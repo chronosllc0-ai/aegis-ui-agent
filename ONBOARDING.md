@@ -4,6 +4,62 @@
 
 ---
 
+## Session 2 — March 9, 2026 (Pass 2 Frontend + Real-time Steering)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Scaffolded a new React + TypeScript Vite app in `frontend/`, installed dependencies, and added Tailwind via `@tailwindcss/vite`.
+- Built the pass-2 UI shell with a dark dashboard layout in `App.tsx`: `ScreenView` (left), `ActionLog` (right), and `InputBar`/steering controls at the bottom.
+- Implemented frontend components:
+  - `ScreenView` for live frame rendering, pulsing working border, and transient “Steering...” overlay.
+  - `ActionLog` with timestamped step feed, monospace styling, and interrupt emphasis.
+  - `InputBar` that is always interactive, includes mode-aware send behavior + mic button UI.
+  - `SteeringControl` segmented toggle (`Steer` default, `Interrupt`, `Queue`).
+  - `MessageQueue` collapsible queued instruction list with count badge and per-item delete.
+- Added `useWebSocket` hook with connect/disconnect/reconnect handling, routing of `step`/`result`/`frame`/`error` messages, and connection status state.
+- Added Vite dev proxy for `/ws/*` to `http://localhost:8080` with WebSocket forwarding.
+- Updated backend `main.py` for pass-2 steering protocol support:
+  - Per-session runtime state (`task_running`, `cancel_event`, steering context list, queue).
+  - New actions: `steer`, `interrupt`, `queue`, plus existing `navigate`/`stop`/`audio_chunk`.
+  - Background task execution so users can send steering while task is running.
+  - Queue draining after active task completes.
+  - Frame streaming over websocket as `{"type":"frame","data":{"image":...}}`.
+- Updated `orchestrator.py` to support frame callbacks, cancellation checks, and steering-context checks between streamed steps.
+- Updated Dockerfile to multi-stage build frontend (`frontend/dist`) and run FastAPI with uvicorn.
+- Updated FastAPI to serve `frontend/dist` (assets + SPA fallback route) in production.
+- Updated websocket smoke test to validate frame + step + result flow.
+
+### What's Working
+- Frontend builds successfully (`npm run build`) and outputs to `frontend/dist`.
+- Backend test suite passes (`pytest tests/ -v`).
+- WebSocket smoke test validates frame, step, and result event flow.
+- Steering UI allows continuous input regardless of agent run-state.
+- Interrupt and queue actions are accepted and logged in real time.
+
+### What's NOT Working Yet
+- Live backend semantics for “steer changes next tool decision” are still a first-pass implementation; steering context is checked between streamed events but not yet deeply fused into ADK reasoning.
+- Queue deletion is currently frontend-only; if an item was already sent with `queue`, removing it in UI does not yet retract it server-side.
+- Vite dev server logs proxy warnings when backend is not running (expected in isolated frontend dev).
+
+### Next Steps
+1. Add explicit orchestrator/tool-level consumption of steering messages before each tool call for tighter behavior.
+2. Add backend protocol support to remove/reorder queued items from UI (queue IDs + delete action).
+3. Stream richer result payloads to UI (task summaries, completion metadata, errors).
+4. Start Pass 3 voice path: wire mic capture to `audio_chunk` websocket messages and playback for responses.
+5. Add integration tests for interrupt + queue lifecycle.
+
+### Decisions Made
+- Frontend↔backend communication remains websocket-only, including queue/interrupt/steer controls.
+- Default mode remains `Steer`, while first submission in idle state maps to `navigate`.
+- Production frontend hosting is handled by FastAPI static + SPA fallback, avoiding separate Nginx layer.
+
+### Blockers
+- None blocking pass completion.
+
+---
+
 ## Session 1 — March 8, 2026 (Phase 1 Core Loop Hardening)
 
 **Agent:** GPT-5.2-Codex
