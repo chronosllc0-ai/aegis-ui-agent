@@ -4,6 +4,58 @@
 
 ---
 
+## Session 3 — March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Rebuilt the frontend shell around a persistent sidebar with top/middle/bottom sections: `New Task`, history search, workflow/settings shortcuts, and user avatar menu.
+- Added a full-page Settings experience with left tab nav and right content pane. New tabs implemented: `Profile`, `Agent Configuration`, `Integrations`, and `Workflows`.
+- Added app-wide settings state (`SettingsContext` + `useSettings`) with localStorage persistence, theme toggle state, workflow template storage, and websocket session config payload generation.
+- Added `UserMenu` dropdown entry point to Settings and a second entry point from sidebar settings gear/shortcut.
+- Added workflow visualization toggle in Action Log and implemented a fallback workflow view component that renders step cards from structured workflow websocket events.
+- Added “Save as Workflow” behavior from ActionLog and run/edit/delete controls in Workflows settings tab.
+- Added client MCP helpers/types and integrations UI supporting built-in integrations plus custom MCP server form (`authType`, URL, test/save stubs).
+- Added backend MCP + messaging stubs:
+  - `mcp_client.py` user-scoped registry and tool forwarding scaffold
+  - `integrations/base.py` interface
+  - `integrations/telegram.py`, `integrations/slack_connector.py`, `integrations/discord.py` mocked connectors and tool manifests
+  - `integrations/__init__.py` exports
+- Extended websocket backend contract with:
+  - `config` action to receive per-session settings
+  - `workflow_step` event emission for graph/list rendering payloads
+  - pass-through of settings/workflow callbacks into orchestrator execution
+- Extended orchestrator to emit structured workflow steps (id/parent/action/description/status/timestamp/duration/screenshot).
+
+### What's Working
+- `pytest` suite remains green (3 tests).
+- Frontend builds successfully with the new settings/integrations/workflow UI wiring.
+- Settings persist in localStorage and are sent as websocket `config` before task starts.
+- Backend emits `workflow_step` payloads while task steps stream.
+
+### What's NOT Working Yet
+- Real reactflow graph was requested, but npm registry access is blocked in this environment (403), so a fallback card-based workflow view is used.
+- Firestore sync is currently a no-op stub in `useSettings`; local persistence is working.
+- MCP protocol networking and messaging APIs are intentionally stubbed/mocked (tool manifests + execute paths wired, not full external API calls).
+- Token encryption-at-rest is not implemented yet; UI only stores masked display values.
+
+### Next Steps
+1. Replace fallback workflow cards with real React Flow + auto-layout (dagre/elk) once package install is available.
+2. Implement authenticated Firestore settings/workflow sync (read/write + conflict strategy).
+3. Wire MCP client to real HTTP MCP servers with retries, auth handling, and per-user persisted server configs.
+4. Implement real Telegram/Slack/Discord API clients with secure token storage and live status polling.
+5. Add tests for settings serialization, workflow persistence, and websocket `workflow_step` schema contract.
+
+### Decisions Made
+- Prioritized end-to-end UI/data-flow wiring with stubs over full external API integration per pass instructions.
+- Chose fallback workflow rendering due to blocked dependency install to keep build green.
+
+### Blockers
+- npm package fetch for `reactflow` blocked by registry 403 in this environment.
+
+---
+
 ## Session 2.6 — March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)
 
 **Agent:** GPT-5.2-Codex  

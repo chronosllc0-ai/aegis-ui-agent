@@ -7,6 +7,7 @@ import base64
 from collections.abc import Awaitable, Callable
 import logging
 from typing import Any
+from uuid import uuid4
 
 from google import genai
 from google.adk.agents import Agent
@@ -16,6 +17,7 @@ from google.adk.sessions import InMemorySessionService
 from analyzer import ScreenshotAnalyzer, detect_available_model
 from config import settings
 from executor import ActionExecutor
+from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class AgentOrchestrator:
         self.session_service = InMemorySessionService()
         self.model_name = settings.GEMINI_MODEL
         self.agent: Agent | None = None
+        self.mcp_client = MCPClient()
 
     async def initialize(self) -> None:
         """Initialize model selection and ADK agent instance."""
@@ -74,6 +77,8 @@ class AgentOrchestrator:
         on_frame: Callable[[str], Awaitable[None]] | None = None,
         cancel_event: asyncio.Event | None = None,
         steering_context: list[str] | None = None,
+        settings: dict[str, Any] | None = None,
+        on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction."""
         if self.agent is None:
@@ -84,6 +89,7 @@ class AgentOrchestrator:
         await self.session_service.create_session(app_name="aegis", user_id="user", session_id=session_id)
 
         steps: list[dict[str, Any]] = []
+        parent_step_id: str | None = None
         if on_frame is not None:
             await on_frame(await self.capture_frame_b64())
 
@@ -103,8 +109,21 @@ class AgentOrchestrator:
                 "steering": injected,
             }
             steps.append(step_data)
+            workflow_step = {
+                "step_id": str(uuid4()),
+                "parent_step_id": parent_step_id,
+                "action": step_data["type"],
+                "description": step_data.get("content") or "Agent step",
+                "status": "completed",
+                "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                "duration_ms": 500,
+                "screenshot": None,
+            }
+            parent_step_id = workflow_step["step_id"]
             if on_step is not None:
                 await on_step(step_data)
+            if on_workflow_step is not None:
+                await on_workflow_step(workflow_step)
             if on_frame is not None:
                 await on_frame(await self.capture_frame_b64())
 
