@@ -12,6 +12,12 @@ export type LogEntry = {
   status: TaskStatus
   stepKind: 'analyze' | 'click' | 'type' | 'scroll' | 'navigate' | 'other'
   elapsedSeconds: number
+
+export type LogEntry = {
+  id: string
+  message: string
+  timestamp: string
+  type: 'step' | 'result' | 'error' | 'interrupt'
 }
 
 type WebSocketPayload = {
@@ -45,6 +51,10 @@ export function useWebSocket() {
     const elapsedSeconds = entry.elapsedSeconds ?? (now - lastStepAtRef.current) / 1000
     lastStepAtRef.current = now
 
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectRef = useRef<number | null>(null)
+
+  const appendLog = useCallback((entry: Omit<LogEntry, 'id' | 'timestamp'>) => {
     setLogs((prev) => [
       ...prev,
       {
@@ -94,6 +104,11 @@ export function useWebSocket() {
           status: failed ? 'failed' : 'completed',
           taskId: activeTaskId,
         })
+        appendLog({ message: content, type: 'step' })
+      } else if (payload.type === 'result') {
+        setIsWorking(false)
+        const status = String(payload.data?.status ?? 'completed')
+        appendLog({ message: `Task ${status}`, type: status === 'interrupted' ? 'interrupt' : 'result' })
       } else if (payload.type === 'frame') {
         const frame = String(payload.data?.image ?? '')
         if (frame) {
@@ -105,6 +120,10 @@ export function useWebSocket() {
       }
     }
   }, [activeTaskId, appendLog])
+        appendLog({ message: String(payload.data?.message ?? 'Unknown error'), type: 'error' })
+      }
+    }
+  }, [appendLog])
 
   useEffect(() => {
     connect()
@@ -151,6 +170,14 @@ export function useWebSocket() {
     setIsWorking(false)
     setActiveTaskId('idle')
   }, [])
+  const send = useCallback((message: Record<string, unknown>) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message))
+      return true
+    }
+    appendLog({ message: 'WebSocket not connected', type: 'error' })
+    return false
+  }, [appendLog])
 
   return {
     connectionStatus,
@@ -160,5 +187,7 @@ export function useWebSocket() {
     currentUrl,
     send,
     resetClientState,
+    send,
+    setLogs,
   }
 }
