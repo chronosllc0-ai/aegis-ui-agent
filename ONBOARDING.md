@@ -4,6 +4,50 @@
 
 ---
 
+## Session 2.5 — March 9, 2026 (UI Polish + UX Upgrades)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Polished the frontend UX while preserving the core layout and websocket protocol.
+- Added a richer header with Aegis branding, semantic connection status labels/dots, live session timer, and a `New Session` reset button.
+- Added a URL command bar between header and screen panel, including back/forward controls, URL display/edit input, and direct navigation submit behavior.
+- Replaced the blank screen empty state with an onboarding hero: large Aegis icon, “Tell me what to do”, and 4 clickable example prompt cards that submit instantly.
+- Upgraded `ScreenView` with a thin top progress indicator while working and crossfade transitions between incoming screenshot frames.
+- Enhanced input UX: multiline textarea, keyboard hints, `Enter` send, `Shift+Enter` newline, `Esc` clear, `Tab` mode cycle, steer glow, interrupt warning border, queue badge, and send loading spinner.
+- Enhanced log UX: grouped entries by task (collapsible), per-step icons, status color coding, elapsed time per step, smooth autoscroll, and Copy Log export button.
+- Added responsive behavior: narrow-screen log collapse/restore affordance and draggable divider for desktop panel resizing.
+- Added success/error toast feedback and dynamic tab title (`Aegis` vs `Aegis · Working...`).
+- Added shield favicon (`frontend/public/shield.svg`) and updated `index.html` title/favicon metadata.
+
+### What's Working
+- Frontend builds cleanly with all polish features enabled.
+- Empty-state example prompts can trigger task submission flow immediately.
+- Action log grouping, collapse, color coding, and copy export work in-browser.
+- Dynamic title, toasts, and frame transitions are functioning.
+- URL bar and header controls are wired to websocket command flow without protocol changes.
+
+### What's NOT Working Yet
+- Back/forward controls currently send steering text commands (`go back`, `go forward`) rather than explicit dedicated backend actions.
+- Queue item removal remains client-side UI only (no backend dequeue protocol yet).
+- Voice-active mic animation is wired as a UI placeholder only pending Pass 3 live audio integration.
+
+### Next Steps
+1. Pass 3 voice integration: connect mic state + audio stream to websocket `audio_chunk` flow and playback handling.
+2. Add server-side queue item IDs and delete/reorder protocol for fully synchronized queue UX.
+3. Enrich websocket step payloads with structured action metadata (`action_kind`, `url`, `timings`) to reduce frontend heuristics.
+4. Add focused frontend tests for log grouping, keyboard shortcuts, and mode styling states.
+
+### Decisions Made
+- Preserved existing websocket envelope/actions as requested; all polish is layered in UI/hook behavior.
+- Kept dark product aesthetic and Tailwind-only styling.
+
+### Blockers
+- None blocking Pass 2.5 completion.
+
+---
+
 ## Session 2 — March 9, 2026 (Pass 2 Frontend + Real-time Steering)
 
 **Agent:** GPT-5.2-Codex  
