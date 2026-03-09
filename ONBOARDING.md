@@ -4,6 +4,228 @@
 
 ---
 
+## Session 2.8 — March 9, 2026 (Review Fixes: Dequeue Input Validation + Working-State Accuracy)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented Codex review follow-up for malformed `dequeue` payload handling in `main.py`.
+- Updated `dequeue` action parsing to validate `index` conversion safely:
+  - Wrapped `int(...)` conversion in `try/except (TypeError, ValueError)`.
+  - Returns protocol error (`Invalid queue index`) for malformed input instead of crashing websocket session.
+- Implemented frontend working-state fix in `frontend/src/hooks/useWebSocket.ts`.
+- Updated step-message handling to avoid setting `isWorking=true` on non-execution acknowledgements (`queue`, `steer`).
+- Preserved task-progress behavior for real execution steps while preventing false “working” UI state after queue/dequeue operations.
+
+### What's Working
+- Backend websocket remains stable on malformed dequeue payloads (no teardown from conversion exceptions).
+- Frontend no longer gets stuck in false running mode after queue/dequeue acknowledgements.
+- Existing backend tests and frontend build pass.
+
+### What's NOT Working Yet
+- Queue synchronization is still optimistic/index-based and not yet id-based with authoritative queue snapshots.
+
+### Next Steps
+1. Add websocket test coverage for malformed `dequeue` payload values (e.g., `"abc"`, `null`).
+2. Add frontend tests for working-state transitions on `queue`/`steer` step types.
+3. Move queue operations to server-generated item IDs for safer multi-update scenarios.
+
+### Decisions Made
+- Kept protocol contract unchanged while hardening validation and UI state transitions.
+
+### Blockers
+- None.
+
+---
+
+## Session 2.7 — March 9, 2026 (Security + Queue Semantics Review Follow-up)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented follow-up fixes requested by Codex review across backend and frontend.
+- Hardened SPA static serving path handling in `main.py`:
+  - Resolved requested file path and enforced it stays under `frontend/dist` using `relative_to`.
+  - Prevents traversal-style requests from reading files outside the built frontend root.
+- Fixed queue-drain interrupt starvation in `main.py`:
+  - Removed recursive `await` queue-drain behavior from `_run_navigation_task`.
+  - Added `_start_next_queued_task_if_ready(...)` that schedules at most one next queued task without blocking current control flow.
+  - Added cancellation-aware guard so queued work does not auto-start while an interrupt cancellation is active.
+- Added queue deletion server support in `main.py`:
+  - New websocket action: `dequeue` with index.
+  - Removes queued instruction by index and emits queue update step/error feedback.
+- Wired frontend queue delete UI to backend runtime in `App.tsx`:
+  - Queue item deletion now sends `{ action: "dequeue", index }` in addition to local UI state update.
+
+### What's Working
+- `pytest tests/ -v` passes after backend control-flow/security changes.
+- `npm run build` passes after frontend queue-delete wiring update.
+- Queue deletions in UI now propagate to backend queue state for this websocket session.
+- Interrupt instructions are no longer blocked by recursive queue-drain waits.
+
+### What's NOT Working Yet
+- Queue entries are still index-based and ephemeral; reconnect/session restart loses queued client/server sync context.
+- Frontend queue list still mirrors optimistic local state and does not yet consume authoritative queue snapshots from backend.
+
+### Next Steps
+1. Add queue item IDs and explicit queue snapshot events for robust client/server synchronization.
+2. Add dedicated tests for `dequeue` behavior and interrupt precedence with non-empty queues.
+3. Consider stricter URL normalization/decoding tests for static file serving path safety regression coverage.
+
+### Decisions Made
+- Kept websocket protocol changes minimal by introducing a single `dequeue` action rather than refactoring queue schema.
+- Prioritized non-blocking interrupt semantics over recursive queue execution chaining.
+
+### Blockers
+- None.
+
+---
+
+## Session 2.6 — March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed Codex review feedback in `frontend/src/hooks/useWebSocket.ts` by decoupling socket lifecycle from task-id changes.
+- Removed unintended websocket reconnect churn caused by `activeTaskId` dependency capture:
+  - Introduced `activeTaskIdRef` for message handlers,
+  - Kept `connect` stable (depends only on stable logger callback),
+  - Added `shouldReconnectRef` to avoid reconnect scheduling on intentional cleanup/unmount.
+- Addressed backend interrupt race in `main.py`:
+  - Interrupt now sets cancellation and waits for the currently running task to settle before starting the new task,
+  - Prevents `cancel_event` from being cleared by a new task before prior task has observed cancellation.
+- Addressed stuck `task_running` failure path in `main.py`:
+  - Wrapped navigation execution in `try/except/finally`,
+  - Ensures `task_running` is always reset even on runtime failures,
+  - Emits websocket error/result payloads when task execution fails.
+- Added `_start_navigation_task(...)` helper to centralize task creation and reduce duplicated task-launch code paths.
+
+### What's Working
+- Backend tests pass after race/failure handling changes.
+- Frontend production build passes after websocket-hook stabilization changes.
+- WebSocket connection remains stable when starting new tasks (no reconnect churn triggered by task id state updates).
+
+### What's NOT Working Yet
+- Queue deletion is still UI-local and not yet synchronized with backend queue removal/reorder protocol.
+- Action metadata is still partially inferred client-side from freeform step text.
+
+### Next Steps
+1. Add server-side queue IDs and delete/reorder websocket actions for full queue sync.
+2. Emit structured step payload fields from backend (e.g., `action_kind`, `target`, `url`) to reduce frontend heuristics.
+3. Add targeted tests for interrupt timing behavior and failure-path task-state reset.
+
+### Decisions Made
+- Preserved existing websocket action contract while fixing race conditions internally.
+- Kept reconnect behavior automatic but guarded with explicit cleanup semantics.
+
+### Blockers
+- None.
+
+---
+
+## Session 2.5 — March 9, 2026 (UI Polish + UX Upgrades)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Polished the frontend UX while preserving the core layout and websocket protocol.
+- Added a richer header with Aegis branding, semantic connection status labels/dots, live session timer, and a `New Session` reset button.
+- Added a URL command bar between header and screen panel, including back/forward controls, URL display/edit input, and direct navigation submit behavior.
+- Replaced the blank screen empty state with an onboarding hero: large Aegis icon, “Tell me what to do”, and 4 clickable example prompt cards that submit instantly.
+- Upgraded `ScreenView` with a thin top progress indicator while working and crossfade transitions between incoming screenshot frames.
+- Enhanced input UX: multiline textarea, keyboard hints, `Enter` send, `Shift+Enter` newline, `Esc` clear, `Tab` mode cycle, steer glow, interrupt warning border, queue badge, and send loading spinner.
+- Enhanced log UX: grouped entries by task (collapsible), per-step icons, status color coding, elapsed time per step, smooth autoscroll, and Copy Log export button.
+- Added responsive behavior: narrow-screen log collapse/restore affordance and draggable divider for desktop panel resizing.
+- Added success/error toast feedback and dynamic tab title (`Aegis` vs `Aegis · Working...`).
+- Added shield favicon (`frontend/public/shield.svg`) and updated `index.html` title/favicon metadata.
+
+### What's Working
+- Frontend builds cleanly with all polish features enabled.
+- Empty-state example prompts can trigger task submission flow immediately.
+- Action log grouping, collapse, color coding, and copy export work in-browser.
+- Dynamic title, toasts, and frame transitions are functioning.
+- URL bar and header controls are wired to websocket command flow without protocol changes.
+
+### What's NOT Working Yet
+- Back/forward controls currently send steering text commands (`go back`, `go forward`) rather than explicit dedicated backend actions.
+- Queue item removal remains client-side UI only (no backend dequeue protocol yet).
+- Voice-active mic animation is wired as a UI placeholder only pending Pass 3 live audio integration.
+
+### Next Steps
+1. Pass 3 voice integration: connect mic state + audio stream to websocket `audio_chunk` flow and playback handling.
+2. Add server-side queue item IDs and delete/reorder protocol for fully synchronized queue UX.
+3. Enrich websocket step payloads with structured action metadata (`action_kind`, `url`, `timings`) to reduce frontend heuristics.
+4. Add focused frontend tests for log grouping, keyboard shortcuts, and mode styling states.
+
+### Decisions Made
+- Preserved existing websocket envelope/actions as requested; all polish is layered in UI/hook behavior.
+- Kept dark product aesthetic and Tailwind-only styling.
+
+### Blockers
+- None blocking Pass 2.5 completion.
+
+---
+
+## Session 2 — March 9, 2026 (Pass 2 Frontend + Real-time Steering)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Scaffolded a new React + TypeScript Vite app in `frontend/`, installed dependencies, and added Tailwind via `@tailwindcss/vite`.
+- Built the pass-2 UI shell with a dark dashboard layout in `App.tsx`: `ScreenView` (left), `ActionLog` (right), and `InputBar`/steering controls at the bottom.
+- Implemented frontend components:
+  - `ScreenView` for live frame rendering, pulsing working border, and transient “Steering...” overlay.
+  - `ActionLog` with timestamped step feed, monospace styling, and interrupt emphasis.
+  - `InputBar` that is always interactive, includes mode-aware send behavior + mic button UI.
+  - `SteeringControl` segmented toggle (`Steer` default, `Interrupt`, `Queue`).
+  - `MessageQueue` collapsible queued instruction list with count badge and per-item delete.
+- Added `useWebSocket` hook with connect/disconnect/reconnect handling, routing of `step`/`result`/`frame`/`error` messages, and connection status state.
+- Added Vite dev proxy for `/ws/*` to `http://localhost:8080` with WebSocket forwarding.
+- Updated backend `main.py` for pass-2 steering protocol support:
+  - Per-session runtime state (`task_running`, `cancel_event`, steering context list, queue).
+  - New actions: `steer`, `interrupt`, `queue`, plus existing `navigate`/`stop`/`audio_chunk`.
+  - Background task execution so users can send steering while task is running.
+  - Queue draining after active task completes.
+  - Frame streaming over websocket as `{"type":"frame","data":{"image":...}}`.
+- Updated `orchestrator.py` to support frame callbacks, cancellation checks, and steering-context checks between streamed steps.
+- Updated Dockerfile to multi-stage build frontend (`frontend/dist`) and run FastAPI with uvicorn.
+- Updated FastAPI to serve `frontend/dist` (assets + SPA fallback route) in production.
+- Updated websocket smoke test to validate frame + step + result flow.
+
+### What's Working
+- Frontend builds successfully (`npm run build`) and outputs to `frontend/dist`.
+- Backend test suite passes (`pytest tests/ -v`).
+- WebSocket smoke test validates frame, step, and result event flow.
+- Steering UI allows continuous input regardless of agent run-state.
+- Interrupt and queue actions are accepted and logged in real time.
+
+### What's NOT Working Yet
+- Live backend semantics for “steer changes next tool decision” are still a first-pass implementation; steering context is checked between streamed events but not yet deeply fused into ADK reasoning.
+- Queue deletion is currently frontend-only; if an item was already sent with `queue`, removing it in UI does not yet retract it server-side.
+- Vite dev server logs proxy warnings when backend is not running (expected in isolated frontend dev).
+
+### Next Steps
+1. Add explicit orchestrator/tool-level consumption of steering messages before each tool call for tighter behavior.
+2. Add backend protocol support to remove/reorder queued items from UI (queue IDs + delete action).
+3. Stream richer result payloads to UI (task summaries, completion metadata, errors).
+4. Start Pass 3 voice path: wire mic capture to `audio_chunk` websocket messages and playback for responses.
+5. Add integration tests for interrupt + queue lifecycle.
+
+### Decisions Made
+- Frontend↔backend communication remains websocket-only, including queue/interrupt/steer controls.
+- Default mode remains `Steer`, while first submission in idle state maps to `navigate`.
+- Production frontend hosting is handled by FastAPI static + SPA fallback, avoiding separate Nginx layer.
+
+### Blockers
+- None blocking pass completion.
+
+---
+
 ## Session 1 — March 8, 2026 (Phase 1 Core Loop Hardening)
 
 **Agent:** GPT-5.2-Codex
