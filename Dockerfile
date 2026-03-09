@@ -1,6 +1,12 @@
+FROM node:22-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
-# Install system deps for Playwright
 RUN apt-get update && apt-get install -y \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
@@ -10,12 +16,13 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
-COPY . .
+COPY . ./
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 EXPOSE 8080
 
-CMD ["python", "-m", "src.main"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
