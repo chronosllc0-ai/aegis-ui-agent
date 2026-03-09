@@ -75,25 +75,16 @@ async def _run_navigation_task(
     runtime.task_running = True
     runtime.cancel_event.clear()
 
-    try:
-        result = await orchestrator.execute_task(
-            session_id=session_id,
-            instruction=instruction,
-            on_step=callback,
-            on_frame=lambda image_b64: _send_frame(websocket, image_b64),
-            cancel_event=runtime.cancel_event,
-            steering_context=runtime.steering_context,
-        )
-        await websocket.send_json({"type": "result", "data": result})
-    except asyncio.CancelledError:
-        logger.info("Navigation task cancelled for session %s", session_id)
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Navigation task failed for session %s", session_id)
-        await websocket.send_json({"type": "error", "data": {"message": str(exc)}})
-        await websocket.send_json({"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}})
-    finally:
-        runtime.task_running = False
+    result = await orchestrator.execute_task(
+        session_id=session_id,
+        instruction=instruction,
+        on_step=callback,
+        on_frame=lambda image_b64: _send_frame(websocket, image_b64),
+        cancel_event=runtime.cancel_event,
+        steering_context=runtime.steering_context,
+    )
+    await websocket.send_json({"type": "result", "data": result})
+    runtime.task_running = False
 
     while not runtime.queued_instructions.empty() and not runtime.task_running:
         queued_instruction = await runtime.queued_instructions.get()
@@ -106,11 +97,6 @@ async def _run_navigation_task(
         )
         runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, queued_instruction))
         await runtime.current_task
-
-
-def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
-    """Create and store the background navigation task for the current session."""
-    runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
 
 
 @app.websocket("/ws/navigate")
@@ -130,21 +116,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if runtime.task_running:
                     await websocket.send_json({"type": "error", "data": {"message": "Task already running"}})
                     continue
-                _start_navigation_task(websocket, runtime, session_id, instruction)
+                runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
             elif action == "steer":
                 runtime.steering_context.append(instruction)
                 await _send_step(websocket, {"type": "steer", "content": f"Steering note added: {instruction}"})
             elif action == "interrupt":
                 runtime.cancel_event.set()
                 await _send_step(websocket, {"type": "interrupt", "content": "Task interrupted"})
-                if runtime.current_task is not None and not runtime.current_task.done():
-                    try:
-                        await runtime.current_task
-                    except asyncio.CancelledError:
-                        logger.info("Current task cancelled during interrupt for session %s", session_id)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("Interrupted task exited with error for session %s", session_id)
-                _start_navigation_task(websocket, runtime, session_id, instruction)
+                runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
             elif action == "queue":
                 await runtime.queued_instructions.put(instruction)
                 await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
@@ -154,7 +133,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     if runtime.task_running:
                         runtime.steering_context.append(transcript)
                     else:
-                        _start_navigation_task(websocket, runtime, session_id, transcript)
+                        runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, transcript))
             elif action == "stop":
                 runtime.cancel_event.set()
                 break
