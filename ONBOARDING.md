@@ -4,6 +4,49 @@
 
 ---
 
+## Session 2.6 — March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed Codex review feedback in `frontend/src/hooks/useWebSocket.ts` by decoupling socket lifecycle from task-id changes.
+- Removed unintended websocket reconnect churn caused by `activeTaskId` dependency capture:
+  - Introduced `activeTaskIdRef` for message handlers,
+  - Kept `connect` stable (depends only on stable logger callback),
+  - Added `shouldReconnectRef` to avoid reconnect scheduling on intentional cleanup/unmount.
+- Addressed backend interrupt race in `main.py`:
+  - Interrupt now sets cancellation and waits for the currently running task to settle before starting the new task,
+  - Prevents `cancel_event` from being cleared by a new task before prior task has observed cancellation.
+- Addressed stuck `task_running` failure path in `main.py`:
+  - Wrapped navigation execution in `try/except/finally`,
+  - Ensures `task_running` is always reset even on runtime failures,
+  - Emits websocket error/result payloads when task execution fails.
+- Added `_start_navigation_task(...)` helper to centralize task creation and reduce duplicated task-launch code paths.
+
+### What's Working
+- Backend tests pass after race/failure handling changes.
+- Frontend production build passes after websocket-hook stabilization changes.
+- WebSocket connection remains stable when starting new tasks (no reconnect churn triggered by task id state updates).
+
+### What's NOT Working Yet
+- Queue deletion is still UI-local and not yet synchronized with backend queue removal/reorder protocol.
+- Action metadata is still partially inferred client-side from freeform step text.
+
+### Next Steps
+1. Add server-side queue IDs and delete/reorder websocket actions for full queue sync.
+2. Emit structured step payload fields from backend (e.g., `action_kind`, `target`, `url`) to reduce frontend heuristics.
+3. Add targeted tests for interrupt timing behavior and failure-path task-state reset.
+
+### Decisions Made
+- Preserved existing websocket action contract while fixing race conditions internally.
+- Kept reconnect behavior automatic but guarded with explicit cleanup semantics.
+
+### Blockers
+- None.
+
+---
+
 ## Session 2.5 — March 9, 2026 (UI Polish + UX Upgrades)
 
 **Agent:** GPT-5.2-Codex  

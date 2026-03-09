@@ -76,11 +76,15 @@ export function useWebSocket() {
     ws.onclose = () => {
       setConnectionStatus('disconnected')
       setIsWorking(false)
+      if (shouldReconnectRef.current) {
+        reconnectRef.current = window.setTimeout(connect, 1500)
+      }
       reconnectRef.current = window.setTimeout(connect, 1500)
     }
     ws.onerror = () => setConnectionStatus('disconnected')
     ws.onmessage = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as WebSocketPayload
+      const currentTaskId = activeTaskIdRef.current
       if (payload.type === 'step') {
         setIsWorking(true)
         const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
@@ -92,6 +96,7 @@ export function useWebSocket() {
           message: content,
           type: payload.data?.type === 'interrupt' ? 'interrupt' : 'step',
           status: payload.data?.type === 'steer' ? 'steered' : 'in_progress',
+          taskId: currentTaskId,
           taskId: activeTaskId,
         })
       } else if (payload.type === 'result') {
@@ -102,6 +107,8 @@ export function useWebSocket() {
           message: `Task ${status}`,
           type: status === 'interrupted' ? 'interrupt' : failed ? 'error' : 'result',
           status: failed ? 'failed' : 'completed',
+          taskId: currentTaskId,
+        })
           taskId: activeTaskId,
         })
         appendLog({ message: content, type: 'step' })
@@ -126,6 +133,10 @@ export function useWebSocket() {
   }, [appendLog])
 
   useEffect(() => {
+    shouldReconnectRef.current = true
+    connect()
+    return () => {
+      shouldReconnectRef.current = false
     connect()
     return () => {
       if (reconnectRef.current !== null) {
@@ -140,6 +151,7 @@ export function useWebSocket() {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         if (message.action === 'navigate' || message.action === 'interrupt') {
           const nextTaskId = crypto.randomUUID()
+          activeTaskIdRef.current = nextTaskId
           setActiveTaskId(nextTaskId)
           appendLog({
             message: String(message.instruction ?? 'New task'),
