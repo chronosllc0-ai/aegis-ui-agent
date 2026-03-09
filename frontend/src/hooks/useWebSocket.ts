@@ -12,6 +12,12 @@ export type LogEntry = {
   status: TaskStatus
   stepKind: 'analyze' | 'click' | 'type' | 'scroll' | 'navigate' | 'other'
   elapsedSeconds: number
+
+export type LogEntry = {
+  id: string
+  message: string
+  timestamp: string
+  type: 'step' | 'result' | 'error' | 'interrupt'
 }
 
 type WebSocketPayload = {
@@ -38,33 +44,28 @@ export function useWebSocket() {
   const [activeTaskId, setActiveTaskId] = useState<string>('idle')
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
-  const shouldReconnectRef = useRef<boolean>(true)
-  const activeTaskIdRef = useRef<string>('idle')
   const lastStepAtRef = useRef<number>(performance.now())
 
-  useEffect(() => {
-    activeTaskIdRef.current = activeTaskId
-  }, [activeTaskId])
+  const appendLog = useCallback((entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
+    const now = performance.now()
+    const elapsedSeconds = entry.elapsedSeconds ?? (now - lastStepAtRef.current) / 1000
+    lastStepAtRef.current = now
 
-  const appendLog = useCallback(
-    (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
-      const now = performance.now()
-      const elapsedSeconds = entry.elapsedSeconds ?? (now - lastStepAtRef.current) / 1000
-      lastStepAtRef.current = now
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectRef = useRef<number | null>(null)
 
-      setLogs((prev) => [
-        ...prev,
-        {
-          ...entry,
-          stepKind: entry.stepKind ?? guessStepKind(entry.message),
-          elapsedSeconds,
-          id: crypto.randomUUID(),
-          timestamp: new Date().toLocaleTimeString(),
-        },
-      ])
-    },
-    [],
-  )
+  const appendLog = useCallback((entry: Omit<LogEntry, 'id' | 'timestamp'>) => {
+    setLogs((prev) => [
+      ...prev,
+      {
+        ...entry,
+        stepKind: entry.stepKind ?? guessStepKind(entry.message),
+        elapsedSeconds,
+        id: crypto.randomUUID(),
+        timestamp: new Date().toLocaleTimeString(),
+      },
+    ])
+  }, [])
 
   const connect = useCallback(() => {
     setConnectionStatus('connecting')
@@ -78,6 +79,7 @@ export function useWebSocket() {
       if (shouldReconnectRef.current) {
         reconnectRef.current = window.setTimeout(connect, 1500)
       }
+      reconnectRef.current = window.setTimeout(connect, 1500)
     }
     ws.onerror = () => setConnectionStatus('disconnected')
     ws.onmessage = (event: MessageEvent<string>) => {
@@ -95,6 +97,7 @@ export function useWebSocket() {
           type: payload.data?.type === 'interrupt' ? 'interrupt' : 'step',
           status: payload.data?.type === 'steer' ? 'steered' : 'in_progress',
           taskId: currentTaskId,
+          taskId: activeTaskId,
         })
       } else if (payload.type === 'result') {
         setIsWorking(false)
@@ -106,6 +109,13 @@ export function useWebSocket() {
           status: failed ? 'failed' : 'completed',
           taskId: currentTaskId,
         })
+          taskId: activeTaskId,
+        })
+        appendLog({ message: content, type: 'step' })
+      } else if (payload.type === 'result') {
+        setIsWorking(false)
+        const status = String(payload.data?.status ?? 'completed')
+        appendLog({ message: `Task ${status}`, type: status === 'interrupted' ? 'interrupt' : 'result' })
       } else if (payload.type === 'frame') {
         const frame = String(payload.data?.image ?? '')
         if (frame) {
@@ -113,7 +123,11 @@ export function useWebSocket() {
         }
       } else if (payload.type === 'error') {
         setIsWorking(false)
-        appendLog({ message: String(payload.data?.message ?? 'Unknown error'), type: 'error', status: 'failed', taskId: currentTaskId })
+        appendLog({ message: String(payload.data?.message ?? 'Unknown error'), type: 'error', status: 'failed', taskId: activeTaskId })
+      }
+    }
+  }, [activeTaskId, appendLog])
+        appendLog({ message: String(payload.data?.message ?? 'Unknown error'), type: 'error' })
       }
     }
   }, [appendLog])
@@ -123,6 +137,8 @@ export function useWebSocket() {
     connect()
     return () => {
       shouldReconnectRef.current = false
+    connect()
+    return () => {
       if (reconnectRef.current !== null) {
         window.clearTimeout(reconnectRef.current)
       }
@@ -153,10 +169,10 @@ export function useWebSocket() {
         wsRef.current.send(JSON.stringify(message))
         return true
       }
-      appendLog({ message: 'WebSocket not connected', type: 'error', status: 'failed', taskId: activeTaskIdRef.current })
+      appendLog({ message: 'WebSocket not connected', type: 'error', status: 'failed', taskId: activeTaskId })
       return false
     },
-    [appendLog],
+    [activeTaskId, appendLog],
   )
 
   const resetClientState = useCallback(() => {
@@ -165,8 +181,15 @@ export function useWebSocket() {
     setCurrentUrl('about:blank')
     setIsWorking(false)
     setActiveTaskId('idle')
-    activeTaskIdRef.current = 'idle'
   }, [])
+  const send = useCallback((message: Record<string, unknown>) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message))
+      return true
+    }
+    appendLog({ message: 'WebSocket not connected', type: 'error' })
+    return false
+  }, [appendLog])
 
   return {
     connectionStatus,
@@ -176,5 +199,7 @@ export function useWebSocket() {
     currentUrl,
     send,
     resetClientState,
+    send,
+    setLogs,
   }
 }

@@ -4,50 +4,6 @@
 
 ---
 
-## Session 2.7 — March 9, 2026 (Security + Queue Semantics Review Follow-up)
-
-**Agent:** GPT-5.2-Codex  
-**Duration:** ~1 pass
-
-### What Was Done
-- Implemented follow-up fixes requested by Codex review across backend and frontend.
-- Hardened SPA static serving path handling in `main.py`:
-  - Resolved requested file path and enforced it stays under `frontend/dist` using `relative_to`.
-  - Prevents traversal-style requests from reading files outside the built frontend root.
-- Fixed queue-drain interrupt starvation in `main.py`:
-  - Removed recursive `await` queue-drain behavior from `_run_navigation_task`.
-  - Added `_start_next_queued_task_if_ready(...)` that schedules at most one next queued task without blocking current control flow.
-  - Added cancellation-aware guard so queued work does not auto-start while an interrupt cancellation is active.
-- Added queue deletion server support in `main.py`:
-  - New websocket action: `dequeue` with index.
-  - Removes queued instruction by index and emits queue update step/error feedback.
-- Wired frontend queue delete UI to backend runtime in `App.tsx`:
-  - Queue item deletion now sends `{ action: "dequeue", index }` in addition to local UI state update.
-
-### What's Working
-- `pytest tests/ -v` passes after backend control-flow/security changes.
-- `npm run build` passes after frontend queue-delete wiring update.
-- Queue deletions in UI now propagate to backend queue state for this websocket session.
-- Interrupt instructions are no longer blocked by recursive queue-drain waits.
-
-### What's NOT Working Yet
-- Queue entries are still index-based and ephemeral; reconnect/session restart loses queued client/server sync context.
-- Frontend queue list still mirrors optimistic local state and does not yet consume authoritative queue snapshots from backend.
-
-### Next Steps
-1. Add queue item IDs and explicit queue snapshot events for robust client/server synchronization.
-2. Add dedicated tests for `dequeue` behavior and interrupt precedence with non-empty queues.
-3. Consider stricter URL normalization/decoding tests for static file serving path safety regression coverage.
-
-### Decisions Made
-- Kept websocket protocol changes minimal by introducing a single `dequeue` action rather than refactoring queue schema.
-- Prioritized non-blocking interrupt semantics over recursive queue execution chaining.
-
-### Blockers
-- None.
-
----
-
 ## Session 2.6 — March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)
 
 **Agent:** GPT-5.2-Codex  
