@@ -12,27 +12,6 @@ from integrations.base import BaseIntegration
 
 logger = logging.getLogger(__name__)
 
-class BuiltinStubIntegration(BaseIntegration):
-    """Stub connector for built-in integrations not yet backed by external services."""
-
-    def __init__(self, name: str, tools: list[dict[str, Any]]) -> None:
-        self.name = name
-        self.connected = False
-        self._tools = tools
-
-    async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
-        self.connected = bool(config.get("enabled", True))
-        return {"connected": self.connected, "integration": self.name}
-
-    async def disconnect(self) -> None:
-        self.connected = False
-
-    def list_tools(self) -> list[dict[str, Any]]:
-        return self._tools
-
-    async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": self.connected, "tool": tool_name, "params": params, "result": f"stub_{self.name}_response"}
-
 
 @dataclass
 class MCPServer:
@@ -56,32 +35,8 @@ class MCPClient:
             "telegram": TelegramIntegration(),
             "slack": SlackIntegration(),
             "discord": DiscordIntegration(),
-            "web-search": BuiltinStubIntegration(
-                name="web-search",
-                tools=[
-                    {"name": "web_search", "description": "Search public web content"},
-                    {"name": "extract_page", "description": "Extract webpage content"},
-                ],
-            ),
-            "filesystem": BuiltinStubIntegration(
-                name="filesystem",
-                tools=[
-                    {"name": "list_files", "description": "List files in workspace"},
-                    {"name": "read_file", "description": "Read file content"},
-                    {"name": "write_file", "description": "Write file content"},
-                ],
-            ),
-            "code-exec": BuiltinStubIntegration(
-                name="code-exec",
-                tools=[
-                    {"name": "exec_python", "description": "Run Python code in sandbox"},
-                    {"name": "exec_javascript", "description": "Run JavaScript code in sandbox"},
-                ],
-            ),
         }
-        connector = connector_map.get(integration_name)
-        if connector is None:
-            raise ValueError(f"Unsupported built-in integration: {integration_name}")
+        connector = connector_map[integration_name]
         status = await connector.connect(config)
         server = MCPServer(
             server_id=f"{integration_name}-{user_id}",
