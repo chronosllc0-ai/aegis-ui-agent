@@ -4,82 +4,165 @@
 
 ---
 
-## Session 2.8 — March 9, 2026 (Review Fixes: Dequeue Input Validation + Working-State Accuracy)
+## Session 3.2 — March 10, 2026 (Code Review Fixes: Settings Application + Workflow Edit + WS Cleanup)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Implemented Codex review follow-up for malformed `dequeue` payload handling in `main.py`.
-- Updated `dequeue` action parsing to validate `index` conversion safely:
-  - Wrapped `int(...)` conversion in `try/except (TypeError, ValueError)`.
-  - Returns protocol error (`Invalid queue index`) for malformed input instead of crashing websocket session.
-- Implemented frontend working-state fix in `frontend/src/hooks/useWebSocket.ts`.
-- Updated step-message handling to avoid setting `isWorking=true` on non-execution acknowledgements (`queue`, `steer`).
-- Preserved task-progress behavior for real execution steps while preventing false “working” UI state after queue/dequeue operations.
+- Addressed code review P1: session settings are now applied in `orchestrator.execute_task(...)` before runner execution.
+  - Added `_apply_session_settings(...)` to consume model/system instruction settings.
+  - Added `_build_agent(...)` helper and rebuild logic when session model/personality prompt changes.
+- Addressed websocket reconnect lifecycle review item:
+  - Hardened reconnect timer handling in `useWebSocket` by clearing existing reconnect timers before scheduling new ones.
+  - Disabled `onclose` callback during hook cleanup to prevent reconnect scheduling while disposing.
+- Addressed workflows edit review item:
+  - `WorkflowsTab` Edit now persists edited instruction to workflow template data via `onChange(...)` instead of running it.
+- Addressed workflow save instruction derivation review item:
+  - `saveWorkflow` now prefers the selected task history instruction and falls back to first user-navigation step for the active task.
+  - Added guard filters to avoid system/config/queue messages being used as saved workflow instructions.
 
 ### What's Working
-- Backend websocket remains stable on malformed dequeue payloads (no teardown from conversion exceptions).
-- Frontend no longer gets stuck in false running mode after queue/dequeue acknowledgements.
-- Existing backend tests and frontend build pass.
+- Backend tests pass (`pytest -q`).
+- Frontend production build passes (`cd frontend && npm run build`).
+- Session settings are now functionally consumed before task execution.
+- Workflow edit behavior now updates templates correctly without accidental execution.
 
 ### What's NOT Working Yet
-- Queue synchronization is still optimistic/index-based and not yet id-based with authoritative queue snapshots.
+- Browser screenshot capture for this pass failed due a browser-container Chromium crash (SIGSEGV) in this environment.
 
 ### Next Steps
-1. Add websocket test coverage for malformed `dequeue` payload values (e.g., `"abc"`, `null`).
-2. Add frontend tests for working-state transitions on `queue`/`steer` step types.
-3. Move queue operations to server-generated item IDs for safer multi-update scenarios.
-
-### Decisions Made
-- Kept protocol contract unchanged while hardening validation and UI state transitions.
+1. Extend settings application to include behavior flags in orchestrator/tool invocation semantics.
+2. Add targeted tests for `_apply_session_settings(...)` behavior and workflow-edit persistence.
+3. Re-run screenshot capture in a stable browser environment.
 
 ### Blockers
-- None.
+- Browser container Playwright/Chromium instability (SIGSEGV) during screenshot attempt.
 
 ---
 
-## Session 2.7 — March 9, 2026 (Security + Queue Semantics Review Follow-up)
+## Session 3.1 — March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### Regressions Found
+- Pass 3A regressed the previously polished dashboard experience: onboarding empty state was flattened, top bar polish and browser-style URL strip were reduced, ActionLog hierarchy/detail was simplified, and input/steering UX lost keyboard/polish parity.
+- Workflow fallback view was functional but visually weak for demos.
+
+### What Was Restored / Improved
+- Restored premium dashboard shell while keeping the new product architecture:
+  - Rich onboarding empty state in `ScreenView` (logo, headline, subtext, 4 clickable examples, helper text).
+  - Polished top bar (Aegis branding, status pill, session timer, New Session).
+  - Browser copilot URL/navigation strip (back/forward, current URL, Go submit).
+  - Enhanced ActionLog hierarchy (grouped by task, icons, status color coding, timestamp + elapsed seconds, copy log).
+  - Restored polished input + steering UX (segmented mode control, queue badge, multiline input, keyboard shortcuts, send spinner, queue panel).
+- Preserved all Pass 3 product additions:
+  - Sidebar history/search and bottom user area.
+  - Settings full-page tabs and return flow.
+  - Workflow toggle + save workflow.
+  - Settings context persistence and websocket `config` sends.
+  - Backend `workflow_step` and MCP integration scaffolding.
+- Improved workflow fallback visualization to be intentionally demo-ready:
+  - Ordered execution flow with parent relationships,
+  - Clear status styling,
+  - Right-hand step detail inspector.
+- Added lightweight dev/demo seed data to validate all major surfaces without live backend dependence:
+  - 3+ history items,
+  - 2+ workflow templates,
+  - 4+ action log entries,
+  - Multi-step workflow graph data,
+  - Integrations in mixed states,
+  - Auth view/sign-out state for auth screenshot.
+
+### Screenshot Evidence Captured
+- Captured screenshot set (artifact paths) and manifest at `docs/screenshots/README.md`.
+- Captured names:
+  - `01-dashboard-onboarding.png`
+  - `02-dashboard-sidebar-history.png`
+  - `03-dashboard-active-log.png`
+  - `04-settings-profile.png`
+  - `05-settings-agent-config.png`
+  - `06-settings-integrations.png`
+  - `07-settings-workflows.png`
+  - `08-workflow-view.png`
+  - `09-auth-page.png`
+- Artifact location prefix:
+  - `browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`
+
+### What's Working
+- Frontend build passes with restored non-regressed shell and settings/workflow integration.
+- Backend tests remain green.
+- Dashboard + settings + workflow + auth surfaces are all visually verified.
+
+### What's Stubbed / Incomplete
+- React Flow dependency remains unavailable in this environment; enhanced fallback workflow view is used.
+- Firestore sync is still placeholder-only.
+- MCP/messaging connectors remain mocked wiring (not live external APIs).
+
+### What Still Feels Weak
+- History replay is currently log-focused and not full screenshot timeline playback yet.
+- Sidebar responsive behavior is solid but could benefit from animation polish and persistent collapsed state.
+
+### Next Steps
+1. Add real task replay timeline with screenshot snapshots per step.
+2. Replace workflow fallback with React Flow when package install becomes available.
+3. Implement Firestore sync and real messaging connector APIs with secure token handling.
+
+### Blockers
+- npm registry restrictions still prevent installing `reactflow` in this environment.
+
+---
+
+## Session 3 — March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Implemented follow-up fixes requested by Codex review across backend and frontend.
-- Hardened SPA static serving path handling in `main.py`:
-  - Resolved requested file path and enforced it stays under `frontend/dist` using `relative_to`.
-  - Prevents traversal-style requests from reading files outside the built frontend root.
-- Fixed queue-drain interrupt starvation in `main.py`:
-  - Removed recursive `await` queue-drain behavior from `_run_navigation_task`.
-  - Added `_start_next_queued_task_if_ready(...)` that schedules at most one next queued task without blocking current control flow.
-  - Added cancellation-aware guard so queued work does not auto-start while an interrupt cancellation is active.
-- Added queue deletion server support in `main.py`:
-  - New websocket action: `dequeue` with index.
-  - Removes queued instruction by index and emits queue update step/error feedback.
-- Wired frontend queue delete UI to backend runtime in `App.tsx`:
-  - Queue item deletion now sends `{ action: "dequeue", index }` in addition to local UI state update.
+- Rebuilt the frontend shell around a persistent sidebar with top/middle/bottom sections: `New Task`, history search, workflow/settings shortcuts, and user avatar menu.
+- Added a full-page Settings experience with left tab nav and right content pane. New tabs implemented: `Profile`, `Agent Configuration`, `Integrations`, and `Workflows`.
+- Added app-wide settings state (`SettingsContext` + `useSettings`) with localStorage persistence, theme toggle state, workflow template storage, and websocket session config payload generation.
+- Added `UserMenu` dropdown entry point to Settings and a second entry point from sidebar settings gear/shortcut.
+- Added workflow visualization toggle in Action Log and implemented a fallback workflow view component that renders step cards from structured workflow websocket events.
+- Added “Save as Workflow” behavior from ActionLog and run/edit/delete controls in Workflows settings tab.
+- Added client MCP helpers/types and integrations UI supporting built-in integrations plus custom MCP server form (`authType`, URL, test/save stubs).
+- Added backend MCP + messaging stubs:
+  - `mcp_client.py` user-scoped registry and tool forwarding scaffold
+  - `integrations/base.py` interface
+  - `integrations/telegram.py`, `integrations/slack_connector.py`, `integrations/discord.py` mocked connectors and tool manifests
+  - `integrations/__init__.py` exports
+- Extended websocket backend contract with:
+  - `config` action to receive per-session settings
+  - `workflow_step` event emission for graph/list rendering payloads
+  - pass-through of settings/workflow callbacks into orchestrator execution
+- Extended orchestrator to emit structured workflow steps (id/parent/action/description/status/timestamp/duration/screenshot).
 
 ### What's Working
-- `pytest tests/ -v` passes after backend control-flow/security changes.
-- `npm run build` passes after frontend queue-delete wiring update.
-- Queue deletions in UI now propagate to backend queue state for this websocket session.
-- Interrupt instructions are no longer blocked by recursive queue-drain waits.
+- `pytest` suite remains green (3 tests).
+- Frontend builds successfully with the new settings/integrations/workflow UI wiring.
+- Settings persist in localStorage and are sent as websocket `config` before task starts.
+- Backend emits `workflow_step` payloads while task steps stream.
 
 ### What's NOT Working Yet
-- Queue entries are still index-based and ephemeral; reconnect/session restart loses queued client/server sync context.
-- Frontend queue list still mirrors optimistic local state and does not yet consume authoritative queue snapshots from backend.
+- Real reactflow graph was requested, but npm registry access is blocked in this environment (403), so a fallback card-based workflow view is used.
+- Firestore sync is currently a no-op stub in `useSettings`; local persistence is working.
+- MCP protocol networking and messaging APIs are intentionally stubbed/mocked (tool manifests + execute paths wired, not full external API calls).
+- Token encryption-at-rest is not implemented yet; UI only stores masked display values.
 
 ### Next Steps
-1. Add queue item IDs and explicit queue snapshot events for robust client/server synchronization.
-2. Add dedicated tests for `dequeue` behavior and interrupt precedence with non-empty queues.
-3. Consider stricter URL normalization/decoding tests for static file serving path safety regression coverage.
+1. Replace fallback workflow cards with real React Flow + auto-layout (dagre/elk) once package install is available.
+2. Implement authenticated Firestore settings/workflow sync (read/write + conflict strategy).
+3. Wire MCP client to real HTTP MCP servers with retries, auth handling, and per-user persisted server configs.
+4. Implement real Telegram/Slack/Discord API clients with secure token storage and live status polling.
+5. Add tests for settings serialization, workflow persistence, and websocket `workflow_step` schema contract.
 
 ### Decisions Made
-- Kept websocket protocol changes minimal by introducing a single `dequeue` action rather than refactoring queue schema.
-- Prioritized non-blocking interrupt semantics over recursive queue execution chaining.
+- Prioritized end-to-end UI/data-flow wiring with stubs over full external API integration per pass instructions.
+- Chose fallback workflow rendering due to blocked dependency install to keep build green.
 
 ### Blockers
-- None.
+- npm package fetch for `reactflow` blocked by registry 403 in this environment.
 
 ---
 
