@@ -90,7 +90,7 @@ export function useWebSocket() {
       const taskId = activeTaskIdRef.current
       if (payload.type === 'step') {
         setIsWorking(true)
-        const content = String(payload.data?.content ?? 'Step update')
+        const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
         if (urlMatch?.[0]) setCurrentUrl(urlMatch[0])
         appendLog({
@@ -172,3 +172,4 @@ export function useWebSocket() {
 
   return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, send, resetClientState, setLogs, setWorkflowSteps }
 }
+
