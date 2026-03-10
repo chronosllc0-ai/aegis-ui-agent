@@ -1,20 +1,16 @@
-# Pass 3.2 Screenshot Manifest
+# Pass 3.1 Screenshot Manifest
 
-Captured directly from the running app via browser automation.
+Captured via browser automation artifacts (environment browser container):
 
-## Required captures
-- 01-auth-page.png
-- 02-dashboard-onboarding.png
-- 03-dashboard-active-task.png
-- 04-dashboard-history-sidebar.png
-- 05-settings-profile.png
-- 06-settings-agent-config.png
-- 07-settings-integrations.png
-- 08-settings-workflows.png
-- 09-workflow-visualization.png
-- 10-mobile-or-narrow-layout.png
+- 01-dashboard-onboarding.png
+- 02-dashboard-sidebar-history.png
+- 03-dashboard-active-log.png
+- 04-settings-profile.png
+- 05-settings-agent-config.png
+- 06-settings-integrations.png
+- 07-settings-workflows.png
+- 08-workflow-view.png
+- 09-auth-page.png
 
 Artifact base path:
-`browser:/tmp/codex_browser_invocations/d8efeeee8de93844/artifacts/docs/screenshots/`
-
-> Note: Browser-tool artifacts are generated outside repo workspace storage in this environment; this manifest records exact retrieval paths.
+`browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`
