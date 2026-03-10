@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 import logging
 from typing import Any
+from uuid import uuid4
 
 from google import genai
 from google.adk.agents import Agent
@@ -16,6 +18,7 @@ from google.adk.sessions import InMemorySessionService
 from analyzer import ScreenshotAnalyzer, detect_available_model
 from config import settings
 from executor import ActionExecutor
+from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
@@ -30,24 +33,21 @@ class AgentOrchestrator:
         self.executor = ActionExecutor()
         self.navigator = NavigatorAgent(self.analyzer, self.executor)
         self.session_service = InMemorySessionService()
-        self.model_name = settings.GEMINI_MODEL
+        self.default_model_name = settings.GEMINI_MODEL
         self.agent: Agent | None = None
+        self.mcp_client = MCPClient()
 
-    async def initialize(self) -> None:
-        """Initialize model selection and ADK agent instance."""
-        key = settings.GEMINI_API_KEY.strip()
-        has_real_key = bool(key) and "your-gemini" not in key.lower()
-        if has_real_key:
-            self.model_name = await detect_available_model(self.client)
-        self.analyzer.model = self.model_name
-        self.agent = Agent(
+    def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
+        """Build an ADK agent instance for the requested model/instruction."""
+        instruction = system_instruction or (
+            "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
+            "If asked to search the web, go to a search engine, type query, and submit."
+        )
+        return Agent(
             name="aegis_navigator",
-            model=self.model_name,
+            model=model_name,
             description="An AI agent that navigates UIs by seeing screenshots and executing actions.",
-            instruction=(
-                "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
-                "If asked to search the web, go to a search engine, type query, and submit."
-            ),
+            instruction=instruction,
             tools=[
                 self.navigator.take_screenshot,
                 self.navigator.analyze_screen,
@@ -59,7 +59,30 @@ class AgentOrchestrator:
                 self.navigator.go_back,
             ],
         )
-        logger.info("Orchestrator initialized with model %s", self.model_name)
+
+    async def _resolve_session_agent(self, session_settings: dict[str, Any] | None) -> tuple[Agent, str]:
+        """Resolve an isolated agent configuration for the current session/task."""
+        requested_model = self.default_model_name
+        system_instruction: str | None = None
+
+        if session_settings:
+            requested_model = str(session_settings.get("model", self.default_model_name)).strip() or self.default_model_name
+            raw_instruction = session_settings.get("system_instruction")
+            if isinstance(raw_instruction, str) and raw_instruction.strip():
+                system_instruction = raw_instruction
+
+        agent = self._build_agent(requested_model, system_instruction)
+        return agent, requested_model
+
+    async def initialize(self) -> None:
+        """Initialize default model selection and baseline ADK agent instance."""
+        key = settings.GEMINI_API_KEY.strip()
+        has_real_key = bool(key) and "your-gemini" not in key.lower()
+        if has_real_key:
+            self.default_model_name = await detect_available_model(self.client)
+        self.analyzer.model = self.default_model_name
+        self.agent = self._build_agent(self.default_model_name)
+        logger.info("Orchestrator initialized with default model %s", self.default_model_name)
 
     async def capture_frame_b64(self) -> str:
         """Capture the current browser viewport as base64 PNG data."""
@@ -74,16 +97,21 @@ class AgentOrchestrator:
         on_frame: Callable[[str], Awaitable[None]] | None = None,
         cancel_event: asyncio.Event | None = None,
         steering_context: list[str] | None = None,
+        settings: dict[str, Any] | None = None,
+        on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction."""
         if self.agent is None:
             await self.initialize()
-        assert self.agent is not None
 
-        runner = Runner(agent=self.agent, app_name="aegis", session_service=self.session_service)
+        session_agent, session_model = await self._resolve_session_agent(settings)
+        self.analyzer.model = session_model
+
+        runner = Runner(agent=session_agent, app_name="aegis", session_service=self.session_service)
         await self.session_service.create_session(app_name="aegis", user_id="user", session_id=session_id)
 
         steps: list[dict[str, Any]] = []
+        parent_step_id: str | None = None
         if on_frame is not None:
             await on_frame(await self.capture_frame_b64())
 
@@ -103,8 +131,21 @@ class AgentOrchestrator:
                 "steering": injected,
             }
             steps.append(step_data)
+            workflow_step = {
+                "step_id": str(uuid4()),
+                "parent_step_id": parent_step_id,
+                "action": step_data["type"],
+                "description": step_data.get("content") or "Agent step",
+                "status": "completed",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": 500,
+                "screenshot": None,
+            }
+            parent_step_id = workflow_step["step_id"]
             if on_step is not None:
                 await on_step(step_data)
+            if on_workflow_step is not None:
+                await on_workflow_step(workflow_step)
             if on_frame is not None:
                 await on_frame(await self.capture_frame_b64())
 
