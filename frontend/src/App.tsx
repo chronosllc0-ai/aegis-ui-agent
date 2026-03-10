@@ -119,13 +119,28 @@ function App() {
 
   const saveWorkflow = () => {
     if (!visibleLogs.length) return
+
+    const selectedTaskInstruction = selectedTaskId
+      ? taskHistory.find((item) => item.id === selectedTaskId)?.instruction
+      : null
+
+    const fallbackInstruction = visibleLogs.find(
+      (entry) =>
+        entry.type === 'step' &&
+        entry.stepKind === 'navigate' &&
+        !entry.message.toLowerCase().includes('session settings updated') &&
+        !entry.message.toLowerCase().includes('queued instruction'),
+    )?.message
+
+    const instruction = selectedTaskInstruction ?? fallbackInstruction ?? 'Saved workflow instruction'
+
     patchSettings({
       workflowTemplates: [
         ...settings.workflowTemplates,
         {
           id: crypto.randomUUID(),
           name: `Workflow ${settings.workflowTemplates.length + 1}`,
-          instruction: visibleLogs[0].message,
+          instruction,
           stepCount: visibleLogs.length,
           lastRunAt: new Date().toISOString(),
         },

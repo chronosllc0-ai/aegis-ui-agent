@@ -36,21 +36,18 @@ class AgentOrchestrator:
         self.agent: Agent | None = None
         self.mcp_client = MCPClient()
 
-    async def initialize(self) -> None:
-        """Initialize model selection and ADK agent instance."""
-        key = settings.GEMINI_API_KEY.strip()
-        has_real_key = bool(key) and "your-gemini" not in key.lower()
-        if has_real_key:
-            self.model_name = await detect_available_model(self.client)
-        self.analyzer.model = self.model_name
-        self.agent = Agent(
+
+    def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
+        """Build an ADK agent instance for the requested model/instruction."""
+        instruction = system_instruction or (
+            "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
+            "If asked to search the web, go to a search engine, type query, and submit."
+        )
+        return Agent(
             name="aegis_navigator",
-            model=self.model_name,
+            model=model_name,
             description="An AI agent that navigates UIs by seeing screenshots and executing actions.",
-            instruction=(
-                "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
-                "If asked to search the web, go to a search engine, type query, and submit."
-            ),
+            instruction=instruction,
             tools=[
                 self.navigator.take_screenshot,
                 self.navigator.analyze_screen,
@@ -62,6 +59,35 @@ class AgentOrchestrator:
                 self.navigator.go_back,
             ],
         )
+
+    async def _apply_session_settings(self, session_settings: dict[str, Any] | None) -> None:
+        """Apply per-session settings before executing a task."""
+        if not session_settings:
+            return
+
+        requested_model = str(session_settings.get("model", self.model_name)).strip() or self.model_name
+        system_instruction = session_settings.get("system_instruction")
+
+        should_rebuild = self.agent is None
+        if requested_model != self.model_name:
+            self.model_name = requested_model
+            self.analyzer.model = self.model_name
+            should_rebuild = True
+
+        if isinstance(system_instruction, str) and system_instruction.strip():
+            should_rebuild = True
+
+        if should_rebuild:
+            self.agent = self._build_agent(self.model_name, system_instruction if isinstance(system_instruction, str) else None)
+            logger.info("Applied session settings", extra={"model": self.model_name, "has_system_instruction": bool(system_instruction)})
+    async def initialize(self) -> None:
+        """Initialize model selection and ADK agent instance."""
+        key = settings.GEMINI_API_KEY.strip()
+        has_real_key = bool(key) and "your-gemini" not in key.lower()
+        if has_real_key:
+            self.model_name = await detect_available_model(self.client)
+        self.analyzer.model = self.model_name
+        self.agent = self._build_agent(self.model_name)
         logger.info("Orchestrator initialized with model %s", self.model_name)
 
     async def capture_frame_b64(self) -> str:
@@ -83,6 +109,7 @@ class AgentOrchestrator:
         """Execute a UI navigation task from a natural language instruction."""
         if self.agent is None:
             await self.initialize()
+        await self._apply_session_settings(settings)
         assert self.agent is not None
 
         runner = Runner(agent=self.agent, app_name="aegis", session_service=self.session_service)

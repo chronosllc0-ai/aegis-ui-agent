@@ -4,6 +4,43 @@
 
 ---
 
+## Session 3.2 — March 10, 2026 (Code Review Fixes: Settings Application + Workflow Edit + WS Cleanup)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed code review P1: session settings are now applied in `orchestrator.execute_task(...)` before runner execution.
+  - Added `_apply_session_settings(...)` to consume model/system instruction settings.
+  - Added `_build_agent(...)` helper and rebuild logic when session model/personality prompt changes.
+- Addressed websocket reconnect lifecycle review item:
+  - Hardened reconnect timer handling in `useWebSocket` by clearing existing reconnect timers before scheduling new ones.
+  - Disabled `onclose` callback during hook cleanup to prevent reconnect scheduling while disposing.
+- Addressed workflows edit review item:
+  - `WorkflowsTab` Edit now persists edited instruction to workflow template data via `onChange(...)` instead of running it.
+- Addressed workflow save instruction derivation review item:
+  - `saveWorkflow` now prefers the selected task history instruction and falls back to first user-navigation step for the active task.
+  - Added guard filters to avoid system/config/queue messages being used as saved workflow instructions.
+
+### What's Working
+- Backend tests pass (`pytest -q`).
+- Frontend production build passes (`cd frontend && npm run build`).
+- Session settings are now functionally consumed before task execution.
+- Workflow edit behavior now updates templates correctly without accidental execution.
+
+### What's NOT Working Yet
+- Browser screenshot capture for this pass failed due a browser-container Chromium crash (SIGSEGV) in this environment.
+
+### Next Steps
+1. Extend settings application to include behavior flags in orchestrator/tool invocation semantics.
+2. Add targeted tests for `_apply_session_settings(...)` behavior and workflow-edit persistence.
+3. Re-run screenshot capture in a stable browser environment.
+
+### Blockers
+- Browser container Playwright/Chromium instability (SIGSEGV) during screenshot attempt.
+
+---
+
 ## Session 3.1 — March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge)
 
 **Agent:** GPT-5.2-Codex  

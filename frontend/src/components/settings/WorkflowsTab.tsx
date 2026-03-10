@@ -20,7 +20,17 @@ export function WorkflowsTab({ workflows, onRun, onChange }: WorkflowsTabProps) 
           <p className='mt-2 text-[11px] text-zinc-500'>{workflow.stepCount} steps · {workflow.lastRunAt}</p>
           <div className='mt-2 flex gap-2 text-xs'>
             <button type='button' onClick={() => onRun(workflow.instruction)} className='rounded border border-[#2a2a2a] px-2 py-1'>Run</button>
-            <button type='button' onClick={() => onRun(prompt('Edit instruction', workflow.instruction) ?? workflow.instruction)} className='rounded border border-[#2a2a2a] px-2 py-1'>Edit</button>
+            <button
+              type='button'
+              onClick={() => {
+                const edited = prompt('Edit instruction', workflow.instruction)
+                if (edited === null) return
+                onChange(workflows.map((item) => (item.id === workflow.id ? { ...item, instruction: edited } : item)))
+              }}
+              className='rounded border border-[#2a2a2a] px-2 py-1'
+            >
+              Edit
+            </button>
             <button type='button' onClick={() => onChange(workflows.filter((item) => item.id !== workflow.id))} className='rounded border border-red-500/40 px-2 py-1 text-red-300'>Delete</button>
           </div>
         </article>

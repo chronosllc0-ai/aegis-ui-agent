@@ -78,6 +78,9 @@ export function useWebSocket() {
       setConnectionStatus('disconnected')
       setIsWorking(false)
       if (shouldReconnectRef.current) {
+        if (reconnectRef.current !== null) {
+          window.clearTimeout(reconnectRef.current)
+        }
         reconnectRef.current = window.setTimeout(connect, 1400)
       }
     }
@@ -131,8 +134,14 @@ export function useWebSocket() {
     connect()
     return () => {
       shouldReconnectRef.current = false
-      if (reconnectRef.current !== null) window.clearTimeout(reconnectRef.current)
-      wsRef.current?.close()
+      if (reconnectRef.current !== null) {
+        window.clearTimeout(reconnectRef.current)
+        reconnectRef.current = null
+      }
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.close()
+      }
     }
   }, [connect])
 
