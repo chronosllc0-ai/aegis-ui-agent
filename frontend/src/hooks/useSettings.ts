@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { DEMO_WORKFLOW_TEMPLATES } from '../lib/demoData'
 import { DEFAULT_INTEGRATIONS, type IntegrationConfig } from '../lib/mcp'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
@@ -42,7 +43,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   verboseLogging: false,
   confirmDestructiveActions: true,
   integrations: DEFAULT_INTEGRATIONS,
-  workflowTemplates: [],
+  workflowTemplates: import.meta.env.DEV ? DEMO_WORKFLOW_TEMPLATES : [],
 }
 
 export function useSettings() {

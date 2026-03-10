@@ -4,6 +4,79 @@
 
 ---
 
+## Session 3.1 — March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### Regressions Found
+- Pass 3A regressed the previously polished dashboard experience: onboarding empty state was flattened, top bar polish and browser-style URL strip were reduced, ActionLog hierarchy/detail was simplified, and input/steering UX lost keyboard/polish parity.
+- Workflow fallback view was functional but visually weak for demos.
+
+### What Was Restored / Improved
+- Restored premium dashboard shell while keeping the new product architecture:
+  - Rich onboarding empty state in `ScreenView` (logo, headline, subtext, 4 clickable examples, helper text).
+  - Polished top bar (Aegis branding, status pill, session timer, New Session).
+  - Browser copilot URL/navigation strip (back/forward, current URL, Go submit).
+  - Enhanced ActionLog hierarchy (grouped by task, icons, status color coding, timestamp + elapsed seconds, copy log).
+  - Restored polished input + steering UX (segmented mode control, queue badge, multiline input, keyboard shortcuts, send spinner, queue panel).
+- Preserved all Pass 3 product additions:
+  - Sidebar history/search and bottom user area.
+  - Settings full-page tabs and return flow.
+  - Workflow toggle + save workflow.
+  - Settings context persistence and websocket `config` sends.
+  - Backend `workflow_step` and MCP integration scaffolding.
+- Improved workflow fallback visualization to be intentionally demo-ready:
+  - Ordered execution flow with parent relationships,
+  - Clear status styling,
+  - Right-hand step detail inspector.
+- Added lightweight dev/demo seed data to validate all major surfaces without live backend dependence:
+  - 3+ history items,
+  - 2+ workflow templates,
+  - 4+ action log entries,
+  - Multi-step workflow graph data,
+  - Integrations in mixed states,
+  - Auth view/sign-out state for auth screenshot.
+
+### Screenshot Evidence Captured
+- Captured screenshot set (artifact paths) and manifest at `docs/screenshots/README.md`.
+- Captured names:
+  - `01-dashboard-onboarding.png`
+  - `02-dashboard-sidebar-history.png`
+  - `03-dashboard-active-log.png`
+  - `04-settings-profile.png`
+  - `05-settings-agent-config.png`
+  - `06-settings-integrations.png`
+  - `07-settings-workflows.png`
+  - `08-workflow-view.png`
+  - `09-auth-page.png`
+- Artifact location prefix:
+  - `browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`
+
+### What's Working
+- Frontend build passes with restored non-regressed shell and settings/workflow integration.
+- Backend tests remain green.
+- Dashboard + settings + workflow + auth surfaces are all visually verified.
+
+### What's Stubbed / Incomplete
+- React Flow dependency remains unavailable in this environment; enhanced fallback workflow view is used.
+- Firestore sync is still placeholder-only.
+- MCP/messaging connectors remain mocked wiring (not live external APIs).
+
+### What Still Feels Weak
+- History replay is currently log-focused and not full screenshot timeline playback yet.
+- Sidebar responsive behavior is solid but could benefit from animation polish and persistent collapsed state.
+
+### Next Steps
+1. Add real task replay timeline with screenshot snapshots per step.
+2. Replace workflow fallback with React Flow when package install becomes available.
+3. Implement Firestore sync and real messaging connector APIs with secure token handling.
+
+### Blockers
+- npm registry restrictions still prevent installing `reactflow` in this environment.
+
+---
+
 ## Session 3 — March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring)
 
 **Agent:** GPT-5.2-Codex  

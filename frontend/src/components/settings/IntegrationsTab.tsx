@@ -8,6 +8,12 @@ type IntegrationsTabProps = {
 
 const EMPTY_FORM: CustomServerForm = { serverName: '', serverUrl: '', authType: 'none', apiKey: '' }
 
+const STATUS_DOT: Record<IntegrationConfig['status'], string> = {
+  connected: 'bg-emerald-400',
+  error: 'bg-red-400',
+  disabled: 'bg-zinc-500',
+}
+
 export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps) {
   const [form, setForm] = useState<CustomServerForm>(EMPTY_FORM)
 
@@ -40,18 +46,23 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
         <div className='space-y-2'>
           {integrations.map((integration) => (
             <article key={integration.id} className='rounded border border-[#2a2a2a] bg-[#111] p-3'>
-              <div className='flex items-center justify-between'>
+              <div className='flex items-start justify-between gap-4'>
                 <div>
-                  <p>{integration.icon} {integration.name}</p>
+                  <p className='font-medium'>{integration.icon} {integration.name}</p>
                   <p className='text-xs text-zinc-400'>{integration.description}</p>
+                  <p className='mt-1 text-[11px] text-zinc-500'>Tools: {integration.tools.join(', ')}</p>
                 </div>
-                <span className='text-xs'>{integration.status}</span>
+                <span className='inline-flex items-center gap-2 text-xs'>
+                  <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOT[integration.status]}`} />
+                  {integration.status}
+                </span>
               </div>
               <div className='mt-2 flex gap-2 text-xs'>
                 <button type='button' onClick={() => updateIntegration(integration.id, { enabled: !integration.enabled, status: integration.enabled ? 'disabled' : 'connected' })} className='rounded border border-[#2a2a2a] px-2 py-1'>
                   {integration.enabled ? 'Disable' : 'Enable'}
                 </button>
                 <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1'>Configure</button>
+                <button type='button' onClick={() => updateIntegration(integration.id, { status: 'connected' })} className='rounded border border-[#2a2a2a] px-2 py-1'>Test</button>
                 <button type='button' onClick={() => onChange(integrations.filter((item) => item.id !== integration.id))} className='rounded border border-red-500/40 px-2 py-1 text-red-300'>Disconnect</button>
               </div>
             </article>
@@ -60,10 +71,10 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
       </section>
 
       <section>
-        <h3 className='mb-2 text-sm font-semibold'>Add Custom MCP Server</h3>
+        <h3 className='mb-2 text-sm font-semibold'>Add Integration</h3>
         <div className='grid gap-2 md:grid-cols-2'>
           <input placeholder='Server name' value={form.serverName} onChange={(event) => setForm((prev) => ({ ...prev, serverName: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#111] px-3 py-2' />
-          <input placeholder='Server URL' value={form.serverUrl} onChange={(event) => setForm((prev) => ({ ...prev, serverUrl: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#111] px-3 py-2' />
+          <input placeholder='Server URL (http://localhost:3000/mcp)' value={form.serverUrl} onChange={(event) => setForm((prev) => ({ ...prev, serverUrl: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#111] px-3 py-2' />
           <select value={form.authType} onChange={(event) => setForm((prev) => ({ ...prev, authType: event.target.value as AuthType }))} className='rounded border border-[#2a2a2a] bg-[#111] px-3 py-2'>
             <option value='none'>None</option>
             <option value='api_key'>API Key</option>
