@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SteeringMode } from '../hooks/useWebSocket'
 import { MessageQueue } from './MessageQueue'
+import { Icons } from './icons'
 import { SteeringControl } from './SteeringControl'
 
 type InputBarProps = {
