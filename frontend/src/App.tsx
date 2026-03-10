@@ -86,6 +86,8 @@ function App() {
     return { cls: 'bg-red-400', label: 'Disconnected' }
   }, [connectionStatus])
 
+  const displayFrame = latestFrame || (import.meta.env.DEV && selectedTaskId ? DEMO_FRAME : '')
+
   const handleSend = (instruction: string, selectedMode: SteeringMode) => {
     setSending(true)
     window.setTimeout(() => setSending(false), 280)

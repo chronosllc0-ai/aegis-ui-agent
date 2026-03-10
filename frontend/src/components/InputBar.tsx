@@ -69,9 +69,7 @@ export function InputBar({
               event.preventDefault()
               submit()
             }
-            if (event.key === 'Escape') {
-              setValue('')
-            }
+            if (event.key === 'Escape') setValue('')
             if (event.key === 'Tab') {
               event.preventDefault()
               const idx = MODE_ORDER.indexOf(mode)
