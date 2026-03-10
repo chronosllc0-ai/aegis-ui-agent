@@ -4,6 +4,290 @@
 
 ---
 
+## Session 3.4 — March 10, 2026 (Review Fixes: Session-Scoped Agent Settings + Config Validation)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed cross-session settings leakage in `orchestrator.py`:
+  - Removed reliance on mutating shared model/agent state for per-session overrides.
+  - Added `_resolve_session_agent(...)` to build an isolated agent instance per task/session.
+  - Kept a stable default model baseline (`default_model_name`) initialized once and reused when session settings are absent.
+  - Ensured analyzer model is aligned with the resolved session model for each task run.
+- Addressed style/lint concern in `orchestrator.py` by correcting method spacing/formatting around class methods.
+- Addressed websocket config payload robustness in `main.py`:
+  - Added type validation for `config.settings` payload.
+  - Invalid non-object settings now return a websocket error instead of being stored and causing downstream runtime exceptions.
+
+### What's Working
+- Per-session model/system instruction settings are now scoped to the current task execution and do not leak into later sessions.
+- Invalid config payloads are rejected cleanly with an explicit error response.
+- Backend tests pass, frontend build passes, and frontend lint passes.
+
+### Validation Commands Run
+- `pytest -q`
+- `cd frontend && npm run build`
+- `cd frontend && npm run lint`
+
+### What Still Feels Weak
+- Session behavior flags in settings are still mostly transport-level and not deeply enforced in tool-level execution logic.
+
+### Next Steps
+1. Add targeted unit tests for session settings isolation behavior in orchestrator.
+2. Add websocket tests for invalid `config.settings` payload rejection path.
+
+---
+
+## Session 3.3 — March 10, 2026 (Pass 3.2: Settings Depth, Demo Realism, Screenshot Discipline)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Improved
+- Upgraded settings from a cramped scaffold into a product-style page with breathing room:
+  - Dedicated settings header,
+  - stable left tab rail,
+  - wider scrollable content panel,
+  - cleaner max-width form sections.
+- Deepened settings tab content quality:
+  - **Profile:** avatar preview/upload placeholder, display name/email/theme, save/reset, success feedback, isolated danger zone.
+  - **Agent Configuration:** richer model+temperature controls, personality preset cards, helper copy, behavior toggles, restore defaults.
+  - **Integrations:** stronger cards with status badges, metadata (last checked/used), tool counts, details drawer, MCP server list, add-MCP form.
+  - **Workflows:** richer cards with description/tags/integration usage, run/edit/duplicate/delete, favorite toggle.
+- Upgraded workflow fallback visualization:
+  - summary cards (steps, total duration, success rate),
+  - visually connected ordered steps,
+  - status colors/icons,
+  - parent relation indicators,
+  - right-side inspector panel.
+- Improved dashboard realism and demo data:
+  - expanded seeded task history across dates,
+  - seeded workflows (3 templates) with metadata,
+  - seeded log events and 6-step workflow execution,
+  - demo auth user,
+  - dev-mode mock screen frame when tasks are selected.
+- Upgraded auth experience:
+  - product context copy,
+  - Google primary action,
+  - loading/error states,
+  - secondary email path stub,
+  - branded two-column auth card.
+- Fixed overflow/viewport artifacts:
+  - set `html/body/#root` full height,
+  - hide body overflow,
+  - tightened app container overflow behavior.
+
+### Non-Regression Verification
+Verified before closing pass:
+- onboarding state still works,
+- dashboard layout still works,
+- task history still works,
+- settings still works,
+- auth still works,
+- workflow view still works,
+- steer / interrupt / queue still works.
+
+### Screenshot Evidence (Direct Browser Capture)
+Saved manifest in `docs/screenshots/README.md` with paths:
+- `01-auth-page.png`
+- `02-dashboard-onboarding.png`
+- `03-dashboard-active-task.png`
+- `04-dashboard-history-sidebar.png`
+- `05-settings-profile.png`
+- `06-settings-agent-config.png`
+- `07-settings-integrations.png`
+- `08-settings-workflows.png`
+- `09-workflow-visualization.png`
+- `10-mobile-or-narrow-layout.png`
+
+Artifact prefix:
+- `browser:/tmp/codex_browser_invocations/d8efeeee8de93844/artifacts/docs/screenshots/`
+
+### Validation Commands Run
+- `pytest -q`
+- `cd frontend && npm run build`
+- `cd frontend && npm run lint`
+- Browser automation screenshot script via Playwright browser tool (10 captures)
+
+### Regressions Encountered and Fixes
+- ESLint/react-hooks regressions appeared while deepening UI state logic.
+  - Fixed by moving localStorage hydration into lazy initializers,
+  - reducing effect-driven synchronous state updates,
+  - stabilizing websocket connect callback/self-reference,
+  - and addressing fast-refresh export lint rule.
+
+### What Still Feels Weak
+- Messaging/auth scopes in integrations remain demo metadata (real OAuth/credential flows still stubbed).
+- Workflow replay is still log/step centric and not yet full screenshot timeline playback.
+
+### Blockers / Environment Notes
+- Browser tool worked this pass; screenshot artifacts remain external to repo filesystem and are referenced via artifact URIs in the manifest.
+
+---
+
+## Session 3.2 — March 10, 2026 (Code Review Fixes: Settings Application + Workflow Edit + WS Cleanup)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed code review P1: session settings are now applied in `orchestrator.execute_task(...)` before runner execution.
+  - Added `_apply_session_settings(...)` to consume model/system instruction settings.
+  - Added `_build_agent(...)` helper and rebuild logic when session model/personality prompt changes.
+- Addressed websocket reconnect lifecycle review item:
+  - Hardened reconnect timer handling in `useWebSocket` by clearing existing reconnect timers before scheduling new ones.
+  - Disabled `onclose` callback during hook cleanup to prevent reconnect scheduling while disposing.
+- Addressed workflows edit review item:
+  - `WorkflowsTab` Edit now persists edited instruction to workflow template data via `onChange(...)` instead of running it.
+- Addressed workflow save instruction derivation review item:
+  - `saveWorkflow` now prefers the selected task history instruction and falls back to first user-navigation step for the active task.
+  - Added guard filters to avoid system/config/queue messages being used as saved workflow instructions.
+
+### What's Working
+- Backend tests pass (`pytest -q`).
+- Frontend production build passes (`cd frontend && npm run build`).
+- Session settings are now functionally consumed before task execution.
+- Workflow edit behavior now updates templates correctly without accidental execution.
+
+### What's NOT Working Yet
+- Browser screenshot capture for this pass failed due a browser-container Chromium crash (SIGSEGV) in this environment.
+
+### Next Steps
+1. Extend settings application to include behavior flags in orchestrator/tool invocation semantics.
+2. Add targeted tests for `_apply_session_settings(...)` behavior and workflow-edit persistence.
+3. Re-run screenshot capture in a stable browser environment.
+
+### Blockers
+- Browser container Playwright/Chromium instability (SIGSEGV) during screenshot attempt.
+
+---
+
+## Session 3.1 — March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### Regressions Found
+- Pass 3A regressed the previously polished dashboard experience: onboarding empty state was flattened, top bar polish and browser-style URL strip were reduced, ActionLog hierarchy/detail was simplified, and input/steering UX lost keyboard/polish parity.
+- Workflow fallback view was functional but visually weak for demos.
+
+### What Was Restored / Improved
+- Restored premium dashboard shell while keeping the new product architecture:
+  - Rich onboarding empty state in `ScreenView` (logo, headline, subtext, 4 clickable examples, helper text).
+  - Polished top bar (Aegis branding, status pill, session timer, New Session).
+  - Browser copilot URL/navigation strip (back/forward, current URL, Go submit).
+  - Enhanced ActionLog hierarchy (grouped by task, icons, status color coding, timestamp + elapsed seconds, copy log).
+  - Restored polished input + steering UX (segmented mode control, queue badge, multiline input, keyboard shortcuts, send spinner, queue panel).
+- Preserved all Pass 3 product additions:
+  - Sidebar history/search and bottom user area.
+  - Settings full-page tabs and return flow.
+  - Workflow toggle + save workflow.
+  - Settings context persistence and websocket `config` sends.
+  - Backend `workflow_step` and MCP integration scaffolding.
+- Improved workflow fallback visualization to be intentionally demo-ready:
+  - Ordered execution flow with parent relationships,
+  - Clear status styling,
+  - Right-hand step detail inspector.
+- Added lightweight dev/demo seed data to validate all major surfaces without live backend dependence:
+  - 3+ history items,
+  - 2+ workflow templates,
+  - 4+ action log entries,
+  - Multi-step workflow graph data,
+  - Integrations in mixed states,
+  - Auth view/sign-out state for auth screenshot.
+
+### Screenshot Evidence Captured
+- Captured screenshot set (artifact paths) and manifest at `docs/screenshots/README.md`.
+- Captured names:
+  - `01-dashboard-onboarding.png`
+  - `02-dashboard-sidebar-history.png`
+  - `03-dashboard-active-log.png`
+  - `04-settings-profile.png`
+  - `05-settings-agent-config.png`
+  - `06-settings-integrations.png`
+  - `07-settings-workflows.png`
+  - `08-workflow-view.png`
+  - `09-auth-page.png`
+- Artifact location prefix:
+  - `browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`
+
+### What's Working
+- Frontend build passes with restored non-regressed shell and settings/workflow integration.
+- Backend tests remain green.
+- Dashboard + settings + workflow + auth surfaces are all visually verified.
+
+### What's Stubbed / Incomplete
+- React Flow dependency remains unavailable in this environment; enhanced fallback workflow view is used.
+- Firestore sync is still placeholder-only.
+- MCP/messaging connectors remain mocked wiring (not live external APIs).
+
+### What Still Feels Weak
+- History replay is currently log-focused and not full screenshot timeline playback yet.
+- Sidebar responsive behavior is solid but could benefit from animation polish and persistent collapsed state.
+
+### Next Steps
+1. Add real task replay timeline with screenshot snapshots per step.
+2. Replace workflow fallback with React Flow when package install becomes available.
+3. Implement Firestore sync and real messaging connector APIs with secure token handling.
+
+### Blockers
+- npm registry restrictions still prevent installing `reactflow` in this environment.
+
+---
+
+## Session 3 — March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Rebuilt the frontend shell around a persistent sidebar with top/middle/bottom sections: `New Task`, history search, workflow/settings shortcuts, and user avatar menu.
+- Added a full-page Settings experience with left tab nav and right content pane. New tabs implemented: `Profile`, `Agent Configuration`, `Integrations`, and `Workflows`.
+- Added app-wide settings state (`SettingsContext` + `useSettings`) with localStorage persistence, theme toggle state, workflow template storage, and websocket session config payload generation.
+- Added `UserMenu` dropdown entry point to Settings and a second entry point from sidebar settings gear/shortcut.
+- Added workflow visualization toggle in Action Log and implemented a fallback workflow view component that renders step cards from structured workflow websocket events.
+- Added “Save as Workflow” behavior from ActionLog and run/edit/delete controls in Workflows settings tab.
+- Added client MCP helpers/types and integrations UI supporting built-in integrations plus custom MCP server form (`authType`, URL, test/save stubs).
+- Added backend MCP + messaging stubs:
+  - `mcp_client.py` user-scoped registry and tool forwarding scaffold
+  - `integrations/base.py` interface
+  - `integrations/telegram.py`, `integrations/slack_connector.py`, `integrations/discord.py` mocked connectors and tool manifests
+  - `integrations/__init__.py` exports
+- Extended websocket backend contract with:
+  - `config` action to receive per-session settings
+  - `workflow_step` event emission for graph/list rendering payloads
+  - pass-through of settings/workflow callbacks into orchestrator execution
+- Extended orchestrator to emit structured workflow steps (id/parent/action/description/status/timestamp/duration/screenshot).
+
+### What's Working
+- `pytest` suite remains green (3 tests).
+- Frontend builds successfully with the new settings/integrations/workflow UI wiring.
+- Settings persist in localStorage and are sent as websocket `config` before task starts.
+- Backend emits `workflow_step` payloads while task steps stream.
+
+### What's NOT Working Yet
+- Real reactflow graph was requested, but npm registry access is blocked in this environment (403), so a fallback card-based workflow view is used.
+- Firestore sync is currently a no-op stub in `useSettings`; local persistence is working.
+- MCP protocol networking and messaging APIs are intentionally stubbed/mocked (tool manifests + execute paths wired, not full external API calls).
+- Token encryption-at-rest is not implemented yet; UI only stores masked display values.
+
+### Next Steps
+1. Replace fallback workflow cards with real React Flow + auto-layout (dagre/elk) once package install is available.
+2. Implement authenticated Firestore settings/workflow sync (read/write + conflict strategy).
+3. Wire MCP client to real HTTP MCP servers with retries, auth handling, and per-user persisted server configs.
+4. Implement real Telegram/Slack/Discord API clients with secure token storage and live status polling.
+5. Add tests for settings serialization, workflow persistence, and websocket `workflow_step` schema contract.
+
+### Decisions Made
+- Prioritized end-to-end UI/data-flow wiring with stubs over full external API integration per pass instructions.
+- Chose fallback workflow rendering due to blocked dependency install to keep build green.
+
+### Blockers
+- npm package fetch for `reactflow` blocked by registry 403 in this environment.
+
+---
+
 ## Session 2.6 — March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)
 
 **Agent:** GPT-5.2-Codex  
