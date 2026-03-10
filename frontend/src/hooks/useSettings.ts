@@ -46,6 +46,20 @@ const DEFAULT_SETTINGS: AppSettings = {
   workflowTemplates: import.meta.env.DEV ? DEMO_WORKFLOW_TEMPLATES : [],
 }
 
+function loadInitialSettings(): AppSettings {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return DEFAULT_SETTINGS
+  try {
+    const parsed = JSON.parse(raw) as Partial<AppSettings>
+    return { ...DEFAULT_SETTINGS, ...parsed }
+  } catch {
+    localStorage.removeItem(STORAGE_KEY)
+    return DEFAULT_SETTINGS
+  }
+}
+
+export function useSettings() {
+  const [settings, setSettings] = useState<AppSettings>(loadInitialSettings)
 export function useSettings() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
 

@@ -111,6 +111,7 @@ class AgentOrchestrator:
             await self.initialize()
         await self._apply_session_settings(settings)
         assert self.agent is not None
+.
 
         session_agent, _ = await self._resolve_session_agent(settings)
 
