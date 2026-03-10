@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
+import { Icons } from './icons'
 import type { WorkflowStep } from '../hooks/useWebSocket'
 
 type WorkflowViewProps = {
@@ -12,26 +13,27 @@ const STATUS_CLASSES: Record<WorkflowStep['status'], string> = {
   steered: 'border-amber-400 text-amber-200',
 }
 
+const ACTION_ICON: Record<string, (className?: string) => ReactElement> = {
+  navigate: (className) => Icons.globe({ className }),
+  analyze: (className) => Icons.search({ className }),
+  click: (className) => Icons.chevronRight({ className }),
+  type: (className) => Icons.edit({ className }),
+  scroll: (className) => Icons.chevronDown({ className }),
+}
+
 export function WorkflowView({ steps }: WorkflowViewProps) {
   const [selectedId, setSelectedId] = useState<string | null>(steps[0]?.step_id ?? null)
 
   const ordered = useMemo(() => {
-    const map = new Map(steps.map((step) => [step.step_id, step]))
     const roots = steps.filter((step) => !step.parent_step_id)
-    const linear: WorkflowStep[] = []
-
-    const visit = (node: WorkflowStep, depth: number) => {
-      linear.push({ ...node, description: `${'↳ '.repeat(depth)}${node.description}` })
+    const linear: Array<WorkflowStep & { depth: number }> = []
+    const walk = (node: WorkflowStep, depth: number) => {
+      linear.push({ ...node, depth })
       const children = steps.filter((step) => step.parent_step_id === node.step_id)
-      children.forEach((child) => visit(child, depth + 1))
+      children.forEach((child) => walk(child, depth + 1))
     }
-
-    roots.forEach((root) => visit(root, 0))
-    if (!roots.length) {
-      for (const step of steps) {
-        if (map.has(step.step_id)) linear.push(step)
-      }
-    }
+    roots.forEach((root) => walk(root, 0))
+    if (!roots.length) steps.forEach((step) => linear.push({ ...step, depth: 0 }))
     return linear
   }, [steps])
 
