@@ -37,6 +37,7 @@ class AgentOrchestrator:
         self.agent: Agent | None = None
         self.mcp_client = MCPClient()
 
+
     def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
         """Build an ADK agent instance for the requested model/instruction."""
         instruction = system_instruction or (
@@ -60,29 +61,35 @@ class AgentOrchestrator:
             ],
         )
 
-    async def _resolve_session_agent(self, session_settings: dict[str, Any] | None) -> tuple[Agent, str]:
-        """Resolve an isolated agent configuration for the current session/task."""
-        requested_model = self.default_model_name
-        system_instruction: str | None = None
+    async def _apply_session_settings(self, session_settings: dict[str, Any] | None) -> None:
+        """Apply per-session settings before executing a task."""
+        if not session_settings:
+            return
 
-        if session_settings:
-            requested_model = str(session_settings.get("model", self.default_model_name)).strip() or self.default_model_name
-            raw_instruction = session_settings.get("system_instruction")
-            if isinstance(raw_instruction, str) and raw_instruction.strip():
-                system_instruction = raw_instruction
+        requested_model = str(session_settings.get("model", self.model_name)).strip() or self.model_name
+        system_instruction = session_settings.get("system_instruction")
 
-        agent = self._build_agent(requested_model, system_instruction)
-        return agent, requested_model
+        should_rebuild = self.agent is None
+        if requested_model != self.model_name:
+            self.model_name = requested_model
+            self.analyzer.model = self.model_name
+            should_rebuild = True
 
+        if isinstance(system_instruction, str) and system_instruction.strip():
+            should_rebuild = True
+
+        if should_rebuild:
+            self.agent = self._build_agent(self.model_name, system_instruction if isinstance(system_instruction, str) else None)
+            logger.info("Applied session settings", extra={"model": self.model_name, "has_system_instruction": bool(system_instruction)})
     async def initialize(self) -> None:
-        """Initialize default model selection and baseline ADK agent instance."""
+        """Initialize model selection and ADK agent instance."""
         key = settings.GEMINI_API_KEY.strip()
         has_real_key = bool(key) and "your-gemini" not in key.lower()
         if has_real_key:
-            self.default_model_name = await detect_available_model(self.client)
-        self.analyzer.model = self.default_model_name
-        self.agent = self._build_agent(self.default_model_name)
-        logger.info("Orchestrator initialized with default model %s", self.default_model_name)
+            self.model_name = await detect_available_model(self.client)
+        self.analyzer.model = self.model_name
+        self.agent = self._build_agent(self.model_name)
+        logger.info("Orchestrator initialized with model %s", self.model_name)
 
     async def capture_frame_b64(self) -> str:
         """Capture the current browser viewport as base64 PNG data."""
@@ -103,6 +110,8 @@ class AgentOrchestrator:
         """Execute a UI navigation task from a natural language instruction."""
         if self.agent is None:
             await self.initialize()
+        await self._apply_session_settings(settings)
+        assert self.agent is not None
 
         session_agent, session_model = await self._resolve_session_agent(settings)
         self.analyzer.model = session_model
@@ -137,7 +146,7 @@ class AgentOrchestrator:
                 "action": step_data["type"],
                 "description": step_data.get("content") or "Agent step",
                 "status": "completed",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
                 "duration_ms": 500,
                 "screenshot": None,
             }

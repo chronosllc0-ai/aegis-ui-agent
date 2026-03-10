@@ -13,7 +13,32 @@ const EXAMPLES = [
 ]
 
 export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
-  const showSteering = steeringFlashKey > 0 && isWorking
+  const [showSteering, setShowSteering] = useState(false)
+  const [displayFrame, setDisplayFrame] = useState('')
+  const [overlayFrame, setOverlayFrame] = useState('')
+
+  useEffect(() => {
+    if (!frameSrc) return
+    if (!displayFrame) {
+      setDisplayFrame(frameSrc)
+      return
+    }
+    if (frameSrc !== displayFrame) {
+      setOverlayFrame(frameSrc)
+      const timeout = window.setTimeout(() => {
+        setDisplayFrame(frameSrc)
+        setOverlayFrame('')
+      }, 220)
+      return () => window.clearTimeout(timeout)
+    }
+  }, [displayFrame, frameSrc])
+
+  useEffect(() => {
+    if (steeringFlashKey === 0) return
+    setShowSteering(true)
+    const timeout = window.setTimeout(() => setShowSteering(false), 900)
+    return () => window.clearTimeout(timeout)
+  }, [steeringFlashKey])
 
   return (
     <section className='relative h-full min-h-[480px] overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
@@ -22,8 +47,11 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
       </div>
       {showSteering && <div className='absolute left-4 top-4 z-20 rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'>Steering…</div>}
 
-      {frameSrc ? (
-        <img src={frameSrc} alt='Live browser stream' className='h-full w-full object-contain' />
+      {displayFrame ? (
+        <>
+          <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
+          {overlayFrame && <img src={overlayFrame} alt='Incoming browser frame' className='absolute inset-0 h-full w-full object-contain opacity-70' />}
+        </>
       ) : (
         <div className='flex h-full flex-col items-center justify-center px-8 text-center'>
           <img src='/shield.svg' alt='Aegis logo' className='mb-5 h-16 w-16 opacity-90' />

@@ -40,12 +40,9 @@ export function InputBar({
 
   useEffect(() => {
     if (!examplePrompt) return
-    const timeout = window.setTimeout(() => {
-      onSend(examplePrompt, mode)
-      onExampleHandled?.()
-    }, 0)
-    return () => window.clearTimeout(timeout)
-  }, [examplePrompt, mode, onExampleHandled, onSend])
+    submit(examplePrompt)
+    onExampleHandled?.()
+  }, [examplePrompt])
 
   const modeStyling =
     mode === 'steer'
