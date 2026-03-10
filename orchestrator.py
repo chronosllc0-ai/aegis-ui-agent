@@ -22,6 +22,7 @@ from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
+SUPPORTED_SESSION_MODELS = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-2.5-pro-preview-03-25"}
 
 
 class AgentOrchestrator:
@@ -29,15 +30,13 @@ class AgentOrchestrator:
 
     def __init__(self) -> None:
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY or "test-key")
-        self.analyzer = ScreenshotAnalyzer(self.client)
         self.executor = ActionExecutor()
-        self.navigator = NavigatorAgent(self.analyzer, self.executor)
         self.session_service = InMemorySessionService()
         self.default_model_name = settings.GEMINI_MODEL
         self.agent: Agent | None = None
         self.mcp_client = MCPClient()
 
-    def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
+    def _build_agent(self, model_name: str, navigator: NavigatorAgent, system_instruction: str | None = None) -> Agent:
         """Build an ADK agent instance for the requested model/instruction."""
         instruction = system_instruction or (
             "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
@@ -49,14 +48,14 @@ class AgentOrchestrator:
             description="An AI agent that navigates UIs by seeing screenshots and executing actions.",
             instruction=instruction,
             tools=[
-                self.navigator.take_screenshot,
-                self.navigator.analyze_screen,
-                self.navigator.click_element,
-                self.navigator.type_text,
-                self.navigator.scroll_page,
-                self.navigator.go_to_url,
-                self.navigator.wait_for_load,
-                self.navigator.go_back,
+                navigator.take_screenshot,
+                navigator.analyze_screen,
+                navigator.click_element,
+                navigator.type_text,
+                navigator.scroll_page,
+                navigator.go_to_url,
+                navigator.wait_for_load,
+                navigator.go_back,
             ],
         )
 
@@ -66,12 +65,20 @@ class AgentOrchestrator:
         system_instruction: str | None = None
 
         if session_settings:
-            requested_model = str(session_settings.get("model", self.default_model_name)).strip() or self.default_model_name
+            raw_model = str(session_settings.get("model", self.default_model_name)).strip() or self.default_model_name
+            if raw_model in SUPPORTED_SESSION_MODELS:
+                requested_model = raw_model
+            else:
+                logger.warning("Unsupported session model requested: %s; falling back to %s", raw_model, self.default_model_name)
+
             raw_instruction = session_settings.get("system_instruction")
             if isinstance(raw_instruction, str) and raw_instruction.strip():
                 system_instruction = raw_instruction
 
-        agent = self._build_agent(requested_model, system_instruction)
+        session_analyzer = ScreenshotAnalyzer(self.client)
+        session_analyzer.model = requested_model
+        session_navigator = NavigatorAgent(session_analyzer, self.executor)
+        agent = self._build_agent(requested_model, session_navigator, system_instruction)
         return agent, requested_model
 
     async def initialize(self) -> None:
@@ -80,8 +87,10 @@ class AgentOrchestrator:
         has_real_key = bool(key) and "your-gemini" not in key.lower()
         if has_real_key:
             self.default_model_name = await detect_available_model(self.client)
-        self.analyzer.model = self.default_model_name
-        self.agent = self._build_agent(self.default_model_name)
+        bootstrap_analyzer = ScreenshotAnalyzer(self.client)
+        bootstrap_analyzer.model = self.default_model_name
+        bootstrap_navigator = NavigatorAgent(bootstrap_analyzer, self.executor)
+        self.agent = self._build_agent(self.default_model_name, bootstrap_navigator)
         logger.info("Orchestrator initialized with default model %s", self.default_model_name)
 
     async def capture_frame_b64(self) -> str:
@@ -104,8 +113,7 @@ class AgentOrchestrator:
         if self.agent is None:
             await self.initialize()
 
-        session_agent, session_model = await self._resolve_session_agent(settings)
-        self.analyzer.model = session_model
+        session_agent, _ = await self._resolve_session_agent(settings)
 
         runner = Runner(agent=session_agent, app_name="aegis", session_service=self.session_service)
         await self.session_service.create_session(app_name="aegis", user_id="user", session_id=session_id)

@@ -4,6 +4,39 @@
 
 ---
 
+## Session 3.6 — March 10, 2026 (Review Follow-up: Session Model Validation + Analyzer Concurrency Isolation)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed Codex P1 model validation concern in `orchestrator.py`:
+  - Added explicit session model allowlist validation (`SUPPORTED_SESSION_MODELS`).
+  - Unsupported/stale UI model values now fall back to `default_model_name` with warning log instead of overriding to potentially invalid models.
+- Addressed Codex P1 analyzer shared-mutation concurrency concern:
+  - Removed per-request mutation of a shared analyzer instance.
+  - `_resolve_session_agent(...)` now creates a **session-local** `ScreenshotAnalyzer` + `NavigatorAgent` and builds task-scoped ADK agent tools from those instances.
+  - Prevents concurrent sessions from overwriting each other’s analyzer model.
+- Addressed Codex P2 sign-out lifecycle concern in `frontend/src/App.tsx`:
+  - Added `handleSignOut()` that sends `stop`, resets websocket/client state, clears task/workflow/queue/session timers, and then transitions to signed-out auth state.
+
+### What's Working
+- Session model selection now safely validates and falls back on unsupported model requests.
+- Analyzer model usage is isolated per task/session and no longer shared mutable state.
+- Sign-out now cleanly terminates in-flight automation and clears state before showing auth page.
+- Backend tests, frontend build, and frontend lint all pass.
+
+### Validation Commands Run
+- `pytest -q`
+- `cd frontend && npm run build`
+- `cd frontend && npm run lint`
+
+### Next Steps
+1. Add unit tests covering session-model fallback behavior for unsupported model values.
+2. Add UI/integration test for sign-out during in-flight run to assert stop/reset behavior.
+
+---
+
 ## Session 3.5 — March 10, 2026 (Review Follow-up: MCP Built-in Guarding + UTC Timestamp)
 
 **Agent:** GPT-5.2-Codex  

@@ -147,6 +147,19 @@ function App() {
     })
   }
 
+
+  const handleSignOut = () => {
+    send({ action: 'stop' })
+    resetClientState()
+    setQueuedMessages([])
+    setShowSettings(false)
+    setShowWorkflow(false)
+    setSelectedTaskId(null)
+    setTaskStartedAt(null)
+    setDurationSeconds(0)
+    setAuthState('signed_out')
+  }
+
   const signIn = () => {
     setAuthState('loading')
     setAuthError('')
@@ -221,7 +234,7 @@ function App() {
           <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
             <button type='button' onClick={() => setShowSettings(true)} className='block w-full rounded border border-[#2a2a2a] px-2 py-2 text-left'>🧩 Workflow templates ({settings.workflowTemplates.length})</button>
             <button type='button' onClick={() => setShowSettings(true)} className='block w-full rounded border border-[#2a2a2a] px-2 py-2 text-left'>⚙️ Settings</button>
-            <UserMenu name={settings.displayName} avatarUrl={settings.avatarUrl} onOpenSettings={() => setShowSettings(true)} onSignOut={() => setAuthState('signed_out')} />
+            <UserMenu name={settings.displayName} avatarUrl={settings.avatarUrl} onOpenSettings={() => setShowSettings(true)} onSignOut={handleSignOut} />
           </div>
         </aside>
 
