@@ -46,6 +46,7 @@ class SessionRuntime:
         self.cancel_event = asyncio.Event()
         self.steering_context: list[str] = []
         self.queued_instructions: asyncio.Queue[str] = asyncio.Queue()
+        self.settings: dict[str, Any] = {}
 
 
 @app.get("/health")
@@ -62,6 +63,11 @@ async def _send_step(websocket: WebSocket, step: dict[str, str | None]) -> None:
 async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
     """Send a base64 PNG frame over websocket."""
     await websocket.send_json({"type": "frame", "data": {"image": image_b64}})
+
+
+async def _send_workflow_step(websocket: WebSocket, workflow_step: dict[str, Any]) -> None:
+    """Send workflow graph step payload to frontend."""
+    await websocket.send_json({"type": "workflow_step", "data": workflow_step})
 
 
 async def _run_navigation_task(
@@ -82,6 +88,8 @@ async def _run_navigation_task(
         on_frame=lambda image_b64: _send_frame(websocket, image_b64),
         cancel_event=runtime.cancel_event,
         steering_context=runtime.steering_context,
+        settings=runtime.settings,
+        on_workflow_step=lambda step: _send_workflow_step(websocket, step),
     )
     await websocket.send_json({"type": "result", "data": result})
     runtime.task_running = False
@@ -127,6 +135,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             elif action == "queue":
                 await runtime.queued_instructions.put(instruction)
                 await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
+            elif action == "config":
+                runtime.settings = data.get("settings", {})
+                await _send_step(websocket, {"type": "config", "content": "Session settings updated"})
             elif action == "audio_chunk":
                 transcript = await live_manager.process_audio(session_id, data.get("audio"))
                 if transcript:
