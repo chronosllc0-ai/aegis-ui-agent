@@ -7,12 +7,8 @@ export type ThemePreference = 'dark' | 'light' | 'system'
 export type WorkflowTemplate = {
   id: string
   name: string
-  description: string
   instruction: string
-  tags: string[]
-  usesIntegrations: string[]
   stepCount: number
-  favorite: boolean
   lastRunAt: string
 }
 
@@ -28,9 +24,6 @@ export type AppSettings = {
   autoScreenshot: boolean
   verboseLogging: boolean
   confirmDestructiveActions: boolean
-  narrateActions: boolean
-  allowAutonomousContinuation: boolean
-  requireExternalMessagingPermission: boolean
   integrations: IntegrationConfig[]
   workflowTemplates: WorkflowTemplate[]
 }
@@ -43,33 +36,29 @@ const DEFAULT_SETTINGS: AppSettings = {
   email: 'user@example.com',
   theme: 'dark',
   systemInstruction: 'You are Aegis. Be helpful, concise, and safe when taking actions.',
-  personalityPreset: 'Operator',
+  personalityPreset: 'Professional',
   temperature: 0.7,
   model: 'gemini-2.5-pro',
   autoScreenshot: true,
   verboseLogging: false,
   confirmDestructiveActions: true,
-  narrateActions: true,
-  allowAutonomousContinuation: false,
-  requireExternalMessagingPermission: true,
   integrations: DEFAULT_INTEGRATIONS,
   workflowTemplates: import.meta.env.DEV ? DEMO_WORKFLOW_TEMPLATES : [],
 }
 
-function loadInitialSettings(): AppSettings {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) return DEFAULT_SETTINGS
-  try {
-    const parsed = JSON.parse(raw) as Partial<AppSettings>
-    return { ...DEFAULT_SETTINGS, ...parsed }
-  } catch {
-    localStorage.removeItem(STORAGE_KEY)
-    return DEFAULT_SETTINGS
-  }
-}
-
 export function useSettings() {
-  const [settings, setSettings] = useState<AppSettings>(loadInitialSettings)
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as Partial<AppSettings>
+      setSettings((prev) => ({ ...prev, ...parsed }))
+    } catch {
+      localStorage.removeItem(STORAGE_KEY)
+    }
+  }, [])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
@@ -105,9 +94,6 @@ export function useSettings() {
         auto_screenshot: settings.autoScreenshot,
         verbose_logging: settings.verboseLogging,
         confirm_destructive_actions: settings.confirmDestructiveActions,
-        narrate_actions: settings.narrateActions,
-        allow_autonomous_continuation: settings.allowAutonomousContinuation,
-        require_external_messaging_permission: settings.requireExternalMessagingPermission,
       },
       integrations: settings.integrations.filter((integration) => integration.enabled),
     }),
