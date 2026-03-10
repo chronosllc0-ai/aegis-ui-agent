@@ -22,6 +22,7 @@ from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
+SUPPORTED_SESSION_MODELS = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-2.5-pro-preview-03-25"}
 
 
 class AgentOrchestrator:
@@ -29,9 +30,7 @@ class AgentOrchestrator:
 
     def __init__(self) -> None:
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY or "test-key")
-        self.analyzer = ScreenshotAnalyzer(self.client)
         self.executor = ActionExecutor()
-        self.navigator = NavigatorAgent(self.analyzer, self.executor)
         self.session_service = InMemorySessionService()
         self.default_model_name = settings.GEMINI_MODEL
         self.agent: Agent | None = None
@@ -50,14 +49,14 @@ class AgentOrchestrator:
             description="An AI agent that navigates UIs by seeing screenshots and executing actions.",
             instruction=instruction,
             tools=[
-                self.navigator.take_screenshot,
-                self.navigator.analyze_screen,
-                self.navigator.click_element,
-                self.navigator.type_text,
-                self.navigator.scroll_page,
-                self.navigator.go_to_url,
-                self.navigator.wait_for_load,
-                self.navigator.go_back,
+                navigator.take_screenshot,
+                navigator.analyze_screen,
+                navigator.click_element,
+                navigator.type_text,
+                navigator.scroll_page,
+                navigator.go_to_url,
+                navigator.wait_for_load,
+                navigator.go_back,
             ],
         )
 
@@ -112,9 +111,9 @@ class AgentOrchestrator:
             await self.initialize()
         await self._apply_session_settings(settings)
         assert self.agent is not None
+.
 
-        session_agent, session_model = await self._resolve_session_agent(settings)
-        self.analyzer.model = session_model
+        session_agent, _ = await self._resolve_session_agent(settings)
 
         runner = Runner(agent=session_agent, app_name="aegis", session_service=self.session_service)
         await self.session_service.create_session(app_name="aegis", user_id="user", session_id=session_id)

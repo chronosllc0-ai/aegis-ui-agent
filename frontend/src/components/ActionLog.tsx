@@ -8,13 +8,13 @@ type ActionLogProps = {
   onSaveWorkflow: () => void
 }
 
-const STEP_ICON: Record<LogEntry['stepKind'], string> = {
-  analyze: '🔍',
-  click: '🖱️',
-  type: '⌨️',
-  scroll: '📜',
-  navigate: '🌐',
-  other: '•',
+const STEP_ICON: Record<LogEntry['stepKind'], (className?: string) => ReactElement> = {
+  analyze: (className) => Icons.search({ className }),
+  click: (className) => Icons.chevronRight({ className }),
+  type: (className) => Icons.edit({ className }),
+  scroll: (className) => Icons.chevronDown({ className }),
+  navigate: (className) => Icons.globe({ className }),
+  other: (className) => Icons.workflows({ className }),
 }
 
 const STATUS_CLASS: Record<LogEntry['status'], string> = {
@@ -66,7 +66,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
             <div key={taskId} className='mb-2 rounded-md border border-[#2a2a2a] bg-[#111]'>
               <button type='button' onClick={() => setCollapsedTasks((prev) => ({ ...prev, [taskId]: !isTaskCollapsed }))} className='flex w-full items-center justify-between px-3 py-2 text-left text-zinc-300 hover:bg-zinc-900'>
                 <span className='truncate'>{title}</span>
-                <span>{isTaskCollapsed ? '▸' : '▾'}</span>
+                <span>{isTaskCollapsed ? Icons.chevronRight({ className: 'h-3.5 w-3.5' }) : Icons.chevronDown({ className: 'h-3.5 w-3.5' })}</span>
               </button>
               {!isTaskCollapsed && (
                 <div className='space-y-1 px-2 pb-2'>
@@ -77,7 +77,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
                         <span>{entry.elapsedSeconds.toFixed(1)}s</span>
                       </div>
                       <div>
-                        <span className='mr-1'>{STEP_ICON[entry.stepKind]}</span>
+                        <span className='mr-1 inline-flex align-middle'>{STEP_ICON[entry.stepKind]('h-3.5 w-3.5')}</span>
                         {entry.type === 'interrupt' ? 'Task interrupted: ' : ''}
                         {entry.message}
                       </div>
