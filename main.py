@@ -136,11 +136,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 await runtime.queued_instructions.put(instruction)
                 await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
             elif action == "config":
-                candidate_settings = data.get("settings", {})
-                if not isinstance(candidate_settings, dict):
-                    await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
-                    continue
-                runtime.settings = candidate_settings
+                runtime.settings = data.get("settings", {})
                 await _send_step(websocket, {"type": "config", "content": "Session settings updated"})
             elif action == "audio_chunk":
                 transcript = await live_manager.process_audio(session_id, data.get("audio"))
