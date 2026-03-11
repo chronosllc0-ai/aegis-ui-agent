@@ -8,6 +8,48 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  overflow: hidden;
+  background: #111;
+}
+
+.screen-view-container {
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.screen-view-container.agent-active {
+  animation: agent-pulse 2s ease-in-out infinite;
+}
+
+.screen-view-container.agent-steer-flash {
+  animation: steer-flash 300ms ease-out;
+}
+
+@keyframes agent-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3), 0 0 20px rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.6), 0 0 40px rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.7);
+  }
+}
+
+@keyframes steer-flash {
+  0% {
+    box-shadow: 0 0 20px rgba(147, 197, 253, 0.8), 0 0 50px rgba(147, 197, 253, 0.35);
+  }
+  100% {
+    box-shadow: none;
+  }
 }
