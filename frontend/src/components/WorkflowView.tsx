@@ -38,25 +38,37 @@ export function WorkflowView({ steps }: WorkflowViewProps) {
   }, [steps])
 
   const selected = ordered.find((step) => step.step_id === selectedId) ?? ordered[0]
+  const totalDuration = ordered.reduce((sum, step) => sum + step.duration_ms, 0)
+  const successRate = ordered.length ? Math.round((ordered.filter((step) => step.status === 'completed').length / ordered.length) * 100) : 0
 
   return (
-    <section className='grid h-full min-h-[480px] grid-cols-[1.5fr_1fr] gap-3 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-3'>
+    <section className='grid h-full min-h-[520px] grid-cols-1 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-3 xl:grid-cols-[1.6fr_1fr]'>
       <div className='min-h-0 overflow-y-auto'>
-        <div className='mb-3 flex items-center justify-between text-xs text-zinc-400'>
-          <span>Workflow Execution Flow</span>
-          <span>{ordered.length} steps</span>
+        <div className='mb-3 grid gap-2 text-xs text-zinc-300 sm:grid-cols-3'>
+          <SummaryCard title='Steps' value={`${ordered.length}`} />
+          <SummaryCard title='Total Duration' value={`${(totalDuration / 1000).toFixed(1)}s`} />
+          <SummaryCard title='Success Rate' value={`${successRate}%`} />
         </div>
+
         <div className='space-y-2'>
           {ordered.map((step, index) => (
-            <button key={step.step_id} type='button' onClick={() => setSelectedId(step.step_id)} className={`w-full rounded-xl border bg-[#111] p-3 text-left transition hover:border-blue-500/60 ${STATUS_CLASSES[step.status]} ${selected?.step_id === step.step_id ? 'ring-1 ring-blue-500/50' : ''}`}>
-              <div className='mb-1 flex items-center justify-between text-[11px]'>
-                <span>Step {index + 1}</span>
-                <span>{step.duration_ms}ms</span>
-              </div>
-              <p className='font-medium text-zinc-100'>{step.action}</p>
-              <p className='text-xs text-zinc-300'>{step.description}</p>
-              <p className='mt-1 text-[10px] text-zinc-500'>Parent: {step.parent_step_id ?? 'none'}</p>
-            </button>
+            <div key={step.step_id} className='relative'>
+              {index < ordered.length - 1 && <div className='absolute left-5 top-12 h-10 border-l border-dashed border-zinc-600' />}
+              <button
+                type='button'
+                onClick={() => setSelectedId(step.step_id)}
+                className={`w-full rounded-xl border bg-[#111] p-3 text-left transition hover:border-blue-500/60 ${STATUS_CLASSES[step.status]} ${selected?.step_id === step.step_id ? 'ring-1 ring-blue-500/50' : ''}`}
+                style={{ marginLeft: `${Math.min(step.depth, 3) * 14}px`, width: `calc(100% - ${Math.min(step.depth, 3) * 14}px)` }}
+              >
+                <div className='mb-1 flex items-center justify-between text-[11px]'>
+                  <span>Step {index + 1}</span>
+                  <span>{step.duration_ms}ms</span>
+                </div>
+                <p className='inline-flex items-center gap-1 font-medium text-zinc-100'>{(ACTION_ICON[step.action] ?? ((c?:string)=>Icons.workflows({ className:c })) )('h-3.5 w-3.5')} {step.action}</p>
+                <p className='text-xs text-zinc-300'>{step.description}</p>
+                <p className='mt-1 text-[10px] text-zinc-500'>Parent: {step.parent_step_id ?? 'none'} · {step.timestamp}</p>
+              </button>
+            </div>
           ))}
         </div>
       </div>

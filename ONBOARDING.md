@@ -1,3 +1,26 @@
+## Session 3.4A — March 11, 2026 (Review Follow-up: Session ID Isolation + Env Filter Hardening)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Improved
+- Fixed orchestrator ADK session identity handling so task execution now uses a session-scoped `user_id` derived from `session_id` instead of hardcoded `"user"`. This prevents cross-session collisions in the shared ADK session service.
+- Added a code execution integration module with safer subprocess environment filtering using explicit blocked prefixes (`API_`, `AWS_`, `AZURE_`, `GCP_`, `SECRET`, `TOKEN`, `PRIVATE`, `CREDENTIAL`) instead of broad substring matching.
+- Exported the new `CodeExecutionIntegration` in `integrations/__init__.py` for consistent import paths.
+- Added regression tests:
+  - `test_orchestrator_user_id.py` validates `create_session` and `Runner.run_async` receive the session-scoped user id.
+  - `test_code_execution_env_filter.py` validates sensitive env prefixes are filtered while non-sensitive variables are preserved.
+
+### Validation
+- `pytest -q`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run build`
+
+### Notes
+- Review comments referencing integration manager webhook record access and Slack/Discord 429 loops map to newer integration files not present on this branch snapshot; this pass addressed the directly applicable conflicts and hardening items in the current tree.
+
+---
+
 # ONBOARDING.md — Session Progress Log
 
 > Update this file at the END of every coding session. This is how continuity is maintained between agents and sessions. Newest entries go at the top.

@@ -123,7 +123,7 @@ class AgentOrchestrator:
         if on_frame is not None:
             await on_frame(await self.capture_frame_b64())
 
-        async for event in runner.run_async(user_id="user", session_id=session_id, new_message=instruction):
+        async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=instruction):
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("Task cancelled for session %s", session_id)
                 return {"status": "interrupted", "instruction": instruction, "steps": steps}
