@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { Icons } from './icons'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LogEntry } from '../hooks/useWebSocket'
 
 type ActionLogProps = {
@@ -54,9 +53,9 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
       <div className='mb-3 flex items-center justify-between'>
         <h2 className='text-sm font-semibold text-zinc-200'>Action Log</h2>
         <div className='flex items-center gap-2 text-xs'>
-          <button type='button' onClick={copyLog} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'><span className='inline-flex items-center gap-1'>{Icons.copy({ className: 'h-3.5 w-3.5' })}Copy Log</span></button>
-          <button type='button' onClick={onToggleWorkflow} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'><span className='inline-flex items-center gap-1'>{Icons.workflows({ className: 'h-3.5 w-3.5' })}{showWorkflow ? 'List View' : 'Workflow'}</span></button>
-          <button type='button' onClick={onSaveWorkflow} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'><span className='inline-flex items-center gap-1'>{Icons.save({ className: 'h-3.5 w-3.5' })}Save Workflow</span></button>
+          <button type='button' onClick={copyLog} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'>Copy Log</button>
+          <button type='button' onClick={onToggleWorkflow} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'>{showWorkflow ? 'List View' : 'Workflow'}</button>
+          <button type='button' onClick={onSaveWorkflow} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'>Save Workflow</button>
         </div>
       </div>
       <div ref={containerRef} className='h-[calc(100%-2.4rem)] overflow-y-auto font-mono text-xs'>

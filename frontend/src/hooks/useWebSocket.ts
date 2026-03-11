@@ -25,10 +25,8 @@ export type WorkflowStep = {
 }
 
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'screenshot' | 'error' | 'workflow_step'
-  data?: Record<string, unknown> | string
-  url?: string
-  title?: string
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step'
+  data?: Record<string, unknown>
 }
 
 function guessStepKind(message: string): LogEntry['stepKind'] {
@@ -48,41 +46,29 @@ export function useWebSocket() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
   const [currentUrl, setCurrentUrl] = useState('about:blank')
-  const [pageTitle, setPageTitle] = useState('')
-  const [activeTaskId, setActiveTaskIdState] = useState('idle')
-
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
-  const lastStepAtRef = useRef(0)
+  const lastStepAtRef = useRef(performance.now())
 
-
-  const setActiveTaskId = useCallback((taskId: string) => {
-    activeTaskIdRef.current = taskId
-    setActiveTaskIdState(taskId)
+  const appendLog = useCallback((entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
+    const now = performance.now()
+    const elapsed = entry.elapsedSeconds ?? (now - lastStepAtRef.current) / 1000
+    lastStepAtRef.current = now
+    setLogs((prev) => [
+      ...prev,
+      {
+        ...entry,
+        id: crypto.randomUUID(),
+        timestamp: new Date().toLocaleTimeString(),
+        elapsedSeconds: elapsed,
+        stepKind: entry.stepKind ?? guessStepKind(entry.message),
+      },
+    ])
   }, [])
 
-  const appendLog = useCallback(
-    (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
-      const now = Date.now()
-      const elapsed = entry.elapsedSeconds ?? (lastStepAtRef.current ? (now - lastStepAtRef.current) / 1000 : 0)
-      lastStepAtRef.current = now
-      setLogs((prev) => [
-        ...prev,
-        {
-          ...entry,
-          id: crypto.randomUUID(),
-          timestamp: new Date().toLocaleTimeString(),
-          elapsedSeconds: elapsed,
-          stepKind: entry.stepKind ?? guessStepKind(entry.message),
-        },
-      ])
-    },
-    [],
-  )
-
-  const connect = useCallback(function connectSocket() {
+  const connect = useCallback(() => {
     const ws = new WebSocket(`${window.location.origin.replace('http', 'ws')}/ws/navigate`)
     wsRef.current = ws
     setConnectionStatus('connecting')
@@ -92,30 +78,29 @@ export function useWebSocket() {
       setConnectionStatus('disconnected')
       setIsWorking(false)
       if (shouldReconnectRef.current) {
-        if (reconnectRef.current !== null) window.clearTimeout(reconnectRef.current)
-        reconnectRef.current = window.setTimeout(() => connectSocket(), 1400)
+        if (reconnectRef.current !== null) {
+          window.clearTimeout(reconnectRef.current)
+        }
+        reconnectRef.current = window.setTimeout(connect, 1400)
       }
     }
     ws.onerror = () => setConnectionStatus('disconnected')
     ws.onmessage = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as WebSocketPayload
-      const dataObj = typeof payload.data === 'object' && payload.data !== null ? (payload.data as Record<string, unknown>) : {}
       const taskId = activeTaskIdRef.current
-
       if (payload.type === 'step') {
         setIsWorking(true)
-        const content = String(dataObj.content ?? 'Step update')
+        const content = String(payload.data?.content ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
         if (urlMatch?.[0]) setCurrentUrl(urlMatch[0])
         appendLog({
           message: content,
           taskId,
-          type: dataObj.type === 'interrupt' ? 'interrupt' : 'step',
-          status: dataObj.type === 'steer' ? 'steered' : 'in_progress',
+          type: payload.data?.type === 'interrupt' ? 'interrupt' : 'step',
+          status: payload.data?.type === 'steer' ? 'steered' : 'in_progress',
         })
         return
       }
-
       if (payload.type === 'result') {
         setIsWorking(false)
         const status = String(dataObj.status ?? 'completed')
@@ -128,30 +113,19 @@ export function useWebSocket() {
         })
         return
       }
-
-      if (payload.type === 'screenshot') {
-        const image = typeof payload.data === 'string' ? payload.data : String(dataObj.image ?? '')
-        if (image) setLatestFrame(`data:image/png;base64,${image}`)
-        if (payload.url) setCurrentUrl(String(payload.url))
-        if (payload.title) setPageTitle(String(payload.title))
-        return
-      }
-
       if (payload.type === 'frame') {
-        const image = String(dataObj.image ?? '')
+        const image = String(payload.data?.image ?? '')
         if (image) setLatestFrame(`data:image/png;base64,${image}`)
         return
       }
-
       if (payload.type === 'workflow_step') {
         const step = payload.data as unknown as WorkflowStep
         setWorkflowSteps((prev) => [...prev.filter((item) => item.step_id !== step.step_id), step])
         return
       }
-
       if (payload.type === 'error') {
         setIsWorking(false)
-        appendLog({ message: String(dataObj.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
+        appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
       }
     }
   }, [appendLog])
@@ -171,25 +145,21 @@ export function useWebSocket() {
     }
   }, [connect])
 
-  const send = useCallback(
-    (message: Record<string, unknown>) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        if (message.action === 'navigate' || message.action === 'interrupt') {
-          const nextTaskId = crypto.randomUUID()
-          setActiveTaskId(nextTaskId)
-          appendLog({ message: String(message.instruction ?? 'New task'), taskId: nextTaskId, type: 'step', status: 'in_progress', stepKind: 'navigate', elapsedSeconds: 0 })
-          const maybeUrl = String(message.instruction ?? '')
-          if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
-        }
-        wsRef.current.send(JSON.stringify(message))
-        return true
+  const send = useCallback((message: Record<string, unknown>) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (message.action === 'navigate' || message.action === 'interrupt') {
+        const nextTaskId = crypto.randomUUID()
+        activeTaskIdRef.current = nextTaskId
+        appendLog({ message: String(message.instruction ?? 'New task'), taskId: nextTaskId, type: 'step', status: 'in_progress', stepKind: 'navigate', elapsedSeconds: 0 })
+        const maybeUrl = String(message.instruction ?? '')
+        if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
       }
-
-      appendLog({ message: 'WebSocket not connected', taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
-      return false
-    },
-    [appendLog, setActiveTaskId],
-  )
+      wsRef.current.send(JSON.stringify(message))
+      return true
+    }
+    appendLog({ message: 'WebSocket not connected', taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
+    return false
+  }, [appendLog])
 
   const resetClientState = useCallback(() => {
     setLogs([])
@@ -197,10 +167,9 @@ export function useWebSocket() {
     setCurrentUrl('about:blank')
     setIsWorking(false)
     setWorkflowSteps([])
-    setActiveTaskId('idle')
-    lastStepAtRef.current = 0
-  }, [setActiveTaskId])
+    activeTaskIdRef.current = 'idle'
+  }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, pageTitle, send, resetClientState, setLogs, setWorkflowSteps, activeTaskId, setActiveTaskId }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, send, resetClientState, setLogs, setWorkflowSteps }
 }
 

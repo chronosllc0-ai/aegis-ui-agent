@@ -14,30 +14,45 @@ const EXAMPLES = [
   'Go to Wikipedia and summarize the article on quantum computing',
 ]
 
-export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, currentUrl, pageTitle }: ScreenViewProps) {
-  const showSteering = steeringFlashKey > 0 && isWorking
-  const hasFrame = Boolean(frameSrc)
+export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
+  const [showSteering, setShowSteering] = useState(false)
+  const [displayFrame, setDisplayFrame] = useState('')
+  const [overlayFrame, setOverlayFrame] = useState('')
+
+  useEffect(() => {
+    if (!frameSrc) return
+    if (!displayFrame) {
+      setDisplayFrame(frameSrc)
+      return
+    }
+    if (frameSrc !== displayFrame) {
+      setOverlayFrame(frameSrc)
+      const timeout = window.setTimeout(() => {
+        setDisplayFrame(frameSrc)
+        setOverlayFrame('')
+      }, 220)
+      return () => window.clearTimeout(timeout)
+    }
+  }, [displayFrame, frameSrc])
+
+  useEffect(() => {
+    if (steeringFlashKey === 0) return
+    setShowSteering(true)
+    const timeout = window.setTimeout(() => setShowSteering(false), 900)
+    return () => window.clearTimeout(timeout)
+  }, [steeringFlashKey])
 
   return (
-    <section className={`screen-view-container relative h-full min-h-[480px] overflow-hidden rounded-2xl border bg-[#1a1a1a] ${isWorking ? 'agent-active' : ''} ${showSteering ? 'agent-steer-flash' : ''}`}>
+    <section className='relative h-full min-h-[480px] overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
       <div className='absolute inset-x-0 top-0 z-20 h-0.5 bg-zinc-800'>
         <div className={`h-full bg-blue-500 transition-all ${isWorking ? 'w-full animate-pulse' : 'w-0'}`} />
       </div>
+      {showSteering && <div className='absolute left-4 top-4 z-20 rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'>Steering…</div>}
 
-      <div className='absolute left-4 top-4 z-20 flex items-center gap-2 rounded-md border border-[#2a2a2a] bg-black/40 px-3 py-1 text-xs text-zinc-300'>
-        <span className={`h-2 w-2 rounded-full ${isWorking ? 'bg-blue-400 animate-pulse' : 'bg-zinc-500'}`} />
-        {isWorking ? 'Agent working...' : 'Agent idle'}
-      </div>
-
-      {showSteering && <div className='absolute left-4 top-12 z-20 rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'>Steering received</div>}
-
-      {hasFrame ? (
+      {displayFrame ? (
         <>
-          <img src={frameSrc} alt='Live browser stream' className='h-full w-full object-contain opacity-100 transition-opacity duration-150 ease-in' />
-          <div className='absolute inset-x-4 bottom-4 z-20 rounded-lg border border-[#2a2a2a] bg-black/50 px-3 py-2 text-xs text-zinc-200'>
-            <p className='truncate font-medium'>{pageTitle || 'Untitled page'}</p>
-            <p className='truncate text-zinc-400'>{currentUrl || 'about:blank'}</p>
-          </div>
+          <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
+          {overlayFrame && <img src={overlayFrame} alt='Incoming browser frame' className='absolute inset-0 h-full w-full object-contain opacity-70' />}
         </>
       ) : (
         <div className='flex h-full flex-col items-center justify-center px-8 text-center'>
@@ -51,7 +66,7 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
               </button>
             ))}
           </div>
-          <p className='mt-5 text-xs text-zinc-500'>Connecting to browser...</p>
+          <p className='mt-5 text-xs text-zinc-500'>Waiting for first live frame…</p>
         </div>
       )}
     </section>

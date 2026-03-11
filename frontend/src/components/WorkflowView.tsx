@@ -74,30 +74,21 @@ export function WorkflowView({ steps }: WorkflowViewProps) {
       </div>
 
       <aside className='min-h-0 rounded-xl border border-[#2a2a2a] bg-[#111] p-3 text-xs'>
-        <h3 className='mb-3 text-sm font-semibold text-zinc-200'>Step Inspector</h3>
+        <h3 className='mb-3 text-sm font-semibold text-zinc-200'>Step Details</h3>
         {selected ? (
-          <div className='space-y-3'>
+          <div className='space-y-2'>
             <Detail label='Action' value={selected.action} />
             <Detail label='Status' value={selected.status} />
             <Detail label='Timestamp' value={selected.timestamp} />
             <Detail label='Duration' value={`${selected.duration_ms} ms`} />
             <Detail label='Parent Step' value={selected.parent_step_id ?? 'none'} />
-            <Detail label='Description' value={selected.description} />
+            <Detail label='Description' value={selected.description.replace(/^↳\s*/g, '')} />
           </div>
         ) : (
           <p className='text-zinc-500'>No workflow data yet.</p>
         )}
       </aside>
     </section>
-  )
-}
-
-function SummaryCard({ title, value }: { title: string; value: string }) {
-  return (
-    <div className='rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2'>
-      <p className='text-[11px] text-zinc-500'>{title}</p>
-      <p className='text-sm font-semibold text-zinc-100'>{value}</p>
-    </div>
   )
 }
 

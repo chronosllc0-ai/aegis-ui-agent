@@ -1,19 +1,16 @@
-# Pass 3.8 Screenshot Manifest
+# Pass 3.1 Screenshot Manifest
 
-Captured directly via browser automation during Pass 3.8.
+Captured via browser automation artifacts (environment browser container):
 
-## Captures
-1. browser_initial_frame.png
-2. browser_mid_navigation.png
-3. browser_glow_active.png
-4. browser_glow_idle.png
-5. telegram_settings_connected.png
-6. telegram_test_console.png
-7. dashboard_regression_check.png
+- 01-dashboard-onboarding.png
+- 02-dashboard-sidebar-history.png
+- 03-dashboard-active-log.png
+- 04-settings-profile.png
+- 05-settings-agent-config.png
+- 06-settings-integrations.png
+- 07-settings-workflows.png
+- 08-workflow-view.png
+- 09-auth-page.png
 
 Artifact base path:
-`browser:/tmp/codex_browser_invocations/a17a36de49380e10/artifacts/docs/screenshots/`
-
-Notes:
-- Browser captures are direct Playwright screenshots from the app UI surface.
-- This environment lacked local backend Playwright browser binaries, so backend-driven live browser frames could not be fully validated end-to-end despite the new screenshot streaming code path and passing tests.
+`browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`

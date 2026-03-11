@@ -109,6 +109,11 @@ async def _send_workflow_step(websocket: WebSocket, workflow_step: dict[str, Any
     await websocket.send_json({"type": "workflow_step", "data": workflow_step})
 
 
+async def _send_workflow_step(websocket: WebSocket, workflow_step: dict[str, Any]) -> None:
+    """Send workflow graph step payload to frontend."""
+    await websocket.send_json({"type": "workflow_step", "data": workflow_step})
+
+
 async def _run_navigation_task(
     websocket: WebSocket,
     runtime: SessionRuntime,
@@ -183,6 +188,10 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     continue
                 runtime.settings = candidate_settings
                 await _send_step_and_screenshot(websocket, {"type": "config", "content": "Session settings updated"})
+                await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
+            elif action == "config":
+                runtime.settings = data.get("settings", {})
+                await _send_step(websocket, {"type": "config", "content": "Session settings updated"})
             elif action == "audio_chunk":
                 transcript = await live_manager.process_audio(session_id, data.get("audio"))
                 if transcript:
