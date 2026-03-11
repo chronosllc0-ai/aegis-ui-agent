@@ -9,6 +9,10 @@ import { SettingsPage } from './components/settings/SettingsPage'
 import { useSettingsContext } from './context/SettingsContext'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { DEMO_AUTH_USER, DEMO_FRAME, DEMO_LOGS, DEMO_TASKS, DEMO_WORKFLOW_STEPS, type TaskHistoryItem } from './lib/demoData'
+import { SettingsPage } from './components/settings/SettingsPage'
+import { useSettingsContext } from './context/SettingsContext'
+import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
+import { DEMO_LOGS, DEMO_TASKS, DEMO_WORKFLOW_STEPS, type TaskHistoryItem } from './lib/demoData'
 
 function App() {
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, send, resetClientState, setLogs, setWorkflowSteps } = useWebSocket()
@@ -28,8 +32,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [authState, setAuthState] = useState<'signed_out' | 'loading' | 'signed_in' | 'error'>('signed_in')
-  const [authError, setAuthError] = useState<string>('')
+  const [isAuthenticated, setIsAuthenticated] = useState(true)
   const seededRef = useRef(false)
 
   useEffect(() => {
@@ -40,8 +43,7 @@ function App() {
     setWorkflowSteps(DEMO_WORKFLOW_STEPS)
     setTaskHistory(DEMO_TASKS)
     setSelectedTaskId(DEMO_TASKS[0].id)
-    patchSettings({ displayName: DEMO_AUTH_USER.name, email: DEMO_AUTH_USER.email, avatarUrl: DEMO_AUTH_USER.avatarUrl })
-  }, [setLogs, setWorkflowSteps, patchSettings])
+  }, [setLogs, setWorkflowSteps])
 
   useEffect(() => {
     setUrlInput(currentUrl)
@@ -70,15 +72,13 @@ function App() {
         title: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
         dateLabel: 'Today',
         instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
-        summary: 'Session captured from live logs.',
       }))
-    if (fromLogs.length) setTaskHistory((prev) => [...fromLogs, ...prev])
+    if (fromLogs.length) {
+      setTaskHistory((prev) => [...fromLogs, ...prev])
+    }
   }, [logs, taskHistory])
 
-  const filteredHistory = useMemo(
-    () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase()) || item.instruction.toLowerCase().includes(historySearch.toLowerCase())),
-    [historySearch, taskHistory],
-  )
+  const filteredHistory = useMemo(() => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())), [historySearch, taskHistory])
 
   const visibleLogs: LogEntry[] = useMemo(() => {
     if (!selectedTaskId) return logs
@@ -95,7 +95,7 @@ function App() {
 
   const handleSend = (instruction: string, selectedMode: SteeringMode) => {
     setSending(true)
-    window.setTimeout(() => setSending(false), 260)
+    window.setTimeout(() => setSending(false), 280)
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, instruction])
       send({ action: 'queue', instruction })
@@ -112,7 +112,7 @@ function App() {
 
   const submitUrl = () => {
     const normalized = /^https?:\/\//i.test(urlInput) ? urlInput : `https://${urlInput}`
-    handleSend(normalized, 'steer')
+    handleSend(normalized, isWorking ? 'steer' : 'steer')
   }
 
   const newSession = () => {
@@ -122,97 +122,59 @@ function App() {
     setDurationSeconds(0)
     resetClientState()
     setSelectedTaskId(null)
-    setShowWorkflow(false)
   }
 
   const saveWorkflow = () => {
     if (!visibleLogs.length) return
-    const selectedTask = selectedTaskId ? taskHistory.find((item) => item.id === selectedTaskId) : null
-    const fallbackInstruction = visibleLogs.find((entry) => entry.type === 'step' && entry.stepKind === 'navigate' && !entry.message.toLowerCase().includes('session settings updated'))?.message
+
+    const selectedTaskInstruction = selectedTaskId
+      ? taskHistory.find((item) => item.id === selectedTaskId)?.instruction
+      : null
+
+    const fallbackInstruction = visibleLogs.find(
+      (entry) =>
+        entry.type === 'step' &&
+        entry.stepKind === 'navigate' &&
+        !entry.message.toLowerCase().includes('session settings updated') &&
+        !entry.message.toLowerCase().includes('queued instruction'),
+    )?.message
+
+    const instruction = selectedTaskInstruction ?? fallbackInstruction ?? 'Saved workflow instruction'
 
     patchSettings({
       workflowTemplates: [
+        ...settings.workflowTemplates,
         {
           id: crypto.randomUUID(),
-          name: selectedTask?.title ?? `Workflow ${settings.workflowTemplates.length + 1}`,
-          description: selectedTask?.summary ?? 'Saved from dashboard run.',
-          instruction: selectedTask?.instruction ?? fallbackInstruction ?? 'Saved workflow instruction',
-          tags: ['saved', 'dashboard'],
-          usesIntegrations: settings.integrations.filter((item) => item.enabled).map((item) => item.name),
+          name: `Workflow ${settings.workflowTemplates.length + 1}`,
+          instruction,
           stepCount: visibleLogs.length,
-          favorite: false,
           lastRunAt: new Date().toISOString(),
         },
-        ...settings.workflowTemplates,
       ],
     })
   }
 
-
-  const handleSignOut = () => {
-    send({ action: 'stop' })
-    resetClientState()
-    setQueuedMessages([])
-    setShowSettings(false)
-    setShowWorkflow(false)
-    setSelectedTaskId(null)
-    setTaskStartedAt(null)
-    setDurationSeconds(0)
-    setAuthState('signed_out')
-  }
-
-  const signIn = () => {
-    setAuthState('loading')
-    setAuthError('')
-    window.setTimeout(() => {
-      if (Math.random() > 0.05) {
-        setAuthState('signed_in')
-      } else {
-        setAuthState('error')
-        setAuthError('Could not reach auth provider. Please try again.')
-      }
-    }, 700)
-  }
-
-  if (authState !== 'signed_in') {
+  if (!isAuthenticated) {
     return (
-      <main className='flex h-screen items-center justify-center bg-[#0f1115] px-4 text-zinc-100'>
-        <section className='w-full max-w-3xl rounded-2xl border border-[#2a2a2a] bg-gradient-to-br from-[#161a22] to-[#12151c] p-8 shadow-2xl'>
-          <div className='grid gap-8 md:grid-cols-[1.2fr_1fr]'>
-            <div>
-              <img src='/shield.svg' alt='Aegis logo' className='mb-5 h-14 w-14' />
-              <h1 className='text-3xl font-semibold'>Operate any interface with Aegis</h1>
-              <p className='mt-3 text-sm text-zinc-400'>A multimodal UI navigator for cross-app workflows, messaging automation, and visual task execution.</p>
-              <ul className='mt-5 space-y-2 text-sm text-zinc-300'>
-                <li className='inline-flex items-center gap-2'>{Icons.globe({ className: 'h-4 w-4 text-blue-300' })}<span>Visual browser control with step-by-step action logs</span></li>
-                <li className='inline-flex items-center gap-2'>{Icons.workflows({ className: 'h-4 w-4 text-blue-300' })}<span>Workflow templates, replay, and integration-aware automations</span></li>
-                <li className='inline-flex items-center gap-2'>{Icons.settings({ className: 'h-4 w-4 text-blue-300' })}<span>MCP-enabled extensions for messaging and tools</span></li>
-              </ul>
-            </div>
-
-            <div className='rounded-xl border border-[#2a2a2a] bg-[#10131a] p-5'>
-              <h2 className='text-lg font-semibold'>Sign in</h2>
-              <p className='mt-1 text-xs text-zinc-500'>Use your Google account to access settings, workflows, and session history.</p>
-              <button type='button' onClick={signIn} disabled={authState === 'loading'} className='mt-5 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium disabled:opacity-70'>
-                {authState === 'loading' ? 'Connecting…' : 'Continue with Google'}
-              </button>
-              {authState === 'error' && <p className='mt-3 text-xs text-red-300'>{authError}</p>}
-              <button type='button' className='mt-3 w-full rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-zinc-300'>Use email instead</button>
-            </div>
-          </div>
+      <main className='flex h-screen items-center justify-center bg-[#111] text-zinc-100'>
+        <section className='w-full max-w-md rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 text-center'>
+          <img src='/shield.svg' alt='Aegis logo' className='mx-auto mb-4 h-14 w-14' />
+          <h1 className='text-2xl font-semibold'>Welcome to Aegis</h1>
+          <p className='mt-2 text-sm text-zinc-400'>Sign in to run live UI navigation sessions and manage workflows.</p>
+          <button type='button' onClick={() => setIsAuthenticated(true)} className='mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm'>Continue with Google</button>
         </section>
       </main>
     )
   }
 
   return (
-    <main className='h-screen overflow-hidden bg-[#111] p-3 text-zinc-100'>
-      <div className='mx-auto flex h-full max-w-[1780px] gap-3'>
-        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] md:translate-x-0'} fixed inset-y-3 left-3 z-30 w-[300px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition md:static md:translate-x-0`}>
-          <button type='button' onClick={newSession} className='mb-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>{Icons.plus({ className: 'h-4 w-4' })}New Task</button>
-          <div className='relative mb-3'><span className='pointer-events-none absolute left-2.5 top-2.5 text-zinc-500'>{Icons.search({ className: 'h-4 w-4' })}</span><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] py-2 pl-8 pr-3 text-sm' /></div>
-
-          <div className='h-[calc(100%-190px)] overflow-y-auto space-y-3'>
+    <main className='h-screen bg-[#111] p-3 text-zinc-100'>
+      <div className='mx-auto flex h-full max-w-[1750px] gap-3'>
+        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] md:translate-x-0'} fixed inset-y-3 left-3 z-30 w-[280px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition md:static md:translate-x-0`}>
+          <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>New Task</button>
+          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm' />
+          <div className='min-h-0 h-[calc(100%-170px)] overflow-y-auto space-y-3'>
             {['Today', 'Yesterday'].map((group) => {
               const items = filteredHistory.filter((item) => item.dateLabel === group)
               if (!items.length) return null
@@ -223,7 +185,7 @@ function App() {
                     {items.map((item) => (
                       <button key={item.id} type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 text-left text-xs ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
                         <p className='truncate text-zinc-200'>{item.title}</p>
-                        <p className='truncate text-zinc-500'>{item.summary}</p>
+                        <p className='truncate text-zinc-500'>{item.instruction}</p>
                       </button>
                     ))}
                   </div>
@@ -231,18 +193,17 @@ function App() {
               )
             })}
           </div>
-
           <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
-            <button type='button' onClick={() => setShowSettings(true)} className='inline-flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>{Icons.workflows({ className: 'h-4 w-4' })}<span>Workflow templates ({settings.workflowTemplates.length})</span></button>
-            <button type='button' onClick={() => setShowSettings(true)} className='inline-flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>{Icons.settings({ className: 'h-4 w-4' })}<span>Settings</span></button>
-            <UserMenu name={settings.displayName} avatarUrl={settings.avatarUrl} onOpenSettings={() => setShowSettings(true)} onSignOut={handleSignOut} />
+            <button type='button' onClick={() => setShowSettings(true)} className='block w-full rounded border border-[#2a2a2a] px-2 py-2 text-left'>🧩 Workflow templates ({settings.workflowTemplates.length})</button>
+            <button type='button' onClick={() => setShowSettings(true)} className='block w-full rounded border border-[#2a2a2a] px-2 py-2 text-left'>⚙️ Settings</button>
+            <UserMenu name={settings.displayName} avatarUrl={settings.avatarUrl} onOpenSettings={() => setShowSettings(true)} onSignOut={() => setIsAuthenticated(false)} />
           </div>
         </aside>
 
-        <section className='flex min-h-0 flex-1 flex-col gap-3'>
+        <section className='flex min-h-0 flex-1 flex-col gap-3 md:ml-0'>
           <header className='flex items-center justify-between rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
             <div className='flex items-center gap-2'>
-              <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden'>{Icons.menu({ className: 'h-4 w-4' })}</button>
+              <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden'>☰</button>
               <img src='/shield.svg' alt='Aegis' className='h-5 w-5' />
               <h1 className='text-lg font-semibold'>Aegis</h1>
             </div>
@@ -257,9 +218,9 @@ function App() {
 
           {!showSettings && (
             <section className='flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2'>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>{Icons.back({ className: 'h-4 w-4' })}</button>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>{Icons.chevronRight({ className: 'h-4 w-4' })}</button>
-              <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-4 w-4' })}</span>
+              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>←</button>
+              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>→</button>
+              <span className='text-xs text-zinc-400'>🌐</span>
               <input value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-sm outline-none focus:border-blue-500/70' />
               <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-3 py-1 text-xs hover:bg-zinc-800'>Go</button>
             </section>
@@ -269,11 +230,11 @@ function App() {
             {showSettings ? (
               <SettingsPage onBack={() => setShowSettings(false)} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} />
             ) : (
-              <div className='grid h-full min-h-0 grid-cols-1 gap-3 xl:grid-cols-[2.1fr_1fr]'>
+              <div className='grid h-full min-h-0 grid-cols-1 gap-3 xl:grid-cols-[2.2fr_1fr]'>
                 {showWorkflow ? (
                   <WorkflowView steps={workflowSteps} />
                 ) : (
-                  <ScreenView frameSrc={displayFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} />
+                  <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} />
                 )}
                 <ActionLog entries={visibleLogs} showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
               </div>

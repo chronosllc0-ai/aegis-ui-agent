@@ -41,12 +41,9 @@ export function InputBar({
 
   useEffect(() => {
     if (!examplePrompt) return
-    const timeout = window.setTimeout(() => {
-      onSend(examplePrompt, mode)
-      onExampleHandled?.()
-    }, 0)
-    return () => window.clearTimeout(timeout)
-  }, [examplePrompt, mode, onExampleHandled, onSend])
+    submit(examplePrompt)
+    onExampleHandled?.()
+  }, [examplePrompt])
 
   const modeStyling =
     mode === 'steer'
@@ -60,7 +57,7 @@ export function InputBar({
       <div className='flex items-center justify-between'>
         <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
         <button type='button' className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : 'hover:bg-zinc-800'}`}>
-          {Icons.mic({ className: 'h-4 w-4' })}
+          🎙️
         </button>
       </div>
       <div className='flex gap-2'>
