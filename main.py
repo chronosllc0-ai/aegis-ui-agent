@@ -181,7 +181,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             elif action == "queue":
                 await runtime.queued_instructions.put(instruction)
                 await _send_step_and_screenshot(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
-            elif action == "config":
+                runtime.settings = candidate_settings
+                await _send_step_and_screenshot(websocket, {"type": "config", "content": "Session settings updated"})
                 candidate_settings = data.get("settings", {})
                 if not isinstance(candidate_settings, dict):
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
