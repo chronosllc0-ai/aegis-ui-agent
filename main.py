@@ -210,6 +210,66 @@ async def _run_navigation_task(
     await _start_next_queued_task_if_ready(websocket, runtime, session_id)
 
 
+async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
+    """Send a base64 PNG frame over websocket."""
+    await websocket.send_json({"type": "frame", "data": {"image": image_b64}})
+
+
+def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
+    """Create and store the background navigation task for the current session."""
+    runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
+
+
+async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: SessionRuntime, session_id: str) -> None:
+    """Start the next queued task when no task is active and cancellation is not pending."""
+    if runtime.task_running or runtime.cancel_event.is_set() or not runtime.queued_instructions:
+        return
+
+    queued_instruction = runtime.queued_instructions.pop(0)
+    await _send_step(
+        websocket,
+        {
+            "type": "queue",
+            "content": f"Starting queued task: {queued_instruction}",
+        },
+    )
+    _start_navigation_task(websocket, runtime, session_id, queued_instruction)
+
+
+async def _run_navigation_task(
+    websocket: WebSocket,
+    runtime: SessionRuntime,
+    session_id: str,
+    instruction: str,
+) -> None:
+    """Execute a single navigation task and optionally schedule one queued follow-up."""
+    callback: Callable[[dict[str, Any]], Awaitable[None]] = lambda step: _send_step(websocket, step)
+    runtime.task_running = True
+    runtime.cancel_event.clear()
+
+    try:
+        result = await orchestrator.execute_task(
+            session_id=session_id,
+            instruction=instruction,
+            on_step=callback,
+            on_frame=lambda image_b64: _send_frame(websocket, image_b64),
+            cancel_event=runtime.cancel_event,
+            steering_context=runtime.steering_context,
+        )
+        await websocket.send_json({"type": "result", "data": result})
+    except asyncio.CancelledError:
+        logger.info("Navigation task cancelled for session %s", session_id)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Navigation task failed for session %s", session_id)
+        await websocket.send_json({"type": "error", "data": {"message": str(exc)}})
+        await websocket.send_json({"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}})
+    finally:
+        runtime.task_running = False
+
+    await _start_next_queued_task_if_ready(websocket, runtime, session_id)
+
+
 @app.websocket("/ws/navigate")
 async def websocket_navigate(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time UI navigation sessions."""

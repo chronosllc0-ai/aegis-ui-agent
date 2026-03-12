@@ -77,6 +77,7 @@ export function InputBar({
               onModeChange(MODE_ORDER[(idx + 1) % MODE_ORDER.length])
             }
           }}
+⁷
           placeholder='Type a new instruction, steer, interrupt, or queue next task...'
           className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2'
         />

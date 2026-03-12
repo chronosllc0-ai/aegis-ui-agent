@@ -1,4 +1,4 @@
-"""WebSocket smoke test for /ws/navigate."""
+"""WebSocket smoke and protocol validation tests for /ws/navigate."""
 
 from __future__ import annotations
 
@@ -54,3 +54,22 @@ def test_websocket_navigate_smoke() -> None:
     assert post_step_screenshot["type"] == "screenshot"
     assert result["type"] == "result"
     assert result["data"]["status"] == "completed"
+
+
+def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
+    """Malformed dequeue payload should return protocol error and keep socket open."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        ws.send_json({"action": "dequeue", "index": "not-a-number"})
+        error = ws.receive_json()
+
+        ws.send_json({"action": "queue", "instruction": "later"})
+        queue_ack = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert error["type"] == "error"
+    assert error["data"]["message"] == "Invalid queue index"
+    assert queue_ack["type"] == "step"
+    assert "Queued instruction: later" in queue_ack["data"]["content"]
