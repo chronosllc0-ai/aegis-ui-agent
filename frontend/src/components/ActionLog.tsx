@@ -3,17 +3,18 @@ import type { LogEntry } from '../hooks/useWebSocket'
 
 type ActionLogProps = {
   entries: LogEntry[]
-  isCollapsed?: boolean
-  onToggleCollapse?: () => void
+  showWorkflow: boolean
+  onToggleWorkflow: () => void
+  onSaveWorkflow: () => void
 }
 
-const STEP_ICON: Record<LogEntry['stepKind'], string> = {
-  analyze: '🔍',
-  click: '🖱️',
-  type: '⌨️',
-  scroll: '📜',
-  navigate: '🌐',
-  other: '•',
+const STEP_ICON: Record<LogEntry['stepKind'], (className?: string) => ReactElement> = {
+  analyze: (className) => Icons.search({ className }),
+  click: (className) => Icons.chevronRight({ className }),
+  type: (className) => Icons.edit({ className }),
+  scroll: (className) => Icons.chevronDown({ className }),
+  navigate: (className) => Icons.globe({ className }),
+  other: (className) => Icons.workflows({ className }),
 }
 
 const STATUS_CLASS: Record<LogEntry['status'], string> = {
@@ -23,55 +24,38 @@ const STATUS_CLASS: Record<LogEntry['status'], string> = {
   steered: 'text-amber-300 border-amber-500/30',
 }
 
-export function ActionLog({ entries, isCollapsed = false, onToggleCollapse }: ActionLogProps) {
+export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkflow }: ActionLogProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [collapsedTasks, setCollapsedTasks] = useState<Record<string, boolean>>({})
 
   const grouped = useMemo(() => {
     const map = new Map<string, LogEntry[]>()
     for (const entry of entries) {
-      if (!map.has(entry.taskId)) {
-        map.set(entry.taskId, [])
-      }
+      if (!map.has(entry.taskId)) map.set(entry.taskId, [])
       map.get(entry.taskId)?.push(entry)
     }
-    return Array.from(map.entries())
+    return Array.from(map.entries()).reverse()
   }, [entries])
 
   useEffect(() => {
     if (containerRef.current) {
-      containerRef.current.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' })
+      containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [entries])
 
   const copyLog = async () => {
-    const blob = entries
-      .map((entry) => `[${entry.timestamp}] (${entry.taskId}) ${entry.message} (${entry.elapsedSeconds.toFixed(1)}s)`)
-      .join('\n')
+    const blob = entries.map((entry) => `[${entry.timestamp}] (${entry.taskId}) ${entry.message} (${entry.elapsedSeconds.toFixed(1)}s)`).join('\n')
     await navigator.clipboard.writeText(blob)
   }
 
-  if (isCollapsed) {
-    return (
-      <button
-        type='button'
-        onClick={onToggleCollapse}
-        className='flex h-full min-h-[420px] w-full items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl hover:border-blue-500/70'
-      >
-        📋
-      </button>
-    )
-  }
-
   return (
-    <section className='h-full rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-3'>
+    <section className='h-full rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-3'>
       <div className='mb-3 flex items-center justify-between'>
         <h2 className='text-sm font-semibold text-zinc-200'>Action Log</h2>
-        <div className='flex items-center gap-2'>
-          <button type='button' onClick={copyLog} className='rounded-md border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800'>Copy Log</button>
-          {onToggleCollapse && (
-            <button type='button' onClick={onToggleCollapse} className='rounded-md border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 lg:hidden'>Hide</button>
-          )}
+        <div className='flex items-center gap-2 text-xs'>
+          <button type='button' onClick={copyLog} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'>Copy Log</button>
+          <button type='button' onClick={onToggleWorkflow} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'>{showWorkflow ? 'List View' : 'Workflow'}</button>
+          <button type='button' onClick={onSaveWorkflow} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:bg-zinc-800'>Save Workflow</button>
         </div>
       </div>
       <div ref={containerRef} className='h-[calc(100%-2.4rem)] overflow-y-auto font-mono text-xs'>
@@ -80,13 +64,9 @@ export function ActionLog({ entries, isCollapsed = false, onToggleCollapse }: Ac
           const isTaskCollapsed = collapsedTasks[taskId] ?? false
           return (
             <div key={taskId} className='mb-2 rounded-md border border-[#2a2a2a] bg-[#111]'>
-              <button
-                type='button'
-                onClick={() => setCollapsedTasks((prev) => ({ ...prev, [taskId]: !isTaskCollapsed }))}
-                className='flex w-full items-center justify-between px-3 py-2 text-left text-zinc-300 hover:bg-zinc-900'
-              >
+              <button type='button' onClick={() => setCollapsedTasks((prev) => ({ ...prev, [taskId]: !isTaskCollapsed }))} className='flex w-full items-center justify-between px-3 py-2 text-left text-zinc-300 hover:bg-zinc-900'>
                 <span className='truncate'>{title}</span>
-                <span>{isTaskCollapsed ? '▸' : '▾'}</span>
+                <span>{isTaskCollapsed ? Icons.chevronRight({ className: 'h-3.5 w-3.5' }) : Icons.chevronDown({ className: 'h-3.5 w-3.5' })}</span>
               </button>
               {!isTaskCollapsed && (
                 <div className='space-y-1 px-2 pb-2'>
@@ -97,7 +77,7 @@ export function ActionLog({ entries, isCollapsed = false, onToggleCollapse }: Ac
                         <span>{entry.elapsedSeconds.toFixed(1)}s</span>
                       </div>
                       <div>
-                        <span className='mr-1'>{STEP_ICON[entry.stepKind]}</span>
+                        <span className='mr-1 inline-flex align-middle'>{STEP_ICON[entry.stepKind]('h-3.5 w-3.5')}</span>
                         {entry.type === 'interrupt' ? 'Task interrupted: ' : ''}
                         {entry.message}
                       </div>
