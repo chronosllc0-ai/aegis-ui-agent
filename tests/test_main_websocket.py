@@ -43,6 +43,7 @@ def test_websocket_navigate_smoke() -> None:
     with client.websocket_connect("/ws/navigate") as ws:
         initial = ws.receive_json()
         ws.send_json({"action": "navigate", "instruction": "hello"})
+        frame = ws.receive_json()
         step = ws.receive_json()
         post_step_screenshot = ws.receive_json()
         result = ws.receive_json()
