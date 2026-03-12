@@ -1,0 +1,15 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - ${_FRONTEND_IMAGE}
+      - --build-arg
+      - VITE_API_URL=${_VITE_API_URL}
+      - --build-arg
+      - VITE_WS_URL=${_VITE_WS_URL}
+      - .
+images:
+  - ${_FRONTEND_IMAGE}

@@ -151,3 +151,43 @@ aegis-ui-agent/
 ## License
 
 MIT
+
+
+## 🚀 Deployment
+
+### Prerequisites
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) installed and authenticated
+- A GCP project with billing enabled
+- Docker installed (for local development)
+
+### Quick Deploy (One Command)
+```bash
+export GCP_PROJECT_ID=your-project-id
+export GCP_REGION=us-central1
+export GEMINI_API_KEY=your-api-key
+./infrastructure/deploy.sh
+```
+
+### First-Time GCP Setup
+```bash
+export GCP_PROJECT_ID=your-project-id
+./infrastructure/setup-gcp.sh
+```
+
+### Local Development (Docker Compose)
+```bash
+cp .env.example .env
+# Fill in keys
+docker-compose up --build
+# Frontend: http://localhost:3000
+# Backend:  http://localhost:8080
+```
+
+### Infrastructure Details
+| Service | GCP Product | Purpose |
+|---------|-------------|---------|
+| Backend API | Cloud Run | FastAPI + Playwright agent runtime |
+| Frontend | Cloud Run | React SPA served via Nginx |
+| Database | Cloud Firestore | Session/task metadata |
+| Screenshot Storage | Cloud Storage | Agent screenshot artifacts |
+| Build Pipeline | Cloud Build | Container image builds |
