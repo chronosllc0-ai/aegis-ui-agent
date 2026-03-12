@@ -3,6 +3,8 @@ type ScreenViewProps = {
   isWorking: boolean
   steeringFlashKey: number
   onExampleClick: (prompt: string) => void
+  currentUrl: string
+  pageTitle: string
 }
 
 const EXAMPLES = [
