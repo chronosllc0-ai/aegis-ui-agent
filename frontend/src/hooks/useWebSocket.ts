@@ -103,7 +103,7 @@ export function useWebSocket() {
       }
       if (payload.type === 'result') {
         setIsWorking(false)
-        const status = String(dataObj.status ?? 'completed')
+        const status = String(payload.data?.status ?? 'completed')
         const failed = status !== 'completed' && status !== 'interrupted'
         appendLog({
           message: `Task ${status}`,
