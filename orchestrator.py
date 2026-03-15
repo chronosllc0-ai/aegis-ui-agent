@@ -29,7 +29,12 @@ class AgentOrchestrator:
     """Orchestrates the UI navigation pipeline using ADK."""
 
     def __init__(self) -> None:
+<<<<<<< ours
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY or "test-key")
+=======
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self.analyzer = ScreenshotAnalyzer(self.client)
+>>>>>>> theirs
         self.executor = ActionExecutor()
         self.session_service = InMemorySessionService()
         self.default_model_name = settings.GEMINI_MODEL
@@ -103,8 +108,11 @@ class AgentOrchestrator:
         on_frame: Callable[[str], Awaitable[None]] | None = None,
         cancel_event: asyncio.Event | None = None,
         steering_context: list[str] | None = None,
+<<<<<<< ours
         settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+=======
+>>>>>>> theirs
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction."""
         if self.agent is None:
@@ -119,11 +127,18 @@ class AgentOrchestrator:
         await self.session_service.create_session(app_name="aegis", user_id="user", session_id=session_id)
 
         steps: list[dict[str, Any]] = []
+<<<<<<< ours
         parent_step_id: str | None = None
         if on_frame is not None:
             await on_frame(await self.capture_frame_b64())
 
         async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=instruction):
+=======
+        if on_frame is not None:
+            await on_frame(await self.capture_frame_b64())
+
+        async for event in runner.run_async(user_id="user", session_id=session_id, new_message=instruction):
+>>>>>>> theirs
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("Task cancelled for session %s", session_id)
                 return {"status": "interrupted", "instruction": instruction, "steps": steps}
@@ -152,8 +167,11 @@ class AgentOrchestrator:
             parent_step_id = workflow_step["step_id"]
             if on_step is not None:
                 await on_step(step_data)
+<<<<<<< ours
             if on_workflow_step is not None:
                 await on_workflow_step(workflow_step)
+=======
+>>>>>>> theirs
             if on_frame is not None:
                 await on_frame(await self.capture_frame_b64())
 

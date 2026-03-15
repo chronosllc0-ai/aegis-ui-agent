@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { SteeringMode } from '../hooks/useWebSocket'
 import { MessageQueue } from './MessageQueue'
+<<<<<<< ours
 import { Icons } from './icons'
+=======
+>>>>>>> theirs
 import { SteeringControl } from './SteeringControl'
 
 type InputBarProps = {
@@ -29,6 +32,7 @@ export function InputBar({
   examplePrompt,
   onExampleHandled,
 }: InputBarProps) {
+<<<<<<< ours
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
 
@@ -44,6 +48,33 @@ export function InputBar({
     submit(examplePrompt)
     onExampleHandled?.()
   }, [examplePrompt])
+=======
+  const [value, setValue] = useState<string>('')
+  const [queueOpen, setQueueOpen] = useState<boolean>(true)
+
+  const submit = (overrideValue?: string) => {
+    const instruction = (overrideValue ?? value).trim()
+    if (!instruction) {
+      return
+    }
+    onSend(instruction, mode)
+    if (!overrideValue) {
+      setValue('')
+    }
+  }
+
+
+
+  useEffect(() => {
+    if (!examplePrompt) {
+      return
+    }
+    setValue(examplePrompt)
+    onSend(examplePrompt, mode)
+    setValue('')
+    onExampleHandled?.()
+  }, [examplePrompt, mode, onExampleHandled, onSend])
+>>>>>>> theirs
 
   const modeStyling =
     mode === 'steer'
@@ -53,10 +84,20 @@ export function InputBar({
         : 'border-[#2a2a2a]'
 
   return (
+<<<<<<< ours
     <section className={`space-y-3 rounded-2xl border bg-[#1a1a1a] p-3 transition ${modeStyling}`}>
       <div className='flex items-center justify-between'>
         <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
         <button type='button' className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : 'hover:bg-zinc-800'}`}>
+=======
+    <section className={`space-y-3 rounded-xl border bg-[#1a1a1a] p-3 transition ${modeStyling}`}>
+      <div className='flex items-center justify-between'>
+        <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+        <button
+          type='button'
+          className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : ''}`}
+        >
+>>>>>>> theirs
           🎙️
         </button>
       </div>
@@ -64,20 +105,33 @@ export function InputBar({
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
+<<<<<<< ours
           rows={2}
+=======
+>>>>>>> theirs
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               submit()
             }
+<<<<<<< ours
             if (event.key === 'Escape') setValue('')
+=======
+            if (event.key === 'Escape') {
+              setValue('')
+            }
+>>>>>>> theirs
             if (event.key === 'Tab') {
               event.preventDefault()
               const idx = MODE_ORDER.indexOf(mode)
               onModeChange(MODE_ORDER[(idx + 1) % MODE_ORDER.length])
             }
           }}
+<<<<<<< ours
 ⁷
+=======
+          rows={2}
+>>>>>>> theirs
           placeholder='Type a new instruction, steer, interrupt, or queue next task...'
           className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2'
         />
@@ -87,7 +141,16 @@ export function InputBar({
       </div>
       <p className='text-xs text-zinc-500'>Enter to send · Esc to clear · Tab to switch mode · Shift+Enter for newline</p>
       {queuedMessages.length > 0 && (
+<<<<<<< ours
         <MessageQueue queuedMessages={queuedMessages} isOpen={queueOpen} onToggle={() => setQueueOpen((prev) => !prev)} onDelete={onDeleteQueueItem} />
+=======
+        <MessageQueue
+          queuedMessages={queuedMessages}
+          isOpen={queueOpen}
+          onToggle={() => setQueueOpen((prev) => !prev)}
+          onDelete={onDeleteQueueItem}
+        />
+>>>>>>> theirs
       )}
     </section>
   )

@@ -27,12 +27,17 @@
 
 ---
 
+<<<<<<< ours
 ## Session 3.2 — March 10, 2026 (Code Review Fixes: Settings Application + Workflow Edit + WS Cleanup)
+=======
+## Session 4.2 — March 11, 2026 (Review Fix: Remove Hardcoded API-Key Fallback)
+>>>>>>> theirs
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
+<<<<<<< ours
 - Addressed code review P1: session settings are now applied in `orchestrator.execute_task(...)` before runner execution.
   - Added `_apply_session_settings(...)` to consume model/system instruction settings.
   - Added `_build_agent(...)` helper and rebuild logic when session model/personality prompt changes.
@@ -65,10 +70,40 @@
 ---
 
 ## Session 3.1 — March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge)
+=======
+- Addressed review warning in `orchestrator.py` by removing the hardcoded Gemini API fallback (`"test-key"`).
+- Updated orchestrator client initialization to rely only on configured settings value.
+- Updated `main.py` to lazily initialize the orchestrator via `_get_orchestrator()` so app import/health/test paths do not eagerly instantiate Gemini client before runtime actions.
+- Preserved behavior for websocket task execution by routing execution through the lazy initializer.
+
+### What's Working
+- Backend tests pass after lazy-orchestrator refactor.
+- Frontend build remains green.
+- No hardcoded API fallback remains in orchestrator initialization.
+
+### What's NOT Working Yet
+- Runtime task execution still requires valid Gemini credentials at actual execution time (expected behavior).
+
+### Next Steps
+1. Move secret injection to Cloud Run Secret Manager wiring in deploy script for production hygiene.
+2. Add explicit startup/config diagnostics endpoint for missing runtime credentials.
+3. Continue Pass 4 live deployment proof capture.
+
+### Decisions Made
+- Chose lazy initialization in `main.py` to keep tests/import paths stable while enforcing no hardcoded API fallbacks.
+
+### Blockers
+- None.
+
+---
+
+## Session 4.1 — March 11, 2026 (Review Follow-up: WebSocket Robustness)
+>>>>>>> theirs
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
+<<<<<<< ours
 ### Regressions Found
 - Pass 3A regressed the previously polished dashboard experience: onboarding empty state was flattened, top bar polish and browser-style URL strip were reduced, ActionLog hierarchy/detail was simplified, and input/steering UX lost keyboard/polish parity.
 - Workflow fallback view was functional but visually weak for demos.
@@ -138,11 +173,124 @@
 ---
 
 ## Session 3 — March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring)
+=======
+### What Was Done
+- Followed up on additional review concerns and validated current code paths.
+- Confirmed previously flagged `chat_id`-casting warnings are not present in the current branch's `main.py` (no Telegram HTTP endpoints in this file scope).
+- Hardened frontend working-state classification in `useWebSocket` by centralizing non-execution step types (`queue`, `steer`, `config`) to avoid false running-state transitions on acknowledgements.
+- Added backend websocket regression coverage for malformed dequeue payloads to ensure protocol errors do not disconnect active sessions.
+
+### What's Working
+- Malformed `dequeue` payload now returns protocol error and keeps websocket session alive (validated by test).
+- Existing websocket smoke flow remains passing (frame + step + result).
+- Frontend build remains green with updated hook logic.
+
+### What's NOT Working Yet
+- No dedicated frontend unit-test harness is in place for hook state transitions (still relying on build + runtime behavior).
+
+### Next Steps
+1. Add frontend hook-level tests for `isWorking` transitions on step/result/error combinations.
+2. If Telegram HTTP endpoints are introduced in this branch, enforce shared payload validators for all numeric fields (`chat_id`, etc.).
+3. Continue Pass 4 live GCP deployment execution and proof capture.
+
+### Decisions Made
+- Kept scope focused on code paths that exist in this branch; avoided speculative endpoint changes not present in source.
+
+### Blockers
+- None.
+
+---
+
+## Session 4.0 — March 11, 2026 (Cloud Run Deployment + Infra-as-Code)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
+- Implemented Pass 4 deployment/infrastructure assets for one-command Cloud Run deployment.
+- Added `backend/` container assets:
+  - `backend/Dockerfile` (Python 3.11 slim + Playwright deps + Chromium install + uvicorn entrypoint)
+  - `backend/requirements.txt` (mirrored backend dependency list)
+- Added frontend containerization assets:
+  - `frontend/Dockerfile` (Node build stage + Nginx runtime)
+  - `frontend/nginx.conf.template` with SPA fallback + `/api/` and `/ws` proxy support.
+- Added infrastructure automation under `infrastructure/`:
+  - `deploy.sh` for full backend+frontend Cloud Run deploy, Firestore init, Storage bucket setup.
+  - `setup-gcp.sh` for first-time project/API/iam bootstrap.
+  - `cloudbuild.yaml` for frontend image builds with Vite runtime URL build args.
+  - `cors.json` for screenshot bucket CORS setup.
+- Added `docker-compose.yml` for local dual-service dev (frontend + backend containers).
+- Expanded `.env.example` with required GCP/frontend/integration variables.
+- Updated frontend WebSocket hook to support `VITE_WS_URL` override for cloud deployment.
+- Updated `README.md` with explicit deployment and infra instructions.
+
+### What's Working
+- Python test suite passes (`pytest tests/ -v`).
+- Frontend production build passes (`npm run build`).
+- Deployment scripts and compose flow are now present in-repo for hackathon automated deployment requirement.
+
+### What's NOT Working Yet
+- Deployment has not been executed against a live GCP project from this environment (no project/credentials provided here).
+- Firestore runtime integration is still mostly future-facing in application logic.
+
+### Next Steps
+1. Run `./infrastructure/setup-gcp.sh` and `./infrastructure/deploy.sh` against real project credentials.
+2. Capture Cloud Run URLs + screenshots/screen recording for submission proof.
+3. Wire Firestore-backed session/task state in runtime (replace in-memory session service where appropriate).
+4. Record final demo and finalize Devpost submission package.
+
+### Decisions Made
+- Kept existing monorepo source layout and introduced deployment-focused `backend/` + `infrastructure/` overlays to avoid risky code moves close to deadline.
+- Used build-time `VITE_WS_URL` override for frontend cloud endpoint configuration.
+
+### Blockers
+- Requires real GCP project, billing, and deploy credentials to complete live rollout proof.
+
+---
+
+## Session 2.8 — March 9, 2026 (Review Fixes: Dequeue Input Validation + Working-State Accuracy)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented Codex review follow-up for malformed `dequeue` payload handling in `main.py`.
+- Updated `dequeue` action parsing to validate `index` conversion safely:
+  - Wrapped `int(...)` conversion in `try/except (TypeError, ValueError)`.
+  - Returns protocol error (`Invalid queue index`) for malformed input instead of crashing websocket session.
+- Implemented frontend working-state fix in `frontend/src/hooks/useWebSocket.ts`.
+- Updated step-message handling to avoid setting `isWorking=true` on non-execution acknowledgements (`queue`, `steer`).
+- Preserved task-progress behavior for real execution steps while preventing false “working” UI state after queue/dequeue operations.
+
+### What's Working
+- Backend websocket remains stable on malformed dequeue payloads (no teardown from conversion exceptions).
+- Frontend no longer gets stuck in false running mode after queue/dequeue acknowledgements.
+- Existing backend tests and frontend build pass.
+
+### What's NOT Working Yet
+- Queue synchronization is still optimistic/index-based and not yet id-based with authoritative queue snapshots.
+
+### Next Steps
+1. Add websocket test coverage for malformed `dequeue` payload values (e.g., `"abc"`, `null`).
+2. Add frontend tests for working-state transitions on `queue`/`steer` step types.
+3. Move queue operations to server-generated item IDs for safer multi-update scenarios.
+
+### Decisions Made
+- Kept protocol contract unchanged while hardening validation and UI state transitions.
+
+### Blockers
+- None.
+
+---
+
+## Session 2.7 — March 9, 2026 (Security + Queue Semantics Review Follow-up)
+>>>>>>> theirs
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+<<<<<<< ours
 - Rebuilt the frontend shell around a persistent sidebar with top/middle/bottom sections: `New Task`, history search, workflow/settings shortcuts, and user avatar menu.
 - Added a full-page Settings experience with left tab nav and right content pane. New tabs implemented: `Profile`, `Agent Configuration`, `Integrations`, and `Workflows`.
 - Added app-wide settings state (`SettingsContext` + `useSettings`) with localStorage persistence, theme toggle state, workflow template storage, and websocket session config payload generation.
@@ -186,6 +334,43 @@
 
 ### Blockers
 - npm package fetch for `reactflow` blocked by registry 403 in this environment.
+=======
+- Implemented follow-up fixes requested by Codex review across backend and frontend.
+- Hardened SPA static serving path handling in `main.py`:
+  - Resolved requested file path and enforced it stays under `frontend/dist` using `relative_to`.
+  - Prevents traversal-style requests from reading files outside the built frontend root.
+- Fixed queue-drain interrupt starvation in `main.py`:
+  - Removed recursive `await` queue-drain behavior from `_run_navigation_task`.
+  - Added `_start_next_queued_task_if_ready(...)` that schedules at most one next queued task without blocking current control flow.
+  - Added cancellation-aware guard so queued work does not auto-start while an interrupt cancellation is active.
+- Added queue deletion server support in `main.py`:
+  - New websocket action: `dequeue` with index.
+  - Removes queued instruction by index and emits queue update step/error feedback.
+- Wired frontend queue delete UI to backend runtime in `App.tsx`:
+  - Queue item deletion now sends `{ action: "dequeue", index }` in addition to local UI state update.
+
+### What's Working
+- `pytest tests/ -v` passes after backend control-flow/security changes.
+- `npm run build` passes after frontend queue-delete wiring update.
+- Queue deletions in UI now propagate to backend queue state for this websocket session.
+- Interrupt instructions are no longer blocked by recursive queue-drain waits.
+
+### What's NOT Working Yet
+- Queue entries are still index-based and ephemeral; reconnect/session restart loses queued client/server sync context.
+- Frontend queue list still mirrors optimistic local state and does not yet consume authoritative queue snapshots from backend.
+
+### Next Steps
+1. Add queue item IDs and explicit queue snapshot events for robust client/server synchronization.
+2. Add dedicated tests for `dequeue` behavior and interrupt precedence with non-empty queues.
+3. Consider stricter URL normalization/decoding tests for static file serving path safety regression coverage.
+
+### Decisions Made
+- Kept websocket protocol changes minimal by introducing a single `dequeue` action rather than refactoring queue schema.
+- Prioritized non-blocking interrupt semantics over recursive queue execution chaining.
+
+### Blockers
+- None.
+>>>>>>> theirs
 
 ---
 
