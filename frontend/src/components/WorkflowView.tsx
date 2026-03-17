@@ -42,7 +42,7 @@ export function WorkflowView({ steps }: WorkflowViewProps) {
   const successRate = ordered.length ? Math.round((ordered.filter((step) => step.status === 'completed').length / ordered.length) * 100) : 0
 
   return (
-    <section className='grid h-full min-h-[520px] grid-cols-1 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-3 xl:grid-cols-[1.6fr_1fr]'>
+    <section className='grid h-full min-h-0 grid-cols-1 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-3 xl:grid-cols-[1.6fr_1fr]'>
       <div className='min-h-0 overflow-y-auto'>
         <div className='mb-3 grid gap-2 text-xs text-zinc-300 sm:grid-cols-3'>
           <SummaryCard title='Steps' value={`${ordered.length}`} />

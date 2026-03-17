@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { DEMO_WORKFLOW_TEMPLATES } from '../lib/demoData'
 import { DEFAULT_INTEGRATIONS, type IntegrationConfig } from '../lib/mcp'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
@@ -28,7 +27,7 @@ export type AppSettings = {
   workflowTemplates: WorkflowTemplate[]
 }
 
-const STORAGE_KEY = 'aegis.settings.v3'
+const STORAGE_KEY = 'aegis.settings.v4'
 
 const DEFAULT_SETTINGS: AppSettings = {
   displayName: 'Aegis User',
@@ -43,7 +42,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   verboseLogging: false,
   confirmDestructiveActions: true,
   integrations: DEFAULT_INTEGRATIONS,
-  workflowTemplates: import.meta.env.DEV ? DEMO_WORKFLOW_TEMPLATES : [],
+  workflowTemplates: [],
 }
 
 function loadInitialSettings(): AppSettings {
@@ -60,19 +59,6 @@ function loadInitialSettings(): AppSettings {
 
 export function useSettings() {
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings)
-export function useSettings() {
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
-
-  useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as Partial<AppSettings>
-      setSettings((prev) => ({ ...prev, ...parsed }))
-    } catch {
-      localStorage.removeItem(STORAGE_KEY)
-    }
-  }, [])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))

@@ -1,22 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
+import { AuthPage } from './components/AuthPage'
 import { InputBar } from './components/InputBar'
+import { LandingPage } from './components/LandingPage'
 import { ScreenView } from './components/ScreenView'
-<<<<<<< ours
 import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { useSettingsContext } from './context/SettingsContext'
+import { useMicrophone } from './hooks/useMicrophone'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
-import { DEMO_AUTH_USER, DEMO_FRAME, DEMO_LOGS, DEMO_TASKS, DEMO_WORKFLOW_STEPS, type TaskHistoryItem } from './lib/demoData'
-import { SettingsPage } from './components/settings/SettingsPage'
-import { useSettingsContext } from './context/SettingsContext'
-import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
-import { DEMO_LOGS, DEMO_TASKS, DEMO_WORKFLOW_STEPS, type TaskHistoryItem } from './lib/demoData'
+import { apiUrl } from './lib/api'
+
+type TaskHistoryItem = {
+  id: string
+  title: string
+  dateLabel: string
+  instruction: string
+}
 
 function App() {
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, send, resetClientState, setLogs, setWorkflowSteps } = useWebSocket()
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket()
   const { settings, patchSettings, wsConfig } = useSettingsContext()
 
   const [mode, setMode] = useState<SteeringMode>('steer')
@@ -33,51 +38,68 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [isAuthenticated, setIsAuthenticated] = useState(true)
-  const seededRef = useRef(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [showLanding, setShowLanding] = useState(true)
+  const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
+    useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
 
   useEffect(() => {
-    const demoMode = import.meta.env.DEV
-    if (!demoMode || seededRef.current) return
-    seededRef.current = true
-    setLogs(DEMO_LOGS)
-    setWorkflowSteps(DEMO_WORKFLOW_STEPS)
-    setTaskHistory(DEMO_TASKS)
-    setSelectedTaskId(DEMO_TASKS[0].id)
-  }, [setLogs, setWorkflowSteps])
-=======
-import { useWebSocket, type SteeringMode } from './hooks/useWebSocket'
-
-type Toast = { id: string; kind: 'success' | 'error'; message: string }
-
-function App() {
-  const { connectionStatus, isWorking, latestFrame, logs, currentUrl, send, resetClientState } = useWebSocket()
-  const [mode, setMode] = useState<SteeringMode>('steer')
-  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
-  const [steeringFlashKey, setSteeringFlashKey] = useState<number>(0)
-  const [panelRatio, setPanelRatio] = useState<number>(67)
-  const [logCollapsed, setLogCollapsed] = useState<boolean>(false)
-  const [urlInput, setUrlInput] = useState<string>('about:blank')
-  const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
-  const [durationSeconds, setDurationSeconds] = useState<number>(0)
-  const [toasts, setToasts] = useState<Toast[]>([])
-  const [sending, setSending] = useState<boolean>(false)
-  const [examplePrompt, setExamplePrompt] = useState<string | null>(null)
-  const dragRef = useRef<boolean>(false)
+    if (connectionStatus !== 'connected' && voiceActive) {
+      void stopVoice()
+    }
+  }, [connectionStatus, voiceActive, stopVoice])
 
   const connectionLabel = useMemo(() => {
     if (connectionStatus === 'connected') return { cls: 'bg-emerald-400', label: 'Connected' }
     if (connectionStatus === 'connecting') return { cls: 'bg-yellow-400', label: 'Reconnecting...' }
     return { cls: 'bg-red-400', label: 'Disconnected' }
   }, [connectionStatus])
->>>>>>> theirs
 
   useEffect(() => {
     setUrlInput(currentUrl)
   }, [currentUrl])
 
   useEffect(() => {
-<<<<<<< ours
+    document.title = isWorking ? 'Aegis - Working...' : 'Aegis'
+  }, [isWorking])
+
+  useEffect(() => {
+    let active = true
+    const loadAuth = async () => {
+      setAuthLoading(true)
+      try {
+        const response = await fetch(apiUrl('/api/auth/me'), { credentials: 'include' })
+        if (!response.ok) {
+          if (active) {
+            setIsAuthenticated(false)
+            setAuthUser(null)
+          }
+          return
+        }
+        const data = await response.json().catch(() => ({}))
+        if (active && data?.user) {
+          setAuthUser(data.user)
+          setIsAuthenticated(true)
+          setShowLanding(false)
+        }
+      } finally {
+        if (active) setAuthLoading(false)
+      }
+    }
+    void loadAuth()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isAuthenticated) setShowLanding(false)
+  }, [isAuthenticated])
+
+  useEffect(() => {
     if (isWorking && taskStartedAt === null) {
       setTaskStartedAt(Date.now())
       setDurationSeconds(0)
@@ -86,130 +108,62 @@ function App() {
     if (!isWorking) return
     const timer = window.setInterval(() => {
       if (taskStartedAt !== null) setDurationSeconds(Math.floor((Date.now() - taskStartedAt) / 1000))
-=======
-    document.title = isWorking ? 'Aegis · Working...' : 'Aegis'
-  }, [isWorking])
-
-  useEffect(() => {
-    if (isWorking && taskStartedAt === null) {
-      setTaskStartedAt(Date.now())
-      setDurationSeconds(0)
-    }
-    if (!isWorking) {
-      return
-    }
-    const timer = window.setInterval(() => {
-      if (taskStartedAt !== null) {
-        setDurationSeconds(Math.floor((Date.now() - taskStartedAt) / 1000))
-      }
->>>>>>> theirs
     }, 1000)
     return () => window.clearInterval(timer)
   }, [isWorking, taskStartedAt])
 
   useEffect(() => {
-<<<<<<< ours
-    const existingTaskIds = new Set(taskHistory.map((item) => item.id))
-    const fromLogs = logs
-      .map((entry) => entry.taskId)
-      .filter((taskId) => taskId !== 'idle' && !existingTaskIds.has(taskId))
-      .map((taskId) => ({
-        id: taskId,
-        title: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
-        dateLabel: 'Today',
-        instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
-      }))
-    if (fromLogs.length) {
-      setTaskHistory((prev) => [...fromLogs, ...prev])
-    }
-  }, [logs, taskHistory])
+    setTaskHistory((prev) => {
+      const existingTaskIds = new Set(prev.map((item) => item.id))
+      const fromLogs = logs
+        .map((entry) => entry.taskId)
+        .filter((taskId) => taskId !== 'idle' && !existingTaskIds.has(taskId))
+        .map((taskId) => ({
+          id: taskId,
+          title: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
+          dateLabel: 'Today',
+          instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
+        }))
+      if (!fromLogs.length) return prev
+      return [...fromLogs, ...prev]
+    })
+  }, [logs])
 
-  const filteredHistory = useMemo(() => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())), [historySearch, taskHistory])
+  const filteredHistory = useMemo(
+    () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
+    [historySearch, taskHistory],
+  )
 
   const visibleLogs: LogEntry[] = useMemo(() => {
     if (!selectedTaskId) return logs
     return logs.filter((entry) => entry.taskId === selectedTaskId)
   }, [logs, selectedTaskId])
 
-  const connectionLabel = useMemo(() => {
-    if (connectionStatus === 'connected') return { cls: 'bg-emerald-400', label: 'Connected' }
-    if (connectionStatus === 'connecting') return { cls: 'bg-yellow-400', label: 'Reconnecting…' }
-    return { cls: 'bg-red-400', label: 'Disconnected' }
-  }, [connectionStatus])
-
-  const displayFrame = latestFrame || (import.meta.env.DEV && selectedTaskId ? DEMO_FRAME : '')
-
   const handleSend = (instruction: string, selectedMode: SteeringMode) => {
+    const trimmed = instruction.trim()
+    if (!trimmed) return
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
-=======
-    const latest = logs[logs.length - 1]
-    if (!latest) return
-    if (latest.type === 'result') {
-      const toast: Toast = { id: crypto.randomUUID(), kind: 'success', message: 'Task completed successfully' }
-      setToasts((prev) => [...prev, toast])
-      window.setTimeout(() => setToasts((prev) => prev.filter((item) => item.id !== toast.id)), 3000)
-    }
-    if (latest.type === 'error') {
-      const toast: Toast = { id: crypto.randomUUID(), kind: 'error', message: latest.message }
-      setToasts((prev) => [...prev, toast])
-      window.setTimeout(() => setToasts((prev) => prev.filter((item) => item.id !== toast.id)), 3000)
-    }
-  }, [logs])
+    send({ action: 'config', settings: wsConfig })
 
-  useEffect(() => {
-    const onMouseMove = (event: MouseEvent) => {
-      if (!dragRef.current) return
-      const nextRatio = Math.max(45, Math.min(80, (event.clientX / window.innerWidth) * 100))
-      setPanelRatio(nextRatio)
-    }
-    const onMouseUp = () => {
-      dragRef.current = false
-    }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
-  }, [])
-
-  const handleSend = (instruction: string, selectedMode: SteeringMode) => {
-    setSending(true)
-    window.setTimeout(() => setSending(false), 250)
->>>>>>> theirs
     if (selectedMode === 'queue') {
-      setQueuedMessages((prev) => [...prev, instruction])
-      send({ action: 'queue', instruction })
+      setQueuedMessages((prev) => [...prev, trimmed])
+      send({ action: 'queue', instruction: trimmed })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction })
+      send({ action: 'interrupt', instruction: trimmed })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
-<<<<<<< ours
-    send({ action: 'config', settings: wsConfig })
-    send({ action: isWorking ? 'steer' : 'navigate', instruction })
-=======
-    const action = isWorking ? 'steer' : 'navigate'
-    send({ action, instruction })
->>>>>>> theirs
+    send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
   }
 
   const submitUrl = () => {
-    const normalized = /^https?:\/\//i.test(urlInput) ? urlInput : `https://${urlInput}`
-<<<<<<< ours
-    handleSend(normalized, isWorking ? 'steer' : 'steer')
-=======
-    if (isWorking) {
-      handleSend(normalized, 'steer')
-      return
-    }
-    setSending(true)
-    window.setTimeout(() => setSending(false), 250)
-    send({ action: 'navigate', instruction: normalized })
->>>>>>> theirs
+    const trimmed = urlInput.trim()
+    if (!trimmed) return
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    handleSend(normalized, 'steer')
   }
 
   const newSession = () => {
@@ -217,9 +171,10 @@ function App() {
     setQueuedMessages([])
     setTaskStartedAt(null)
     setDurationSeconds(0)
-<<<<<<< ours
     resetClientState()
     setSelectedTaskId(null)
+    setShowWorkflow(false)
+    void stopVoice()
   }
 
   const saveWorkflow = () => {
@@ -254,25 +209,37 @@ function App() {
   }
 
   if (!isAuthenticated) {
+    if (authLoading) {
+      return (
+        <main className='flex h-screen items-center justify-center bg-[#111] text-zinc-100'>
+          <div className='rounded-full border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2 text-sm text-zinc-400'>Checking session...</div>
+        </main>
+      )
+    }
+    if (showLanding) {
+      return <LandingPage onGetStarted={() => setShowLanding(false)} />
+    }
     return (
-      <main className='flex h-screen items-center justify-center bg-[#111] text-zinc-100'>
-        <section className='w-full max-w-md rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 text-center'>
-          <img src='/shield.svg' alt='Aegis logo' className='mx-auto mb-4 h-14 w-14' />
-          <h1 className='text-2xl font-semibold'>Welcome to Aegis</h1>
-          <p className='mt-2 text-sm text-zinc-400'>Sign in to run live UI navigation sessions and manage workflows.</p>
-          <button type='button' onClick={() => setIsAuthenticated(true)} className='mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm'>Continue with Google</button>
-        </section>
-      </main>
+      <AuthPage
+        onAuthenticated={(user) => {
+          setAuthUser(user)
+          setIsAuthenticated(true)
+          setShowLanding(false)
+        }}
+        onBack={() => setShowLanding(true)}
+      />
     )
   }
 
   return (
     <main className='h-screen bg-[#111] p-3 text-zinc-100'>
       <div className='mx-auto flex h-full max-w-[1750px] gap-3'>
-        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] md:translate-x-0'} fixed inset-y-3 left-3 z-30 w-[280px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition md:static md:translate-x-0`}>
-          <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>New Task</button>
+        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] md:translate-x-0'} fixed inset-y-3 left-3 z-30 w-[280px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition md:static md:translate-x-0 flex min-h-0 flex-col`}>
+          <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
+            New Task
+          </button>
           <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm' />
-          <div className='min-h-0 h-[calc(100%-170px)] overflow-y-auto space-y-3'>
+          <div className='min-h-0 flex-1 overflow-y-auto space-y-3'>
             {['Today', 'Yesterday'].map((group) => {
               const items = filteredHistory.filter((item) => item.dateLabel === group)
               if (!items.length) return null
@@ -292,16 +259,34 @@ function App() {
             })}
           </div>
           <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
-            <button type='button' onClick={() => setShowSettings(true)} className='block w-full rounded border border-[#2a2a2a] px-2 py-2 text-left'>🧩 Workflow templates ({settings.workflowTemplates.length})</button>
-            <button type='button' onClick={() => setShowSettings(true)} className='block w-full rounded border border-[#2a2a2a] px-2 py-2 text-left'>⚙️ Settings</button>
-            <UserMenu name={settings.displayName} avatarUrl={settings.avatarUrl} onOpenSettings={() => setShowSettings(true)} onSignOut={() => setIsAuthenticated(false)} />
+            <button type='button' onClick={() => setShowSettings(true)} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+              {Icons.workflows({ className: 'h-3.5 w-3.5' })}
+              <span>Workflow templates ({settings.workflowTemplates.length})</span>
+            </button>
+            <button type='button' onClick={() => setShowSettings(true)} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+              {Icons.settings({ className: 'h-3.5 w-3.5' })}
+              <span>Settings</span>
+            </button>
+            <UserMenu
+              name={authUser?.name ?? settings.displayName}
+              avatarUrl={authUser?.avatar_url ?? settings.avatarUrl}
+              onOpenSettings={() => setShowSettings(true)}
+              onSignOut={async () => {
+                await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
+                setAuthUser(null)
+                setIsAuthenticated(false)
+                setShowLanding(true)
+              }}
+            />
           </div>
         </aside>
 
         <section className='flex min-h-0 flex-1 flex-col gap-3 md:ml-0'>
           <header className='flex items-center justify-between rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
             <div className='flex items-center gap-2'>
-              <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden'>☰</button>
+              <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden' aria-label='Toggle sidebar'>
+                {Icons.menu({ className: 'h-4 w-4' })}
+              </button>
               <img src='/shield.svg' alt='Aegis' className='h-5 w-5' />
               <h1 className='text-lg font-semibold'>Aegis</h1>
             </div>
@@ -316,10 +301,14 @@ function App() {
 
           {!showSettings && (
             <section className='flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2'>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>←</button>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>→</button>
-              <span className='text-xs text-zinc-400'>🌐</span>
-              <input value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-sm outline-none focus:border-blue-500/70' />
+              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800' aria-label='Back'>
+                {Icons.back({ className: 'h-4 w-4' })}
+              </button>
+              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800' aria-label='Forward'>
+                {Icons.chevronRight({ className: 'h-4 w-4' })}
+              </button>
+              <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>
+              <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-sm outline-none focus:border-blue-500/70' />
               <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-3 py-1 text-xs hover:bg-zinc-800'>Go</button>
             </section>
           )}
@@ -342,105 +331,26 @@ function App() {
           {!showSettings && (
             <InputBar
               mode={mode}
-              voiceActive={false}
+              voiceActive={voiceActive}
+              voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
+              voiceError={voiceError}
+              onToggleVoice={toggleVoice}
               sending={sending}
               onModeChange={setMode}
               onSend={handleSend}
+              model={settings.model}
+              onModelChange={(nextModel) => patchSettings({ model: nextModel })}
               queuedMessages={queuedMessages}
-              onDeleteQueueItem={(index) => setQueuedMessages((prev) => prev.filter((_, i) => i !== index))}
+              onDeleteQueueItem={(index) => {
+                setQueuedMessages((prev) => prev.filter((_, i) => i !== index))
+                send({ action: 'dequeue', index })
+              }}
               examplePrompt={examplePrompt}
               onExampleHandled={() => setExamplePrompt(null)}
+              transcripts={transcripts}
             />
           )}
         </section>
-=======
-    setUrlInput('about:blank')
-    resetClientState()
-  }
-
-  return (
-    <main className='h-screen bg-[#111] p-4 text-zinc-100'>
-      <div className='mx-auto flex h-full max-w-[1700px] flex-col gap-3'>
-        <header className='flex items-center justify-between rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
-          <div className='flex items-center gap-2'>
-            <span className='text-xl'>🛡️</span>
-            <h1 className='text-xl font-bold'>Aegis</h1>
-          </div>
-          <div className='flex items-center gap-4 text-xs text-zinc-300'>
-            <div className='flex items-center gap-2'>
-              <span className={`h-2.5 w-2.5 rounded-full ${connectionLabel.cls}`} />
-              {connectionLabel.label}
-            </div>
-            <div>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</div>
-            <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-3 py-1.5 text-zinc-200 hover:border-blue-500/60 hover:bg-zinc-900'>
-              New Session
-            </button>
-          </div>
-        </header>
-
-        <section className='flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2'>
-          <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>←</button>
-          <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800'>→</button>
-          <span className='text-xs text-zinc-400'>🌐</span>
-          <input
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') submitUrl()
-            }}
-            className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-sm outline-none focus:border-blue-500/70'
-          />
-          <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-3 py-1 text-xs hover:bg-zinc-800'>Go</button>
-        </section>
-
-        <section className='flex min-h-0 flex-1 gap-2'>
-          <div className='min-h-0' style={{ width: logCollapsed ? '100%' : `${panelRatio}%` }}>
-            <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} />
-          </div>
-          {!logCollapsed && (
-            <button
-              type='button'
-              onMouseDown={() => {
-                dragRef.current = true
-              }}
-              className='hidden w-1 cursor-col-resize rounded bg-[#2a2a2a] hover:bg-blue-500/70 lg:block'
-              aria-label='Resize panels'
-            />
-          )}
-          <div className={`${logCollapsed ? 'hidden' : 'block'} min-h-0 flex-1 max-lg:w-[40%] max-md:hidden`}>
-            <ActionLog entries={logs} isCollapsed={false} onToggleCollapse={() => setLogCollapsed(true)} />
-          </div>
-          <div className='block min-h-0 md:hidden'>
-            <ActionLog entries={logs} isCollapsed={logCollapsed} onToggleCollapse={() => setLogCollapsed((prev) => !prev)} />
-          </div>
-        </section>
-
-        <InputBar
-          mode={mode}
-          voiceActive={false}
-          sending={sending}
-          onModeChange={setMode}
-          onSend={handleSend}
-          queuedMessages={queuedMessages}
-          onDeleteQueueItem={(index) => {
-            setQueuedMessages((prev) => prev.filter((_, i) => i !== index))
-            send({ action: 'dequeue', index })
-          }}
-          examplePrompt={examplePrompt}
-          onExampleHandled={() => setExamplePrompt(null)}
-        />
-      </div>
-
-      <div className='pointer-events-none fixed right-4 top-4 z-50 space-y-2'>
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`rounded-lg border px-3 py-2 text-sm shadow-lg ${toast.kind === 'success' ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-100' : 'border-red-500/40 bg-red-500/20 text-red-100'}`}
-          >
-            {toast.message}
-          </div>
-        ))}
->>>>>>> theirs
       </div>
     </main>
   )

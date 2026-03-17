@@ -315,7 +315,7 @@ All defined in `src/utils/config.py`, loaded from `.env`:
 |---|---|---|
 | `GEMINI_API_KEY` | Yes | Google AI API key for Gemini |
 | `GOOGLE_CLOUD_PROJECT` | Yes (for deploy) | GCP project ID |
-| `PORT` | No (default: 8080) | Server port |
+| `PORT` | No (default: 8000) | Server port |
 | `LOG_LEVEL` | No (default: INFO) | Logging level |
 | `BROWSER_HEADLESS` | No (default: true) | Run browser headless |
 | `VIEWPORT_WIDTH` | No (default: 1280) | Browser viewport width |

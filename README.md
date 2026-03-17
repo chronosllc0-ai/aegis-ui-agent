@@ -180,7 +180,7 @@ cp .env.example .env
 # Fill in keys
 docker-compose up --build
 # Frontend: http://localhost:3000
-# Backend:  http://localhost:8080
+# Backend:  http://localhost:8000
 ```
 
 ### Infrastructure Details

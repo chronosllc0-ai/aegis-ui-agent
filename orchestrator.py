@@ -29,18 +29,15 @@ class AgentOrchestrator:
     """Orchestrates the UI navigation pipeline using ADK."""
 
     def __init__(self) -> None:
-<<<<<<< ours
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY or "test-key")
-=======
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.analyzer = ScreenshotAnalyzer(self.client)
->>>>>>> theirs
         self.executor = ActionExecutor()
+        self.navigator = NavigatorAgent(self.analyzer, self.executor)
         self.session_service = InMemorySessionService()
         self.default_model_name = settings.GEMINI_MODEL
+        self.model_name = self.default_model_name
         self.agent: Agent | None = None
         self.mcp_client = MCPClient()
-
 
     def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
         """Build an ADK agent instance for the requested model/instruction."""
@@ -54,14 +51,14 @@ class AgentOrchestrator:
             description="An AI agent that navigates UIs by seeing screenshots and executing actions.",
             instruction=instruction,
             tools=[
-                navigator.take_screenshot,
-                navigator.analyze_screen,
-                navigator.click_element,
-                navigator.type_text,
-                navigator.scroll_page,
-                navigator.go_to_url,
-                navigator.wait_for_load,
-                navigator.go_back,
+                self.navigator.take_screenshot,
+                self.navigator.analyze_screen,
+                self.navigator.click_element,
+                self.navigator.type_text,
+                self.navigator.scroll_page,
+                self.navigator.go_to_url,
+                self.navigator.wait_for_load,
+                self.navigator.go_back,
             ],
         )
 
@@ -71,6 +68,8 @@ class AgentOrchestrator:
             return
 
         requested_model = str(session_settings.get("model", self.model_name)).strip() or self.model_name
+        if requested_model not in SUPPORTED_SESSION_MODELS:
+            requested_model = self.model_name
         system_instruction = session_settings.get("system_instruction")
 
         should_rebuild = self.agent is None
@@ -85,6 +84,14 @@ class AgentOrchestrator:
         if should_rebuild:
             self.agent = self._build_agent(self.model_name, system_instruction if isinstance(system_instruction, str) else None)
             logger.info("Applied session settings", extra={"model": self.model_name, "has_system_instruction": bool(system_instruction)})
+
+    async def _resolve_session_agent(self, session_settings: dict[str, Any] | None) -> tuple[Agent, str]:
+        """Return the agent instance to use for the current session."""
+        if self.agent is None:
+            await self.initialize()
+        assert self.agent is not None
+        return self.agent, self.model_name
+
     async def initialize(self) -> None:
         """Initialize model selection and ADK agent instance."""
         key = settings.GEMINI_API_KEY.strip()
@@ -108,37 +115,25 @@ class AgentOrchestrator:
         on_frame: Callable[[str], Awaitable[None]] | None = None,
         cancel_event: asyncio.Event | None = None,
         steering_context: list[str] | None = None,
-<<<<<<< ours
         settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-=======
->>>>>>> theirs
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction."""
         if self.agent is None:
             await self.initialize()
         await self._apply_session_settings(settings)
         assert self.agent is not None
-.
 
         session_agent, _ = await self._resolve_session_agent(settings)
 
         runner = Runner(agent=session_agent, app_name="aegis", session_service=self.session_service)
-        await self.session_service.create_session(app_name="aegis", user_id="user", session_id=session_id)
+        user_id = session_id
+        await self.session_service.create_session(app_name="aegis", user_id=user_id, session_id=session_id)
 
         steps: list[dict[str, Any]] = []
-<<<<<<< ours
         parent_step_id: str | None = None
-        if on_frame is not None:
-            await on_frame(await self.capture_frame_b64())
 
         async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=instruction):
-=======
-        if on_frame is not None:
-            await on_frame(await self.capture_frame_b64())
-
-        async for event in runner.run_async(user_id="user", session_id=session_id, new_message=instruction):
->>>>>>> theirs
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("Task cancelled for session %s", session_id)
                 return {"status": "interrupted", "instruction": instruction, "steps": steps}
@@ -154,24 +149,23 @@ class AgentOrchestrator:
                 "steering": injected,
             }
             steps.append(step_data)
+
             workflow_step = {
                 "step_id": str(uuid4()),
                 "parent_step_id": parent_step_id,
                 "action": step_data["type"],
                 "description": step_data.get("content") or "Agent step",
                 "status": "completed",
-                "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "duration_ms": 500,
                 "screenshot": None,
             }
             parent_step_id = workflow_step["step_id"]
+
             if on_step is not None:
                 await on_step(step_data)
-<<<<<<< ours
             if on_workflow_step is not None:
                 await on_workflow_step(workflow_step)
-=======
->>>>>>> theirs
             if on_frame is not None:
                 await on_frame(await self.capture_frame_b64())
 

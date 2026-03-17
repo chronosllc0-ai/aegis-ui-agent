@@ -8,7 +8,6 @@
   box-sizing: border-box;
 }
 
-<<<<<<< ours
 html,
 body,
 #root {
@@ -19,8 +18,4 @@ body {
   margin: 0;
   overflow: hidden;
   background: #111;
-=======
-body {
-  margin: 0;
->>>>>>> theirs
 }

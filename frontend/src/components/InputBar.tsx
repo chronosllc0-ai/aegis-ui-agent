@@ -1,22 +1,26 @@
-import { useEffect, useState } from 'react'
-import type { SteeringMode } from '../hooks/useWebSocket'
-import { MessageQueue } from './MessageQueue'
-<<<<<<< ours
+import { useEffect, useMemo, useState } from 'react'
+import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
+import { MODEL_DESCRIPTIONS, MODEL_ICON_URL, MODEL_OPTIONS } from '../lib/models'
 import { Icons } from './icons'
-=======
->>>>>>> theirs
+import { MessageQueue } from './MessageQueue'
 import { SteeringControl } from './SteeringControl'
 
 type InputBarProps = {
   mode: SteeringMode
   voiceActive: boolean
+  voiceDisabled?: boolean
+  voiceError?: string | null
+  onToggleVoice: () => void
   sending: boolean
   onModeChange: (mode: SteeringMode) => void
   onSend: (instruction: string, mode: SteeringMode) => void
+  model: string
+  onModelChange: (model: string) => void
   queuedMessages: string[]
   onDeleteQueueItem: (index: number) => void
   examplePrompt?: string | null
   onExampleHandled?: () => void
+  transcripts?: TranscriptEntry[]
 }
 
 const MODE_ORDER: SteeringMode[] = ['steer', 'interrupt', 'queue']
@@ -24,15 +28,20 @@ const MODE_ORDER: SteeringMode[] = ['steer', 'interrupt', 'queue']
 export function InputBar({
   mode,
   voiceActive,
+  voiceDisabled = false,
+  voiceError = null,
+  onToggleVoice,
   sending,
   onModeChange,
   onSend,
+  model,
+  onModelChange,
   queuedMessages,
   onDeleteQueueItem,
   examplePrompt,
   onExampleHandled,
+  transcripts = [],
 }: InputBarProps) {
-<<<<<<< ours
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
 
@@ -45,36 +54,24 @@ export function InputBar({
 
   useEffect(() => {
     if (!examplePrompt) return
-    submit(examplePrompt)
+    const instruction = examplePrompt.trim()
+    if (instruction) setValue(instruction)
     onExampleHandled?.()
-  }, [examplePrompt])
-=======
-  const [value, setValue] = useState<string>('')
-  const [queueOpen, setQueueOpen] = useState<boolean>(true)
+  }, [examplePrompt, onExampleHandled])
 
-  const submit = (overrideValue?: string) => {
-    const instruction = (overrideValue ?? value).trim()
-    if (!instruction) {
-      return
-    }
-    onSend(instruction, mode)
-    if (!overrideValue) {
-      setValue('')
-    }
+  const recentTranscripts = useMemo(() => transcripts.slice(-3).reverse(), [transcripts])
+  const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
+  let voiceButtonTitle = 'Start voice input'
+  if (voiceActive) voiceButtonTitle = 'Stop voice input'
+  if (voiceDisabled) voiceButtonTitle = 'Voice input unavailable'
+  if (voiceError) voiceButtonTitle = voiceError
+
+  const playTranscript = (text: string) => {
+    if (!speechSupported) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    window.speechSynthesis.speak(utterance)
   }
-
-
-
-  useEffect(() => {
-    if (!examplePrompt) {
-      return
-    }
-    setValue(examplePrompt)
-    onSend(examplePrompt, mode)
-    setValue('')
-    onExampleHandled?.()
-  }, [examplePrompt, mode, onExampleHandled, onSend])
->>>>>>> theirs
 
   const modeStyling =
     mode === 'steer'
@@ -84,54 +81,56 @@ export function InputBar({
         : 'border-[#2a2a2a]'
 
   return (
-<<<<<<< ours
     <section className={`space-y-3 rounded-2xl border bg-[#1a1a1a] p-3 transition ${modeStyling}`}>
-      <div className='flex items-center justify-between'>
-        <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
-        <button type='button' className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : 'hover:bg-zinc-800'}`}>
-=======
-    <section className={`space-y-3 rounded-xl border bg-[#1a1a1a] p-3 transition ${modeStyling}`}>
-      <div className='flex items-center justify-between'>
-        <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+          <label className='flex items-center gap-2 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+            <img src={MODEL_ICON_URL} alt='' className='h-4 w-4 rounded-sm' />
+            <span className='sr-only'>Model</span>
+            <select
+              value={model}
+              onChange={(event) => onModelChange(event.target.value)}
+              title={MODEL_DESCRIPTIONS[model] ?? model}
+              className='rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+            >
+              {MODEL_OPTIONS.map((option) => (
+                <option key={option} value={option} className='bg-[#0f0f0f] text-zinc-100'>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <button
           type='button'
-          className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : ''}`}
+          onClick={onToggleVoice}
+          disabled={voiceDisabled}
+          aria-pressed={voiceActive}
+          title={voiceButtonTitle}
+          className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : ''} ${voiceDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+          aria-label='Voice input'
         >
->>>>>>> theirs
-          🎙️
+          {Icons.mic({ className: 'h-4 w-4' })}
         </button>
       </div>
       <div className='flex gap-2'>
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
-<<<<<<< ours
           rows={2}
-=======
->>>>>>> theirs
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               submit()
             }
-<<<<<<< ours
             if (event.key === 'Escape') setValue('')
-=======
-            if (event.key === 'Escape') {
-              setValue('')
-            }
->>>>>>> theirs
             if (event.key === 'Tab') {
               event.preventDefault()
               const idx = MODE_ORDER.indexOf(mode)
               onModeChange(MODE_ORDER[(idx + 1) % MODE_ORDER.length])
             }
           }}
-<<<<<<< ours
-⁷
-=======
-          rows={2}
->>>>>>> theirs
           placeholder='Type a new instruction, steer, interrupt, or queue next task...'
           className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2'
         />
@@ -139,18 +138,36 @@ export function InputBar({
           {sending ? <span className='inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white' /> : 'Send'}
         </button>
       </div>
-      <p className='text-xs text-zinc-500'>Enter to send · Esc to clear · Tab to switch mode · Shift+Enter for newline</p>
+      <p className='text-xs text-zinc-500'>Enter to send - Esc to clear - Tab to switch mode - Shift+Enter for newline</p>
+      {recentTranscripts.length > 0 && (
+        <div className='rounded-lg border border-[#2a2a2a] bg-[#111] p-2 text-xs text-zinc-300'>
+          <div className='mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-zinc-500'>
+            <span>Transcript</span>
+            <span>{speechSupported ? 'Playback ready' : 'Playback unsupported'}</span>
+          </div>
+          <div className='space-y-2'>
+            {recentTranscripts.map((entry) => (
+              <div key={entry.id} className='flex items-start justify-between gap-2 rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-1.5'>
+                <div>
+                  <p className='text-[11px] text-zinc-500'>{entry.timestamp}</p>
+                  <p className='text-sm text-zinc-100'>{entry.text}</p>
+                </div>
+                <button
+                  type='button'
+                  onClick={() => playTranscript(entry.text)}
+                  disabled={!speechSupported}
+                  className={`rounded border border-[#2a2a2a] p-1 text-zinc-200 ${speechSupported ? 'hover:bg-zinc-800' : 'cursor-not-allowed opacity-50'}`}
+                  title={speechSupported ? 'Play transcript' : 'Speech synthesis unavailable'}
+                >
+                  {Icons.play({ className: 'h-4 w-4' })}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {queuedMessages.length > 0 && (
-<<<<<<< ours
         <MessageQueue queuedMessages={queuedMessages} isOpen={queueOpen} onToggle={() => setQueueOpen((prev) => !prev)} onDelete={onDeleteQueueItem} />
-=======
-        <MessageQueue
-          queuedMessages={queuedMessages}
-          isOpen={queueOpen}
-          onToggle={() => setQueueOpen((prev) => !prev)}
-          onDelete={onDeleteQueueItem}
-        />
->>>>>>> theirs
       )}
     </section>
   )
