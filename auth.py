@@ -1,4 +1,7 @@
-"""Authentication routes and helpers for OAuth + email sign-in."""
+"""Authentication routes and helpers for OAuth + email sign-in.
+
+Uses PostgreSQL/SQLAlchemy instead of Firestore for user and auth-code storage.
+"""
 
 from __future__ import annotations
 
@@ -15,17 +18,18 @@ from typing import Any
 
 import aiosmtplib
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from google.cloud import firestore
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.database import AuthCode, User, get_session
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 oauth = OAuth()
-_firestore_client: firestore.AsyncClient | None = None
 
 
 def _register_oauth_providers() -> None:
@@ -60,14 +64,6 @@ def _register_oauth_providers() -> None:
 _register_oauth_providers()
 
 
-def _get_firestore_client() -> firestore.AsyncClient:
-    global _firestore_client
-    if _firestore_client is None:
-        project = settings.GOOGLE_CLOUD_PROJECT or None
-        _firestore_client = firestore.AsyncClient(project=project)
-    return _firestore_client
-
-
 def _require_session_secret() -> None:
     if not settings.SESSION_SECRET:
         raise HTTPException(status_code=500, detail="SESSION_SECRET is not configured")
@@ -77,7 +73,7 @@ def _sign_session(payload: dict[str, Any]) -> str:
     _require_session_secret()
     session_payload = dict(payload)
     session_payload["exp"] = int(time.time()) + int(settings.SESSION_TTL_SECONDS)
-    raw = json.dumps(session_payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    raw = json.dumps(session_payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
     encoded = base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
     signature = hmac.new(settings.SESSION_SECRET.encode("utf-8"), encoded.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{encoded}.{signature}"
@@ -123,26 +119,50 @@ def _session_response(user: dict[str, Any], redirect: str | None = None) -> Redi
     return response
 
 
-async def _upsert_user(profile: dict[str, Any]) -> dict[str, Any]:
-    client = _get_firestore_client()
+async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[str, Any]:
+    """Create or update a user record in PostgreSQL."""
     now = datetime.now(timezone.utc)
-    doc_ref = client.collection("users").document(profile["uid"])
-    snapshot = await doc_ref.get()
-    payload = {
-        "uid": profile["uid"],
-        "provider": profile.get("provider"),
-        "provider_id": profile.get("provider_id"),
-        "email": profile.get("email"),
-        "name": profile.get("name"),
-        "avatar_url": profile.get("avatar_url"),
-        "last_login_at": now,
-    }
-    if snapshot.exists:
-        existing = snapshot.to_dict() or {}
-        payload["created_at"] = existing.get("created_at", now)
+    existing = await session.get(User, profile["uid"])
+    if existing:
+        existing.provider = profile.get("provider")
+        existing.provider_id = profile.get("provider_id")
+        existing.email = profile.get("email")
+        existing.name = profile.get("name")
+        existing.avatar_url = profile.get("avatar_url")
+        existing.last_login_at = now
+        payload = {
+            "uid": existing.uid,
+            "provider": existing.provider,
+            "provider_id": existing.provider_id,
+            "email": existing.email,
+            "name": existing.name,
+            "avatar_url": existing.avatar_url,
+            "created_at": existing.created_at,
+            "last_login_at": now,
+        }
     else:
-        payload["created_at"] = now
-    await doc_ref.set(payload, merge=True)
+        user = User(
+            uid=profile["uid"],
+            provider=profile.get("provider"),
+            provider_id=profile.get("provider_id"),
+            email=profile.get("email"),
+            name=profile.get("name"),
+            avatar_url=profile.get("avatar_url"),
+            created_at=now,
+            last_login_at=now,
+        )
+        session.add(user)
+        payload = {
+            "uid": user.uid,
+            "provider": user.provider,
+            "provider_id": user.provider_id,
+            "email": user.email,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "created_at": now,
+            "last_login_at": now,
+        }
+    await session.commit()
     return payload
 
 
@@ -179,6 +199,9 @@ def _hash_code(code: str) -> str:
     return hmac.new(settings.SESSION_SECRET.encode("utf-8"), code.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+# ── OAuth routes ──────────────────────────────────────────────────────
+
+
 @router.get("/google/login")
 async def google_login(request: Request) -> RedirectResponse:
     """Start Google OAuth flow."""
@@ -188,7 +211,7 @@ async def google_login(request: Request) -> RedirectResponse:
 
 
 @router.get("/google/callback")
-async def google_callback(request: Request) -> RedirectResponse:
+async def google_callback(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     """Handle Google OAuth callback."""
     try:
         token = await oauth.google.authorize_access_token(request)
@@ -205,7 +228,7 @@ async def google_callback(request: Request) -> RedirectResponse:
         "name": info.get("name") or info.get("email"),
         "avatar_url": info.get("picture"),
     }
-    user = await _upsert_user(profile)
+    user = await _upsert_user(session, profile)
     return _session_response(user, redirect=_frontend_redirect())
 
 
@@ -218,7 +241,7 @@ async def github_login(request: Request) -> RedirectResponse:
 
 
 @router.get("/github/callback")
-async def github_callback(request: Request) -> RedirectResponse:
+async def github_callback(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     """Handle GitHub OAuth callback."""
     try:
         token = await oauth.github.authorize_access_token(request)
@@ -244,7 +267,7 @@ async def github_callback(request: Request) -> RedirectResponse:
         "name": profile_data.get("name") or profile_data.get("login"),
         "avatar_url": profile_data.get("avatar_url"),
     }
-    user = await _upsert_user(profile)
+    user = await _upsert_user(session, profile)
     return _session_response(user, redirect=_frontend_redirect())
 
 
@@ -257,7 +280,7 @@ async def sso_login(request: Request) -> RedirectResponse:
 
 
 @router.get("/sso/callback")
-async def sso_callback(request: Request) -> RedirectResponse:
+async def sso_callback(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     """Handle generic SSO (OIDC) callback."""
     try:
         token = await oauth.sso.authorize_access_token(request)
@@ -274,12 +297,15 @@ async def sso_callback(request: Request) -> RedirectResponse:
         "name": info.get("name") or info.get("email"),
         "avatar_url": info.get("picture"),
     }
-    user = await _upsert_user(profile)
+    user = await _upsert_user(session, profile)
     return _session_response(user, redirect=_frontend_redirect())
 
 
+# ── Email sign-in ─────────────────────────────────────────────────────
+
+
 @router.post("/email/start")
-async def email_start(payload: dict[str, Any]) -> dict[str, Any]:
+async def email_start(payload: dict[str, Any], session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     """Send a one-time sign-in code to the provided email address."""
     email = str(payload.get("email", "")).strip().lower()
     if not email:
@@ -290,16 +316,15 @@ async def email_start(payload: dict[str, Any]) -> dict[str, Any]:
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
 
     try:
-        client = _get_firestore_client()
-        await client.collection("auth_codes").document(email).set(
-            {
-                "code_hash": code_hash,
-                "expires_at": expires_at,
-                "created_at": datetime.now(timezone.utc),
-            }
-        )
+        existing = await session.get(AuthCode, email)
+        if existing:
+            existing.code_hash = code_hash
+            existing.expires_at = expires_at
+        else:
+            session.add(AuthCode(email=email, code_hash=code_hash, expires_at=expires_at))
+        await session.commit()
         await _send_email(email, "Your Aegis sign-in code", f"Your code is {code}. It expires in 10 minutes.")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Email sign-in failed for %s", email)
         raise HTTPException(status_code=500, detail=f"Email sign-in failed: {exc}") from exc
 
@@ -307,28 +332,25 @@ async def email_start(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/email/verify")
-async def email_verify(payload: dict[str, Any]) -> JSONResponse:
+async def email_verify(payload: dict[str, Any], session: AsyncSession = Depends(get_session)) -> JSONResponse:
     """Verify a one-time code and issue a session."""
     email = str(payload.get("email", "")).strip().lower()
     code = str(payload.get("code", "")).strip()
     if not email or not code:
         raise HTTPException(status_code=400, detail="Email and code are required")
 
-    client = _get_firestore_client()
-    doc_ref = client.collection("auth_codes").document(email)
-    snapshot = await doc_ref.get()
-    if not snapshot.exists:
+    record = await session.get(AuthCode, email)
+    if not record:
         raise HTTPException(status_code=400, detail="Invalid or expired code")
 
-    data = snapshot.to_dict() or {}
-    expires_at = data.get("expires_at")
-    if isinstance(expires_at, datetime) and expires_at < datetime.now(timezone.utc):
+    if record.expires_at and record.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Code expired")
 
-    if data.get("code_hash") != _hash_code(code):
+    if record.code_hash != _hash_code(code):
         raise HTTPException(status_code=400, detail="Invalid code")
 
-    await doc_ref.delete()
+    await session.execute(delete(AuthCode).where(AuthCode.email == email))
+    await session.commit()
 
     profile = {
         "uid": f"email:{email}",
@@ -338,8 +360,11 @@ async def email_verify(payload: dict[str, Any]) -> JSONResponse:
         "name": email.split("@", 1)[0],
         "avatar_url": None,
     }
-    user = await _upsert_user(profile)
+    user = await _upsert_user(session, profile)
     return _session_response(user)
+
+
+# ── Session routes ────────────────────────────────────────────────────
 
 
 @router.get("/me")

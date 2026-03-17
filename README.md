@@ -1,193 +1,105 @@
-# Aegis — AI-Powered Universal UI Navigator
+# Aegis — AI-Powered Universal UI Agent
 
-> Built for the Gemini Live Agent Challenge 2026
+**Aegis** by Chronos is an autonomous agent that sees your screen, understands intent, and
+interacts with any web UI using multimodal vision and real-time browser automation.
 
-Aegis is an intelligent UI navigation agent that observes your screen, understands visual elements without relying on DOM access, and performs actions based on natural language instructions. Think of it as an AI copilot that can operate any website or application by "seeing" the screen.
+> Production-ready at **[mohex.org](https://mohex.org)** · Docs coming soon
+
+---
 
 ## Features
 
-- **Visual UI Understanding** — Interprets screenshots using Gemini's multimodal vision to identify buttons, forms, menus, and interactive elements
-- **Natural Language Control** — Tell the agent what to do in plain English: "Fill out the contact form with my info" or "Find the cheapest flight to NYC"
-- **Cross-Application Workflows** — Chain actions across multiple websites and apps
-- **Real-Time Voice Interaction** — Talk to the agent using Gemini Live API while it navigates for you
-- **Smart Error Recovery** — Detects failures (404s, popups, CAPTCHAs) and adapts its approach
-- **Action Replay & Audit Trail** — Every action is logged with before/after screenshots for transparency
+| Feature | Description |
+|---|---|
+| 🌐 **Multi-model** | OpenAI (GPT-4.1), Anthropic (Claude 4), Google (Gemini 3), Mistral, Groq — swap mid-session |
+| 🔑 **BYOK** | Bring Your Own Key — encrypted at rest with AES-256; billed to your provider account |
+| 🎙️ **Voice control** | Real-time voice steering via Live API |
+| 🧠 **Vision-first** | Multimodal screenshots → reasoning → Playwright actions |
+| ⚡ **Real-time** | WebSocket streams of actions, frames, and logs |
+| 🔗 **Integrations** | Telegram, Slack, and Discord connectors for agent delegation |
+| 🚀 **Railway-ready** | One-click deploy to Railway with PostgreSQL |
+
+## Tech Stack
+
+- **Frontend**: React + TypeScript + Vite + Tailwind v4
+- **Backend**: FastAPI + WebSockets + Playwright
+- **Database**: PostgreSQL (async via SQLAlchemy + asyncpg)
+- **LLM SDK**: `openai`, `anthropic`, `google-genai`, `mistralai`, `groq`
+- **Deploy**: Docker, Railway, docker-compose
+
+## Quick Start
+
+### 1. Docker Compose (recommended)
+
+```bash
+cp .env.example .env          # fill in at least one LLM key
+docker compose up -d           # starts postgres + app
+open http://localhost:8000
+```
+
+### 2. Local development
+
+```bash
+# Backend
+pip install -r requirements.txt
+playwright install chromium
+cp .env.example .env
+uvicorn main:app --reload
+
+# Frontend (separate terminal)
+cd frontend && npm install && npm run dev
+```
+
+### 3. Railway
+
+```bash
+npm i -g @railway/cli
+railway login
+railway link
+railway up
+```
+
+Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
+`ENCRYPTION_SECRET`, and at least one LLM API key in environment variables.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes (prod) | PostgreSQL connection string |
+| `SESSION_SECRET` | Yes | Random string for session signing |
+| `ENCRYPTION_SECRET` | Yes | Secret for BYOK key encryption |
+| `GEMINI_API_KEY` | No | Default Gemini API key |
+| `OPENAI_API_KEY` | No | Default OpenAI API key |
+| `ANTHROPIC_API_KEY` | No | Default Anthropic API key |
+| `MISTRAL_API_KEY` | No | Default Mistral API key |
+| `GROQ_API_KEY` | No | Default Groq API key |
+
+See `.env.example` for the full list.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   Frontend (React)               │
-│  Voice Input ←→ Live API ←→ Screen Capture       │
-└──────────────────────┬──────────────────────────┘
-                       │ WebSocket
-┌──────────────────────▼──────────────────────────┐
-│              Backend (FastAPI on Cloud Run)       │
-│                                                   │
-│  ┌─────────────┐  ┌────────────┐  ┌───────────┐ │
-│  │ ADK Agent   │  │ Screenshot │  │ Action    │ │
-│  │ Orchestrator│←→│ Analyzer   │←→│ Executor  │ │
-│  └─────────────┘  └────────────┘  └───────────┘ │
-│         │                              │         │
-│  ┌──────▼──────┐              ┌───────▼───────┐ │
-│  │ Gemini 3    │              │  Playwright   │ │
-│  │ Live API    │              │  Browser      │ │
-│  └─────────────┘              └───────────────┘ │
-└──────────────────────┬──────────────────────────┘
-                       │
-        ┌──────────────▼──────────────┐
-        │    Google Cloud Platform     │
-        │  Cloud Run · Firestore ·     │
-        │  Cloud Storage · Logging     │
-        └─────────────────────────────┘
+┌──────────────┐   WS    ┌───────────────┐
+│  React       │ ◄─────► │  FastAPI       │
+│  Frontend    │         │  main.py       │
+└──────────────┘         └─────┬─────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+      │ Orchestrator │ │ Providers    │ │ Key Manager  │
+      │ (Analyzer +  │ │ (OpenAI,     │ │ (AES-256     │
+      │  Executor +  │ │  Anthropic,  │ │  encrypted)  │
+      │  Navigator)  │ │  Gemini, …)  │ └──────────────┘
+      └──────┬───────┘ └──────────────┘
+             ▼
+      ┌──────────────┐
+      │ Playwright   │
+      │ (Browser)    │
+      └──────────────┘
 ```
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| AI Model | Gemini 3 Pro (multimodal vision + Computer Use) |
-| Agent Framework | Google ADK (Agent Development Kit) |
-| Real-time Voice | Gemini Live API (bidirectional streaming) |
-| Browser Automation | Playwright |
-| Backend | Python / FastAPI |
-| Frontend | React + Vite |
-| Hosting | Google Cloud Run |
-| Storage | Firestore (session state) + Cloud Storage (screenshots) |
-| CI/CD | Cloud Build |
-
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Node.js 20+
-- Google Cloud account with billing enabled
-- Gemini API key ([Get one here](https://ai.google.dev/))
-
-### Setup
-
-```bash
-# Clone the repo
-git clone https://github.com/chronosllc0-ai/aegis-ui-agent.git
-cd aegis-ui-agent
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Install Playwright browsers
-playwright install chromium
-
-# Set environment variables
-cp .env.example .env
-# Edit .env with your API keys
-
-# Run locally
-python -m src.main
-```
-
-### Google Cloud Deployment
-
-```bash
-# Authenticate
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-
-# Deploy to Cloud Run
-./scripts/deploy.sh
-```
-
-## Project Structure
-
-```
-aegis-ui-agent/
-├── src/
-│   ├── main.py              # FastAPI app entrypoint
-│   ├── agent/
-│   │   ├── orchestrator.py  # ADK agent orchestration
-│   │   ├── navigator.py     # Core UI navigation logic
-│   │   ├── analyzer.py      # Screenshot analysis with Gemini vision
-│   │   └── executor.py      # Playwright action execution
-│   ├── live/
-│   │   ├── session.py       # Live API session management
-│   │   └── voice.py         # Voice interaction handler
-│   ├── tools/
-│   │   ├── screenshot.py    # Screen capture utilities
-│   │   ├── browser.py       # Browser management
-│   │   └── actions.py       # Action primitives (click, type, scroll)
-│   └── utils/
-│       ├── config.py        # Configuration
-│       └── logging.py       # Structured logging
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx          # Main React app
-│   │   ├── components/
-│   │   │   ├── VoiceControl.tsx
-│   │   │   ├── ScreenView.tsx
-│   │   │   └── ActionLog.tsx
-│   │   └── hooks/
-│   │       └── useLiveAPI.ts
-│   └── package.json
-├── tests/
-├── scripts/
-│   ├── deploy.sh            # Cloud Run deployment
-│   └── setup_gcp.sh         # GCP project setup
-├── Dockerfile
-├── cloudbuild.yaml
-├── requirements.txt
-├── .env.example
-└── README.md
-```
-
-## How It Works
-
-1. **User speaks or types** a natural language instruction (e.g., "Go to Amazon and search for wireless headphones under $50")
-2. **Live API** processes voice input in real-time and streams it to the agent
-3. **ADK Orchestrator** breaks the task into steps and delegates to the Navigator
-4. **Screenshot Analyzer** captures the current browser state and uses Gemini vision to understand the UI layout
-5. **Action Executor** performs the identified action (click, type, scroll, etc.) via Playwright
-6. **Loop** — capture new screenshot → analyze → act → repeat until task is complete
-7. **Agent narrates** progress back to user via Live API voice output
 
 ## License
 
-MIT
-
-
-## 🚀 Deployment
-
-### Prerequisites
-- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) installed and authenticated
-- A GCP project with billing enabled
-- Docker installed (for local development)
-
-### Quick Deploy (One Command)
-```bash
-export GCP_PROJECT_ID=your-project-id
-export GCP_REGION=us-central1
-export GEMINI_API_KEY=your-api-key
-./infrastructure/deploy.sh
-```
-
-### First-Time GCP Setup
-```bash
-export GCP_PROJECT_ID=your-project-id
-./infrastructure/setup-gcp.sh
-```
-
-### Local Development (Docker Compose)
-```bash
-cp .env.example .env
-# Fill in keys
-docker-compose up --build
-# Frontend: http://localhost:3000
-# Backend:  http://localhost:8000
-```
-
-### Infrastructure Details
-| Service | GCP Product | Purpose |
-|---------|-------------|---------|
-| Backend API | Cloud Run | FastAPI + Playwright agent runtime |
-| Frontend | Cloud Run | React SPA served via Nginx |
-| Database | Cloud Firestore | Session/task metadata |
-| Screenshot Storage | Cloud Storage | Agent screenshot artifacts |
-| Build Pipeline | Cloud Build | Container image builds |
+Proprietary — © 2024-2026 Chronos Intelligence Systems

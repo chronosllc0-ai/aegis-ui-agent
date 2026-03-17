@@ -10,14 +10,18 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from aegis_logging import setup_logging
-from auth import router as auth_router
+from auth import router as auth_router, _verify_session
+from backend.database import get_session, init_db, create_tables
+from backend.key_management import KeyManager
+from backend.providers import get_provider, list_providers
 from config import settings
 from integrations.discord import DiscordIntegration
 from integrations.slack_connector import SlackIntegration
@@ -28,7 +32,7 @@ from session import LiveSessionManager
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Aegis UI Navigator", version="0.1.0")
+app = FastAPI(title="Aegis UI Navigator", version="1.0.0")
 cors_origins = [origin for origin in {settings.FRONTEND_URL, settings.PUBLIC_BASE_URL} if origin]
 if not cors_origins:
     cors_origins = ["http://localhost:5173", "http://localhost:8000"]
@@ -53,8 +57,35 @@ app.include_router(auth_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
+key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
+
+
+# ── Database lifecycle ────────────────────────────────────────────────
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Initialize database on application startup."""
+    init_db(settings.DATABASE_URL or None)
+    await create_tables()
+    logger.info("Database initialized")
+
+
+# ── Auth helper ───────────────────────────────────────────────────────
+
+
+def _get_current_user(request: Request) -> dict[str, Any]:
+    """Extract the authenticated user from the session cookie."""
+    token = request.cookies.get("aegis_session")
+    payload = _verify_session(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return payload
+
+
+# ── Integration registries ────────────────────────────────────────────
 
 
 class TelegramRegistry:
@@ -138,10 +169,66 @@ class SessionRuntime:
         self.settings: dict[str, Any] = {}
 
 
+# ── Provider & BYOK API routes ────────────────────────────────────────
+
+
+@app.get("/api/providers")
+async def get_providers() -> dict[str, Any]:
+    """List all supported LLM providers and their models."""
+    return {"ok": True, "providers": list_providers()}
+
+
+@app.get("/api/keys")
+async def get_user_keys(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """List stored API key hints for the current user."""
+    user = _get_current_user(request)
+    keys = await key_manager.list_keys(session, user["uid"])
+    return {"ok": True, "keys": keys}
+
+
+@app.post("/api/keys")
+async def store_user_key(
+    request: Request,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Store (or update) an encrypted API key for a provider."""
+    user = _get_current_user(request)
+    provider = str(payload.get("provider", "")).strip()
+    api_key = str(payload.get("api_key", "")).strip()
+    if not provider or not api_key:
+        raise HTTPException(status_code=400, detail="provider and api_key are required")
+    result = await key_manager.store_key(session, user["uid"], provider, api_key)
+    return {"ok": True, **result}
+
+
+@app.delete("/api/keys/{provider}")
+async def delete_user_key(
+    provider: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Delete a stored API key for a provider."""
+    user = _get_current_user(request)
+    deleted = await key_manager.delete_key(session, user["uid"], provider)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"ok": True, "provider": provider}
+
+
+# ── Health check ──────────────────────────────────────────────────────
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Return service health status."""
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "1.0.0"}
+
+
+# ── WebSocket helpers ─────────────────────────────────────────────────
 
 
 async def _send_step(websocket: WebSocket, step: dict[str, Any]) -> None:
@@ -230,6 +317,9 @@ async def _run_navigation_task(
     await _start_next_queued_task_if_ready(websocket, runtime, session_id)
 
 
+# ── WebSocket navigation endpoint ────────────────────────────────────
+
+
 @app.websocket("/ws/navigate")
 async def websocket_navigate(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time UI navigation sessions."""
@@ -310,22 +400,19 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await live_manager.close_session(session_id)
 
 
+# ── Integration webhook / registration endpoints ─────────────────────
+
+
 @app.post("/api/integrations/telegram/webhook/{integration_id}")
 async def telegram_webhook(integration_id: str, request: Request) -> dict[str, Any]:
-    """Receive Telegram webhook updates.
-
-    Validates the X-Telegram-Bot-Api-Secret-Token header before processing.
-    """
     integration = telegram_registry.get_telegram(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
-
     config = telegram_registry.get_config(integration_id)
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     expected_secret = str(config.get("webhook_secret", ""))
     if expected_secret and secret != expected_secret:
         raise HTTPException(status_code=403, detail="Invalid secret token")
-
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     return {"ok": True, "result": result}
@@ -333,7 +420,6 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
 async def register_telegram_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Register or update an in-memory telegram integration instance."""
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "delivery_mode": str(payload.get("delivery_mode", "polling")).strip(),
@@ -348,7 +434,6 @@ async def register_telegram_integration(integration_id: str, payload: dict[str, 
 
 @app.post("/api/integrations/telegram/{integration_id}/test")
 async def test_telegram_integration(integration_id: str) -> dict[str, Any]:
-    """Run Telegram getMe + webhook status test."""
     integration = telegram_registry.get_telegram(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -358,7 +443,6 @@ async def test_telegram_integration(integration_id: str) -> dict[str, Any]:
 
 @app.post("/api/integrations/telegram/{integration_id}/send_message")
 async def telegram_send_message(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Send a Telegram message using registered integration."""
     integration = telegram_registry.get_telegram(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -375,7 +459,6 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
 
 @app.post("/api/integrations/telegram/{integration_id}/send_draft")
 async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Send progressive Telegram draft chunks and final message."""
     integration = telegram_registry.get_telegram(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -386,16 +469,12 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
     text = str(payload.get("text", "")).strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool(
-        "telegram_send_message",
-        {"chat_id": chat_id, "text": text, "draft": True},
-    )
+    result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text, "draft": True})
     return {"ok": bool(result.get("ok")), "result": result}
 
 
 @app.post("/api/integrations/slack/register/{integration_id}")
 async def register_slack_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Register or update an in-memory slack integration instance."""
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "oauth_token": str(payload.get("oauth_token", "")).strip(),
@@ -409,7 +488,6 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
 
 @app.post("/api/integrations/slack/{integration_id}/test")
 async def test_slack_integration(integration_id: str) -> dict[str, Any]:
-    """Run Slack list channels test."""
     integration = slack_registry.get_slack(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -419,7 +497,6 @@ async def test_slack_integration(integration_id: str) -> dict[str, Any]:
 
 @app.post("/api/integrations/slack/{integration_id}/send_message")
 async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Send a Slack message using registered integration."""
     integration = slack_registry.get_slack(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -435,7 +512,6 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
 
 @app.post("/api/integrations/discord/register/{integration_id}")
 async def register_discord_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Register or update an in-memory discord integration instance."""
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "guild_id": str(payload.get("guild_id", "")).strip(),
@@ -448,7 +524,6 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
 
 @app.post("/api/integrations/discord/{integration_id}/test")
 async def test_discord_integration(integration_id: str) -> dict[str, Any]:
-    """Run Discord list channels test."""
     integration = discord_registry.get_discord(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -458,7 +533,6 @@ async def test_discord_integration(integration_id: str) -> dict[str, Any]:
 
 @app.post("/api/integrations/discord/{integration_id}/send_message")
 async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Send a Discord message using registered integration."""
     integration = discord_registry.get_discord(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -471,6 +545,8 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
     result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": text})
     return {"ok": bool(result.get("ok")), "result": result}
 
+
+# ── Frontend static files ────────────────────────────────────────────
 
 if FRONTEND_DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
