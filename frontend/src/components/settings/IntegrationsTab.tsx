@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BrandIcon } from '../icons'
 import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
 type IntegrationsTabProps = {
@@ -24,7 +25,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     if (icon.startsWith('http')) {
       return <img src={icon} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
     }
-    return <span>{icon}</span>
+    return <BrandIcon id={icon} className='h-4 w-4' />
   }
 
   const updateIntegration = (id: string, patch: Partial<IntegrationConfig>) => {
@@ -204,7 +205,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     const next: IntegrationConfig = {
       id: crypto.randomUUID(),
       name: form.serverName,
-      icon: '➕',
+      icon: 'custom',
       description: `Custom MCP server at ${form.serverUrl}`,
       enabled: false,
       status: 'disabled',
@@ -235,7 +236,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
             return (
               <article key={integration.id} className='rounded border border-[#2a2a2a] bg-[#111] p-3'>
                 <div className='flex items-start justify-between gap-4'>
-                <div>
+                  <div>
                   <div className='flex items-center gap-2'>
                     {renderIcon(integration.icon, integration.name)}
                     <p className='font-medium'>{integration.name}</p>
@@ -243,7 +244,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                   <p className='text-xs text-zinc-400'>{integration.description}</p>
                   <p className='mt-1 text-[11px] text-zinc-500'>Tools: {integration.tools.join(', ')}</p>
                 </div>
-                <span className='inline-flex items-center gap-2 text-xs'>
+                  <span className='inline-flex items-center gap-2 text-xs'>
                   <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOT[integration.status]}`} />
                   {integration.status}
                 </span>

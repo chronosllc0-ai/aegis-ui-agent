@@ -58,13 +58,15 @@ export function useWebSocket() {
   const reconnectRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
-  const lastStepAtRef = useRef(performance.now())
+  const lastStepAtRef = useRef(0)
   const lastNotConnectedAtRef = useRef(0)
+  const connectRef = useRef<() => void>(() => undefined)
 
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
       const now = performance.now()
-      const elapsed = entry.elapsedSeconds ?? (now - lastStepAtRef.current) / 1000
+      const elapsed =
+        entry.elapsedSeconds ?? (lastStepAtRef.current > 0 ? (now - lastStepAtRef.current) / 1000 : 0)
       lastStepAtRef.current = now
       setLogs((prev) => [
         ...prev,
@@ -112,7 +114,7 @@ export function useWebSocket() {
         if (reconnectRef.current !== null) {
           window.clearTimeout(reconnectRef.current)
         }
-        reconnectRef.current = window.setTimeout(connect, 1500)
+        reconnectRef.current = window.setTimeout(() => connectRef.current(), 1500)
       }
     }
     ws.onerror = () => setConnectionStatus('disconnected')
@@ -189,9 +191,14 @@ export function useWebSocket() {
   }, [appendLog])
 
   useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
+
+  useEffect(() => {
     shouldReconnectRef.current = true
-    connect()
+    const connectTimeout = window.setTimeout(() => connect(), 0)
     return () => {
+      window.clearTimeout(connectTimeout)
       shouldReconnectRef.current = false
       if (reconnectRef.current !== null) {
         window.clearTimeout(reconnectRef.current)

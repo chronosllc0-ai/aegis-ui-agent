@@ -1,6 +1,6 @@
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
-import { PROVIDERS } from '../lib/models'
+import { PROVIDERS, renderProviderIcon } from '../lib/models'
 
 type LandingPageProps = {
   onGetStarted: () => void
@@ -224,11 +224,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                   title={p.displayName}
                   className='inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#2a2a2a] bg-[#111] text-sm'
                 >
-                  {p.icon.startsWith('http') ? (
-                    <img src={p.icon} alt={p.displayName} className='h-4 w-4' />
-                  ) : (
-                    p.icon
-                  )}
+                  {renderProviderIcon(p, 'h-4 w-4')}
                 </span>
               ))}
             </div>
@@ -315,11 +311,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                     className='flex items-center gap-3 rounded-xl border border-[#1f1f1f] bg-[#0f0f0f] px-4 py-3'
                   >
                     <span className='text-lg'>
-                      {p.icon.startsWith('http') ? (
-                        <img src={p.icon} alt={p.displayName} className='h-5 w-5' />
-                      ) : (
-                        p.icon
-                      )}
+                      {renderProviderIcon(p, 'h-5 w-5')}
                     </span>
                     <span className='text-sm text-zinc-200'>{p.displayName}</span>
                     <span className='ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-300'>
