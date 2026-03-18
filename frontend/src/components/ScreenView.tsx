@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 type ScreenViewProps = {
   frameSrc: string
   isWorking: boolean
@@ -15,6 +13,7 @@ const EXAMPLES = [
 ]
 
 export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
+  const hasFrame = Boolean(frameSrc)
   const [showSteering, setShowSteering] = useState(false)
   const [displayFrame, setDisplayFrame] = useState('')
   const [overlayFrame, setOverlayFrame] = useState('')
@@ -60,22 +59,16 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
       <div className='absolute inset-x-0 top-0 z-20 h-0.5 bg-zinc-800'>
         <div className={`h-full bg-blue-500 transition-all ${isWorking ? 'w-full animate-pulse' : 'w-0'}`} />
       </div>
-      {showSteering && (
-        <div className='absolute left-4 top-4 z-20 rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'>
+      {steeringFlashKey > 0 && (
+        <div
+          key={steeringFlashKey}
+          className='absolute left-4 top-4 z-20 animate-[fade-slide_900ms_ease-out] rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'
+        >
           Steering...
         </div>
       )}
       {hasFrame ? (
-        <>
-          <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
-          {overlayFrame && (
-            <img
-              src={overlayFrame}
-              alt='Incoming browser stream'
-              className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-300 ${fading ? 'opacity-100' : 'opacity-0'}`}
-            />
-          )}
-        </>
+        <img src={frameSrc} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
       ) : (
         <div className='flex min-h-full flex-col items-center justify-start px-6 py-8 text-center md:justify-center'>
           <img src='/shield.svg' alt='Aegis logo' className='mb-5 h-16 w-16 opacity-90' />
