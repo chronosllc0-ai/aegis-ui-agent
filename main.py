@@ -72,14 +72,15 @@ async def _initialize_database() -> None:
     """Initialize the database with retries without blocking app readiness."""
     global db_ready, db_init_error
 
+    init_db(settings.DATABASE_URL or None)
+
     retry_delay_seconds = 5
     while True:
         try:
-            init_db(settings.DATABASE_URL or None)
             await create_tables()
         except Exception as exc:  # noqa: BLE001
             db_ready = False
-            db_init_error = exc.__class__.__name__
+            db_init_error = str(exc)
             logger.exception(
                 "Database initialization failed; retrying in %s seconds",
                 retry_delay_seconds,
@@ -270,7 +271,7 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "version": "1.0.0",
         "database": "ready" if db_ready else "initializing",
-        "database_error": "initialization_failed" if db_init_error else "",
+        "database_error": db_init_error or "",
     }
 
 

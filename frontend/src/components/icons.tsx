@@ -1,5 +1,16 @@
 /* eslint-disable react-refresh/only-export-components */
 import type { ReactNode } from 'react'
+import {
+  FaDiscord,
+  FaFolder,
+  FaGlobe,
+  FaLock,
+  FaPlus,
+  FaSlack,
+  FaTelegram,
+  FaTerminal,
+  FaTimes,
+} from 'react-icons/fa'
 import type { IconType } from 'react-icons'
 import { SiDiscord, SiSlack, SiTelegram } from 'react-icons/si'
 import { LuCode, LuFolder, LuGlobe, LuLock, LuPlus } from 'react-icons/lu'
@@ -39,6 +50,15 @@ export const Icons = {
   clock: (p: IconProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M12 7v6l4 2' /></Svg>,
   check: (p: IconProps) => <Svg {...p}><path d='m5 12 4 4 10-10' /></Svg>,
   alert: (p: IconProps) => <Svg {...p}><path d='M12 8v5M12 17h.01' /><path d='M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z' /></Svg>,
+  globeAlt: ({ className }: IconProps) => <FaGlobe className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  folder: ({ className }: IconProps) => <FaFolder className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  terminal: ({ className }: IconProps) => <FaTerminal className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  slack: ({ className }: IconProps) => <FaSlack className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  discord: ({ className }: IconProps) => <FaDiscord className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  telegram: ({ className }: IconProps) => <FaTelegram className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  plusCircle: ({ className }: IconProps) => <FaPlus className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  lock: ({ className }: IconProps) => <FaLock className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  close: ({ className }: IconProps) => <FaTimes className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   lock: (p: IconProps) => <Svg {...p}><rect x='5' y='11' width='14' height='10' rx='2' /><path d='M8 11V8a4 4 0 1 1 8 0v3' /></Svg>,
   plusCircle: (p: IconProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M12 8v8M8 12h8' /></Svg>,
 }

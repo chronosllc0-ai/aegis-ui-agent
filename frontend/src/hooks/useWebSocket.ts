@@ -65,6 +65,7 @@ export function useWebSocket() {
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
       const now = performance.now()
+      const elapsed = entry.elapsedSeconds ?? (lastStepAtRef.current === 0 ? 0 : (now - lastStepAtRef.current) / 1000)
       const elapsed =
         entry.elapsedSeconds ?? (lastStepAtRef.current > 0 ? (now - lastStepAtRef.current) / 1000 : 0)
       lastStepAtRef.current = now
@@ -82,7 +83,7 @@ export function useWebSocket() {
     [],
   )
 
-  const connect = useCallback(() => {
+  const connect = useCallback(function connectSocket() {
     setConnectionStatus('connecting')
     const configuredWsUrl = (import.meta.env.VITE_WS_URL as string | undefined)?.trim()
     const apiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim()
@@ -114,6 +115,7 @@ export function useWebSocket() {
         if (reconnectRef.current !== null) {
           window.clearTimeout(reconnectRef.current)
         }
+        reconnectRef.current = window.setTimeout(connectSocket, 1500)
         reconnectRef.current = window.setTimeout(() => connectRef.current(), 1500)
       }
     }

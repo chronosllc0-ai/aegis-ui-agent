@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 import { BrandIcon } from '../icons'
 import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
@@ -22,8 +23,9 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   const [integrationErrors, setIntegrationErrors] = useState<Record<string, string | null>>({})
 
   const renderIcon = (icon: string, name: string) => {
-    if (icon.startsWith('http')) {
-      return <img src={icon} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
+    const normalized = normalizeIntegrationIcon(icon)
+    if (normalized.startsWith('http')) {
+      return <img src={normalized} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
     }
     return <BrandIcon id={icon} className='h-4 w-4' />
   }
@@ -238,7 +240,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                 <div className='flex items-start justify-between gap-4'>
                   <div>
                   <div className='flex items-center gap-2'>
-                    {renderIcon(integration.icon, integration.name)}
+                    {renderIntegrationIcon(integration.icon)}
                     <p className='font-medium'>{integration.name}</p>
                   </div>
                   <p className='text-xs text-zinc-400'>{integration.description}</p>

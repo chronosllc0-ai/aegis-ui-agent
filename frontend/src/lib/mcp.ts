@@ -1,11 +1,17 @@
+import { createElement } from 'react'
+import type { IconType } from 'react-icons'
+import { FaDiscord, FaFolder, FaGlobe, FaPlus, FaSlack, FaTelegram, FaTerminal } from 'react-icons/fa'
+
 export type AuthType = 'none' | 'api_key' | 'oauth'
 
 export type IntegrationStatus = 'connected' | 'error' | 'disabled'
+export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'custom'
+
 
 export type IntegrationConfig = {
   id: string
   name: string
-  icon: string
+  icon: IntegrationIcon
   description: string
   enabled: boolean
   status: IntegrationStatus
@@ -22,6 +28,24 @@ export type CustomServerForm = {
   serverUrl: string
   authType: AuthType
   apiKey: string
+}
+
+const INTEGRATION_ICON_MAP = {
+  'web-search': LuGlobe,
+  filesystem: LuFolder,
+  'code-exec': LuCode,
+  telegram: SiTelegram,
+  slack: SiSlack,
+  discord: SiDiscord,
+  custom: LuPlus,
+} as const
+
+const LEGACY_INTEGRATION_ICON_MAP: Record<string, IntegrationIcon> = {
+  '🌐': 'web-search',
+  '📁': 'filesystem',
+  '💻': 'code-exec',
+  '💬': 'slack',
+  '➕': 'custom',
 }
 
 export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
@@ -58,7 +82,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'telegram',
     name: 'Telegram',
-    icon: 'https://i.postimg.cc/KYsDGq2L/download_19.png',
+    icon: 'telegram',
     description: 'Telegram bot messaging tools.',
     enabled: false,
     status: 'disabled',
@@ -99,8 +123,49 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   },
 ]
 
+function isIntegrationIcon(value: string): value is IntegrationIcon {
+  return value in INTEGRATION_ICON_MAP
+}
+
+export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon = 'custom'): string {
+  if (!icon) return fallback
+  if (isIntegrationIcon(icon)) return icon
+  if (icon.startsWith('http')) return icon
+  return LEGACY_INTEGRATION_ICON_MAP[icon] ?? fallback
+}
+
+export function normalizeIntegrationConfig(integration: IntegrationConfig): IntegrationConfig {
+  return {
+    ...integration,
+    icon: normalizeIntegrationIcon(integration.icon, integration.id === 'telegram' ? 'telegram' : integration.id === 'discord' ? 'discord' : integration.id === 'slack' ? 'slack' : 'custom'),
+  }
+}
+
+export function renderIntegrationIcon(icon: string, className = 'h-4 w-4') {
+  const normalized = normalizeIntegrationIcon(icon)
+  if (normalized.startsWith('http')) {
+    return null
+  }
+  const resolved = isIntegrationIcon(normalized) ? normalized : 'custom'
+  return createElement(INTEGRATION_ICON_MAP[resolved] ?? LuLock, { className, 'aria-hidden': 'true' })
+}
+
 export function maskSecret(value: string): string {
   if (!value) return ''
   if (value.length < 8) return '••••••'
   return `${value.slice(0, 3)}••••${value.slice(-3)}`
+}
+
+const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
+  'web-search': FaGlobe,
+  filesystem: FaFolder,
+  'code-exec': FaTerminal,
+  telegram: FaTelegram,
+  slack: FaSlack,
+  discord: FaDiscord,
+  custom: FaPlus,
+}
+
+export function renderIntegrationIcon(icon: IntegrationIcon, className = 'h-4 w-4') {
+  return createElement(INTEGRATION_ICON_MAP[icon], { className, 'aria-hidden': 'true' })
 }

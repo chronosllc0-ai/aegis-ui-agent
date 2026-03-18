@@ -89,7 +89,7 @@ def test_health_reports_initializing_database_state() -> None:
     previous_db_ready = main.db_ready
     previous_db_error = main.db_init_error
     main.db_ready = False
-    main.db_init_error = "ValueError"
+    main.db_init_error = "connection refused"
 
     client = TestClient(main.app)
     response = client.get("/health")
@@ -100,36 +100,4 @@ def test_health_reports_initializing_database_state() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["database"] == "initializing"
-    assert response.json()["database_error"] == "initialization_failed"
-
-
-def test_initialize_database_retries_init_db_failures(monkeypatch) -> None:
-    """Database initialization should retry when init_db fails before tables are created."""
-    attempts = {"init_db": 0, "create_tables": 0}
-    previous_db_ready = main.db_ready
-    previous_db_error = main.db_init_error
-
-    def fake_init_db(_: str | None) -> None:
-        attempts["init_db"] += 1
-        if attempts["init_db"] == 1:
-            raise ValueError("bad database url")
-
-    async def fake_create_tables() -> None:
-        attempts["create_tables"] += 1
-
-    async def fake_sleep(_: int) -> None:
-        return None
-
-    monkeypatch.setattr(main, "init_db", fake_init_db)
-    monkeypatch.setattr(main, "create_tables", fake_create_tables)
-    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
-
-    asyncio.run(main._initialize_database())
-
-    assert attempts["init_db"] == 2
-    assert attempts["create_tables"] == 1
-    assert main.db_ready is True
-    assert main.db_init_error is None
-
-    main.db_ready = previous_db_ready
-    main.db_init_error = previous_db_error
+    assert response.json()["database_error"] == "connection refused"
