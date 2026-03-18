@@ -1,3 +1,5 @@
+import { Icons } from './icons'
+
 type MessageQueueProps = {
   queuedMessages: string[]
   isOpen: boolean
@@ -17,7 +19,14 @@ export function MessageQueue({ queuedMessages, isOpen, onToggle, onDelete }: Mes
           {queuedMessages.map((message, index) => (
             <li key={`${message}-${index}`} className='flex items-center justify-between rounded border border-[#2a2a2a] p-2 text-xs text-zinc-300'>
               <span className='mr-2'>{index + 1}. {message.length > 50 ? `${message.slice(0, 50)}...` : message}</span>
-              <button type='button' onClick={() => onDelete(index)} className='text-red-300 hover:text-red-200'>✕</button>
+              <button
+                type='button'
+                onClick={() => onDelete(index)}
+                className='text-red-300 hover:text-red-200'
+                aria-label={`Remove queued instruction ${index + 1}`}
+              >
+                {Icons.close({ className: 'h-4 w-4' })}
+              </button>
             </li>
           ))}
         </ul>
