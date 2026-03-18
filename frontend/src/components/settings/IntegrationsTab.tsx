@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 import { BrandIcon } from '../icons'
 import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
@@ -238,7 +239,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                 <div className='flex items-start justify-between gap-4'>
                   <div>
                   <div className='flex items-center gap-2'>
-                    {renderIcon(integration.icon, integration.name)}
+                    {renderIntegrationIcon(integration.icon)}
                     <p className='font-medium'>{integration.name}</p>
                   </div>
                   <p className='text-xs text-zinc-400'>{integration.description}</p>
