@@ -145,7 +145,7 @@ export function APIKeysTab() {
                 )}
               </div>
               <p className='mt-2 text-[11px] text-zinc-500'>
-                {provider.models.length} models: {provider.models.slice(0, 3).join(', ')}
+                {provider.models.length} models: {provider.models.slice(0, 3).map((m) => m.label).join(', ')}
                 {provider.models.length > 3 ? `, +${provider.models.length - 3} more` : ''}
               </p>
             </div>

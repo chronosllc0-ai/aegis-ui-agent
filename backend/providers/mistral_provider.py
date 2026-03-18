@@ -14,8 +14,8 @@ MISTRAL_MODELS = [
     "mistral-medium-latest",
     "mistral-small-latest",
     "codestral-latest",
-    "open-mistral-nemo",
     "pixtral-large-latest",
+    "devstral-small-2505",
 ]
 
 

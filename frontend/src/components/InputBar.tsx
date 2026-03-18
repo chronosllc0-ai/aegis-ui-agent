@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
-import { MODEL_DESCRIPTIONS, MODEL_ICON_URL, MODEL_OPTIONS } from '../lib/models'
+import { PROVIDERS, providerById, providerForModel, modelInfo } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
 import { SteeringControl } from './SteeringControl'
@@ -14,7 +14,9 @@ type InputBarProps = {
   sending: boolean
   onModeChange: (mode: SteeringMode) => void
   onSend: (instruction: string, mode: SteeringMode) => void
+  provider: string
   model: string
+  onProviderChange: (provider: string) => void
   onModelChange: (model: string) => void
   queuedMessages: string[]
   onDeleteQueueItem: (index: number) => void
@@ -25,6 +27,68 @@ type InputBarProps = {
 
 const MODE_ORDER: SteeringMode[] = ['steer', 'interrupt', 'queue']
 
+/* ── Provider + Model picker (inline in the InputBar) ──────────────── */
+
+function ModelPicker({
+  provider,
+  model,
+  onProviderChange,
+  onModelChange,
+}: {
+  provider: string
+  model: string
+  onProviderChange: (id: string) => void
+  onModelChange: (id: string) => void
+}) {
+  const currentProvider = providerById(provider) ?? PROVIDERS[0]
+  const currentModel = modelInfo(model)
+  const models = currentProvider.models
+
+  return (
+    <div className='flex items-center gap-1.5'>
+      {/* Provider selector */}
+      <label className='flex items-center gap-1.5 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+        <span className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-xs'>
+          {currentProvider.icon.startsWith('http') ? (
+            <img src={currentProvider.icon} alt={currentProvider.displayName} className='h-4 w-4' />
+          ) : (
+            currentProvider.icon
+          )}
+        </span>
+        <select
+          value={provider}
+          onChange={(e) => onProviderChange(e.target.value)}
+          className='rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          aria-label='Provider'
+        >
+          {PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id} className='bg-[#0f0f0f] text-zinc-100'>
+              {p.displayName}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* Model selector */}
+      <label className='flex items-center gap-1.5 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+        <select
+          value={model}
+          onChange={(e) => onModelChange(e.target.value)}
+          title={currentModel?.description ?? model}
+          className='max-w-[180px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          aria-label='Model'
+        >
+          {models.map((m) => (
+            <option key={m.id} value={m.id} title={m.description} className='bg-[#0f0f0f] text-zinc-100'>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
 export function InputBar({
   mode,
   voiceActive,
@@ -34,7 +98,9 @@ export function InputBar({
   sending,
   onModeChange,
   onSend,
+  provider,
   model,
+  onProviderChange,
   onModelChange,
   queuedMessages,
   onDeleteQueueItem,
@@ -85,22 +151,12 @@ export function InputBar({
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex flex-wrap items-center gap-2'>
           <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
-          <label className='flex items-center gap-2 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
-            <img src={MODEL_ICON_URL} alt='' className='h-4 w-4 rounded-sm' />
-            <span className='sr-only'>Model</span>
-            <select
-              value={model}
-              onChange={(event) => onModelChange(event.target.value)}
-              title={MODEL_DESCRIPTIONS[model] ?? model}
-              className='rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
-            >
-              {MODEL_OPTIONS.map((option) => (
-                <option key={option} value={option} className='bg-[#0f0f0f] text-zinc-100'>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ModelPicker
+            provider={provider}
+            model={model}
+            onProviderChange={onProviderChange}
+            onModelChange={onModelChange}
+          />
         </div>
         <button
           type='button'

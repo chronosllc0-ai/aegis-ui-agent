@@ -10,11 +10,12 @@ from .base import BaseProvider, ChatMessage, ChatResponse, ProviderCapabilities,
 logger = logging.getLogger(__name__)
 
 GROQ_MODELS = [
+    "meta-llama/llama-4-scout-17b-16e-instruct",
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "mixtral-8x7b-32768",
-    "gemma2-9b-it",
-    "deepseek-r1-distill-llama-70b",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "moonshotai/kimi-k2-instruct-0905",
 ]
 
 
@@ -39,9 +40,9 @@ class GroqProvider(BaseProvider):
         return ProviderCapabilities(
             chat=True,
             streaming=True,
-            vision=False,
+            vision=True,
             function_calling=True,
-            max_context_tokens=32_768,
+            max_context_tokens=131_072,
         )
 
     @property

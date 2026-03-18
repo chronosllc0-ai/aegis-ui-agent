@@ -11,10 +11,11 @@ from .base import BaseProvider, ChatMessage, ChatResponse, ProviderCapabilities,
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_MODELS = [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
     "claude-sonnet-4-20250514",
     "claude-3.5-sonnet-20241022",
-    "claude-3.5-haiku-20241022",
-    "claude-3-opus-20240229",
 ]
 
 
@@ -23,7 +24,7 @@ class AnthropicProvider(BaseProvider):
 
     provider_name = "anthropic"
 
-    def __init__(self, api_key: str, default_model: str = "claude-sonnet-4-20250514") -> None:
+    def __init__(self, api_key: str, default_model: str = "claude-opus-4-6") -> None:
         self.api_key = api_key
         self.default_model = default_model
         self._client: Any = None
@@ -41,7 +42,7 @@ class AnthropicProvider(BaseProvider):
             streaming=True,
             vision=True,
             function_calling=True,
-            max_context_tokens=200_000,
+            max_context_tokens=1_000_000,
         )
 
     @property

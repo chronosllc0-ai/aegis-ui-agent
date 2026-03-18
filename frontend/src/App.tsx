@@ -12,6 +12,7 @@ import { useSettingsContext } from './context/SettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
+import { PROVIDERS, providerById } from './lib/models'
 
 type TaskHistoryItem = {
   id: string
@@ -338,7 +339,12 @@ function App() {
               sending={sending}
               onModeChange={setMode}
               onSend={handleSend}
+              provider={settings.provider}
               model={settings.model}
+              onProviderChange={(nextProvider) => {
+                const p = providerById(nextProvider) ?? PROVIDERS[0]
+                patchSettings({ provider: nextProvider, model: p.models[0].id })
+              }}
               onModelChange={(nextModel) => patchSettings({ model: nextModel })}
               queuedMessages={queuedMessages}
               onDeleteQueueItem={(index) => {

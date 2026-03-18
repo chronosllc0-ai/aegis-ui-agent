@@ -11,13 +11,11 @@ from .base import BaseProvider, ChatMessage, ChatResponse, ProviderCapabilities,
 logger = logging.getLogger(__name__)
 
 GOOGLE_MODELS = [
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-3-pro",
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite-preview",
     "gemini-3-flash-preview",
-    "gemini-3-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
 ]
 
 

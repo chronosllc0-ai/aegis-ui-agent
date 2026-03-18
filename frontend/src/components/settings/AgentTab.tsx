@@ -1,5 +1,5 @@
 import type { AppSettings } from '../../hooks/useSettings'
-import { MODEL_DESCRIPTIONS, PROVIDERS, providerForModel } from '../../lib/models'
+import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
 
 const PRESETS: Record<string, string> = {
   Professional: 'Respond clearly and professionally with concise rationale.',
@@ -14,7 +14,8 @@ type AgentTabProps = {
 }
 
 export function AgentTab({ settings, onPatch }: AgentTabProps) {
-  const currentProvider = providerForModel(settings.model)
+  const currentProvider = providerById(settings.provider) ?? providerForModel(settings.model) ?? PROVIDERS[0]
+  const currentModel = modelInfo(settings.model)
 
   return (
     <div className='space-y-6'>
@@ -59,10 +60,10 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         </label>
         <select
           id='agent-provider'
-          value={currentProvider?.id ?? 'google'}
+          value={currentProvider.id}
           onChange={(event) => {
-            const provider = PROVIDERS.find((p) => p.id === event.target.value)
-            if (provider) onPatch({ model: provider.models[0] })
+            const provider = providerById(event.target.value)
+            if (provider) onPatch({ provider: provider.id, model: provider.models[0].id })
           }}
           className='w-full rounded border border-[#2a2a2a] bg-[#111] px-3 py-2 text-zinc-100'
         >
@@ -83,14 +84,14 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
           onChange={(event) => onPatch({ model: event.target.value })}
           className='w-full rounded border border-[#2a2a2a] bg-[#111] px-3 py-2 text-zinc-100'
         >
-          {(currentProvider?.models ?? PROVIDERS[0].models).map((model) => (
-            <option key={model} value={model} className='bg-[#111] text-zinc-100'>
-              {model}
+          {currentProvider.models.map((m) => (
+            <option key={m.id} value={m.id} className='bg-[#111] text-zinc-100'>
+              {m.label}
             </option>
           ))}
         </select>
         <p id='agent-model-description' className='text-xs text-zinc-400'>
-          {MODEL_DESCRIPTIONS[settings.model] ?? 'Select a model for this session.'}
+          {currentModel?.description ?? 'Select a model for this session.'}
         </p>
       </section>
 

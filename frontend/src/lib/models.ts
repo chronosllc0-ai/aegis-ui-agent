@@ -1,122 +1,129 @@
 // ── Provider + Model catalogue ───────────────────────────────────────
+// Last updated: 2026-03-18 — sourced from official provider docs
+
+export type ModelInfo = {
+  id: string
+  label: string
+  description: string
+  vision?: boolean
+}
 
 export type ProviderInfo = {
   id: string
   displayName: string
-  models: string[]
+  models: ModelInfo[]
   icon: string
   keyPrefix: string
 }
 
 export const PROVIDERS: ProviderInfo[] = [
+  // ── Google ──────────────────────────────────────────────────────────
   {
     id: 'google',
     displayName: 'Google (Gemini)',
-    models: [
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
-      'gemini-3-pro',
-      'gemini-3.1-pro-preview',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-3-flash-preview',
-      'gemini-3-pro-preview',
-    ],
     icon: 'https://i.postimg.cc/NMtZmLXT/download_4.png',
     keyPrefix: '',
+    models: [
+      { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Latest Gemini 3 series — cutting-edge reasoning & multimodal.', vision: true },
+      { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite Preview', description: 'First Flash-Lite in the Gemini 3 series — ultra-fast.', vision: true },
+      { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', description: 'Frontier-class speed that rivals larger models.', vision: true },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Stable production model — best quality + complex reasoning.', vision: true },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Stable production model — fast responses, lower latency.', vision: true },
+    ],
   },
+  // ── OpenAI ──────────────────────────────────────────────────────────
   {
     id: 'openai',
     displayName: 'OpenAI',
-    models: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o4-mini', 'o3', 'o3-mini', 'gpt-4o', 'gpt-4o-mini'],
     icon: '🤖',
     keyPrefix: 'sk-',
+    models: [
+      { id: 'gpt-5.2', label: 'GPT-5.2', description: 'Flagship — best for coding and agentic tasks.', vision: true },
+      { id: 'gpt-5.2-pro', label: 'GPT-5.2 Pro', description: 'Smarter, more precise responses on complex tasks.', vision: true },
+      { id: 'gpt-5', label: 'GPT-5', description: 'Intelligent reasoning model with configurable effort.', vision: true },
+      { id: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Fast, cost-efficient version of GPT-5.', vision: true },
+      { id: 'gpt-5-nano', label: 'GPT-5 Nano', description: 'Fastest, most cost-efficient GPT-5 variant.', vision: true },
+      { id: 'gpt-4.1', label: 'GPT-4.1', description: 'Smartest non-reasoning model.', vision: true },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Fast and cost-effective.', vision: true },
+      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', description: 'Ultra-lightweight.', vision: true },
+      { id: 'o4-mini', label: 'o4-mini', description: 'Advanced reasoning, compact.', vision: true },
+      { id: 'o3', label: 'o3', description: 'Deep reasoning model.', vision: true },
+    ],
   },
+  // ── Anthropic ───────────────────────────────────────────────────────
   {
     id: 'anthropic',
     displayName: 'Anthropic',
-    models: [
-      'claude-sonnet-4-20250514',
-      'claude-3.5-sonnet-20241022',
-      'claude-3.5-haiku-20241022',
-      'claude-3-opus-20240229',
-    ],
     icon: '🧠',
     keyPrefix: 'sk-ant-',
+    models: [
+      { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent — agents and coding. 1M context.', vision: true },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Best combo of speed + intelligence. 1M context.', vision: true },
+      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', description: 'Fastest Anthropic model — near-frontier intelligence.', vision: true },
+      { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', description: 'Previous generation balanced model.', vision: true },
+      { id: 'claude-3.5-sonnet-20241022', label: 'Claude 3.5 Sonnet', description: 'Excellent code and reasoning.', vision: true },
+    ],
   },
+  // ── Mistral ─────────────────────────────────────────────────────────
   {
     id: 'mistral',
     displayName: 'Mistral AI',
-    models: [
-      'mistral-large-latest',
-      'mistral-medium-latest',
-      'mistral-small-latest',
-      'codestral-latest',
-      'pixtral-large-latest',
-    ],
     icon: '🌀',
     keyPrefix: '',
+    models: [
+      { id: 'mistral-large-latest', label: 'Mistral Large 3', description: 'State-of-the-art open-weight multimodal model.', vision: true },
+      { id: 'mistral-medium-latest', label: 'Mistral Medium 3.1', description: 'Frontier-class multimodal — Aug 2025.', vision: true },
+      { id: 'mistral-small-latest', label: 'Mistral Small 4', description: 'Hybrid instruct, reasoning, and coding.', vision: false },
+      { id: 'codestral-latest', label: 'Codestral', description: 'Optimized for code generation.', vision: false },
+      { id: 'pixtral-large-latest', label: 'Pixtral Large', description: 'Multimodal vision model.', vision: true },
+      { id: 'devstral-small-2505', label: 'Devstral Small', description: 'Developer-focused small model.', vision: false },
+    ],
   },
+  // ── Groq ────────────────────────────────────────────────────────────
   {
     id: 'groq',
     displayName: 'Groq',
-    models: [
-      'llama-3.3-70b-versatile',
-      'llama-3.1-8b-instant',
-      'mixtral-8x7b-32768',
-      'gemma2-9b-it',
-      'deepseek-r1-distill-llama-70b',
-    ],
     icon: '⚡',
     keyPrefix: 'gsk_',
+    models: [
+      { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', description: 'Llama 4 on Groq — fast multimodal inference.', vision: true },
+      { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B', description: 'Fast open-source on Groq.', vision: false },
+      { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B', description: 'Ultra-low latency.', vision: false },
+      { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', description: 'OpenAI open-weight model on Groq LPU.', vision: false },
+      { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', description: 'Medium open-weight, extreme speed.', vision: false },
+      { id: 'moonshotai/kimi-k2-instruct-0905', label: 'Kimi K2', description: 'Moonshot K2 — strong reasoning on Groq.', vision: false },
+    ],
   },
 ]
 
-export function providerForModel(model: string): ProviderInfo | undefined {
-  return PROVIDERS.find((p) => p.models.includes(model))
+// ── Lookup helpers ─────────────────────────────────────────────────
+
+export function providerById(id: string): ProviderInfo | undefined {
+  return PROVIDERS.find((p) => p.id === id)
 }
 
-export function allModels(): string[] {
-  return PROVIDERS.flatMap((p) => p.models)
+export function providerForModel(modelId: string): ProviderInfo | undefined {
+  return PROVIDERS.find((p) => p.models.some((m) => m.id === modelId))
 }
 
-// Flat descriptions kept for backward compat in AgentTab
-export const MODEL_DESCRIPTIONS: Record<string, string> = {
-  // Google
-  'gemini-2.5-pro': 'Gemini 2.5 Pro — best quality and complex reasoning.',
-  'gemini-2.5-flash': 'Gemini 2.5 Flash — fast responses, lower latency.',
-  'gemini-3-pro': 'Gemini 3 Pro — latest multimodal flagship.',
-  'gemini-3.1-pro-preview': 'Gemini 3.1 Pro preview — cutting-edge reasoning.',
-  'gemini-3.1-flash-lite-preview': 'Gemini 3.1 Flash Lite — ultra-low latency.',
-  'gemini-3-flash-preview': 'Gemini 3 Flash preview — fast navigation.',
-  'gemini-3-pro-preview': 'Gemini 3 Pro preview — high-quality multimodal.',
-  // OpenAI
-  'gpt-4.1': 'GPT-4.1 — flagship model, best overall quality.',
-  'gpt-4.1-mini': 'GPT-4.1 Mini — fast and cost-effective.',
-  'gpt-4.1-nano': 'GPT-4.1 Nano — ultra-lightweight.',
-  'o4-mini': 'o4-mini — advanced reasoning, compact.',
-  'o3': 'o3 — deep reasoning model.',
-  'o3-mini': 'o3-mini — efficient reasoning.',
-  'gpt-4o': 'GPT-4o — multimodal with vision.',
-  'gpt-4o-mini': 'GPT-4o Mini — fast multimodal.',
-  // Anthropic
-  'claude-sonnet-4-20250514': 'Claude Sonnet 4 — latest balanced model.',
-  'claude-3.5-sonnet-20241022': 'Claude 3.5 Sonnet — excellent code & reasoning.',
-  'claude-3.5-haiku-20241022': 'Claude 3.5 Haiku — fastest Anthropic model.',
-  'claude-3-opus-20240229': 'Claude 3 Opus — maximum capability.',
-  // Mistral
-  'mistral-large-latest': 'Mistral Large — top-tier multilingual.',
-  'mistral-medium-latest': 'Mistral Medium — balanced performance.',
-  'mistral-small-latest': 'Mistral Small — fast and efficient.',
-  'codestral-latest': 'Codestral — optimized for code.',
-  'pixtral-large-latest': 'Pixtral Large — multimodal vision.',
-  // Groq
-  'llama-3.3-70b-versatile': 'Llama 3.3 70B — fast open-source on Groq.',
-  'llama-3.1-8b-instant': 'Llama 3.1 8B — ultra-low latency.',
-  'mixtral-8x7b-32768': 'Mixtral 8x7B — 32K context mixture-of-experts.',
-  'gemma2-9b-it': 'Gemma 2 9B — Google open model on Groq.',
-  'deepseek-r1-distill-llama-70b': 'DeepSeek R1 Distill — reasoning model on Groq.',
+export function modelInfo(modelId: string): ModelInfo | undefined {
+  for (const p of PROVIDERS) {
+    const m = p.models.find((m) => m.id === modelId)
+    if (m) return m
+  }
+  return undefined
 }
 
-export const MODEL_OPTIONS = Object.keys(MODEL_DESCRIPTIONS)
+export function allModelIds(): string[] {
+  return PROVIDERS.flatMap((p) => p.models.map((m) => m.id))
+}
+
+// ── Legacy flat exports (backward compat) ──────────────────────────
+
+export const MODEL_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
+  PROVIDERS.flatMap((p) => p.models.map((m) => [m.id, m.description])),
+)
+
+export const MODEL_OPTIONS = allModelIds()
 
 export const MODEL_ICON_URL = 'https://i.postimg.cc/NMtZmLXT/download_4.png'

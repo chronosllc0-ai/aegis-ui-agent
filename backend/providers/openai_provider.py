@@ -11,14 +11,16 @@ from .base import BaseProvider, ChatMessage, ChatResponse, ProviderCapabilities,
 logger = logging.getLogger(__name__)
 
 OPENAI_MODELS = [
+    "gpt-5.2",
+    "gpt-5.2-pro",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
     "gpt-4.1",
     "gpt-4.1-mini",
     "gpt-4.1-nano",
     "o4-mini",
     "o3",
-    "o3-mini",
-    "gpt-4o",
-    "gpt-4o-mini",
 ]
 
 
@@ -27,7 +29,7 @@ class OpenAIProvider(BaseProvider):
 
     provider_name = "openai"
 
-    def __init__(self, api_key: str, default_model: str = "gpt-4.1") -> None:
+    def __init__(self, api_key: str, default_model: str = "gpt-5.2") -> None:
         self.api_key = api_key
         self.default_model = default_model
         self._client: Any = None

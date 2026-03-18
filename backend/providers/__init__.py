@@ -20,14 +20,14 @@ PROVIDER_CATALOGUE: dict[str, dict[str, Any]] = {
         "class": "OpenAIProvider",
         "display_name": "OpenAI",
         "key_prefix": "sk-",
-        "default_model": "gpt-4.1",
+        "default_model": "gpt-5.2",
     },
     "anthropic": {
         "module": "backend.providers.anthropic_provider",
         "class": "AnthropicProvider",
         "display_name": "Anthropic",
         "key_prefix": "sk-ant-",
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": "claude-opus-4-6",
     },
     "google": {
         "module": "backend.providers.google_provider",

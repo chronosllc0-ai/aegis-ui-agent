@@ -19,6 +19,7 @@ export type AppSettings = {
   systemInstruction: string
   personalityPreset: string
   temperature: number
+  provider: string
   model: string
   autoScreenshot: boolean
   verboseLogging: boolean
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   systemInstruction: 'You are Aegis. Be helpful, concise, and safe when taking actions.',
   personalityPreset: 'Professional',
   temperature: 0.7,
+  provider: 'google',
   model: 'gemini-2.5-pro',
   autoScreenshot: true,
   verboseLogging: false,
@@ -87,6 +89,7 @@ export function useSettings() {
 
   const wsConfig = useMemo(
     () => ({
+      provider: settings.provider,
       model: settings.model,
       system_instruction: settings.systemInstruction,
       temperature: settings.temperature,
