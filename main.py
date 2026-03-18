@@ -58,6 +58,9 @@ app.include_router(auth_router)
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
 key_manager = KeyManager(settings.ENCRYPTION_SECRET)
+db_init_task: asyncio.Task[None] | None = None
+db_init_error: str | None = None
+db_ready = False
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -65,12 +68,50 @@ FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 # ── Database lifecycle ────────────────────────────────────────────────
 
 
+async def _initialize_database() -> None:
+    """Initialize the database with retries without blocking app readiness."""
+    global db_ready, db_init_error
+
+    retry_delay_seconds = 5
+    while True:
+        try:
+            init_db(settings.DATABASE_URL or None)
+            await create_tables()
+        except Exception as exc:  # noqa: BLE001
+            db_ready = False
+            db_init_error = exc.__class__.__name__
+            logger.exception(
+                "Database initialization failed; retrying in %s seconds",
+                retry_delay_seconds,
+            )
+            await asyncio.sleep(retry_delay_seconds)
+        else:
+            db_ready = True
+            db_init_error = None
+            logger.info("Database initialized")
+            return
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Initialize database on application startup."""
-    init_db(settings.DATABASE_URL or None)
-    await create_tables()
-    logger.info("Database initialized")
+    """Kick off database initialization on application startup."""
+    global db_init_task
+
+    if db_init_task is None or db_init_task.done():
+        db_init_task = asyncio.create_task(_initialize_database())
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Cancel any outstanding background initialization tasks."""
+    global db_init_task
+
+    if db_init_task is not None and not db_init_task.done():
+        db_init_task.cancel()
+        try:
+            await db_init_task
+        except asyncio.CancelledError:
+            logger.info("Database initialization task cancelled during shutdown")
 
 
 # ── Auth helper ───────────────────────────────────────────────────────
@@ -224,8 +265,13 @@ async def delete_user_key(
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Return service health status."""
-    return {"status": "ok", "version": "1.0.0"}
+    """Return service health status without failing while dependencies warm up."""
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "database": "ready" if db_ready else "initializing",
+        "database_error": "initialization_failed" if db_init_error else "",
+    }
 
 
 # ── WebSocket helpers ─────────────────────────────────────────────────
