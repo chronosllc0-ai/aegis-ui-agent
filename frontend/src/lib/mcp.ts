@@ -28,7 +28,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'web-search',
     name: 'Web Search',
-    icon: '🌐',
+    icon: 'web-search',
     description: 'Search the web and extract content.',
     enabled: false,
     status: 'disabled',
@@ -38,7 +38,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'filesystem',
     name: 'File System',
-    icon: '📁',
+    icon: 'filesystem',
     description: 'Read/write local files and manage downloads.',
     enabled: false,
     status: 'disabled',
@@ -48,7 +48,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'code-exec',
     name: 'Code Execution',
-    icon: '💻',
+    icon: 'code-exec',
     description: 'Execute sandboxed snippets.',
     enabled: false,
     status: 'disabled',
@@ -73,7 +73,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'slack',
     name: 'Slack',
-    icon: '💬',
+    icon: 'slack',
     description: 'Slack channels and messaging tools.',
     enabled: false,
     status: 'disabled',
@@ -87,7 +87,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'discord',
     name: 'Discord',
-    icon: '💬',
+    icon: 'discord',
     description: 'Discord guild channels and files.',
     enabled: false,
     status: 'disabled',
