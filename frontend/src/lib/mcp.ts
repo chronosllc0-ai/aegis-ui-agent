@@ -7,6 +7,7 @@ export type AuthType = 'none' | 'api_key' | 'oauth'
 export type IntegrationStatus = 'connected' | 'error' | 'disabled'
 export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'custom'
 
+
 export type IntegrationConfig = {
   id: string
   name: string
@@ -27,6 +28,24 @@ export type CustomServerForm = {
   serverUrl: string
   authType: AuthType
   apiKey: string
+}
+
+const INTEGRATION_ICON_MAP = {
+  'web-search': LuGlobe,
+  filesystem: LuFolder,
+  'code-exec': LuCode,
+  telegram: SiTelegram,
+  slack: SiSlack,
+  discord: SiDiscord,
+  custom: LuPlus,
+} as const
+
+const LEGACY_INTEGRATION_ICON_MAP: Record<string, IntegrationIcon> = {
+  '🌐': 'web-search',
+  '📁': 'filesystem',
+  '💻': 'code-exec',
+  '💬': 'slack',
+  '➕': 'custom',
 }
 
 export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
@@ -103,6 +122,33 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
     tools: ['discord_get_messages', 'discord_send_message', 'discord_list_channels', 'discord_send_file'],
   },
 ]
+
+function isIntegrationIcon(value: string): value is IntegrationIcon {
+  return value in INTEGRATION_ICON_MAP
+}
+
+export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon = 'custom'): string {
+  if (!icon) return fallback
+  if (isIntegrationIcon(icon)) return icon
+  if (icon.startsWith('http')) return icon
+  return LEGACY_INTEGRATION_ICON_MAP[icon] ?? fallback
+}
+
+export function normalizeIntegrationConfig(integration: IntegrationConfig): IntegrationConfig {
+  return {
+    ...integration,
+    icon: normalizeIntegrationIcon(integration.icon, integration.id === 'telegram' ? 'telegram' : integration.id === 'discord' ? 'discord' : integration.id === 'slack' ? 'slack' : 'custom'),
+  }
+}
+
+export function renderIntegrationIcon(icon: string, className = 'h-4 w-4') {
+  const normalized = normalizeIntegrationIcon(icon)
+  if (normalized.startsWith('http')) {
+    return null
+  }
+  const resolved = isIntegrationIcon(normalized) ? normalized : 'custom'
+  return createElement(INTEGRATION_ICON_MAP[resolved] ?? LuLock, { className, 'aria-hidden': 'true' })
+}
 
 export function maskSecret(value: string): string {
   if (!value) return ''

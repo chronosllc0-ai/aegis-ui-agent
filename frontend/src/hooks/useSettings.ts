@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { DEFAULT_INTEGRATIONS, type IntegrationConfig } from '../lib/mcp'
+import { DEFAULT_INTEGRATIONS, normalizeIntegrationConfig, type IntegrationConfig } from '../lib/mcp'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
@@ -52,7 +52,13 @@ function loadInitialSettings(): AppSettings {
   if (!raw) return DEFAULT_SETTINGS
   try {
     const parsed = JSON.parse(raw) as Partial<AppSettings>
-    return { ...DEFAULT_SETTINGS, ...parsed }
+    const merged = { ...DEFAULT_SETTINGS, ...parsed }
+    return {
+      ...merged,
+      integrations: Array.isArray(merged.integrations)
+        ? merged.integrations.map((integration) => normalizeIntegrationConfig(integration))
+        : DEFAULT_SETTINGS.integrations,
+    }
   } catch {
     localStorage.removeItem(STORAGE_KEY)
     return DEFAULT_SETTINGS

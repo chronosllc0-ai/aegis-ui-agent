@@ -23,8 +23,9 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   const [integrationErrors, setIntegrationErrors] = useState<Record<string, string | null>>({})
 
   const renderIcon = (icon: string, name: string) => {
-    if (icon.startsWith('http')) {
-      return <img src={icon} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
+    const normalized = normalizeIntegrationIcon(icon)
+    if (normalized.startsWith('http')) {
+      return <img src={normalized} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
     }
     return <BrandIcon id={icon} className='h-4 w-4' />
   }
