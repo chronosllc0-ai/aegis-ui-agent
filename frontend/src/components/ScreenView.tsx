@@ -23,26 +23,34 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
   useEffect(() => {
     if (!frameSrc) return
     if (!displayFrame) {
-      setDisplayFrame(frameSrc)
-      return
+      const timeout = window.setTimeout(() => setDisplayFrame(frameSrc), 0)
+      return () => window.clearTimeout(timeout)
     }
     if (frameSrc !== displayFrame) {
-      setOverlayFrame(frameSrc)
-      setFading(true)
-      const timeout = window.setTimeout(() => {
+      const startTimeout = window.setTimeout(() => {
+        setOverlayFrame(frameSrc)
+        setFading(true)
+      }, 0)
+      const finishTimeout = window.setTimeout(() => {
         setDisplayFrame(frameSrc)
         setOverlayFrame('')
         setFading(false)
       }, 250)
-      return () => window.clearTimeout(timeout)
+      return () => {
+        window.clearTimeout(startTimeout)
+        window.clearTimeout(finishTimeout)
+      }
     }
   }, [displayFrame, frameSrc])
 
   useEffect(() => {
     if (steeringFlashKey === 0) return
-    setShowSteering(true)
-    const timeout = window.setTimeout(() => setShowSteering(false), 900)
-    return () => window.clearTimeout(timeout)
+    const showTimeout = window.setTimeout(() => setShowSteering(true), 0)
+    const hideTimeout = window.setTimeout(() => setShowSteering(false), 900)
+    return () => {
+      window.clearTimeout(showTimeout)
+      window.clearTimeout(hideTimeout)
+    }
   }, [steeringFlashKey])
 
   const hasFrame = Boolean(displayFrame)

@@ -1,6 +1,11 @@
 // ── Provider + Model catalogue ───────────────────────────────────────
 // Last updated: 2026-03-18 — sourced from official provider docs
 
+import { createElement } from 'react'
+import type { IconType } from 'react-icons'
+import { FcGoogle } from 'react-icons/fc'
+import { LuBot, LuBrainCircuit, LuWind, LuZap } from 'react-icons/lu'
+
 export type ModelInfo = {
   id: string
   label: string
@@ -12,7 +17,7 @@ export type ProviderInfo = {
   id: string
   displayName: string
   models: ModelInfo[]
-  icon: string
+  icon: IconType
   keyPrefix: string
 }
 
@@ -21,7 +26,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'google',
     displayName: 'Google (Gemini)',
-    icon: 'https://i.postimg.cc/NMtZmLXT/download_4.png',
+    icon: FcGoogle,
     keyPrefix: '',
     models: [
       { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Latest Gemini 3 series — cutting-edge reasoning & multimodal.', vision: true },
@@ -35,7 +40,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'openai',
     displayName: 'OpenAI',
-    icon: '🤖',
+    icon: LuBot,
     keyPrefix: 'sk-',
     models: [
       { id: 'gpt-5.2', label: 'GPT-5.2', description: 'Flagship — best for coding and agentic tasks.', vision: true },
@@ -54,7 +59,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'anthropic',
     displayName: 'Anthropic',
-    icon: '🧠',
+    icon: LuBrainCircuit,
     keyPrefix: 'sk-ant-',
     models: [
       { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent — agents and coding. 1M context.', vision: true },
@@ -68,7 +73,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'mistral',
     displayName: 'Mistral AI',
-    icon: '🌀',
+    icon: LuWind,
     keyPrefix: '',
     models: [
       { id: 'mistral-large-latest', label: 'Mistral Large 3', description: 'State-of-the-art open-weight multimodal model.', vision: true },
@@ -83,7 +88,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'groq',
     displayName: 'Groq',
-    icon: '⚡',
+    icon: LuZap,
     keyPrefix: 'gsk_',
     models: [
       { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', description: 'Llama 4 on Groq — fast multimodal inference.', vision: true },
@@ -127,3 +132,7 @@ export const MODEL_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
 export const MODEL_OPTIONS = allModelIds()
 
 export const MODEL_ICON_URL = 'https://i.postimg.cc/NMtZmLXT/download_4.png'
+
+export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
+  return createElement(provider.icon, { className, 'aria-hidden': 'true' })
+}
