@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Icons } from '../icons'
 import { PROVIDERS, renderProviderIcon } from '../../lib/models'
 import { apiUrl } from '../../lib/api'
-import { Icons } from '../icons'
 
 type StoredKey = {
   provider: string

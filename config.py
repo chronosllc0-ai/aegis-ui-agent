@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
     PUBLIC_BASE_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:5173"
+    CORS_ORIGINS: str = ""  # comma-separated extra origins (e.g. "https://mohex.org,https://app.netlify.app")
 
     # ── OAuth providers ──────────────────────────────────────────────
     GOOGLE_OAUTH_CLIENT_ID: str = ""

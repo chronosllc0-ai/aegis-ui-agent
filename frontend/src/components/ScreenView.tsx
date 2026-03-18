@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 type ScreenViewProps = {
   frameSrc: string
   isWorking: boolean
@@ -13,11 +15,7 @@ const EXAMPLES = [
 ]
 
 export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
-  const hasFrame = Boolean(frameSrc)
-  const [showSteering, setShowSteering] = useState(false)
   const [displayFrame, setDisplayFrame] = useState('')
-  const [overlayFrame, setOverlayFrame] = useState('')
-  const [fading, setFading] = useState(false)
 
   useEffect(() => {
     if (!frameSrc) return
@@ -26,31 +24,10 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
       return () => window.clearTimeout(timeout)
     }
     if (frameSrc !== displayFrame) {
-      const startTimeout = window.setTimeout(() => {
-        setOverlayFrame(frameSrc)
-        setFading(true)
-      }, 0)
-      const finishTimeout = window.setTimeout(() => {
-        setDisplayFrame(frameSrc)
-        setOverlayFrame('')
-        setFading(false)
-      }, 250)
-      return () => {
-        window.clearTimeout(startTimeout)
-        window.clearTimeout(finishTimeout)
-      }
+      const timeout = window.setTimeout(() => setDisplayFrame(frameSrc), 0)
+      return () => window.clearTimeout(timeout)
     }
   }, [displayFrame, frameSrc])
-
-  useEffect(() => {
-    if (steeringFlashKey === 0) return
-    const showTimeout = window.setTimeout(() => setShowSteering(true), 0)
-    const hideTimeout = window.setTimeout(() => setShowSteering(false), 900)
-    return () => {
-      window.clearTimeout(showTimeout)
-      window.clearTimeout(hideTimeout)
-    }
-  }, [steeringFlashKey])
 
   const hasFrame = Boolean(displayFrame)
 
@@ -68,7 +45,7 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
         </div>
       )}
       {hasFrame ? (
-        <img src={frameSrc} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
+        <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
       ) : (
         <div className='flex min-h-full flex-col items-center justify-start px-6 py-8 text-center md:justify-center'>
           <img src='/shield.svg' alt='Aegis logo' className='mb-5 h-16 w-16 opacity-90' />

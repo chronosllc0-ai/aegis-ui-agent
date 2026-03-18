@@ -66,7 +66,6 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
       const now = performance.now()
-      const elapsed = entry.elapsedSeconds ?? (lastStepAtRef.current === 0 ? 0 : (now - lastStepAtRef.current) / 1000)
       const elapsed =
         entry.elapsedSeconds ?? (lastStepAtRef.current > 0 ? (now - lastStepAtRef.current) / 1000 : 0)
       lastStepAtRef.current = now
@@ -116,7 +115,6 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         if (reconnectRef.current !== null) {
           window.clearTimeout(reconnectRef.current)
         }
-        reconnectRef.current = window.setTimeout(connectSocket, 1500)
         reconnectRef.current = window.setTimeout(() => connectRef.current(), 1500)
       }
     }

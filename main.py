@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Aegis UI Navigator", version="1.0.0")
 cors_origins = [origin for origin in {settings.FRONTEND_URL, settings.PUBLIC_BASE_URL} if origin]
+if settings.CORS_ORIGINS:
+    cors_origins.extend([o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()])
 if not cors_origins:
     cors_origins = ["http://localhost:5173", "http://localhost:8000"]
 app.add_middleware(
