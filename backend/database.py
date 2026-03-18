@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from sqlalchemy import Column, DateTime, String, Text, func
+from sqlalchemy import Column, DateTime, String, Text, func, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -31,6 +31,7 @@ class User(Base):
     email = Column(String(320))
     name = Column(String(255))
     avatar_url = Column(Text)
+    password_hash = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -98,7 +99,19 @@ async def create_tables() -> None:
         raise RuntimeError("Call init_db() before create_tables()")
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_user_columns_sync)
     logger.info("Database tables ensured")
+
+
+def _ensure_user_columns_sync(sync_conn) -> None:
+    """Apply lightweight schema fixes for local dev without a migration tool."""
+    inspector = inspect(sync_conn)
+    if "users" not in inspector.get_table_names():
+        return
+
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    if "password_hash" not in user_columns:
+        sync_conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

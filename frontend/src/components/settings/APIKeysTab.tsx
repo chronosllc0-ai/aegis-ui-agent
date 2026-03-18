@@ -93,6 +93,10 @@ export function APIKeysTab() {
         </p>
       )}
 
+      {loading && (
+        <p className='text-xs text-zinc-500'>Loading saved API keys...</p>
+      )}
+
       <div className='space-y-4'>
         {PROVIDERS.map((provider) => {
           const stored = storedMap[provider.id]

@@ -1,3 +1,4 @@
+import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { PROVIDERS } from '../lib/models'
 
@@ -27,7 +28,7 @@ const FEATURES = [
   {
     title: 'Bring Your Own Key',
     description:
-      'Use your own API keys for any provider. Keys are encrypted at rest — you control your usage and billing.',
+      'Use your own API keys for any provider. Keys are encrypted at rest, so you control your usage and billing.',
     icon: Icons.settings,
   },
   {
@@ -111,6 +112,51 @@ const PRICING = [
   },
 ]
 
+const LANDING_SLIDES: EntrySlide[] = [
+  {
+    id: 'see',
+    eyebrow: 'Vision loop',
+    title: 'Aegis sees the screen before it acts.',
+    description: 'Each run captures the viewport, reasons over the current UI state, and then executes the next action with context instead of brittle selectors.',
+    bullets: [
+      'Screenshot-first analysis before every major step',
+      'Multimodal reasoning over visual layout and state',
+      'Safer automation when the UI changes underneath you',
+    ],
+    statLabel: 'Loop cadence',
+    statValue: 'Capture -> Analyze -> Act',
+    icon: (className) => Icons.globe({ className }),
+  },
+  {
+    id: 'steer',
+    eyebrow: 'Live control',
+    title: 'Interrupt, steer, or queue work while the agent is running.',
+    description: 'The operator stays in control the whole time. Aegis streams frames and logs live so you can redirect the task instead of starting over.',
+    bullets: [
+      'Queue the next instruction while the current task runs',
+      'Interrupt safely when the page drifts off course',
+      'Watch transcripts, frames, and action logs update live',
+    ],
+    statLabel: 'Control modes',
+    statValue: 'Steer / Interrupt / Queue',
+    icon: (className) => Icons.workflows({ className }),
+  },
+  {
+    id: 'models',
+    eyebrow: 'Model routing',
+    title: 'Switch providers without rebuilding the workflow.',
+    description: 'The same session can move across Gemini, GPT, Claude, Mistral, and Groq so you can trade off quality, latency, and cost as the task evolves.',
+    bullets: [
+      'Shared UI for provider and model selection',
+      'BYOK storage for your own provider credentials',
+      'Built for mixed-model agent sessions',
+    ],
+    statLabel: 'Providers',
+    statValue: `${PROVIDERS.length}+ available`,
+    icon: (className) => Icons.settings({ className }),
+  },
+]
+
 export function LandingPage({ onGetStarted }: LandingPageProps) {
   return (
     <main className='min-h-screen bg-[#0b0b0b] text-zinc-100'>
@@ -151,7 +197,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
           </h1>
           <p className='mt-5 max-w-lg text-base text-zinc-400'>
             Aegis sees your screen, reasons about intent, and acts with precision.
-            Powered by your choice of model — Gemini, GPT-4.1, Claude, Mistral, or Groq —
+            Powered by your choice of model: Gemini, GPT-4.1, Claude, Mistral, or Groq,
             with full BYOK support.
           </p>
           <div className='mt-6 flex flex-wrap gap-3'>
@@ -160,7 +206,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               onClick={onGetStarted}
               className='rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium hover:bg-blue-500'
             >
-              Get started — it's free
+              Get started free
             </button>
             <a
               href='#how'
@@ -188,25 +234,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
             </div>
           </div>
         </div>
-        <div className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-6'>
-          <p className='text-xs uppercase tracking-[0.3em] text-zinc-500'>Live session preview</p>
-          <div className='mt-4 space-y-4'>
-            {[
-              'Real-time frames stream as the agent navigates.',
-              'Action logs show reasoning and step progression.',
-              'Voice transcripts appear alongside steering controls.',
-              'Switch models mid-session without losing context.',
-            ].map((item) => (
-              <div
-                key={item}
-                className='flex items-center gap-3 rounded-lg border border-[#1f1f1f] bg-[#0f0f0f] px-3 py-2 text-sm text-zinc-300'
-              >
-                {Icons.check({ className: 'h-4 w-4 shrink-0 text-blue-300' })}
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <EntrySlider slides={LANDING_SLIDES} />
       </section>
 
       {/* ── Features ────────────────────────────────────────────────── */}
@@ -214,7 +242,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
         <div className='mb-10 text-center'>
           <h2 className='text-3xl font-semibold'>Everything you need to automate the web</h2>
           <p className='mx-auto mt-3 max-w-xl text-sm text-zinc-400'>
-            Multi-model support, real-time control, encrypted BYOK — designed for production use.
+            Multi-model support, real-time control, and encrypted BYOK designed for production use.
           </p>
         </div>
         <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
@@ -268,7 +296,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               <ul className='mt-5 space-y-2'>
                 {[
                   'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
-                  'Keys encrypted at rest — never logged or shared',
+                  'Keys encrypted at rest, never logged or shared',
                   'Remove or rotate keys anytime from Settings',
                   'Platform fallback when no user key is set',
                 ].map((item) => (

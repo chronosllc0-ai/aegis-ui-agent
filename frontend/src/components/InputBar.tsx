@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
-import { PROVIDERS, providerById, providerForModel, modelInfo } from '../lib/models'
+import { PROVIDERS, providerById, modelInfo } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
 import { SteeringControl } from './SteeringControl'

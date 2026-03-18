@@ -16,17 +16,22 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any
 
-import aiosmtplib
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import AuthCode, User, get_session
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+try:
+    import aiosmtplib
+except ModuleNotFoundError:  # pragma: no cover - optional local dependency
+    aiosmtplib = None
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 oauth = OAuth()
@@ -106,7 +111,7 @@ def _session_response(user: dict[str, Any], redirect: str | None = None) -> Redi
     if redirect:
         response = RedirectResponse(redirect)
     else:
-        response = JSONResponse({"ok": True, "user": user})
+        response = JSONResponse(jsonable_encoder({"ok": True, "user": user}))
     response.set_cookie(
         "aegis_session",
         token,
@@ -129,6 +134,8 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
         existing.email = profile.get("email")
         existing.name = profile.get("name")
         existing.avatar_url = profile.get("avatar_url")
+        if profile.get("password_hash"):
+            existing.password_hash = profile["password_hash"]
         existing.last_login_at = now
         payload = {
             "uid": existing.uid,
@@ -148,6 +155,7 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
             email=profile.get("email"),
             name=profile.get("name"),
             avatar_url=profile.get("avatar_url"),
+            password_hash=profile.get("password_hash"),
             created_at=now,
             last_login_at=now,
         )
@@ -178,6 +186,8 @@ def _frontend_redirect() -> str:
 async def _send_email(recipient: str, subject: str, body: str) -> None:
     if not settings.SMTP_HOST or not settings.SMTP_SENDER:
         raise HTTPException(status_code=500, detail="SMTP is not configured")
+    if aiosmtplib is None:
+        raise HTTPException(status_code=500, detail="Email sign-in is unavailable: aiosmtplib is not installed")
     message = EmailMessage()
     message["From"] = settings.SMTP_SENDER
     message["To"] = recipient
@@ -197,6 +207,40 @@ async def _send_email(recipient: str, subject: str, body: str) -> None:
 def _hash_code(code: str) -> str:
     _require_session_secret()
     return hmac.new(settings.SESSION_SECRET.encode("utf-8"), code.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _password_uid(email: str) -> str:
+    return f"password:{email}"
+
+
+def _hash_password(password: str) -> str:
+    _require_session_secret()
+    salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt + settings.SESSION_SECRET.encode("utf-8"),
+        120_000,
+    )
+    return f"pbkdf2_sha256${salt.hex()}${derived.hex()}"
+
+
+def _verify_password(password: str, password_hash: str | None) -> bool:
+    if not password_hash:
+        return False
+    try:
+        algorithm, salt_hex, digest_hex = password_hash.split("$", 2)
+    except ValueError:
+        return False
+    if algorithm != "pbkdf2_sha256":
+        return False
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        bytes.fromhex(salt_hex) + settings.SESSION_SECRET.encode("utf-8"),
+        120_000,
+    )
+    return hmac.compare_digest(derived.hex(), digest_hex)
 
 
 # ── OAuth routes ──────────────────────────────────────────────────────
@@ -329,6 +373,65 @@ async def email_start(payload: dict[str, Any], session: AsyncSession = Depends(g
         raise HTTPException(status_code=500, detail=f"Email sign-in failed: {exc}") from exc
 
     return {"ok": True}
+
+
+@router.post("/password/signup")
+async def password_signup(payload: dict[str, Any], session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Create a password-based account and sign the user in."""
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", "")).strip()
+    name = str(payload.get("name", "")).strip() or email.split("@", 1)[0]
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    existing = await session.get(User, _password_uid(email))
+    if existing:
+        raise HTTPException(status_code=409, detail="Account already exists. Sign in instead.")
+
+    profile = {
+        "uid": _password_uid(email),
+        "provider": "password",
+        "provider_id": email,
+        "email": email,
+        "name": name,
+        "avatar_url": None,
+        "password_hash": _hash_password(password),
+    }
+    user = await _upsert_user(session, profile)
+    return _session_response(user)
+
+
+@router.post("/password/login")
+async def password_login(payload: dict[str, Any], session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Sign in with an existing password-based account."""
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", "")).strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+
+    existing = await session.get(User, _password_uid(email))
+    if not existing or not _verify_password(password, existing.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    existing.last_login_at = datetime.now(timezone.utc)
+    await session.commit()
+    user = {
+        "uid": existing.uid,
+        "provider": existing.provider,
+        "provider_id": existing.provider_id,
+        "email": existing.email,
+        "name": existing.name,
+        "avatar_url": existing.avatar_url,
+        "created_at": existing.created_at,
+        "last_login_at": existing.last_login_at,
+    }
+    return _session_response(user)
 
 
 @router.post("/email/verify")

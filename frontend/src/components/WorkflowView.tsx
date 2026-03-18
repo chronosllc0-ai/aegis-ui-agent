@@ -92,6 +92,15 @@ export function WorkflowView({ steps }: WorkflowViewProps) {
   )
 }
 
+function SummaryCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div className='rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2'>
+      <p className='text-[11px] uppercase tracking-wide text-zinc-500'>{title}</p>
+      <p className='mt-1 text-sm font-semibold text-zinc-100'>{value}</p>
+    </div>
+  )
+}
+
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
