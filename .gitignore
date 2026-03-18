@@ -5,3 +5,8 @@ node_modules/
 dist/
 .venv/
 *.egg-info/
+
+# Dev artifacts
+*.db
+*.log
+.superpowers/

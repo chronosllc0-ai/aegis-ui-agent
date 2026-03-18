@@ -20,6 +20,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.database import get_session, init_db, create_tables
+from backend.credit_rates import CREDIT_RATES, get_tier
+from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
 from backend.key_management import KeyManager
 from backend.providers import get_provider, list_providers
 from config import settings
@@ -259,6 +261,65 @@ async def delete_user_key(
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")
     return {"ok": True, "provider": provider}
+
+
+# ── Usage / Credit API routes ─────────────────────────────────────────
+
+
+@app.get("/api/usage/balance")
+async def usage_balance(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return current credit balance for the authenticated user."""
+    user = _get_current_user(request)
+    return await check_credits(session, user["uid"])
+
+
+@app.get("/api/usage/summary")
+async def usage_summary(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return aggregated usage stats for the dashboard."""
+    user = _get_current_user(request)
+    return await get_usage_summary(session, user["uid"])
+
+
+@app.get("/api/usage/history")
+async def usage_history(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    limit: int = 50,
+    offset: int = 0,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Return paginated usage event log."""
+    user = _get_current_user(request)
+    return await get_usage_history(
+        session, user["uid"], limit=limit, offset=offset, provider=provider, model=model
+    )
+
+
+@app.get("/api/usage/rates")
+async def usage_rates() -> dict[str, Any]:
+    """Return all credit rates for client-side cost estimation."""
+    return {"rates": CREDIT_RATES}
+
+
+@app.put("/api/usage/spending-cap")
+async def set_spending_cap(
+    request: Request,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Set or remove the spending cap for the authenticated user."""
+    user = _get_current_user(request)
+    balance = await get_or_create_balance(session, user["uid"])
+    balance.spending_cap = payload.get("cap")
+    await session.commit()
+    return {"spending_cap": balance.spending_cap}
 
 
 # ── Health check ──────────────────────────────────────────────────────

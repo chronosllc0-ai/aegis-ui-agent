@@ -8,6 +8,7 @@ import { AgentTab } from './AgentTab'
 import { APIKeysTab } from './APIKeysTab'
 import { IntegrationsTab } from './IntegrationsTab'
 import { ProfileTab } from './ProfileTab'
+import { UsageTab } from './UsageTab'
 import { WorkflowsTab } from './WorkflowsTab'
 
 type SettingsPageProps = {
@@ -15,7 +16,7 @@ type SettingsPageProps = {
   onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Integrations', 'Workflows'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Integrations', 'Workflows'] as const
 const TAB_KEY = 'aegis.settings.activeTab'
 
 export function SettingsPage({ onBack, onRunWorkflow }: SettingsPageProps) {
@@ -48,6 +49,7 @@ export function SettingsPage({ onBack, onRunWorkflow }: SettingsPageProps) {
         {activeTab === 'Profile' && <ProfileTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
+        {activeTab === 'Usage' && <UsageTab />}
         {activeTab === 'Integrations' && <IntegrationsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} />}
         {activeTab === 'Workflows' && <WorkflowsTab workflows={settings.workflowTemplates} onChange={(workflowTemplates) => onPatch({ workflowTemplates })} onRun={(instruction) => onRunWorkflow(instruction, 'steer')} />}
       </div>

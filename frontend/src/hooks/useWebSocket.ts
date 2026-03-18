@@ -32,8 +32,9 @@ export type WorkflowStep = {
 }
 
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript'
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick'
   data?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 function guessStepKind(message: string): LogEntry['stepKind'] {
@@ -46,7 +47,7 @@ function guessStepKind(message: string): LogEntry['stepKind'] {
   return 'other'
 }
 
-export function useWebSocket() {
+export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => void) {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [isWorking, setIsWorking] = useState(false)
   const [latestFrame, setLatestFrame] = useState('')
@@ -185,12 +186,16 @@ export function useWebSocket() {
         }
         return
       }
+      if (payload.type === 'usage' || payload.type === 'usage_tick') {
+        onUsageMessage?.(payload as unknown as Record<string, unknown>)
+        return
+      }
       if (payload.type === 'error') {
         setIsWorking(false)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
       }
     }
-  }, [appendLog])
+  }, [appendLog, onUsageMessage])
 
   useEffect(() => {
     connectRef.current = connect
