@@ -50,12 +50,14 @@ def test_websocket_navigate_smoke() -> None:
         ws.send_json({"action": "navigate", "instruction": "hello"})
         step = ws.receive_json()
         frame = ws.receive_json()
+        workflow_step = ws.receive_json()
         result = ws.receive_json()
         ws.send_json({"action": "stop"})
 
     assert initial["type"] == "frame"
     assert step["type"] == "step"
     assert frame["type"] == "frame"
+    assert workflow_step["type"] == "workflow_step"
     assert result["type"] == "result"
     assert result["data"]["status"] == "completed"
 
@@ -78,3 +80,22 @@ def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
     assert error["data"]["message"] == "Invalid queue index"
     assert queue_ack["type"] == "step"
     assert "Queued instruction: later" in queue_ack["data"]["content"]
+
+
+def test_health_reports_initializing_database_state() -> None:
+    """Health endpoint should stay available while the database is still warming up."""
+    previous_db_ready = main.db_ready
+    previous_db_error = main.db_init_error
+    main.db_ready = False
+    main.db_init_error = "connection refused"
+
+    client = TestClient(main.app)
+    response = client.get("/health")
+
+    main.db_ready = previous_db_ready
+    main.db_init_error = previous_db_error
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["database"] == "initializing"
+    assert response.json()["database_error"] == "connection refused"
