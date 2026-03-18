@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 type ScreenViewProps = {
   frameSrc: string
   isWorking: boolean
@@ -15,59 +13,23 @@ const EXAMPLES = [
 ]
 
 export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
-  const [showSteering, setShowSteering] = useState(false)
-  const [displayFrame, setDisplayFrame] = useState('')
-  const [overlayFrame, setOverlayFrame] = useState('')
-  const [fading, setFading] = useState(false)
-
-  useEffect(() => {
-    if (!frameSrc) return
-    if (!displayFrame) {
-      setDisplayFrame(frameSrc)
-      return
-    }
-    if (frameSrc !== displayFrame) {
-      setOverlayFrame(frameSrc)
-      setFading(true)
-      const timeout = window.setTimeout(() => {
-        setDisplayFrame(frameSrc)
-        setOverlayFrame('')
-        setFading(false)
-      }, 250)
-      return () => window.clearTimeout(timeout)
-    }
-  }, [displayFrame, frameSrc])
-
-  useEffect(() => {
-    if (steeringFlashKey === 0) return
-    setShowSteering(true)
-    const timeout = window.setTimeout(() => setShowSteering(false), 900)
-    return () => window.clearTimeout(timeout)
-  }, [steeringFlashKey])
-
-  const hasFrame = Boolean(displayFrame)
+  const hasFrame = Boolean(frameSrc)
 
   return (
     <section className='relative h-full min-h-0 overflow-auto rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
       <div className='absolute inset-x-0 top-0 z-20 h-0.5 bg-zinc-800'>
         <div className={`h-full bg-blue-500 transition-all ${isWorking ? 'w-full animate-pulse' : 'w-0'}`} />
       </div>
-      {showSteering && (
-        <div className='absolute left-4 top-4 z-20 rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'>
+      {steeringFlashKey > 0 && (
+        <div
+          key={steeringFlashKey}
+          className='absolute left-4 top-4 z-20 animate-[fade-slide_900ms_ease-out] rounded-md border border-blue-400/60 bg-blue-500/20 px-3 py-1 text-sm text-blue-200'
+        >
           Steering...
         </div>
       )}
       {hasFrame ? (
-        <>
-          <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
-          {overlayFrame && (
-            <img
-              src={overlayFrame}
-              alt='Incoming browser stream'
-              className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-300 ${fading ? 'opacity-100' : 'opacity-0'}`}
-            />
-          )}
-        </>
+        <img src={frameSrc} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
       ) : (
         <div className='flex min-h-full flex-col items-center justify-start px-6 py-8 text-center md:justify-center'>
           <img src='/shield.svg' alt='Aegis logo' className='mb-5 h-16 w-16 opacity-90' />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
 type IntegrationsTabProps = {
   integrations: IntegrationConfig[]
@@ -19,13 +19,6 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [integrationErrors, setIntegrationErrors] = useState<Record<string, string | null>>({})
-
-  const renderIcon = (icon: string, name: string) => {
-    if (icon.startsWith('http')) {
-      return <img src={icon} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
-    }
-    return <span>{icon}</span>
-  }
 
   const updateIntegration = (id: string, patch: Partial<IntegrationConfig>) => {
     onChange(integrations.map((integration) => (integration.id === id ? { ...integration, ...patch } : integration)))
@@ -204,7 +197,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     const next: IntegrationConfig = {
       id: crypto.randomUUID(),
       name: form.serverName,
-      icon: '➕',
+      icon: 'custom',
       description: `Custom MCP server at ${form.serverUrl}`,
       enabled: false,
       status: 'disabled',
@@ -237,7 +230,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                 <div className='flex items-start justify-between gap-4'>
                 <div>
                   <div className='flex items-center gap-2'>
-                    {renderIcon(integration.icon, integration.name)}
+                    {renderIntegrationIcon(integration.icon)}
                     <p className='font-medium'>{integration.name}</p>
                   </div>
                   <p className='text-xs text-zinc-400'>{integration.description}</p>

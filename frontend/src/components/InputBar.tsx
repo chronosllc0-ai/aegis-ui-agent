@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
-import { PROVIDERS, providerById, modelInfo } from '../lib/models'
+import { PROVIDERS, modelInfo, providerById, renderProviderIcon } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
 import { SteeringControl } from './SteeringControl'
@@ -49,11 +49,7 @@ function ModelPicker({
       {/* Provider selector */}
       <label className='flex items-center gap-1.5 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
         <span className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-xs'>
-          {currentProvider.icon.startsWith('http') ? (
-            <img src={currentProvider.icon} alt={currentProvider.displayName} className='h-4 w-4' />
-          ) : (
-            currentProvider.icon
-          )}
+          {renderProviderIcon(currentProvider)}
         </span>
         <select
           value={provider}
@@ -121,8 +117,11 @@ export function InputBar({
   useEffect(() => {
     if (!examplePrompt) return
     const instruction = examplePrompt.trim()
-    if (instruction) setValue(instruction)
-    onExampleHandled?.()
+    const timeout = window.setTimeout(() => {
+      if (instruction) setValue(instruction)
+      onExampleHandled?.()
+    }, 0)
+    return () => window.clearTimeout(timeout)
   }, [examplePrompt, onExampleHandled])
 
   const recentTranscripts = useMemo(() => transcripts.slice(-3).reverse(), [transcripts])
