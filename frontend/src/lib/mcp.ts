@@ -7,7 +7,6 @@ export type AuthType = 'none' | 'api_key' | 'oauth'
 export type IntegrationStatus = 'connected' | 'error' | 'disabled'
 export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'custom'
 
-export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'custom'
 
 export type IntegrationConfig = {
   id: string
