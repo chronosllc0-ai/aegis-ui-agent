@@ -1,7 +1,5 @@
 import { useState } from 'react'
 import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
-import { BrandIcon } from '../icons'
-import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
 type IntegrationsTabProps = {
   integrations: IntegrationConfig[]
@@ -21,14 +19,6 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [integrationErrors, setIntegrationErrors] = useState<Record<string, string | null>>({})
-
-  const renderIcon = (icon: string, name: string) => {
-    const normalized = normalizeIntegrationIcon(icon)
-    if (normalized.startsWith('http')) {
-      return <img src={normalized} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
-    }
-    return <BrandIcon id={icon} className='h-4 w-4' />
-  }
 
   const updateIntegration = (id: string, patch: Partial<IntegrationConfig>) => {
     onChange(integrations.map((integration) => (integration.id === id ? { ...integration, ...patch } : integration)))

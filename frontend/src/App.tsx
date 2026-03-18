@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
 import { AuthPage } from './components/AuthPage'
+import { CostEstimator } from './components/CostEstimator'
 import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
 import { ScreenView } from './components/ScreenView'
+import { SpendingAlert } from './components/SpendingAlert'
+import { UsageMeterBar } from './components/UsageMeterBar'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
+import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
 import { PROVIDERS, providerById } from './lib/models'
@@ -22,7 +26,8 @@ type TaskHistoryItem = {
 }
 
 function App() {
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket()
+  const { balance, sessionCredits, sessionMessages, streaming, rates, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
 
   const [mode, setMode] = useState<SteeringMode>('steer')
@@ -43,6 +48,9 @@ function App() {
   const [showLanding, setShowLanding] = useState(true)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [draftInput, setDraftInput] = useState('')
+  // draftInput is wired from InputBar's onChange → CostEstimator for pre-send cost preview
+  void setDraftInput // suppress unused warning — InputBar doesn't expose onChange yet
 
   const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -173,6 +181,7 @@ function App() {
     setTaskStartedAt(null)
     setDurationSeconds(0)
     resetClientState()
+    resetUsageSession()
     setSelectedTaskId(null)
     setShowWorkflow(false)
     void stopVoice()
@@ -283,21 +292,26 @@ function App() {
         </aside>
 
         <section className='flex min-h-0 flex-1 flex-col gap-3 md:ml-0'>
-          <header className='flex items-center justify-between rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
-            <div className='flex items-center gap-2'>
-              <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden' aria-label='Toggle sidebar'>
-                {Icons.menu({ className: 'h-4 w-4' })}
-              </button>
-              <img src='/shield.svg' alt='Aegis' className='h-5 w-5' />
-              <h1 className='text-lg font-semibold'>Aegis</h1>
+          <header className='space-y-2'>
+            <div className='flex items-center justify-between rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
+              <div className='flex items-center gap-2'>
+                <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden' aria-label='Toggle sidebar'>
+                  {Icons.menu({ className: 'h-4 w-4' })}
+                </button>
+                <img src='/shield.svg' alt='Aegis' className='h-5 w-5' />
+                <h1 className='text-lg font-semibold'>Aegis</h1>
+              </div>
+              <div className='flex items-center gap-3 text-xs text-zinc-300'>
+                <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-2 py-1'>
+                  <span className={`h-2.5 w-2.5 rounded-full ${connectionLabel.cls}`} /> {connectionLabel.label}
+                </span>
+                <span>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</span>
+                <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-3 py-1.5 hover:border-blue-500/60 hover:bg-zinc-900'>New Session</button>
+              </div>
             </div>
-            <div className='flex items-center gap-3 text-xs text-zinc-300'>
-              <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-2 py-1'>
-                <span className={`h-2.5 w-2.5 rounded-full ${connectionLabel.cls}`} /> {connectionLabel.label}
-              </span>
-              <span>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</span>
-              <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-3 py-1.5 hover:border-blue-500/60 hover:bg-zinc-900'>New Session</button>
-            </div>
+            {isAuthenticated && (
+              <UsageMeterBar balance={balance} sessionCredits={sessionCredits} sessionMessages={sessionMessages} streaming={streaming} />
+            )}
           </header>
 
           {!showSettings && (
@@ -330,32 +344,37 @@ function App() {
           </div>
 
           {!showSettings && (
-            <InputBar
-              mode={mode}
-              voiceActive={voiceActive}
-              voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
-              voiceError={voiceError}
-              onToggleVoice={toggleVoice}
-              sending={sending}
-              onModeChange={setMode}
-              onSend={handleSend}
-              provider={settings.provider}
-              model={settings.model}
-              onProviderChange={(nextProvider) => {
-                const p = providerById(nextProvider) ?? PROVIDERS[0]
-                patchSettings({ provider: nextProvider, model: p.models[0].id })
-              }}
-              onModelChange={(nextModel) => patchSettings({ model: nextModel })}
-              queuedMessages={queuedMessages}
-              onDeleteQueueItem={(index) => {
-                setQueuedMessages((prev) => prev.filter((_, i) => i !== index))
-                send({ action: 'dequeue', index })
-              }}
-              examplePrompt={examplePrompt}
-              onExampleHandled={() => setExamplePrompt(null)}
-              transcripts={transcripts}
-            />
+            <>
+              <InputBar
+                mode={mode}
+                voiceActive={voiceActive}
+                voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
+                voiceError={voiceError}
+                onToggleVoice={toggleVoice}
+                sending={sending}
+                onModeChange={setMode}
+                onSend={handleSend}
+                provider={settings.provider}
+                model={settings.model}
+                onProviderChange={(nextProvider) => {
+                  const p = providerById(nextProvider) ?? PROVIDERS[0]
+                  patchSettings({ provider: nextProvider, model: p.models[0].id })
+                }}
+                onModelChange={(nextModel) => patchSettings({ model: nextModel })}
+                queuedMessages={queuedMessages}
+                onDeleteQueueItem={(index) => {
+                  setQueuedMessages((prev) => prev.filter((_, i) => i !== index))
+                  send({ action: 'dequeue', index })
+                }}
+                examplePrompt={examplePrompt}
+                onExampleHandled={() => setExamplePrompt(null)}
+                transcripts={transcripts}
+                rates={rates}
+              />
+              <CostEstimator text={draftInput} provider={settings.provider} model={settings.model} rates={rates} />
+            </>
           )}
+          <SpendingAlert balance={balance} />
         </section>
       </div>
     </main>

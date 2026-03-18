@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { IconType } from 'react-icons'
-import { FaDiscord, FaFolder, FaGlobe, FaPlus, FaSlack, FaTelegram, FaTerminal } from 'react-icons/fa'
+import { FaDiscord, FaFolder, FaGlobe, FaLock, FaPlus, FaSlack, FaTelegram, FaTerminal } from 'react-icons/fa'
 
 export type AuthType = 'none' | 'api_key' | 'oauth'
 
@@ -30,15 +30,15 @@ export type CustomServerForm = {
   apiKey: string
 }
 
-const INTEGRATION_ICON_MAP = {
-  'web-search': LuGlobe,
-  filesystem: LuFolder,
-  'code-exec': LuCode,
-  telegram: SiTelegram,
-  slack: SiSlack,
-  discord: SiDiscord,
-  custom: LuPlus,
-} as const
+const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
+  'web-search': FaGlobe,
+  filesystem: FaFolder,
+  'code-exec': FaTerminal,
+  telegram: FaTelegram,
+  slack: FaSlack,
+  discord: FaDiscord,
+  custom: FaPlus,
+}
 
 const LEGACY_INTEGRATION_ICON_MAP: Record<string, IntegrationIcon> = {
   '🌐': 'web-search',
@@ -127,10 +127,9 @@ function isIntegrationIcon(value: string): value is IntegrationIcon {
   return value in INTEGRATION_ICON_MAP
 }
 
-export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon = 'custom'): string {
+export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon = 'custom'): IntegrationIcon {
   if (!icon) return fallback
   if (isIntegrationIcon(icon)) return icon
-  if (icon.startsWith('http')) return icon
   return LEGACY_INTEGRATION_ICON_MAP[icon] ?? fallback
 }
 
@@ -143,29 +142,12 @@ export function normalizeIntegrationConfig(integration: IntegrationConfig): Inte
 
 export function renderIntegrationIcon(icon: string, className = 'h-4 w-4') {
   const normalized = normalizeIntegrationIcon(icon)
-  if (normalized.startsWith('http')) {
-    return null
-  }
   const resolved = isIntegrationIcon(normalized) ? normalized : 'custom'
-  return createElement(INTEGRATION_ICON_MAP[resolved] ?? LuLock, { className, 'aria-hidden': 'true' })
+  return createElement(INTEGRATION_ICON_MAP[resolved] ?? FaLock, { className, 'aria-hidden': 'true' })
 }
 
 export function maskSecret(value: string): string {
   if (!value) return ''
   if (value.length < 8) return '••••••'
   return `${value.slice(0, 3)}••••${value.slice(-3)}`
-}
-
-const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
-  'web-search': FaGlobe,
-  filesystem: FaFolder,
-  'code-exec': FaTerminal,
-  telegram: FaTelegram,
-  slack: FaSlack,
-  discord: FaDiscord,
-  custom: FaPlus,
-}
-
-export function renderIntegrationIcon(icon: IntegrationIcon, className = 'h-4 w-4') {
-  return createElement(INTEGRATION_ICON_MAP[icon], { className, 'aria-hidden': 'true' })
 }

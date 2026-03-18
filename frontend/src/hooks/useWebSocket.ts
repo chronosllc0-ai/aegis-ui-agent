@@ -32,8 +32,9 @@ export type WorkflowStep = {
 }
 
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript'
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick'
   data?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 function guessStepKind(message: string): LogEntry['stepKind'] {
@@ -46,7 +47,7 @@ function guessStepKind(message: string): LogEntry['stepKind'] {
   return 'other'
 }
 
-export function useWebSocket() {
+export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => void) {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [isWorking, setIsWorking] = useState(false)
   const [latestFrame, setLatestFrame] = useState('')
@@ -65,7 +66,6 @@ export function useWebSocket() {
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
       const now = performance.now()
-      const elapsed = entry.elapsedSeconds ?? (lastStepAtRef.current === 0 ? 0 : (now - lastStepAtRef.current) / 1000)
       const elapsed =
         entry.elapsedSeconds ?? (lastStepAtRef.current > 0 ? (now - lastStepAtRef.current) / 1000 : 0)
       lastStepAtRef.current = now
@@ -115,7 +115,6 @@ export function useWebSocket() {
         if (reconnectRef.current !== null) {
           window.clearTimeout(reconnectRef.current)
         }
-        reconnectRef.current = window.setTimeout(connectSocket, 1500)
         reconnectRef.current = window.setTimeout(() => connectRef.current(), 1500)
       }
     }
@@ -185,12 +184,16 @@ export function useWebSocket() {
         }
         return
       }
+      if (payload.type === 'usage' || payload.type === 'usage_tick') {
+        onUsageMessage?.(payload as unknown as Record<string, unknown>)
+        return
+      }
       if (payload.type === 'error') {
         setIsWorking(false)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
       }
     }
-  }, [appendLog])
+  }, [appendLog, onUsageMessage])
 
   useEffect(() => {
     connectRef.current = connect

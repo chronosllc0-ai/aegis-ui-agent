@@ -17,7 +17,8 @@ interacts with any web UI using multimodal vision and real-time browser automati
 | 🧠 **Vision-first** | Multimodal screenshots → reasoning → Playwright actions |
 | ⚡ **Real-time** | WebSocket streams of actions, frames, and logs |
 | 🔗 **Integrations** | Telegram, Slack, and Discord connectors for agent delegation |
-| 🚀 **Railway-ready** | One-click deploy to Railway with PostgreSQL |
+| 💳 **Credit system** | Per-model cost tracking, usage dashboard, spending caps |
+| 🚀 **Deploy anywhere** | Railway (full-stack), Netlify (frontend) + Railway (API), Docker |
 
 ## Tech Stack
 
@@ -25,11 +26,13 @@ interacts with any web UI using multimodal vision and real-time browser automati
 - **Backend**: FastAPI + WebSockets + Playwright
 - **Database**: PostgreSQL (async via SQLAlchemy + asyncpg)
 - **LLM SDK**: `openai`, `anthropic`, `google-genai`, `mistralai`, `groq`
-- **Deploy**: Docker, Railway, docker-compose
+- **Deploy**: Docker, Railway, Netlify, docker-compose
+
+---
 
 ## Quick Start
 
-### 1. Docker Compose (recommended)
+### 1. Docker Compose (recommended for local dev)
 
 ```bash
 cp .env.example .env          # fill in at least one LLM key
@@ -50,7 +53,130 @@ uvicorn main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-### 3. Railway
+---
+
+## Deploy to Netlify (Frontend)
+
+Netlify hosts the React frontend as a static site. The FastAPI backend runs
+separately on Railway (or any server that supports WebSockets + Docker).
+
+### Step 1 — Deploy the backend to Railway
+
+```bash
+npm i -g @railway/cli
+railway login
+railway link          # link this repo
+railway up            # deploys from Dockerfile
+```
+
+Add a PostgreSQL plugin from the Railway dashboard, then set these env vars:
+
+| Variable | Value |
+|---|---|
+| `SESSION_SECRET` | Random 32+ char string |
+| `ENCRYPTION_SECRET` | Random 32+ char string |
+| `GEMINI_API_KEY` | (or any provider key) |
+
+Your backend will be live at something like `https://aegis-xyz.up.railway.app`.
+
+### Step 2 — Deploy the frontend to Netlify
+
+#### Option A: Netlify Dashboard (easiest)
+
+1. Go to [app.netlify.com](https://app.netlify.com) → **Add new site** → **Import an existing project**
+2. Connect your GitHub repo (`chronosllc0-ai/aegis-ui-agent`)
+3. Netlify auto-detects settings from `netlify.toml`:
+   - **Base directory**: `frontend`
+   - **Build command**: `npm ci && npm run build`
+   - **Publish directory**: `frontend/dist`
+4. Set environment variables in **Site configuration → Environment variables**:
+
+   | Variable | Value |
+   |---|---|
+   | `VITE_API_URL` | `https://your-backend.up.railway.app` |
+   | `VITE_WS_URL` | `wss://your-backend.up.railway.app/ws/navigate` |
+
+5. Click **Deploy site**
+
+#### Option B: Netlify CLI
+
+```bash
+# Install the CLI
+npm i -g netlify-cli
+
+# Login
+netlify login
+
+# Init (first time) — link to your Netlify account
+netlify init
+# Select "Create & configure a new site"
+# The CLI reads netlify.toml automatically
+
+# Set environment variables
+netlify env:set VITE_API_URL https://your-backend.up.railway.app
+netlify env:set VITE_WS_URL wss://your-backend.up.railway.app/ws/navigate
+
+# Deploy (preview)
+netlify deploy
+
+# Deploy to production
+netlify deploy --prod
+```
+
+#### Option C: Manual drag-and-drop
+
+```bash
+cd frontend
+npm ci
+VITE_API_URL=https://your-backend.up.railway.app \
+VITE_WS_URL=wss://your-backend.up.railway.app/ws/navigate \
+npm run build
+```
+
+Then drag the `frontend/dist/` folder into the Netlify dashboard deploy area.
+
+### Step 3 — Custom domain (optional)
+
+1. In Netlify dashboard → **Domain management** → **Add custom domain**
+2. Add `mohex.org` (or your domain)
+3. Update DNS:
+   - If using Netlify DNS: point nameservers to Netlify
+   - If external DNS: add a CNAME record pointing to `your-site.netlify.app`
+4. SSL is provisioned automatically
+
+### Step 4 — Configure CORS on the backend
+
+Since frontend (Netlify) and backend (Railway) are on different domains, make sure
+the backend allows cross-origin requests. In your Railway environment variables:
+
+| Variable | Value |
+|---|---|
+| `CORS_ORIGINS` | `https://mohex.org,https://your-site.netlify.app` |
+
+### Continuous deployment
+
+Once connected via GitHub, every push to `main` triggers:
+- Netlify rebuilds the frontend automatically
+- Railway rebuilds the backend automatically (if Railway is linked to the same repo)
+
+### Architecture (Netlify + Railway)
+
+```
+┌─────────────────────────┐          ┌─────────────────────────┐
+│  Netlify CDN            │   API    │  Railway                │
+│  ┌───────────────────┐  │  ──────► │  ┌───────────────────┐  │
+│  │ React SPA         │  │  HTTPS   │  │ FastAPI + WS      │  │
+│  │ (static assets)   │  │          │  │ Playwright         │  │
+│  └───────────────────┘  │  ◄────── │  │ PostgreSQL         │  │
+│  mohex.org              │  WSS     │  └───────────────────┘  │
+└─────────────────────────┘          └─────────────────────────┘
+```
+
+---
+
+## Deploy to Railway (Full-Stack)
+
+If you prefer a single-service deployment:
 
 ```bash
 npm i -g @railway/cli
@@ -61,6 +187,8 @@ railway up
 
 Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
 `ENCRYPTION_SECRET`, and at least one LLM API key in environment variables.
+
+---
 
 ## Environment Variables
 
@@ -74,6 +202,9 @@ Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
 | `ANTHROPIC_API_KEY` | No | Default Anthropic API key |
 | `MISTRAL_API_KEY` | No | Default Mistral API key |
 | `GROQ_API_KEY` | No | Default Groq API key |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins (for split deploy) |
+| `VITE_API_URL` | Frontend | Backend URL (only when frontend is hosted separately) |
+| `VITE_WS_URL` | Frontend | Backend WebSocket URL (only when hosted separately) |
 
 See `.env.example` for the full list.
 
@@ -88,16 +219,17 @@ See `.env.example` for the full list.
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
       ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-      │ Orchestrator │ │ Providers    │ │ Key Manager  │
-      │ (Analyzer +  │ │ (OpenAI,     │ │ (AES-256     │
-      │  Executor +  │ │  Anthropic,  │ │  encrypted)  │
-      │  Navigator)  │ │  Gemini, …)  │ └──────────────┘
-      └──────┬───────┘ └──────────────┘
-             ▼
-      ┌──────────────┐
-      │ Playwright   │
-      │ (Browser)    │
-      └──────────────┘
+      │ Orchestrator │ │ Providers    │ │ Credit System│
+      │ (Analyzer +  │ │ (OpenAI,     │ │ (Rates +     │
+      │  Executor +  │ │  Anthropic,  │ │  Balance +   │
+      │  Navigator)  │ │  Gemini, …)  │ │  Usage)      │
+      └──────┬───────┘ └──────────────┘ └──────────────┘
+             ▼                                ▼
+      ┌──────────────┐              ┌──────────────┐
+      │ Playwright   │              │ Key Manager  │
+      │ (Browser)    │              │ (AES-256     │
+      └──────────────┘              │  encrypted)  │
+                                    └──────────────┘
 ```
 
 ## License

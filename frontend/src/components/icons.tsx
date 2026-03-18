@@ -59,8 +59,6 @@ export const Icons = {
   plusCircle: ({ className }: IconProps) => <FaPlus className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   lock: ({ className }: IconProps) => <FaLock className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   close: ({ className }: IconProps) => <FaTimes className={className ?? 'h-4 w-4'} aria-hidden='true' />,
-  lock: (p: IconProps) => <Svg {...p}><rect x='5' y='11' width='14' height='10' rx='2' /><path d='M8 11V8a4 4 0 1 1 8 0v3' /></Svg>,
-  plusCircle: (p: IconProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M12 8v8M8 12h8' /></Svg>,
 }
 
 const BRAND_ICON_MAP: Record<string, { icon: IconType; className: string }> = {
