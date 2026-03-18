@@ -11,6 +11,9 @@ import {
   FaTerminal,
   FaTimes,
 } from 'react-icons/fa'
+import type { IconType } from 'react-icons'
+import { SiDiscord, SiSlack, SiTelegram } from 'react-icons/si'
+import { LuCode, LuFolder, LuGlobe, LuLock, LuPlus } from 'react-icons/lu'
 
 type IconProps = {
   className?: string
@@ -56,15 +59,22 @@ export const Icons = {
   plusCircle: ({ className }: IconProps) => <FaPlus className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   lock: ({ className }: IconProps) => <FaLock className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   close: ({ className }: IconProps) => <FaTimes className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  lock: (p: IconProps) => <Svg {...p}><rect x='5' y='11' width='14' height='10' rx='2' /><path d='M8 11V8a4 4 0 1 1 8 0v3' /></Svg>,
+  plusCircle: (p: IconProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M12 8v8M8 12h8' /></Svg>,
+}
+
+const BRAND_ICON_MAP: Record<string, { icon: IconType; className: string }> = {
+  slack: { icon: SiSlack, className: 'text-[#E01E5A]' },
+  discord: { icon: SiDiscord, className: 'text-[#5865F2]' },
+  telegram: { icon: SiTelegram, className: 'text-[#24A1DE]' },
+  'web-search': { icon: LuGlobe, className: 'text-blue-200' },
+  filesystem: { icon: LuFolder, className: 'text-zinc-200' },
+  'code-exec': { icon: LuCode, className: 'text-emerald-200' },
+  custom: { icon: LuPlus, className: 'text-blue-200' },
 }
 
 export function BrandIcon({ id, className = 'h-4 w-4' }: { id: string; className?: string }) {
-  const common = 'flex items-center justify-center rounded-md border border-white/10 text-[10px] font-bold'
-  if (id === 'slack') return <span className={`${common} bg-[#4A154B] text-white ${className}`}>S</span>
-  if (id === 'discord') return <span className={`${common} bg-[#5865F2] text-white ${className}`}>D</span>
-  if (id === 'telegram') return <span className={`${common} bg-[#24A1DE] text-white ${className}`}>T</span>
-  if (id === 'web-search') return <span className={`${common} bg-[#0f172a] text-blue-200 ${className}`}>W</span>
-  if (id === 'filesystem') return <span className={`${common} bg-[#1f2937] text-zinc-200 ${className}`}>FS</span>
-  if (id === 'code-exec') return <span className={`${common} bg-[#111827] text-emerald-200 ${className}`}>{'</>'}</span>
-  return <span className={`${common} bg-zinc-700 text-zinc-100 ${className}`}>M</span>
+  const entry = BRAND_ICON_MAP[id] ?? { icon: LuLock, className: 'text-zinc-100' }
+  const Icon = entry.icon
+  return <Icon className={`${className} ${entry.className}`} aria-hidden='true' />
 }

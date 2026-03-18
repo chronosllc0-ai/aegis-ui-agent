@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { BrandIcon } from '../icons'
+import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
 type IntegrationsTabProps = {
   integrations: IntegrationConfig[]
@@ -19,6 +21,13 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [integrationErrors, setIntegrationErrors] = useState<Record<string, string | null>>({})
+
+  const renderIcon = (icon: string, name: string) => {
+    if (icon.startsWith('http')) {
+      return <img src={icon} alt={`${name} icon`} className='h-4 w-4 rounded-sm' />
+    }
+    return <BrandIcon id={icon} className='h-4 w-4' />
+  }
 
   const updateIntegration = (id: string, patch: Partial<IntegrationConfig>) => {
     onChange(integrations.map((integration) => (integration.id === id ? { ...integration, ...patch } : integration)))
@@ -228,7 +237,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
             return (
               <article key={integration.id} className='rounded border border-[#2a2a2a] bg-[#111] p-3'>
                 <div className='flex items-start justify-between gap-4'>
-                <div>
+                  <div>
                   <div className='flex items-center gap-2'>
                     {renderIntegrationIcon(integration.icon)}
                     <p className='font-medium'>{integration.name}</p>
@@ -236,7 +245,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                   <p className='text-xs text-zinc-400'>{integration.description}</p>
                   <p className='mt-1 text-[11px] text-zinc-500'>Tools: {integration.tools.join(', ')}</p>
                 </div>
-                <span className='inline-flex items-center gap-2 text-xs'>
+                  <span className='inline-flex items-center gap-2 text-xs'>
                   <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOT[integration.status]}`} />
                   {integration.status}
                 </span>

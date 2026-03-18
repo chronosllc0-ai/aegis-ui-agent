@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Icons } from '../icons'
 import { PROVIDERS, renderProviderIcon } from '../../lib/models'
 import { apiUrl } from '../../lib/api'
 import { Icons } from '../icons'
@@ -159,6 +160,7 @@ export function APIKeysTab() {
           {Icons.lock({ className: 'h-3.5 w-3.5' })}
           <span>How BYOK works</span>
         </p>
+        <p className='inline-flex items-center gap-2 font-medium text-blue-200'>{Icons.lock({ className: 'h-4 w-4' })}<span>How BYOK works</span></p>
         <ul className='mt-2 list-inside list-disc space-y-1 text-zinc-400'>
           <li>Keys are encrypted with AES-256 before storage — we never see your plaintext key.</li>
           <li>Each request to an LLM uses <em>your</em> key, billed directly to your provider account.</li>

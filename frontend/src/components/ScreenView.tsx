@@ -14,6 +14,45 @@ const EXAMPLES = [
 
 export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
   const hasFrame = Boolean(frameSrc)
+  const [showSteering, setShowSteering] = useState(false)
+  const [displayFrame, setDisplayFrame] = useState('')
+  const [overlayFrame, setOverlayFrame] = useState('')
+  const [fading, setFading] = useState(false)
+
+  useEffect(() => {
+    if (!frameSrc) return
+    if (!displayFrame) {
+      const timeout = window.setTimeout(() => setDisplayFrame(frameSrc), 0)
+      return () => window.clearTimeout(timeout)
+    }
+    if (frameSrc !== displayFrame) {
+      const startTimeout = window.setTimeout(() => {
+        setOverlayFrame(frameSrc)
+        setFading(true)
+      }, 0)
+      const finishTimeout = window.setTimeout(() => {
+        setDisplayFrame(frameSrc)
+        setOverlayFrame('')
+        setFading(false)
+      }, 250)
+      return () => {
+        window.clearTimeout(startTimeout)
+        window.clearTimeout(finishTimeout)
+      }
+    }
+  }, [displayFrame, frameSrc])
+
+  useEffect(() => {
+    if (steeringFlashKey === 0) return
+    const showTimeout = window.setTimeout(() => setShowSteering(true), 0)
+    const hideTimeout = window.setTimeout(() => setShowSteering(false), 900)
+    return () => {
+      window.clearTimeout(showTimeout)
+      window.clearTimeout(hideTimeout)
+    }
+  }, [steeringFlashKey])
+
+  const hasFrame = Boolean(displayFrame)
 
   return (
     <section className='relative h-full min-h-0 overflow-auto rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
