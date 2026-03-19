@@ -68,27 +68,45 @@ const PRICING = [
     name: 'Free',
     price: '$0',
     period: '/month',
-    description: 'Run live sessions with your own provider keys.',
+    description: 'Get started with 1,000 credits and your own provider keys.',
     cta: 'Start free',
-    features: ['Unlimited BYOK sessions', 'All providers supported', 'Embedded docs access', 'Self-hosted path'],
+    features: [
+      '1,000 credits included (1 credit = $0.001)',
+      'BYOK sessions with all 5 providers',
+      '32+ models across OpenAI, Anthropic, Google, Mistral, Groq',
+      'Embedded docs access',
+      'Real-time usage meter',
+    ],
     highlight: false,
   },
   {
     name: 'Pro',
     price: '$29',
     period: '/month',
-    description: 'For operators who want credits, saved workflows, and faster setup.',
+    description: 'For operators who need serious throughput and saved workflows.',
     cta: 'Start Pro trial',
-    features: ['Everything in Free', 'Included usage credits', 'Workflow templates', 'Priority support'],
+    features: [
+      '50,000 credits/month (~$50 of model usage)',
+      'Everything in Free',
+      'Workflow templates and session history',
+      'Priority support',
+      'Spending alerts and usage analytics',
+    ],
     highlight: true,
   },
   {
     name: 'Team',
     price: '$79',
     period: '/seat/month',
-    description: 'Shared operations, SSO, and team-level workflow management.',
+    description: 'Shared operations, SSO, and team-level credit pools.',
     cta: 'Talk to us',
-    features: ['Everything in Pro', 'Shared key pools', 'Team workflow library', 'SSO and admin support'],
+    features: [
+      '200,000 credits/seat/month',
+      'Everything in Pro',
+      'Shared API key pools across the team',
+      'Team workflow library',
+      'SSO, admin dashboard, and audit logs',
+    ],
     highlight: false,
   },
 ]
@@ -255,9 +273,9 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                   <span
                     key={provider.id}
                     title={provider.displayName}
-                    className='inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/3 px-3 text-sm text-zinc-200'
+                    className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'
                   >
-                    {renderProviderIcon(provider, 'h-5 w-5')}
+                    {renderProviderIcon(provider, 'h-7 w-7')}
                   </span>
                 ))}
               </div>
@@ -272,8 +290,8 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         {PROVIDER_HIGHLIGHTS.map((ph) => {
           const provider = PROVIDERS.find((p) => p.id === ph.id)
           return (
-            <article key={ph.id} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-white/3 px-5 py-3'>
-              {provider && <span className='text-base'>{renderProviderIcon(provider, 'h-5 w-5')}</span>}
+            <article key={ph.id} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
+              {provider && <span className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'>{renderProviderIcon(provider, 'h-7 w-7')}</span>}
               <div>
                 <p className='text-sm font-medium text-white'>{ph.name}</p>
                 <p className='text-xs text-zinc-400'>{ph.count} models</p>
@@ -420,7 +438,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
             <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Bring your own keys</p>
             <h2 className='mt-4 text-4xl font-semibold text-white'>Use the providers you already trust.</h2>
             <p className='mt-4 text-sm leading-8 text-zinc-300'>
-              One branch added richer provider visuals and pricing. This merge keeps that work while preserving the docs-first public-site structure, so the landing page stays consistent with the current model catalog.
+              Plug in your own API keys for any supported provider. Your keys are encrypted with AES-256, billed directly to your provider account, and never logged or shared.
             </p>
             <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
               {[
@@ -437,9 +455,9 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
           </div>
           <div className='grid gap-3'>
             {PROVIDERS.slice(0, 4).map((provider) => (
-              <div key={provider.id} className='flex items-center gap-3 rounded-3xl border border-white/8 bg-white/4 px-4 py-4'>
-                <span className='inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-cyan-200'>
-                  {renderProviderIcon(provider, 'h-5 w-5')}
+              <div key={provider.id} className='flex items-center gap-3 rounded-3xl border border-white/8 bg-[#111] px-4 py-4'>
+                <span className='inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.08]'>
+                  {renderProviderIcon(provider, 'h-8 w-8')}
                 </span>
                 <div>
                   <p className='text-sm font-medium text-white'>{provider.displayName}</p>
@@ -458,9 +476,9 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
       <section id='pricing' className='mx-auto w-full max-w-7xl px-6 py-18'>
         <div className='max-w-3xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Pricing</p>
-          <h2 className='mt-4 text-4xl font-semibold text-white'>Clear entry points for individual operators and teams.</h2>
+          <h2 className='mt-4 text-4xl font-semibold text-white'>Simple credit-based pricing. No hidden fees.</h2>
           <p className='mt-4 text-sm leading-8 text-zinc-300'>
-            This keeps the pricing work from the other branch while staying connected to docs and onboarding. Users can start with the public story, read the docs, and then pick the operating mode that fits.
+            1 credit = $0.001. Every model call is metered transparently based on actual token usage with a simple 40% platform margin. Bring your own keys for zero-markup direct billing, or use platform credits for convenience.
           </p>
         </div>
         <div className='mt-8 grid gap-6 lg:grid-cols-3'>
