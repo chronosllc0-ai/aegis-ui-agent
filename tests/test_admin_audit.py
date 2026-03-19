@@ -79,7 +79,7 @@ def _build_client() -> TestClient:
     async def override_admin_user() -> User:
         return User(uid="admin-1", email="admin@example.com", role="admin", status="active")
 
-    async def override_session() -> AsyncGenerator:
+    async def override_session() -> AsyncGenerator[AsyncSession, None]:
         async with database._session_factory() as session:  # type: ignore[union-attr]
             yield session
 
