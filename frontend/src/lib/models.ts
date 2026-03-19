@@ -2,18 +2,18 @@
 // Last updated: 2026-03-18 — sourced from official provider docs
 
 import { createElement } from 'react'
-import type { IconType } from 'react-icons'
-import { SiAnthropic, SiGoogle, SiMistralai, SiOpenai } from 'react-icons/si'
-import { LuZap } from 'react-icons/lu'
 
-// Official brand colours
-const BRAND_COLOR: Record<string, string> = {
-  google: 'text-[#4285F4]',
-  openai: 'text-[#f0f0f0]',
-  anthropic: 'text-[#D4A27F]',
-  mistral: 'text-[#F7D046]',
-  groq: 'text-[#F55036]',
+// ── Provider icon URLs (hosted on postimg) ────────────────────────
+export const PROVIDER_ICON_URLS: Record<string, string> = {
+  google:    'https://i.postimg.cc/2SwWrKwz/download_1.jpg',
+  openai:    'https://i.postimg.cc/d3HRsSv7/download_2.png',
+  anthropic: 'https://i.postimg.cc/L6yVy6b3/2eb79382ad63416682dcc08c91fcc46f.png',
+  mistral:   'https://i.postimg.cc/mgvCqcNP/mistral-ai-icon-logo-png-seeklogo-515008.png',
+  groq:      'https://i.postimg.cc/hjFSTn8V/download_7.png',
 }
+
+// Chronos AI logo
+export const CHRONOS_LOGO_URL = 'https://i.postimg.cc/c1zHTpc3/IMG-20260103-192235-443.webp'
 
 export type ModelInfo = {
   id: string
@@ -26,7 +26,7 @@ export type ProviderInfo = {
   id: string
   displayName: string
   models: ModelInfo[]
-  icon: IconType
+  iconUrl: string
   keyPrefix: string
 }
 
@@ -35,7 +35,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'google',
     displayName: 'Google (Gemini)',
-    icon: SiGoogle,
+    iconUrl: PROVIDER_ICON_URLS.google,
     keyPrefix: '',
     models: [
       { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Latest Gemini 3 series — cutting-edge reasoning & multimodal.', vision: true },
@@ -49,7 +49,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'openai',
     displayName: 'OpenAI',
-    icon: SiOpenai,
+    iconUrl: PROVIDER_ICON_URLS.openai,
     keyPrefix: 'sk-',
     models: [
       { id: 'gpt-5.2', label: 'GPT-5.2', description: 'Flagship — best for coding and agentic tasks.', vision: true },
@@ -68,7 +68,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'anthropic',
     displayName: 'Anthropic',
-    icon: SiAnthropic,
+    iconUrl: PROVIDER_ICON_URLS.anthropic,
     keyPrefix: 'sk-ant-',
     models: [
       { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent — agents and coding. 1M context.', vision: true },
@@ -82,7 +82,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'mistral',
     displayName: 'Mistral AI',
-    icon: SiMistralai,
+    iconUrl: PROVIDER_ICON_URLS.mistral,
     keyPrefix: '',
     models: [
       { id: 'mistral-large-latest', label: 'Mistral Large 3', description: 'State-of-the-art open-weight multimodal model.', vision: true },
@@ -97,7 +97,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'groq',
     displayName: 'Groq',
-    icon: LuZap,
+    iconUrl: PROVIDER_ICON_URLS.groq,
     keyPrefix: 'gsk_',
     models: [
       { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', description: 'Llama 4 on Groq — fast multimodal inference.', vision: true },
@@ -143,6 +143,10 @@ export const MODEL_OPTIONS = allModelIds()
 export const MODEL_ICON_URL = 'https://i.postimg.cc/NMtZmLXT/download_4.png'
 
 export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
-  const color = BRAND_COLOR[provider.id] ?? ''
-  return createElement(provider.icon, { className: `${className} ${color}`, 'aria-hidden': 'true' })
+  return createElement('img', {
+    src: provider.iconUrl,
+    alt: provider.displayName,
+    className: `${className} rounded-sm object-contain`,
+    'aria-hidden': 'true',
+  })
 }

@@ -1,3 +1,5 @@
+import { CHRONOS_LOGO_URL } from '../lib/models'
+
 type PublicFooterProps = {
   onGoHome: () => void
   onGoAuth: () => void
@@ -42,10 +44,10 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
       <div className='mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 lg:grid-cols-[1.2fr_2fr]'>
         <div>
           <button type='button' onClick={onGoHome} className='flex items-center gap-3 text-left'>
-            <img src='/shield.svg' alt='Aegis logo' className='h-10 w-10' />
+            <img src={CHRONOS_LOGO_URL} alt='Chronos AI' className='chronos-spin h-10 w-10 rounded-full' />
             <div>
               <p className='text-lg font-semibold text-white'>Aegis</p>
-              <p className='text-sm text-zinc-400'>AI-powered universal UI navigator</p>
+              <p className='text-sm text-zinc-400'>by Chronos AI</p>
             </div>
           </button>
           <p className='mt-5 max-w-md text-sm leading-7 text-zinc-400'>
@@ -92,16 +94,6 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
               </div>
             </section>
           ))}
-        </div>
-      </div>
-      <div className='border-t border-white/6 py-6'>
-        <div className='mx-auto flex w-full max-w-7xl flex-col items-center gap-2 px-6 text-center'>
-          <p className='text-xs text-zinc-500'>
-            &copy; {new Date().getFullYear()} Chronos Intelligence Systems. All rights reserved.
-          </p>
-          <p className='text-[11px] text-zinc-600'>
-            Built by Jesse Winton (Chronos AI), Viktor AI, Codex, and Kilo Code
-          </p>
         </div>
       </div>
     </footer>

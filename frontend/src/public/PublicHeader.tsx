@@ -1,4 +1,5 @@
 import { Icons } from '../components/icons'
+import { CHRONOS_LOGO_URL } from '../lib/models'
 
 type PublicHeaderProps = {
   onGoHome: () => void
@@ -13,10 +14,10 @@ export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
     <header className='sticky top-0 z-20 border-b border-white/8 bg-[#0a0d14]/82 backdrop-blur-xl'>
       <div className='mx-auto flex w-full max-w-7xl items-center justify-between gap-6 px-6 py-5'>
         <button type='button' onClick={onGoHome} className='flex items-center gap-3 text-left'>
-          <img src='/shield.svg' alt='Aegis logo' className='h-8 w-8' />
+          <img src={CHRONOS_LOGO_URL} alt='Chronos AI' className='chronos-spin h-8 w-8 rounded-full' />
           <div>
             <p className='text-sm font-semibold text-white'>Aegis</p>
-            <p className='text-[11px] uppercase tracking-[0.22em] text-cyan-200'>UI navigator</p>
+            <p className='text-[11px] uppercase tracking-[0.22em] text-cyan-200'>by Chronos AI</p>
           </div>
         </button>
 

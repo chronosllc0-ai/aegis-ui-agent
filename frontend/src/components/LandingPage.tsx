@@ -218,7 +218,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         <div className='absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.12),transparent_35%)]' />
         <div className='relative mx-auto grid w-full max-w-7xl gap-14 px-6 py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
           <div className='flex flex-col justify-center'>
-            <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>Story-led launch</p>
+            <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>A Chronos AI product</p>
             <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
               Navigate any interface with a visual operator that can see, listen, and adapt.
             </h1>
@@ -231,7 +231,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                 onClick={onGetStarted}
                 className='rounded-full bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400'
               >
-                Start from auth
+                Get started free
               </button>
               <button
                 type='button'
