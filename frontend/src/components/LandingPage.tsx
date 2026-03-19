@@ -1,6 +1,8 @@
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
-import { PROVIDERS } from '../lib/models'
+import { PROVIDERS, renderProviderIcon } from '../lib/models'
+import { PublicFooter } from '../public/PublicFooter'
+import { PublicHeader } from '../public/PublicHeader'
 
 type LandingPageProps = {
   onGetStarted: () => void
@@ -8,6 +10,88 @@ type LandingPageProps = {
   onOpenDoc: (slug: string) => void
   docsPortalHref: string
 }
+
+const FEATURES = [
+  {
+    title: 'Vision-first navigation',
+    description: 'Aegis reasons over the live screen state before every major action so the operator stays aligned with what is actually visible.',
+    icon: Icons.globe,
+  },
+  {
+    title: 'Real-time control',
+    description: 'Steer, interrupt, queue, and monitor transcripts without restarting the session or losing context.',
+    icon: Icons.workflows,
+  },
+  {
+    title: 'Live voice loop',
+    description: 'Voice input, transcripts, and action logs flow through the same operator surface for fast handoffs.',
+    icon: Icons.mic,
+  },
+  {
+    title: 'Bring your own keys',
+    description: 'Use your own provider accounts across Gemini, OpenAI, Anthropic, Mistral, and Groq from one settings surface.',
+    icon: Icons.settings,
+  },
+  {
+    title: 'Docs-driven onboarding',
+    description: 'Quickstart, API reference, tutorials, FAQ, and changelog are wired directly into the public product story.',
+    icon: Icons.check,
+  },
+  {
+    title: 'Deploy-ready stack',
+    description: 'FastAPI, WebSockets, Playwright, PostgreSQL, Docker, and Railway-friendly deployment paths are already in the repo.',
+    icon: Icons.menu,
+  },
+]
+
+const STEPS = [
+  {
+    title: 'Capture',
+    text: 'Grab the current viewport so the agent reasons over the real screen instead of guessing from stale state.',
+  },
+  {
+    title: 'Analyze',
+    text: 'Use multimodal reasoning to understand layout, intent, and the interactive elements available right now.',
+  },
+  {
+    title: 'Act',
+    text: 'Execute clicks, typing, scrolling, and navigation while the operator can still steer the task.',
+  },
+  {
+    title: 'Report',
+    text: 'Stream frames, workflow steps, logs, and transcripts back into the shell so progress stays legible.',
+  },
+]
+
+const PRICING = [
+  {
+    name: 'Free',
+    price: '$0',
+    period: '/month',
+    description: 'Run live sessions with your own provider keys.',
+    cta: 'Start free',
+    features: ['Unlimited BYOK sessions', 'All providers supported', 'Embedded docs access', 'Self-hosted path'],
+    highlight: false,
+  },
+  {
+    name: 'Pro',
+    price: '$29',
+    period: '/month',
+    description: 'For operators who want credits, saved workflows, and faster setup.',
+    cta: 'Start Pro trial',
+    features: ['Everything in Free', 'Included usage credits', 'Workflow templates', 'Priority support'],
+    highlight: true,
+  },
+  {
+    name: 'Team',
+    price: '$79',
+    period: '/seat/month',
+    description: 'Shared operations, SSO, and team-level workflow management.',
+    cta: 'Talk to us',
+    features: ['Everything in Pro', 'Shared key pools', 'Team workflow library', 'SSO and admin support'],
+    highlight: false,
+  },
+]
 
 const LANDING_SLIDES: EntrySlide[] = [
   {
@@ -118,83 +202,70 @@ const TRUST_BANDS = [
 ]
 
 export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPortalHref }: LandingPageProps) {
-  return (
-    <main className='min-h-screen bg-[#0b0b0b] text-zinc-100'>
-      {/* ── Nav ─────────────────────────────────────────────────────── */}
-      <header className='mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6'>
-        <div className='flex items-center gap-2'>
-          <img src='/shield.svg' alt='Aegis logo' className='h-7 w-7' />
-          <span className='text-lg font-semibold'>Aegis</span>
-          <span className='rounded-full border border-blue-500/40 px-2 py-0.5 text-[10px] text-blue-300'>by Chronos</span>
-        </div>
-        <nav className='flex items-center gap-4 text-sm text-zinc-300'>
-          <a href='#features' className='hover:text-white'>Features</a>
-          <a href='#how' className='hover:text-white'>How it works</a>
-          <a href='#byok' className='hover:text-white'>BYOK</a>
-          <a href='#pricing' className='hover:text-white'>Pricing</a>
-          <button
-            type='button'
-            onClick={onGetStarted}
-            className='rounded-md border border-blue-500/60 px-3 py-1.5 text-blue-200 hover:bg-blue-500/10'
-          >
-            Sign in
-          </button>
-        </nav>
-      </header>
+  const docsPortalBase = docsPortalHref.replace(/\/$/, '')
 
-      {/* ── Hero ────────────────────────────────────────────────────── */}
-      <section className='mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-10 px-6 py-20 lg:grid-cols-[1.2fr_1fr]'>
-        <div>
-          <p className='text-sm uppercase tracking-[0.2em] text-blue-300/80'>
-            AI-powered universal UI agent
-          </p>
-          <h1 className='mt-4 text-4xl font-semibold leading-tight md:text-5xl'>
-            Navigate any UI with
-            <br />
-            <span className='bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent'>
-              vision, voice, and AI.
-            </span>
-          </h1>
-          <p className='mt-5 max-w-lg text-base text-zinc-400'>
-            Aegis sees your screen, reasons about intent, and acts with precision.
-            Powered by your choice of model: Gemini, GPT-4.1, Claude, Mistral, or Groq,
-            with full BYOK support.
-          </p>
-          <div className='mt-6 flex flex-wrap gap-3'>
-            <button
-              type='button'
-              onClick={onGetStarted}
-              className='rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium hover:bg-blue-500'
-            >
-              Get started free
-            </button>
-            <a
-              href='#how'
-              className='rounded-lg border border-[#2a2a2a] px-5 py-2.5 text-sm text-zinc-300 hover:border-blue-500/60'
-            >
-              See how it works
-            </a>
-          </div>
-          <div className='mt-8 flex items-center gap-4'>
-            <p className='text-xs text-zinc-500'>Supported providers</p>
-            <div className='flex gap-2'>
-              {PROVIDERS.map((p) => (
-                <span
-                  key={p.id}
-                  title={p.displayName}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#2a2a2a] bg-[#111] text-sm'
-                >
-                  {p.icon.startsWith('http') ? (
-                    <img src={p.icon} alt={p.displayName} className='h-4 w-4' />
-                  ) : (
-                    p.icon
-                  )}
-                </span>
-              ))}
+  return (
+    <main className='min-h-screen bg-[#070b12] text-zinc-100'>
+      <PublicHeader
+        onGoHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        onGoAuth={onGetStarted}
+        onGoDocsHome={onOpenDocsHome}
+        onGoDoc={onOpenDoc}
+        docsPortalHref={docsPortalHref}
+      />
+
+      <section className='relative overflow-hidden'>
+        <div className='absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.12),transparent_35%)]' />
+        <div className='relative mx-auto grid w-full max-w-7xl gap-14 px-6 py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
+          <div className='flex flex-col justify-center'>
+            <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>Story-led launch</p>
+            <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
+              Navigate any interface with a visual operator that can see, listen, and adapt.
+            </h1>
+            <p className='mt-6 max-w-2xl text-base leading-8 text-zinc-300 md:text-lg'>
+              Aegis is an AI-powered universal UI navigator. It watches the screen, reasons over live state, and acts with the operator still in control from the first instruction to the last step.
+            </p>
+            <div className='mt-8 flex flex-wrap gap-3'>
+              <button
+                type='button'
+                onClick={onGetStarted}
+                className='rounded-full bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400'
+              >
+                Start from auth
+              </button>
+              <button
+                type='button'
+                onClick={() => onOpenDoc('quickstart')}
+                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Read quickstart
+              </button>
+              <a
+                href={docsPortalHref}
+                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Open docs portal
+              </a>
+            </div>
+
+            <div className='mt-10 flex flex-wrap items-center gap-4'>
+              <p className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Supported providers</p>
+              <div className='flex flex-wrap gap-2'>
+                {PROVIDERS.map((provider) => (
+                  <span
+                    key={provider.id}
+                    title={provider.displayName}
+                    className='inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/3 px-3 text-sm text-zinc-200'
+                  >
+                    {renderProviderIcon(provider, 'h-5 w-5')}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
+
+          <EntrySlider slides={LANDING_SLIDES} className='self-start lg:sticky lg:top-28' />
         </div>
-        <EntrySlider slides={LANDING_SLIDES} />
       </section>
 
       <section className='mx-auto grid w-full max-w-7xl gap-10 px-6 py-8 md:grid-cols-4'>
@@ -206,12 +277,33 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         ))}
       </section>
 
+      <section id='features' className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='mb-10 max-w-2xl'>
+          <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Capability map</p>
+          <h2 className='mt-4 text-4xl font-semibold text-white'>Everything needed to move from discovery to live execution.</h2>
+          <p className='mt-4 text-sm leading-7 text-zinc-400'>
+            This public surface has to do more than market the product. It needs to show operators, builders, and teammates how the system behaves before they ever sign in.
+          </p>
+        </div>
+        <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
+          {FEATURES.map((feature) => (
+            <article key={feature.title} className='rounded-[28px] border border-white/8 bg-[#0c1018] p-6'>
+              <div className='inline-flex rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-3 text-cyan-200'>
+                {feature.icon({ className: 'h-5 w-5' })}
+              </div>
+              <h3 className='mt-5 text-lg font-semibold text-white'>{feature.title}</h3>
+              <p className='mt-3 text-sm leading-7 text-zinc-300'>{feature.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className='mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-18'>
         <div className='max-w-2xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Product story</p>
           <h2 className='mt-4 text-4xl font-semibold text-white'>An alternating story of control, vision, and operational readiness.</h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
-            The public surface should teach the product by moving between narrative explanation, docs entry points, and proof of how the operator shell actually works.
+            The public surface teaches the product by moving between narrative explanation, docs entry points, and proof of how the operator shell actually works.
           </p>
         </div>
 
@@ -233,68 +325,62 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                   {module.docsLabel}
                 </button>
                 <a
-                  href={`${docsPortalHref.replace(/\/$/, '')}/${module.docsSlug}`}
+                  href={`${docsPortalBase}/${module.docsSlug}`}
                   className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
                 >
                   Read in docs portal
                 </a>
               </div>
             </div>
-          ))}
-        </div>
-      </section>
 
-      {/* ── BYOK explainer ──────────────────────────────────────────── */}
-      <section id='byok' className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-8 md:p-10'>
-          <div className='grid gap-8 md:grid-cols-2'>
-            <div>
-              <p className='text-sm uppercase tracking-[0.2em] text-blue-300/80'>Bring Your Own Key</p>
-              <h2 className='mt-3 text-2xl font-semibold'>Your keys, your control</h2>
-              <p className='mt-4 text-sm text-zinc-400'>
-                Aegis encrypts your API keys with AES-256 before storing them.
-                Each request is billed directly to your provider account.
-                No middleman markup, no vendor lock-in.
-              </p>
-              <ul className='mt-5 space-y-2'>
-                {[
-                  'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
-                  'Keys encrypted at rest, never logged or shared',
-                  'Remove or rotate keys anytime from Settings',
-                  'Platform fallback when no user key is set',
-                ].map((item) => (
-                  <li key={item} className='flex items-start gap-2 text-sm text-zinc-300'>
-                    {Icons.check({ className: 'mt-0.5 h-4 w-4 shrink-0 text-emerald-400' })}
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className='flex items-center justify-center'>
-              <div className='w-full max-w-xs space-y-3'>
-                {PROVIDERS.slice(0, 4).map((p) => (
-                  <div
-                    key={p.id}
-                    className='flex items-center gap-3 rounded-xl border border-[#1f1f1f] bg-[#0f0f0f] px-4 py-3'
-                  >
-                    <span className='text-lg'>
-                      {p.icon.startsWith('http') ? (
-                        <img src={p.icon} alt={p.displayName} className='h-5 w-5' />
-                      ) : (
-                        p.icon
-                      )}
-                    </span>
-                    <span className='text-sm text-zinc-200'>{p.displayName}</span>
-                    <span className='ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-300'>
-                      <span className='h-1.5 w-1.5 rounded-full bg-emerald-400' />
-                      Connected
-                    </span>
-                  </div>
-                ))}
-              </div>
+            <div className='grid gap-4'>
+              {module.bullets.map((bullet) => (
+                <div key={bullet} className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
+                  {bullet}
+                </div>
+              ))}
             </div>
           </article>
         ))}
+      </section>
+
+      <section id='how' className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='rounded-[36px] border border-white/8 bg-[#0c1018] p-8 md:p-10'>
+          <div className='max-w-3xl'>
+            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>How it works</p>
+            <h2 className='mt-4 text-4xl font-semibold text-white'>A tight loop connects capture, reasoning, execution, and feedback.</h2>
+            <p className='mt-4 text-sm leading-8 text-zinc-300'>
+              The operator shell and docs should explain the same loop. The live product just makes that loop visible through frames, transcripts, logs, and workflow steps.
+            </p>
+          </div>
+          <div className='mt-8 grid gap-4 md:grid-cols-4'>
+            {STEPS.map((step, index) => (
+              <article key={step.title} className='rounded-3xl border border-white/8 bg-white/4 p-5'>
+                <div className='inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-cyan-400/12 text-sm font-semibold text-cyan-200'>
+                  {index + 1}
+                </div>
+                <h3 className='mt-4 text-lg font-semibold text-white'>{step.title}</h3>
+                <p className='mt-3 text-sm leading-7 text-zinc-300'>{step.text}</p>
+              </article>
+            ))}
+          </div>
+          <div className='mt-8 flex flex-wrap gap-3'>
+            <button
+              type='button'
+              onClick={() => onOpenDoc('api-auth-reference')}
+              className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+            >
+              Read API reference
+            </button>
+            <button
+              type='button'
+              onClick={() => onOpenDoc('first-live-run')}
+              className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+            >
+              Follow a tutorial
+            </button>
+          </div>
+        </div>
       </section>
 
       <section className='mx-auto w-full max-w-7xl px-6 py-18'>
@@ -323,6 +409,98 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
       </section>
 
       <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.1fr_0.9fr]'>
+          <div>
+            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Bring your own keys</p>
+            <h2 className='mt-4 text-4xl font-semibold text-white'>Use the providers you already trust.</h2>
+            <p className='mt-4 text-sm leading-8 text-zinc-300'>
+              One branch added richer provider visuals and pricing. This merge keeps that work while preserving the docs-first public-site structure, so the landing page stays consistent with the current model catalog.
+            </p>
+            <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
+              {[
+                'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
+                'Use one settings surface for providers and model selection',
+                'Pair BYOK setup with docs for auth, deployment, and workflows',
+              ].map((item) => (
+                <li key={item} className='flex items-start gap-2'>
+                  {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className='grid gap-3'>
+            {PROVIDERS.slice(0, 4).map((provider) => (
+              <div key={provider.id} className='flex items-center gap-3 rounded-3xl border border-white/8 bg-white/4 px-4 py-4'>
+                <span className='inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-cyan-200'>
+                  {renderProviderIcon(provider, 'h-5 w-5')}
+                </span>
+                <div>
+                  <p className='text-sm font-medium text-white'>{provider.displayName}</p>
+                  <p className='text-xs text-zinc-400'>{provider.models.length} models available</p>
+                </div>
+                <span className='ml-auto inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] text-emerald-200'>
+                  <span className='h-2 w-2 rounded-full bg-emerald-300' />
+                  Ready
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id='pricing' className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='max-w-3xl'>
+          <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Pricing</p>
+          <h2 className='mt-4 text-4xl font-semibold text-white'>Clear entry points for individual operators and teams.</h2>
+          <p className='mt-4 text-sm leading-8 text-zinc-300'>
+            This keeps the pricing work from the other branch while staying connected to docs and onboarding. Users can start with the public story, read the docs, and then pick the operating mode that fits.
+          </p>
+        </div>
+        <div className='mt-8 grid gap-6 lg:grid-cols-3'>
+          {PRICING.map((plan) => (
+            <article
+              key={plan.name}
+              className={`rounded-[32px] border p-7 ${
+                plan.highlight
+                  ? 'border-cyan-400/35 bg-[linear-gradient(180deg,rgba(34,211,238,0.16),rgba(12,16,24,0.95))]'
+                  : 'border-white/8 bg-[#0c1018]'
+              }`}
+            >
+              {plan.highlight && (
+                <p className='mb-4 text-[11px] uppercase tracking-[0.22em] text-cyan-200'>Most popular</p>
+              )}
+              <h3 className='text-2xl font-semibold text-white'>{plan.name}</h3>
+              <div className='mt-3 flex items-end gap-1'>
+                <span className='text-4xl font-semibold text-white'>{plan.price}</span>
+                <span className='pb-1 text-sm text-zinc-400'>{plan.period}</span>
+              </div>
+              <p className='mt-4 text-sm leading-7 text-zinc-300'>{plan.description}</p>
+              <button
+                type='button'
+                onClick={onGetStarted}
+                className={`mt-6 w-full rounded-full px-4 py-3 text-sm font-medium transition ${
+                  plan.highlight
+                    ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                    : 'border border-white/10 text-zinc-100 hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                }`}
+              >
+                {plan.cta}
+              </button>
+              <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
+                {plan.features.map((feature) => (
+                  <li key={feature} className='flex items-start gap-2'>
+                    {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
+                    <span>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
         <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.2fr_0.8fr]'>
           <div>
             <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Operator trust</p>
@@ -333,10 +511,26 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
           </div>
           <div className='grid gap-4'>
             <div className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
-              Keep pricing for the next pass so this phase can focus on the product story, docs architecture, and onboarding flow.
+              Use embedded docs when users need context inside the main app, and the standalone docs portal when they need a deeper reference experience.
             </div>
             <div className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
-              Use embedded docs when users need context inside the main app, and the standalone docs portal when they need a deeper reference experience.
+              Pricing, docs, auth, and the live operator shell now belong to the same public narrative instead of looking like separate products.
+            </div>
+            <div className='flex flex-wrap gap-3'>
+              <button
+                type='button'
+                onClick={onGetStarted}
+                className='rounded-full bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-400'
+              >
+                Go to auth
+              </button>
+              <button
+                type='button'
+                onClick={onOpenDocsHome}
+                className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Explore embedded docs
+              </button>
             </div>
           </div>
         </div>

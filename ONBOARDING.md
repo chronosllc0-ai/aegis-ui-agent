@@ -1,3 +1,34 @@
+## Session 5.15 - March 19, 2026 (Landing + Docs Recovery After React Icons Failure)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Investigated the blank-screen/Vite overlay issue and traced it to failed `react-icons` module resolution in the frontend before React could mount the landing page or docs routes.
+- Reinstalled `react-icons` properly in `frontend/` after confirming the earlier install was partial/corrupted.
+- Added `frontend/src/types/react-icons.d.ts` so the real `react-icons` package can be used without TypeScript blocking the bundle on missing subpath declarations.
+- Kept the merged `LandingPage.tsx` implementation in place and revalidated the standalone `docs-site/` build.
+
+### What's Working
+- `cd frontend && npm run build` passes again.
+- `cd docs-site && npm run build` passes.
+- The landing page and standalone docs site should render again once the frontend dev server refreshes or restarts.
+
+### What's NOT Working Yet
+- The running dev server may still be showing the old Vite error overlay until the page is refreshed or the dev server is restarted.
+
+### Next Steps
+1. Refresh the browser on `http://localhost:5173/`; if Vite still shows stale errors, restart the frontend dev server.
+2. Recheck `/` for the landing page and the docs entry route after the refresh.
+
+### Decisions Made
+- Kept `react-icons` as the icon system, per request, and fixed the dependency/type integration instead of replacing icons locally.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.13 - March 19, 2026 (Admin Router Mount Expansion)
 
 **Agent:** GPT-5.2-Codex  
