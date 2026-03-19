@@ -75,6 +75,7 @@ Add a PostgreSQL plugin from the Railway dashboard, then set these env vars:
 |---|---|
 | `SESSION_SECRET` | Random 32+ char string |
 | `ENCRYPTION_SECRET` | Random 32+ char string |
+| `ADMIN_EMAILS` | Comma-separated email list for auto-admin assignment |
 | `GEMINI_API_KEY` | (or any provider key) |
 
 Your backend will be live at something like `https://aegis-xyz.up.railway.app`.
@@ -186,7 +187,8 @@ railway up
 ```
 
 Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
-`ENCRYPTION_SECRET`, and at least one LLM API key in environment variables.
+`ENCRYPTION_SECRET`, `ADMIN_EMAILS` (if you want auto-admin assignment), and at least
+one LLM API key in environment variables.
 
 ---
 
@@ -196,6 +198,7 @@ Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
 |---|---|---|
 | `DATABASE_URL` | Yes (prod) | PostgreSQL connection string |
 | `SESSION_SECRET` | Yes | Random string for session signing |
+| `ADMIN_EMAILS` | No | Comma-separated email list for auto-admin assignment |
 | `ENCRYPTION_SECRET` | Yes | Secret for BYOK key encryption |
 | `GEMINI_API_KEY` | No | Default Gemini API key |
 | `OPENAI_API_KEY` | No | Default OpenAI API key |
