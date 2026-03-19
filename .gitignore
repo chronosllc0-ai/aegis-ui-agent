@@ -5,3 +5,6 @@ node_modules/
 dist/
 .venv/
 *.egg-info/
+.superpowers/
+docs-site/node_modules/
+docs-site/dist/
