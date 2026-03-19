@@ -124,11 +124,6 @@ def _session_response(user: dict[str, Any], redirect: str | None = None) -> Redi
     return response
 
 
-def _normalized_admin_emails() -> set[str]:
-    """Return the configured admin email allowlist normalized for lookup."""
-    return {email.strip().lower() for email in settings.ADMIN_EMAILS.split(",") if email.strip()}
-
-
 async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[str, Any]:
     """Create or update a user record in PostgreSQL."""
     now = datetime.now(timezone.utc)
@@ -141,8 +136,6 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
         existing.avatar_url = profile.get("avatar_url")
         if profile.get("password_hash"):
             existing.password_hash = profile["password_hash"]
-        if existing.status and existing.status != "active":
-            raise HTTPException(status_code=403, detail="Account suspended")
         existing.last_login_at = now
         payload = {
             "uid": existing.uid,
@@ -151,14 +144,10 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
             "email": existing.email,
             "name": existing.name,
             "avatar_url": existing.avatar_url,
-            "role": existing.role or "user",
-            "status": existing.status or "active",
             "created_at": existing.created_at,
             "last_login_at": now,
         }
     else:
-        profile_email = str(profile.get("email", "")).strip().lower()
-        role = "admin" if profile_email and profile_email in _normalized_admin_emails() else "user"
         user = User(
             uid=profile["uid"],
             provider=profile.get("provider"),
@@ -166,8 +155,6 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
             email=profile.get("email"),
             name=profile.get("name"),
             avatar_url=profile.get("avatar_url"),
-            role=role,
-            status="active",
             password_hash=profile.get("password_hash"),
             created_at=now,
             last_login_at=now,
@@ -180,8 +167,6 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
             "email": user.email,
             "name": user.name,
             "avatar_url": user.avatar_url,
-            "role": user.role,
-            "status": user.status,
             "created_at": now,
             "last_login_at": now,
         }
@@ -431,8 +416,6 @@ async def password_login(payload: dict[str, Any], session: AsyncSession = Depend
         raise HTTPException(status_code=400, detail="Password is required")
 
     existing = await session.get(User, _password_uid(email))
-    if existing and existing.status and existing.status != "active":
-        raise HTTPException(status_code=403, detail="Account suspended")
     if not existing or not _verify_password(password, existing.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -445,8 +428,6 @@ async def password_login(payload: dict[str, Any], session: AsyncSession = Depend
         "email": existing.email,
         "name": existing.name,
         "avatar_url": existing.avatar_url,
-        "role": existing.role or "user",
-        "status": existing.status or "active",
         "created_at": existing.created_at,
         "last_login_at": existing.last_login_at,
     }
