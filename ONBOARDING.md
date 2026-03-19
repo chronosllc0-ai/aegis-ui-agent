@@ -1,29 +1,29 @@
-## Session 5.11 - March 19, 2026 (Admin Billing Routes)
+## Session 5.11 - March 19, 2026 (Admin Users API Endpoints)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Added `backend/admin/billing.py` with admin-protected billing endpoints for listing, creating, defaulting, deleting payment methods, and updating per-user plan/allowance metadata.
-- Mounted the new billing router under `/api/admin/billing` from `backend/admin/router.py`.
-- Fixed `backend/admin/audit_service.py` so admin audit helper calls now flush and refresh correctly instead of returning before the write completes.
+- Added `backend/admin/users.py` with admin-only user management endpoints for listing users, fetching user detail, updating profile fields, changing roles, suspending/reinstating accounts, and applying manual credit adjustments.
+- Added safe user-list sorting/filtering, user detail aggregation for balances/conversations/usage, and per-mutation audit logging payloads with before/after or amount/reason metadata.
+- Updated `backend/admin/router.py` to mount the new users router under `/api/admin/users` and repaired `backend/admin/audit_service.py` so audit entries are flushed correctly inside the surrounding transaction.
 
 ### What's Working
-- Admin billing endpoints now return JSON-friendly dictionaries with ISO-formatted timestamps where applicable.
-- Creating the first payment method automatically marks it as default, and default reassignment unsets competing defaults for the same user.
-- Plan updates now create/load `CreditBalance`, update plan metadata, and log old/new values in the admin audit trail.
+- `/api/admin/users` now exposes the requested admin CRUD/read surfaces behind admin authentication.
+- Mutating user admin routes now write audit log rows through the shared helper without the earlier unreachable-code bug in `audit_service.py`.
+- Targeted import and RBAC regression checks pass locally.
 
 ### What's NOT Working Yet
-- This pass did not add dedicated HTTP endpoint tests for the new admin billing routes.
-- Input validation is currently minimal beyond the request schema types (for example, card-brand normalization and expiration sanity checks are not yet enforced).
+- This pass did not add dedicated automated tests for the new admin users endpoints themselves.
+- Other planned admin sub-routers from the larger admin roadmap are still not implemented in this repo snapshot.
 
 ### Next Steps
-1. Add focused API tests covering the admin billing CRUD/default-plan flows plus audit-log assertions.
-2. If product requirements harden, add stricter validation for payment-method fields and decide whether deleting a default method should always promote the oldest remaining method.
+1. Add focused API tests for the new `/api/admin/users` endpoints, especially sorting/filter validation, detail aggregation, superadmin role changes, and credit adjustment edge cases.
+2. Implement the remaining admin sub-routers (dashboard, billing, conversations, impersonation, audit) when those phases are requested.
 
 ### Decisions Made
-- Scoped the router itself with `Depends(get_admin_user)` so all billing endpoints inherit admin-only protection by default.
-- Kept audit logging transaction-aware by having the helper flush within the caller's session instead of committing independently.
+- Kept role changes off the general profile update path unless the caller already satisfies `require_superadmin`, while also exposing a dedicated superadmin-only `/role` endpoint.
+- Treated manual credit adjustments as balance-state mutations on `credits_used` / `overage_credits`, clamped so the resulting state cannot become negative or exceed the base monthly allowance bucket.
 
 ### Blockers
 - None.
