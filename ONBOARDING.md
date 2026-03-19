@@ -1,60 +1,29 @@
-## Session 5.13 - March 19, 2026 (Admin Audit Follow-up: Nullable Timestamp Hardening)
-
-**Agent:** GPT-5.2-Codex  
-**Duration:** ~1 short pass
-
-### What Was Done
-- Followed up on review feedback for the new admin audit endpoint by hardening audit timestamp handling in both the endpoint ordering and the `AuditLog` model.
-- Updated `backend/admin/audit.py` to sort audit entries with `NULLS LAST` semantics so legacy/null timestamps cannot destabilize page order across SQLite vs. PostgreSQL.
-- Updated `backend/database.py` so `AuditLog.created_at` is declared `nullable=False` and added a lightweight startup backfill that repairs any historic `audit_logs.created_at IS NULL` rows in local/dev environments.
-- Expanded `tests/test_admin_audit.py` to assert both the non-nullable model contract and the generated `NULLS LAST` ordering behavior.
-
-### What's Working
-- Audit ordering is now deterministic even if a legacy database still contains rows with missing timestamps.
-- Freshly created audit tables now require `created_at`, reducing the chance of future ghost rows that disappear from date filters.
-- The targeted audit regression suite and Python compile checks pass locally after the follow-up.
-
-### What's NOT Working Yet
-- This pass still does not resolve the separate pre-existing `tests/test_admin_billing.py` import mismatch around `_get_cycle_bounds`.
-
-### Next Steps
-1. Fix the lingering billing test import mismatch so the broader admin slice can run cleanly again.
-2. If audit schema drift becomes a recurring need, consider formal migrations instead of relying only on lightweight startup repair helpers.
-
-### Decisions Made
-- Kept the endpoint-level `NULLS LAST` ordering even after making `created_at` non-nullable, so existing legacy rows remain stable until every deployed environment is fully cleaned up.
-- Limited the startup repair to backfilling null timestamps rather than attempting a risky in-place constraint migration in SQLite/local-dev mode.
-
-### Blockers
-- None.
-
----
-
-## Session 5.12 - March 19, 2026 (Admin Audit Log Listing Endpoint)
+## Session 5.12 - March 19, 2026 (Admin Impersonation API Endpoints)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Added `backend/admin/audit.py` with an admin-protected audit log listing router that supports dynamic filtering by admin, action, target user, date range, limit, and offset.
-- Implemented careful ISO timestamp parsing with 400 responses for invalid `date_from` / `date_to` values, plus defensive JSON decoding so malformed historic `details_json` rows are still returned safely.
-- Mounted the new audit router from `backend/admin/router.py` and added targeted regression coverage in `tests/test_admin_audit.py`.
+- Added `backend/admin/impersonation.py` with admin-protected impersonation start/stop/status endpoints.
+- Implemented target resolution by email then uid, superadmin/self-protection checks, impersonation session persistence, audit logging, and signed cookie swap/restore behavior using the shared auth session helpers.
+- Updated `backend/admin/router.py` to mount the new impersonation router under `/api/admin/impersonation`.
 
 ### What's Working
-- `/api/admin/audit/` now returns `{entries, total}` with stable descending ordering and the requested serialized audit fields.
-- Historic audit rows with malformed `details_json` no longer break the endpoint; they fall back to the raw stored string.
-- Targeted audit endpoint tests and Python compile checks pass locally.
+- Admin users can now start impersonation sessions that preserve the original `aegis_session` in `aegis_admin_session` and replace it with an impersonated signed session payload.
+- Stopping impersonation restores the preserved admin cookie, clears the backup cookie, closes the latest active impersonation session row, and records an audit event.
+- Status checks now report whether the current session is impersonating and expose the impersonated target/admin identifiers when active.
 
 ### What's NOT Working Yet
-- The broader admin test suite still has a pre-existing import/collection failure in `tests/test_admin_billing.py` related to `_get_cycle_bounds`, which this pass did not change.
+- This pass did not add dedicated automated tests for the new impersonation endpoints.
+- `POST /stop` currently requires a valid preserved `aegis_admin_session`; if that backup cookie is missing or expired, the route returns 401 instead of attempting any fallback recovery.
 
 ### Next Steps
-1. Resolve the existing `tests/test_admin_billing.py` import mismatch so the full admin regression slice can run together again.
-2. If requested later, add audit-route tests for offset pagination across multiple pages and mixed naive/aware timestamp storage behavior on different databases.
+1. Add focused API tests for impersonation lifecycle edge cases, especially missing backup cookies, expired sessions, superadmin targets, and target resolution precedence.
+2. Consider whether impersonation should also be restricted from suspended/inactive target accounts, depending on the desired admin support workflow.
 
 ### Decisions Made
-- Normalized naive ISO query timestamps to UTC for consistent filtering behavior while still accepting standard `Z`-suffixed ISO-8601 inputs.
-- Returned the original malformed `details_json` string when JSON decoding fails so operators can still inspect legacy data instead of silently losing it.
+- Reused `auth._sign_session` / `auth._verify_session` and matched the existing auth cookie parameters instead of duplicating a new session format.
+- Logged impersonation lifecycle events through the shared admin audit service with `request.client.host if request.client else None` for IP capture on every audit write.
 
 ### Blockers
 - None.
