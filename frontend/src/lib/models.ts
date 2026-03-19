@@ -3,8 +3,17 @@
 
 import { createElement } from 'react'
 import type { IconType } from 'react-icons'
-import { FcGoogle } from 'react-icons/fc'
-import { LuBot, LuBrainCircuit, LuWind, LuZap } from 'react-icons/lu'
+import { SiAnthropic, SiGoogle, SiMistralai, SiOpenai } from 'react-icons/si'
+import { LuZap } from 'react-icons/lu'
+
+// Official brand colours
+const BRAND_COLOR: Record<string, string> = {
+  google: 'text-[#4285F4]',
+  openai: 'text-[#f0f0f0]',
+  anthropic: 'text-[#D4A27F]',
+  mistral: 'text-[#F7D046]',
+  groq: 'text-[#F55036]',
+}
 
 export type ModelInfo = {
   id: string
@@ -26,7 +35,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'google',
     displayName: 'Google (Gemini)',
-    icon: FcGoogle,
+    icon: SiGoogle,
     keyPrefix: '',
     models: [
       { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Latest Gemini 3 series — cutting-edge reasoning & multimodal.', vision: true },
@@ -40,7 +49,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'openai',
     displayName: 'OpenAI',
-    icon: LuBot,
+    icon: SiOpenai,
     keyPrefix: 'sk-',
     models: [
       { id: 'gpt-5.2', label: 'GPT-5.2', description: 'Flagship — best for coding and agentic tasks.', vision: true },
@@ -59,7 +68,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'anthropic',
     displayName: 'Anthropic',
-    icon: LuBrainCircuit,
+    icon: SiAnthropic,
     keyPrefix: 'sk-ant-',
     models: [
       { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent — agents and coding. 1M context.', vision: true },
@@ -73,7 +82,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'mistral',
     displayName: 'Mistral AI',
-    icon: LuWind,
+    icon: SiMistralai,
     keyPrefix: '',
     models: [
       { id: 'mistral-large-latest', label: 'Mistral Large 3', description: 'State-of-the-art open-weight multimodal model.', vision: true },
@@ -134,5 +143,6 @@ export const MODEL_OPTIONS = allModelIds()
 export const MODEL_ICON_URL = 'https://i.postimg.cc/NMtZmLXT/download_4.png'
 
 export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
-  return createElement(provider.icon, { className, 'aria-hidden': 'true' })
+  const color = BRAND_COLOR[provider.id] ?? ''
+  return createElement(provider.icon, { className: `${className} ${color}`, 'aria-hidden': 'true' })
 }

@@ -22,16 +22,14 @@ declare module 'react-icons/fa' {
   export const FaTimes: IconType
 }
 
-declare module 'react-icons/fc' {
-  import type { IconType } from 'react-icons'
-
-  export const FcGoogle: IconType
-}
-
 declare module 'react-icons/si' {
   import type { IconType } from 'react-icons'
 
+  export const SiAnthropic: IconType
   export const SiDiscord: IconType
+  export const SiGoogle: IconType
+  export const SiMistralai: IconType
+  export const SiOpenai: IconType
   export const SiSlack: IconType
   export const SiTelegram: IconType
 }

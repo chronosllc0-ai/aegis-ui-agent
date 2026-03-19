@@ -194,12 +194,12 @@ const DOCS_GATEWAY = [
   { slug: 'changelog', title: 'Changelog', description: 'Launch-facing updates and product changes as the surface evolves.' },
 ]
 
-const TRUST_BANDS = [
-  { label: 'Auth', value: 'Password, Google, GitHub, and OIDC SSO' },
-  { label: 'Runtime', value: 'FastAPI, WebSockets, Playwright, and PostgreSQL' },
-  { label: 'Models', value: 'Gemini, GPT, Claude, Mistral, and Groq' },
-  { label: 'Deploy', value: 'Docker-first with Railway-ready backend support' },
-]
+// Provider highlight cards shown under the hero
+const PROVIDER_HIGHLIGHTS = PROVIDERS.map((p) => ({
+  id: p.id,
+  name: p.displayName,
+  count: p.models.length,
+}))
 
 export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPortalHref }: LandingPageProps) {
   const docsPortalBase = docsPortalHref.replace(/\/$/, '')
@@ -268,13 +268,19 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </div>
       </section>
 
-      <section className='mx-auto grid w-full max-w-7xl gap-10 px-6 py-8 md:grid-cols-4'>
-        {TRUST_BANDS.map((band) => (
-          <article key={band.label} className='rounded-3xl border border-white/8 bg-white/3 p-5'>
-            <p className='text-[11px] uppercase tracking-[0.24em] text-zinc-500'>{band.label}</p>
-            <p className='mt-3 text-sm leading-7 text-zinc-200'>{band.value}</p>
-          </article>
-        ))}
+      <section className='mx-auto flex w-full max-w-7xl flex-wrap justify-center gap-4 px-6 py-8'>
+        {PROVIDER_HIGHLIGHTS.map((ph) => {
+          const provider = PROVIDERS.find((p) => p.id === ph.id)
+          return (
+            <article key={ph.id} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-white/3 px-5 py-3'>
+              {provider && <span className='text-base'>{renderProviderIcon(provider, 'h-5 w-5')}</span>}
+              <div>
+                <p className='text-sm font-medium text-white'>{ph.name}</p>
+                <p className='text-xs text-zinc-400'>{ph.count} models</p>
+              </div>
+            </article>
+          )
+        })}
       </section>
 
       <section id='features' className='mx-auto w-full max-w-7xl px-6 py-18'>
@@ -501,37 +507,28 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
       </section>
 
       <section className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.2fr_0.8fr]'>
+        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 text-center'>
           <div>
-            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Operator trust</p>
-            <h2 className='mt-4 text-4xl font-semibold text-white'>Built to move from public discovery into a live operator shell.</h2>
-            <p className='mt-4 text-sm leading-8 text-zinc-300'>
-              The main product surface now carries users from a story-led launch page into authentication, embedded docs, the standalone docs portal, and finally the signed-in app without changing the core identity of the product.
+            <h2 className='text-3xl font-semibold text-white'>Ready to automate with AI?</h2>
+            <p className='mx-auto mt-4 max-w-xl text-sm leading-8 text-zinc-300'>
+              Sign up, connect your API keys, and start running live sessions in under a minute. Read the docs when you need a deeper walkthrough.
             </p>
           </div>
-          <div className='grid gap-4'>
-            <div className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
-              Use embedded docs when users need context inside the main app, and the standalone docs portal when they need a deeper reference experience.
-            </div>
-            <div className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
-              Pricing, docs, auth, and the live operator shell now belong to the same public narrative instead of looking like separate products.
-            </div>
-            <div className='flex flex-wrap gap-3'>
-              <button
-                type='button'
-                onClick={onGetStarted}
-                className='rounded-full bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-400'
-              >
-                Go to auth
-              </button>
-              <button
-                type='button'
-                onClick={onOpenDocsHome}
-                className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-              >
-                Explore embedded docs
-              </button>
-            </div>
+          <div className='flex flex-wrap justify-center gap-3'>
+            <button
+              type='button'
+              onClick={onGetStarted}
+              className='rounded-full bg-cyan-500 px-5 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-cyan-400'
+            >
+              Get started free
+            </button>
+            <button
+              type='button'
+              onClick={onOpenDocsHome}
+              className='rounded-full border border-white/10 px-5 py-2.5 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+            >
+              Read the docs
+            </button>
           </div>
         </div>
       </section>
