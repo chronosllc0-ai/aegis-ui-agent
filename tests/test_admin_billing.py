@@ -164,12 +164,6 @@ def test_payment_method_routes_keep_a_single_default_and_audit_actions(tmp_path:
     assert Counter(actions) == Counter(
         [
             "billing.add_payment_method",
-            "billing.set_default_payment",
-            "billing.remove_payment_method",
-        ]
-    )
-        [
-            "billing.add_payment_method",
             "billing.add_payment_method",
             "billing.set_default_payment",
             "billing.remove_payment_method",
