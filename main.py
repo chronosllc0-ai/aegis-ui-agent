@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -78,13 +79,22 @@ async def _initialize_database() -> None:
     """Initialize the database with retries without blocking app readiness."""
     global db_ready, db_init_error
 
-    init_db(settings.DATABASE_URL or None)
-
+    configured_database_url = settings.DATABASE_URL or None
+    attempted_sqlite_fallback = False
     retry_delay_seconds = 5
     while True:
         try:
+            init_db(configured_database_url)
             await create_tables()
         except Exception as exc:  # noqa: BLE001
+            if _should_fallback_to_local_sqlite(configured_database_url, exc) and not attempted_sqlite_fallback:
+                logger.warning(
+                    "Database initialization failed for local DATABASE_URL; falling back to SQLite. error=%s",
+                    exc,
+                )
+                configured_database_url = None
+                attempted_sqlite_fallback = True
+                continue
             db_ready = False
             db_init_error = str(exc)
             logger.exception(
@@ -97,6 +107,34 @@ async def _initialize_database() -> None:
             db_init_error = None
             logger.info("Database initialized")
             return
+
+
+def _should_fallback_to_local_sqlite(database_url: str | None, exc: Exception) -> bool:
+    """Return whether local dev should fall back to SQLite after a PostgreSQL failure."""
+    if not database_url or settings.RAILWAY_ENVIRONMENT:
+        return False
+
+    parsed = urlparse(database_url)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        return False
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        return False
+
+    error_text = str(exc).lower()
+    if isinstance(exc, ModuleNotFoundError):
+        return exc.name == "asyncpg" or "asyncpg" in error_text
+
+    return any(
+        marker in error_text
+        for marker in (
+            "connection refused",
+            "could not connect",
+            "actively refused",
+            "connect call failed",
+            "timeout expired",
+            "timed out",
+        )
+    )
 
 
 @app.on_event("startup")

@@ -17,6 +17,9 @@ import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
 import { PROVIDERS, providerById } from './lib/models'
+import { docsPath, navigateTo, usePathname } from './lib/routes'
+import { getStandaloneDocUrl } from './lib/site'
+import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
 type TaskHistoryItem = {
   id: string
@@ -29,6 +32,7 @@ function App() {
   const { balance, sessionCredits, sessionMessages, streaming, rates, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
+  const pathname = usePathname()
 
   const [mode, setMode] = useState<SteeringMode>('steer')
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
@@ -45,12 +49,15 @@ function App() {
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [showLanding, setShowLanding] = useState(true)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [draftInput, setDraftInput] = useState('')
   // draftInput is wired from InputBar's onChange → CostEstimator for pre-send cost preview
   void setDraftInput // suppress unused warning — InputBar doesn't expose onChange yet
+
+  const docsSlug = slugFromDocsPath(pathname)
+  const isDocsRoute = pathname === '/docs' || pathname.startsWith('/docs/')
+  const isAuthRoute = pathname === '/auth'
 
   const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -76,6 +83,13 @@ function App() {
   }, [isWorking])
 
   useEffect(() => {
+    document.body.style.overflow = isAuthenticated && !isDocsRoute ? 'hidden' : 'auto'
+    return () => {
+      document.body.style.overflow = 'auto'
+    }
+  }, [isAuthenticated, isDocsRoute])
+
+  useEffect(() => {
     let active = true
     const loadAuth = async () => {
       setAuthLoading(true)
@@ -92,7 +106,6 @@ function App() {
         if (active && data?.user) {
           setAuthUser(data.user)
           setIsAuthenticated(true)
-          setShowLanding(false)
         }
       } finally {
         if (active) setAuthLoading(false)
@@ -103,10 +116,6 @@ function App() {
       active = false
     }
   }, [])
-
-  useEffect(() => {
-    if (isAuthenticated) setShowLanding(false)
-  }, [isAuthenticated])
 
   useEffect(() => {
     if (isWorking && taskStartedAt === null) {
@@ -218,6 +227,11 @@ function App() {
     })
   }
 
+  const openDocsHome = () => navigateTo('/docs')
+  const openDoc = (slug: string) => navigateTo(docsPath(slug))
+  const openAuth = () => navigateTo('/auth')
+  const openHome = () => navigateTo('/')
+
   if (!isAuthenticated) {
     if (authLoading) {
       return (
@@ -226,19 +240,35 @@ function App() {
         </main>
       )
     }
-    if (showLanding) {
-      return <LandingPage onGetStarted={() => setShowLanding(false)} />
+    if (isDocsRoute) {
+      return <EmbeddedDocsPage slug={docsSlug} onGoHome={openHome} onGoAuth={openAuth} onGoDocsHome={openDocsHome} onNavigateToSlug={openDoc} />
+    }
+    if (!isAuthRoute) {
+      return (
+        <LandingPage
+          onGetStarted={openAuth}
+          onOpenDocsHome={openDocsHome}
+          onOpenDoc={openDoc}
+          docsPortalHref={getStandaloneDocUrl()}
+        />
+      )
     }
     return (
       <AuthPage
         onAuthenticated={(user) => {
           setAuthUser(user)
           setIsAuthenticated(true)
-          setShowLanding(false)
+          navigateTo('/')
         }}
-        onBack={() => setShowLanding(true)}
+        onBack={openHome}
+        onOpenDocsHome={openDocsHome}
+        onOpenDoc={openDoc}
       />
     )
+  }
+
+  if (isDocsRoute) {
+    return <EmbeddedDocsPage slug={docsSlug} onGoHome={openHome} onGoAuth={openAuth} onGoDocsHome={openDocsHome} onNavigateToSlug={openDoc} />
   }
 
   return (
@@ -285,7 +315,7 @@ function App() {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
                 setAuthUser(null)
                 setIsAuthenticated(false)
-                setShowLanding(true)
+                navigateTo('/')
               }}
             />
           </div>

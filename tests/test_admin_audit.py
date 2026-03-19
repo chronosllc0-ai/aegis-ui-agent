@@ -9,6 +9,11 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+<<<<<<< codex/create-audit.py-with-get-endpoint-wpn666
+=======
+from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
+>>>>>>> main
 
 from backend import database
 from backend.admin.audit import router as audit_router
@@ -67,6 +72,11 @@ async def _seed_audit_logs() -> None:
         await session.commit()
 
 
+<<<<<<< codex/create-audit.py-with-get-endpoint-wpn666
+=======
+
+
+>>>>>>> main
 def _build_client() -> TestClient:
     """Build a FastAPI test app with admin audit dependency overrides."""
     app = FastAPI()
@@ -75,7 +85,11 @@ def _build_client() -> TestClient:
     async def override_admin_user() -> User:
         return User(uid="admin-1", email="admin@example.com", role="admin", status="active")
 
+<<<<<<< codex/create-audit.py-with-get-endpoint-wpn666
     async def override_session() -> AsyncGenerator:
+=======
+    async def override_session() -> AsyncGenerator[AsyncSession, None]:
+>>>>>>> main
         async with database._session_factory() as session:  # type: ignore[union-attr]
             yield session
 
@@ -128,6 +142,20 @@ def test_list_audit_entries_supports_action_target_and_pagination(tmp_path: Path
     assert payload["entries"][0]["details"] == ["restored"]
 
 
+<<<<<<< codex/create-audit.py-with-get-endpoint-wpn666
+=======
+
+def test_audit_log_created_at_is_non_nullable_and_sorted_with_nulls_last() -> None:
+    """Audit timestamps should be required and ordered deterministically across databases."""
+    assert AuditLog.__table__.c.created_at.nullable is False
+
+    statement = select(AuditLog).order_by(AuditLog.created_at.desc().nulls_last(), AuditLog.id.desc())
+    compiled = str(statement.compile(dialect=postgresql.dialect()))
+
+    assert "created_at DESC NULLS LAST" in compiled
+
+
+>>>>>>> main
 def test_list_audit_entries_rejects_invalid_iso_timestamps(tmp_path: Path) -> None:
     """Audit endpoint should return HTTP 400 when timestamp filters are invalid."""
     _init_test_db(tmp_path)

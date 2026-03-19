@@ -1,46 +1,45 @@
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { PROVIDERS, renderProviderIcon } from '../lib/models'
+import { PublicFooter } from '../public/PublicFooter'
+import { PublicHeader } from '../public/PublicHeader'
 
 type LandingPageProps = {
   onGetStarted: () => void
+  onOpenDocsHome: () => void
+  onOpenDoc: (slug: string) => void
+  docsPortalHref: string
 }
 
 const FEATURES = [
   {
-    title: 'Multi-model intelligence',
-    description:
-      'Switch between OpenAI, Anthropic, Google Gemini, Mistral, and Groq in one click. Pick the best model for every task.',
+    title: 'Vision-first navigation',
+    description: 'Aegis reasons over the live screen state before every major action so the operator stays aligned with what is actually visible.',
     icon: Icons.globe,
   },
   {
-    title: 'Real-time steering',
-    description:
-      'Steer, interrupt, or queue instructions while tasks run. Keep the agent aligned without starting over.',
+    title: 'Real-time control',
+    description: 'Steer, interrupt, queue, and monitor transcripts without restarting the session or losing context.',
     icon: Icons.workflows,
   },
   {
-    title: 'Live voice control',
-    description:
-      'Stream voice input through the Live API for hands-free navigation with sub-second transcription.',
+    title: 'Live voice loop',
+    description: 'Voice input, transcripts, and action logs flow through the same operator surface for fast handoffs.',
     icon: Icons.mic,
   },
   {
-    title: 'Bring Your Own Key',
-    description:
-      'Use your own API keys for any provider. Keys are encrypted at rest, so you control your usage and billing.',
+    title: 'Bring your own keys',
+    description: 'Use your own provider accounts across Gemini, OpenAI, Anthropic, Mistral, and Groq from one settings surface.',
     icon: Icons.settings,
   },
   {
-    title: 'Vision-first navigation',
-    description:
-      'Aegis reads the screen directly with multimodal vision. No DOM selectors, no brittle scripts.',
+    title: 'Docs-driven onboarding',
+    description: 'Quickstart, API reference, tutorials, FAQ, and changelog are wired directly into the public product story.',
     icon: Icons.check,
   },
   {
-    title: 'Deploy anywhere',
-    description:
-      'One-click Railway deploys, Docker support, and a PostgreSQL backend. Production-ready from day one.',
+    title: 'Deploy-ready stack',
+    description: 'FastAPI, WebSockets, Playwright, PostgreSQL, Docker, and Railway-friendly deployment paths are already in the repo.',
     icon: Icons.menu,
   },
 ]
@@ -48,19 +47,19 @@ const FEATURES = [
 const STEPS = [
   {
     title: 'Capture',
-    text: 'Grab the current viewport as a screenshot to lock in the UI state.',
+    text: 'Grab the current viewport so the agent reasons over the real screen instead of guessing from stale state.',
   },
   {
     title: 'Analyze',
-    text: 'Multimodal vision identifies interactive elements and page context.',
+    text: 'Use multimodal reasoning to understand layout, intent, and the interactive elements available right now.',
   },
   {
     title: 'Act',
-    text: 'Playwright executes clicks, typing, scrolling, and navigation.',
+    text: 'Execute clicks, typing, scrolling, and navigation while the operator can still steer the task.',
   },
   {
     title: 'Report',
-    text: 'Progress streams back through logs, frames, and voice narration.',
+    text: 'Stream frames, workflow steps, logs, and transcripts back into the shell so progress stays legible.',
   },
 ]
 
@@ -69,13 +68,14 @@ const PRICING = [
     name: 'Free',
     price: '$0',
     period: '/month',
-    description: 'Get started with your own API keys',
+    description: 'Get started with 1,000 credits and your own provider keys.',
     cta: 'Start free',
     features: [
-      'Unlimited sessions (BYOK)',
-      'All providers supported',
-      'Community support',
-      'Self-hosted option',
+      '1,000 credits included (1 credit = $0.001)',
+      'BYOK sessions with all 5 providers',
+      '32+ models across OpenAI, Anthropic, Google, Mistral, Groq',
+      'Embedded docs access',
+      'Real-time usage meter',
     ],
     highlight: false,
   },
@@ -83,14 +83,14 @@ const PRICING = [
     name: 'Pro',
     price: '$29',
     period: '/month',
-    description: 'For power users and small teams',
+    description: 'For operators who need serious throughput and saved workflows.',
     cta: 'Start Pro trial',
     features: [
+      '50,000 credits/month (~$50 of model usage)',
       'Everything in Free',
-      'Included API credits ($20/mo)',
-      'Priority model access',
-      'Workflow templates',
-      'Email support',
+      'Workflow templates and session history',
+      'Priority support',
+      'Spending alerts and usage analytics',
     ],
     highlight: true,
   },
@@ -98,15 +98,14 @@ const PRICING = [
     name: 'Team',
     price: '$79',
     period: '/seat/month',
-    description: 'Collaboration and shared workflows',
-    cta: 'Contact us',
+    description: 'Shared operations, SSO, and team-level credit pools.',
+    cta: 'Talk to us',
     features: [
+      '200,000 credits/seat/month',
       'Everything in Pro',
-      'Shared API key pools',
+      'Shared API key pools across the team',
       'Team workflow library',
-      'SSO / SAML',
-      'Dedicated support',
-      'Custom integrations',
+      'SSO, admin dashboard, and audit logs',
     ],
     highlight: false,
   },
@@ -114,321 +113,451 @@ const PRICING = [
 
 const LANDING_SLIDES: EntrySlide[] = [
   {
-    id: 'see',
-    eyebrow: 'Vision loop',
-    title: 'Aegis sees the screen before it acts.',
-    description: 'Each run captures the viewport, reasons over the current UI state, and then executes the next action with context instead of brittle selectors.',
+    id: 'operator-loop',
+    eyebrow: 'Operator loop',
+    title: 'The screen is the source of truth.',
+    description:
+      'Aegis captures the viewport, reasons over the live UI state, and acts with the context of what is actually visible right now.',
     bullets: [
-      'Screenshot-first analysis before every major step',
-      'Multimodal reasoning over visual layout and state',
-      'Safer automation when the UI changes underneath you',
+      'Vision-first navigation that adapts to changing layouts',
+      'Live frame updates while the session is running',
+      'Built for real operator supervision instead of blind automation',
     ],
-    statLabel: 'Loop cadence',
-    statValue: 'Capture -> Analyze -> Act',
+    statLabel: 'Live cycle',
+    statValue: 'See -> Reason -> Act',
     icon: (className) => Icons.globe({ className }),
   },
   {
-    id: 'steer',
-    eyebrow: 'Live control',
-    title: 'Interrupt, steer, or queue work while the agent is running.',
-    description: 'The operator stays in control the whole time. Aegis streams frames and logs live so you can redirect the task instead of starting over.',
+    id: 'steer-and-voice',
+    eyebrow: 'Real-time control',
+    title: 'Interrupt, steer, queue, and speak without restarting.',
+    description:
+      'Aegis keeps the operator in the loop. You can redirect a task mid-run, push voice input, or queue the next move while the current one is still executing.',
     bullets: [
-      'Queue the next instruction while the current task runs',
-      'Interrupt safely when the page drifts off course',
-      'Watch transcripts, frames, and action logs update live',
+      'Steer or interrupt without losing session state',
+      'Transcript display and voice-friendly flows',
+      'Action logs and workflow view stay in sync with the run',
     ],
-    statLabel: 'Control modes',
-    statValue: 'Steer / Interrupt / Queue',
-    icon: (className) => Icons.workflows({ className }),
+    statLabel: 'Control',
+    statValue: 'Text + Voice',
+    icon: (className) => Icons.mic({ className }),
   },
   {
-    id: 'models',
-    eyebrow: 'Model routing',
-    title: 'Switch providers without rebuilding the workflow.',
-    description: 'The same session can move across Gemini, GPT, Claude, Mistral, and Groq so you can trade off quality, latency, and cost as the task evolves.',
+    id: 'docs-and-deploy',
+    eyebrow: 'Build and deploy',
+    title: 'Read the docs, bring your own keys, and ship fast.',
+    description:
+      'The public site, auth flow, embedded docs, and standalone docs portal are designed to carry a user all the way from discovery to a live deployment.',
     bullets: [
-      'Shared UI for provider and model selection',
-      'BYOK storage for your own provider credentials',
-      'Built for mixed-model agent sessions',
+      'Shared docs across embedded and standalone experiences',
+      'BYOK support across multiple model providers',
+      'Deployment guidance for environments such as Railway',
     ],
     statLabel: 'Providers',
-    statValue: `${PROVIDERS.length}+ available`,
+    statValue: `${PROVIDERS.length}+ ready`,
     icon: (className) => Icons.settings({ className }),
   },
 ]
 
-export function LandingPage({ onGetStarted }: LandingPageProps) {
-  return (
-    <main className='min-h-screen bg-[#0b0b0b] text-zinc-100'>
-      {/* ── Nav ─────────────────────────────────────────────────────── */}
-      <header className='mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6'>
-        <div className='flex items-center gap-2'>
-          <img src='/shield.svg' alt='Aegis logo' className='h-7 w-7' />
-          <span className='text-lg font-semibold'>Aegis</span>
-          <span className='rounded-full border border-blue-500/40 px-2 py-0.5 text-[10px] text-blue-300'>by Chronos</span>
-        </div>
-        <nav className='flex items-center gap-4 text-sm text-zinc-300'>
-          <a href='#features' className='hover:text-white'>Features</a>
-          <a href='#how' className='hover:text-white'>How it works</a>
-          <a href='#byok' className='hover:text-white'>BYOK</a>
-          <a href='#pricing' className='hover:text-white'>Pricing</a>
-          <button
-            type='button'
-            onClick={onGetStarted}
-            className='rounded-md border border-blue-500/60 px-3 py-1.5 text-blue-200 hover:bg-blue-500/10'
-          >
-            Sign in
-          </button>
-        </nav>
-      </header>
+const STORY_MODULES = [
+  {
+    id: 'vision',
+    eyebrow: 'Why it works',
+    title: 'A visual agent should understand the screen before it touches anything.',
+    body:
+      'Aegis treats screenshots as the operating surface. That lets the product move through complex layouts, popovers, and state changes without relying on brittle selectors.',
+    bullets: [
+      'Screenshot analysis on the live viewport',
+      'Multimodal reasoning over layout and state',
+      'Safer automation under UI drift',
+    ],
+    docsSlug: 'quickstart',
+    docsLabel: 'Read quickstart',
+  },
+  {
+    id: 'control',
+    eyebrow: 'Operator control',
+    title: 'The operator stays in charge the whole time.',
+    body:
+      'The signed-in shell is built around live control. Steering notes, interrupts, queue management, transcripts, and workflow capture all sit in the same operational surface.',
+    bullets: [
+      'Live sessions with frame, log, and workflow updates',
+      'Steer, interrupt, and queue semantics built into the core loop',
+      'Voice input and transcript-driven task starts',
+    ],
+    docsSlug: 'live-sessions',
+    docsLabel: 'Read live session guide',
+  },
+  {
+    id: 'integrations',
+    eyebrow: 'Teams and outputs',
+    title: 'Workflows and integrations turn successful runs into repeatable operations.',
+    body:
+      'Once the session finds a useful pattern, operators can save it, run it again, and connect outputs to integrations such as Telegram, Slack, and Discord.',
+    bullets: [
+      'Reusable workflow templates',
+      'Operator-facing integration setup',
+      'Docs and tutorials that explain the end-to-end path',
+    ],
+    docsSlug: 'integrations',
+    docsLabel: 'Read integration docs',
+  },
+]
 
-      {/* ── Hero ────────────────────────────────────────────────────── */}
-      <section className='mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-10 px-6 py-20 lg:grid-cols-[1.2fr_1fr]'>
-        <div>
-          <p className='text-sm uppercase tracking-[0.2em] text-blue-300/80'>
-            AI-powered universal UI agent
-          </p>
-          <h1 className='mt-4 text-4xl font-semibold leading-tight md:text-5xl'>
-            Navigate any UI with
-            <br />
-            <span className='bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent'>
-              vision, voice, and AI.
-            </span>
-          </h1>
-          <p className='mt-5 max-w-lg text-base text-zinc-400'>
-            Aegis sees your screen, reasons about intent, and acts with precision.
-            Powered by your choice of model: Gemini, GPT-4.1, Claude, Mistral, or Groq,
-            with full BYOK support.
-          </p>
-          <div className='mt-6 flex flex-wrap gap-3'>
-            <button
-              type='button'
-              onClick={onGetStarted}
-              className='rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium hover:bg-blue-500'
-            >
-              Get started free
-            </button>
-            <a
-              href='#how'
-              className='rounded-lg border border-[#2a2a2a] px-5 py-2.5 text-sm text-zinc-300 hover:border-blue-500/60'
-            >
-              See how it works
-            </a>
+const DOCS_GATEWAY = [
+  { slug: 'quickstart', title: 'Quickstart', description: 'Get from zero to a live session with the shortest possible setup path.' },
+  { slug: 'api-auth-reference', title: 'API reference', description: 'HTTP routes, WebSocket contract, and auth endpoints in one place.' },
+  { slug: 'first-live-run', title: 'Tutorials', description: 'Follow end-to-end operator examples without guessing the next step.' },
+  { slug: 'faq', title: 'FAQ', description: 'Common auth, deployment, and operator questions answered directly.' },
+  { slug: 'changelog', title: 'Changelog', description: 'Launch-facing updates and product changes as the surface evolves.' },
+]
+
+// Provider highlight cards shown under the hero
+const PROVIDER_HIGHLIGHTS = PROVIDERS.map((p) => ({
+  id: p.id,
+  name: p.displayName,
+  count: p.models.length,
+}))
+
+export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPortalHref }: LandingPageProps) {
+  const docsPortalBase = docsPortalHref.replace(/\/$/, '')
+
+  return (
+    <main className='min-h-screen bg-[#070b12] text-zinc-100'>
+      <PublicHeader
+        onGoHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        onGoAuth={onGetStarted}
+        onGoDocsHome={onOpenDocsHome}
+        onGoDoc={onOpenDoc}
+        docsPortalHref={docsPortalHref}
+      />
+
+      <section className='relative overflow-hidden'>
+        <div className='absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.12),transparent_35%)]' />
+        <div className='relative mx-auto grid w-full max-w-7xl gap-14 px-6 py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
+          <div className='flex flex-col justify-center'>
+            <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>A Chronos AI product</p>
+            <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
+              Navigate any interface with a visual operator that can see, listen, and adapt.
+            </h1>
+            <p className='mt-6 max-w-2xl text-base leading-8 text-zinc-300 md:text-lg'>
+              Aegis is an AI-powered universal UI navigator. It watches the screen, reasons over live state, and acts with the operator still in control from the first instruction to the last step.
+            </p>
+            <div className='mt-8 flex flex-wrap gap-3'>
+              <button
+                type='button'
+                onClick={onGetStarted}
+                className='rounded-full bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400'
+              >
+                Get started free
+              </button>
+              <button
+                type='button'
+                onClick={() => onOpenDoc('quickstart')}
+                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Read quickstart
+              </button>
+              <a
+                href={docsPortalHref}
+                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Open docs portal
+              </a>
+            </div>
+
+            <div className='mt-10 flex flex-wrap items-center gap-4'>
+              <p className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Supported providers</p>
+              <div className='flex flex-wrap gap-2'>
+                {PROVIDERS.map((provider) => (
+                  <span
+                    key={provider.id}
+                    title={provider.displayName}
+                    className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'
+                  >
+                    {renderProviderIcon(provider, 'h-7 w-7')}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className='mt-8 flex items-center gap-4'>
-            <p className='text-xs text-zinc-500'>Supported providers</p>
-            <div className='flex gap-2'>
-              {PROVIDERS.map((p) => (
-                <span
-                  key={p.id}
-                  title={p.displayName}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#2a2a2a] bg-[#111] text-sm'
+
+          <EntrySlider slides={LANDING_SLIDES} className='self-start lg:sticky lg:top-28' />
+        </div>
+      </section>
+
+      <section className='mx-auto flex w-full max-w-7xl flex-wrap justify-center gap-4 px-6 py-8'>
+        {PROVIDER_HIGHLIGHTS.map((ph) => {
+          const provider = PROVIDERS.find((p) => p.id === ph.id)
+          return (
+            <article key={ph.id} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
+              {provider && <span className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'>{renderProviderIcon(provider, 'h-7 w-7')}</span>}
+              <div>
+                <p className='text-sm font-medium text-white'>{ph.name}</p>
+                <p className='text-xs text-zinc-400'>{ph.count} models</p>
+              </div>
+            </article>
+          )
+        })}
+      </section>
+
+      <section id='features' className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='mb-10 max-w-2xl'>
+          <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Capability map</p>
+          <h2 className='mt-4 text-4xl font-semibold text-white'>Everything needed to move from discovery to live execution.</h2>
+          <p className='mt-4 text-sm leading-7 text-zinc-400'>
+            This public surface has to do more than market the product. It needs to show operators, builders, and teammates how the system behaves before they ever sign in.
+          </p>
+        </div>
+        <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
+          {FEATURES.map((feature) => (
+            <article key={feature.title} className='rounded-[28px] border border-white/8 bg-[#0c1018] p-6'>
+              <div className='inline-flex rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-3 text-cyan-200'>
+                {feature.icon({ className: 'h-5 w-5' })}
+              </div>
+              <h3 className='mt-5 text-lg font-semibold text-white'>{feature.title}</h3>
+              <p className='mt-3 text-sm leading-7 text-zinc-300'>{feature.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className='mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-18'>
+        <div className='max-w-2xl'>
+          <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Product story</p>
+          <h2 className='mt-4 text-4xl font-semibold text-white'>An alternating story of control, vision, and operational readiness.</h2>
+          <p className='mt-4 text-sm leading-7 text-zinc-400'>
+            The public surface teaches the product by moving between narrative explanation, docs entry points, and proof of how the operator shell actually works.
+          </p>
+        </div>
+
+        {STORY_MODULES.map((module, index) => (
+          <article
+            key={module.id}
+            className={`grid gap-6 rounded-[32px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-2 ${index % 2 === 1 ? 'lg:[&>*:first-child]:order-2' : ''}`}
+          >
+            <div className='flex flex-col justify-center'>
+              <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>{module.eyebrow}</p>
+              <h3 className='mt-4 text-3xl font-semibold text-white'>{module.title}</h3>
+              <p className='mt-4 text-sm leading-8 text-zinc-300'>{module.body}</p>
+              <div className='mt-6 flex flex-wrap gap-3'>
+                <button
+                  type='button'
+                  onClick={() => onOpenDoc(module.docsSlug)}
+                  className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
                 >
-                  {renderProviderIcon(p, 'h-4 w-4')}
-                </span>
+                  {module.docsLabel}
+                </button>
+                <a
+                  href={`${docsPortalBase}/${module.docsSlug}`}
+                  className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                >
+                  Read in docs portal
+                </a>
+              </div>
+            </div>
+
+            <div className='grid gap-4'>
+              {module.bullets.map((bullet) => (
+                <div key={bullet} className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
+                  {bullet}
+                </div>
               ))}
             </div>
-          </div>
-        </div>
-        <EntrySlider slides={LANDING_SLIDES} />
+          </article>
+        ))}
       </section>
 
-      {/* ── Features ────────────────────────────────────────────────── */}
-      <section id='features' className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='mb-10 text-center'>
-          <h2 className='text-3xl font-semibold'>Everything you need to automate the web</h2>
-          <p className='mx-auto mt-3 max-w-xl text-sm text-zinc-400'>
-            Multi-model support, real-time control, and encrypted BYOK designed for production use.
-          </p>
+      <section id='how' className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='rounded-[36px] border border-white/8 bg-[#0c1018] p-8 md:p-10'>
+          <div className='max-w-3xl'>
+            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>How it works</p>
+            <h2 className='mt-4 text-4xl font-semibold text-white'>A tight loop connects capture, reasoning, execution, and feedback.</h2>
+            <p className='mt-4 text-sm leading-8 text-zinc-300'>
+              The operator shell and docs should explain the same loop. The live product just makes that loop visible through frames, transcripts, logs, and workflow steps.
+            </p>
+          </div>
+          <div className='mt-8 grid gap-4 md:grid-cols-4'>
+            {STEPS.map((step, index) => (
+              <article key={step.title} className='rounded-3xl border border-white/8 bg-white/4 p-5'>
+                <div className='inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-cyan-400/12 text-sm font-semibold text-cyan-200'>
+                  {index + 1}
+                </div>
+                <h3 className='mt-4 text-lg font-semibold text-white'>{step.title}</h3>
+                <p className='mt-3 text-sm leading-7 text-zinc-300'>{step.text}</p>
+              </article>
+            ))}
+          </div>
+          <div className='mt-8 flex flex-wrap gap-3'>
+            <button
+              type='button'
+              onClick={() => onOpenDoc('api-auth-reference')}
+              className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+            >
+              Read API reference
+            </button>
+            <button
+              type='button'
+              onClick={() => onOpenDoc('first-live-run')}
+              className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+            >
+              Follow a tutorial
+            </button>
+          </div>
         </div>
-        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
-          {FEATURES.map((feature) => (
-            <div key={feature.title} className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-5'>
-              <div className='flex items-center gap-3'>
-                <span className='rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-blue-200'>
-                  {feature.icon({ className: 'h-5 w-5' })}
+      </section>
+
+      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='rounded-[36px] border border-cyan-400/20 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_30%),#0c1018] p-8 md:p-10'>
+          <div className='max-w-3xl'>
+            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Docs gateway</p>
+            <h2 className='mt-4 text-4xl font-semibold text-white'>Read docs where the story needs depth.</h2>
+            <p className='mt-4 text-sm leading-8 text-zinc-300'>
+              The landing page should not try to answer every technical question directly. It should route users into quickstart, API reference, tutorials, FAQ, and changelog at the exact points where confidence matters.
+            </p>
+          </div>
+          <div className='mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5'>
+            {DOCS_GATEWAY.map((item) => (
+              <button
+                key={item.slug}
+                type='button'
+                onClick={() => onOpenDoc(item.slug)}
+                className='rounded-3xl border border-white/8 bg-white/4 p-5 text-left transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                <p className='text-sm font-semibold text-white'>{item.title}</p>
+                <p className='mt-3 text-sm leading-7 text-zinc-300'>{item.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.1fr_0.9fr]'>
+          <div>
+            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Bring your own keys</p>
+            <h2 className='mt-4 text-4xl font-semibold text-white'>Use the providers you already trust.</h2>
+            <p className='mt-4 text-sm leading-8 text-zinc-300'>
+              Plug in your own API keys for any supported provider. Your keys are encrypted with AES-256, billed directly to your provider account, and never logged or shared.
+            </p>
+            <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
+              {[
+                'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
+                'Use one settings surface for providers and model selection',
+                'Pair BYOK setup with docs for auth, deployment, and workflows',
+              ].map((item) => (
+                <li key={item} className='flex items-start gap-2'>
+                  {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className='grid gap-3'>
+            {PROVIDERS.slice(0, 4).map((provider) => (
+              <div key={provider.id} className='flex items-center gap-3 rounded-3xl border border-white/8 bg-[#111] px-4 py-4'>
+                <span className='inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.08]'>
+                  {renderProviderIcon(provider, 'h-8 w-8')}
                 </span>
-                <h3 className='text-lg font-semibold'>{feature.title}</h3>
-              </div>
-              <p className='mt-3 text-sm text-zinc-400'>{feature.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── How it works ────────────────────────────────────────────── */}
-      <section id='how' className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='mb-10 text-center'>
-          <h2 className='text-3xl font-semibold'>How it works</h2>
-          <p className='mx-auto mt-3 max-w-xl text-sm text-zinc-400'>
-            A tight loop connects vision, reasoning, and action until the task is done.
-          </p>
-        </div>
-        <div className='grid gap-4 md:grid-cols-4'>
-          {STEPS.map((step, index) => (
-            <div key={step.title} className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-4'>
-              <div className='mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600/20 text-sm font-bold text-blue-300'>
-                {index + 1}
-              </div>
-              <h3 className='text-lg font-semibold'>{step.title}</h3>
-              <p className='mt-2 text-sm text-zinc-400'>{step.text}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── BYOK explainer ──────────────────────────────────────────── */}
-      <section id='byok' className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-8 md:p-10'>
-          <div className='grid gap-8 md:grid-cols-2'>
-            <div>
-              <p className='text-sm uppercase tracking-[0.2em] text-blue-300/80'>Bring Your Own Key</p>
-              <h2 className='mt-3 text-2xl font-semibold'>Your keys, your control</h2>
-              <p className='mt-4 text-sm text-zinc-400'>
-                Aegis encrypts your API keys with AES-256 before storing them.
-                Each request is billed directly to your provider account.
-                No middleman markup, no vendor lock-in.
-              </p>
-              <ul className='mt-5 space-y-2'>
-                {[
-                  'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
-                  'Keys encrypted at rest, never logged or shared',
-                  'Remove or rotate keys anytime from Settings',
-                  'Platform fallback when no user key is set',
-                ].map((item) => (
-                  <li key={item} className='flex items-start gap-2 text-sm text-zinc-300'>
-                    {Icons.check({ className: 'mt-0.5 h-4 w-4 shrink-0 text-emerald-400' })}
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className='flex items-center justify-center'>
-              <div className='w-full max-w-xs space-y-3'>
-                {PROVIDERS.slice(0, 4).map((p) => (
-                  <div
-                    key={p.id}
-                    className='flex items-center gap-3 rounded-xl border border-[#1f1f1f] bg-[#0f0f0f] px-4 py-3'
-                  >
-                    <span className='text-lg'>
-                      {renderProviderIcon(p, 'h-5 w-5')}
-                    </span>
-                    <span className='text-sm text-zinc-200'>{p.displayName}</span>
-                    <span className='ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-300'>
-                      <span className='h-1.5 w-1.5 rounded-full bg-emerald-400' />
-                      Connected
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Architecture ────────────────────────────────────────────── */}
-      <section className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-6 md:p-8'>
-          <div className='flex items-center gap-2 text-sm text-zinc-400'>
-            {Icons.workflows({ className: 'h-4 w-4' })}
-            <span>Architecture</span>
-          </div>
-          <h2 className='mt-3 text-2xl font-semibold'>Built for production</h2>
-          <p className='mt-3 text-sm text-zinc-400'>
-            FastAPI manages websocket sessions, multi-provider LLM routing handles vision
-            and reasoning, and Playwright executes UI interactions. PostgreSQL, Railway, and
-            Docker keep the stack scalable and portable.
-          </p>
-          <div className='mt-5 grid gap-3 md:grid-cols-4'>
-            {[
-              { label: 'Frontend', value: 'React + Vite + Tailwind' },
-              { label: 'Backend', value: 'FastAPI + WebSockets + Playwright' },
-              { label: 'AI', value: '5 providers · 30+ models' },
-              { label: 'Infra', value: 'Railway · PostgreSQL · Docker' },
-            ].map((item) => (
-              <div key={item.label} className='rounded-xl border border-[#1f1f1f] bg-[#0f0f0f] p-4'>
-                <p className='text-xs uppercase tracking-[0.2em] text-zinc-500'>{item.label}</p>
-                <p className='mt-2 text-sm text-zinc-200'>{item.value}</p>
+                <div>
+                  <p className='text-sm font-medium text-white'>{provider.displayName}</p>
+                  <p className='text-xs text-zinc-400'>{provider.models.length} models available</p>
+                </div>
+                <span className='ml-auto inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] text-emerald-200'>
+                  <span className='h-2 w-2 rounded-full bg-emerald-300' />
+                  Ready
+                </span>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Pricing ─────────────────────────────────────────────────── */}
-      <section id='pricing' className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='mb-10 text-center'>
-          <h2 className='text-3xl font-semibold'>Simple, transparent pricing</h2>
-          <p className='mx-auto mt-3 max-w-xl text-sm text-zinc-400'>
-            Start free with your own keys. Upgrade for included credits and team features.
+      <section id='pricing' className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='max-w-3xl'>
+          <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Pricing</p>
+          <h2 className='mt-4 text-4xl font-semibold text-white'>Simple credit-based pricing. No hidden fees.</h2>
+          <p className='mt-4 text-sm leading-8 text-zinc-300'>
+            1 credit = $0.001. Every model call is metered transparently based on actual token usage with a simple 40% platform margin. Bring your own keys for zero-markup direct billing, or use platform credits for convenience.
           </p>
         </div>
-        <div className='grid gap-6 md:grid-cols-3'>
+        <div className='mt-8 grid gap-6 lg:grid-cols-3'>
           {PRICING.map((plan) => (
-            <div
+            <article
               key={plan.name}
-              className={`rounded-2xl border p-6 ${
+              className={`rounded-[32px] border p-7 ${
                 plan.highlight
-                  ? 'border-blue-500/60 bg-gradient-to-b from-blue-600/10 to-[#111]'
-                  : 'border-[#1f1f1f] bg-[#111]'
+                  ? 'border-cyan-400/35 bg-[linear-gradient(180deg,rgba(34,211,238,0.16),rgba(12,16,24,0.95))]'
+                  : 'border-white/8 bg-[#0c1018]'
               }`}
             >
               {plan.highlight && (
-                <p className='mb-3 text-xs font-medium uppercase tracking-wider text-blue-300'>
-                  Most popular
-                </p>
+                <p className='mb-4 text-[11px] uppercase tracking-[0.22em] text-cyan-200'>Most popular</p>
               )}
-              <h3 className='text-xl font-semibold'>{plan.name}</h3>
-              <div className='mt-2 flex items-baseline gap-1'>
-                <span className='text-3xl font-bold'>{plan.price}</span>
-                <span className='text-sm text-zinc-400'>{plan.period}</span>
+              <h3 className='text-2xl font-semibold text-white'>{plan.name}</h3>
+              <div className='mt-3 flex items-end gap-1'>
+                <span className='text-4xl font-semibold text-white'>{plan.price}</span>
+                <span className='pb-1 text-sm text-zinc-400'>{plan.period}</span>
               </div>
-              <p className='mt-2 text-sm text-zinc-400'>{plan.description}</p>
+              <p className='mt-4 text-sm leading-7 text-zinc-300'>{plan.description}</p>
               <button
                 type='button'
                 onClick={onGetStarted}
-                className={`mt-5 w-full rounded-lg px-4 py-2 text-sm font-medium ${
+                className={`mt-6 w-full rounded-full px-4 py-3 text-sm font-medium transition ${
                   plan.highlight
-                    ? 'bg-blue-600 hover:bg-blue-500'
-                    : 'border border-[#2a2a2a] hover:border-blue-500/60'
+                    ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                    : 'border border-white/10 text-zinc-100 hover:border-cyan-400/30 hover:bg-cyan-400/8'
                 }`}
               >
                 {plan.cta}
               </button>
-              <ul className='mt-5 space-y-2'>
-                {plan.features.map((feat) => (
-                  <li key={feat} className='flex items-start gap-2 text-sm text-zinc-300'>
-                    {Icons.check({ className: 'mt-0.5 h-4 w-4 shrink-0 text-blue-300' })}
-                    <span>{feat}</span>
+              <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
+                {plan.features.map((feature) => (
+                  <li key={feature} className='flex items-start gap-2'>
+                    {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
+                    <span>{feature}</span>
                   </li>
                 ))}
               </ul>
-            </div>
+            </article>
           ))}
         </div>
       </section>
 
-      {/* ── CTA ─────────────────────────────────────────────────────── */}
-      <section className='mx-auto w-full max-w-6xl px-6 py-16'>
-        <div className='rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-600/20 via-[#111] to-[#111] p-8 text-center'>
-          <h2 className='text-2xl font-semibold'>Ready to automate with AI?</h2>
-          <p className='mt-2 text-sm text-zinc-300'>
-            Sign in, connect your API keys, and start running live sessions in under a minute.
-          </p>
-          <button
-            type='button'
-            onClick={onGetStarted}
-            className='mt-5 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium hover:bg-blue-500'
-          >
-            Get started free
-          </button>
+      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 text-center'>
+          <div>
+            <h2 className='text-3xl font-semibold text-white'>Ready to automate with AI?</h2>
+            <p className='mx-auto mt-4 max-w-xl text-sm leading-8 text-zinc-300'>
+              Sign up, connect your API keys, and start running live sessions in under a minute. Read the docs when you need a deeper walkthrough.
+            </p>
+          </div>
+          <div className='flex flex-wrap justify-center gap-3'>
+            <button
+              type='button'
+              onClick={onGetStarted}
+              className='rounded-full bg-cyan-500 px-5 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-cyan-400'
+            >
+              Get started free
+            </button>
+            <button
+              type='button'
+              onClick={onOpenDocsHome}
+              className='rounded-full border border-white/10 px-5 py-2.5 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+            >
+              Read the docs
+            </button>
+          </div>
         </div>
       </section>
 
-      {/* ── Footer ──────────────────────────────────────────────────── */}
-      <footer className='border-t border-[#1f1f1f] py-6 text-center text-xs text-zinc-500'>
-        Aegis · A Chronos Intelligence Systems product · mohex.org
-      </footer>
+      <PublicFooter
+        onGoHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        onGoAuth={onGetStarted}
+        onGoDocsHome={onOpenDocsHome}
+        onGoDoc={onOpenDoc}
+        docsPortalHref={docsPortalHref}
+      />
     </main>
   )
 }
