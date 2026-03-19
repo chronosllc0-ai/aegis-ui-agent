@@ -1,3 +1,35 @@
+## Session 5.11 - March 19, 2026 (Admin Billing Routes)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/billing.py` with admin-protected billing endpoints for listing, creating, defaulting, deleting payment methods, and updating per-user plan/allowance metadata.
+- Mounted the new billing router under `/api/admin/billing` from `backend/admin/router.py`.
+- Fixed `backend/admin/audit_service.py` so admin audit helper calls now flush and refresh correctly instead of returning before the write completes.
+
+### What's Working
+- Admin billing endpoints now return JSON-friendly dictionaries with ISO-formatted timestamps where applicable.
+- Creating the first payment method automatically marks it as default, and default reassignment unsets competing defaults for the same user.
+- Plan updates now create/load `CreditBalance`, update plan metadata, and log old/new values in the admin audit trail.
+
+### What's NOT Working Yet
+- This pass did not add dedicated HTTP endpoint tests for the new admin billing routes.
+- Input validation is currently minimal beyond the request schema types (for example, card-brand normalization and expiration sanity checks are not yet enforced).
+
+### Next Steps
+1. Add focused API tests covering the admin billing CRUD/default-plan flows plus audit-log assertions.
+2. If product requirements harden, add stricter validation for payment-method fields and decide whether deleting a default method should always promote the oldest remaining method.
+
+### Decisions Made
+- Scoped the router itself with `Depends(get_admin_user)` so all billing endpoints inherit admin-only protection by default.
+- Kept audit logging transaction-aware by having the helper flush within the caller's session instead of committing independently.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.10 - March 19, 2026 (Remove Committed Screenshot Binary)
 
 **Agent:** GPT-5.2-Codex  
