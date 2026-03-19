@@ -19,7 +19,6 @@ router = APIRouter(
     dependencies=[Depends(get_admin_user)],
 )
 
-
 def _serialize_datetime(value: datetime | None) -> str | None:
     """Serialize a datetime defensively for JSON responses."""
     if value is None:
@@ -27,7 +26,6 @@ def _serialize_datetime(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
-
 
 def _decode_metadata(metadata_json: str | None) -> dict[str, Any] | list[Any] | str | None:
     """Decode conversation metadata JSON when possible."""
@@ -37,12 +35,6 @@ def _decode_metadata(metadata_json: str | None) -> dict[str, Any] | list[Any] | 
         return json.loads(metadata_json)
     except json.JSONDecodeError:
         return metadata_json
-
-
-def _escape_like_term(value: str) -> str:
-    """Escape SQL LIKE wildcard characters in a search term."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
 
 def _conversation_payload(
     conversation: Conversation,
@@ -62,7 +54,6 @@ def _conversation_payload(
         "updated_at": _serialize_datetime(conversation.updated_at),
     }
 
-
 def _message_payload(message: ConversationMessage) -> dict[str, Any]:
     """Convert a conversation message row to a response payload."""
     return {
@@ -74,7 +65,6 @@ def _message_payload(message: ConversationMessage) -> dict[str, Any]:
         "metadata": _decode_metadata(message.metadata_json),
         "created_at": _serialize_datetime(message.created_at),
     }
-
 
 def _conversation_filters(
     *,
@@ -93,20 +83,18 @@ def _conversation_filters(
     if status:
         filters.append(Conversation.status == status)
     if search:
-        normalized_search = search.strip()
-        if normalized_search:
-            needle = f"%{_escape_like_term(normalized_search)}%"
-            filters.append(
-                or_(
-                    Conversation.id.ilike(needle, escape="\\"),
-                    Conversation.title.ilike(needle, escape="\\"),
-                    Conversation.platform.ilike(needle, escape="\\"),
-                    Conversation.platform_chat_id.ilike(needle, escape="\\"),
-                    Conversation.user_id.ilike(needle, escape="\\"),
-                    User.email.ilike(needle, escape="\\"),
-                    User.name.ilike(needle, escape="\\"),
-                )
+        needle = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                Conversation.id.ilike(needle),
+                Conversation.title.ilike(needle),
+                Conversation.platform.ilike(needle),
+                Conversation.platform_chat_id.ilike(needle),
+                Conversation.user_id.ilike(needle),
+                User.email.ilike(needle),
+                User.name.ilike(needle),
             )
+        )
 
     return filters
 
@@ -132,7 +120,7 @@ async def _list_conversations(
     total_stmt = (
         select(func.count(distinct(Conversation.id)))
         .select_from(Conversation)
-        .outerjoin(User, User.uid == Conversation.user_id)
+        .join(User, User.uid == Conversation.user_id)
     )
     if filters:
         total_stmt = total_stmt.where(and_(*filters))
@@ -153,7 +141,7 @@ async def _list_conversations(
             func.coalesce(message_counts.c.message_count, 0).label("message_count"),
         )
         .select_from(Conversation)
-        .outerjoin(User, User.uid == Conversation.user_id)
+        .join(User, User.uid == Conversation.user_id)
         .outerjoin(message_counts, message_counts.c.conversation_id == Conversation.id)
         .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
         .limit(limit)
