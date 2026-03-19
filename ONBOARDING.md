@@ -1,3 +1,33 @@
+## Session 5.7 - March 19, 2026 (Follow-up on DB Review Feedback)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Followed up on the database review feedback in `backend/database.py`.
+- Added an index to `Conversation.status` to support common status-based filtering.
+- Refactored `_ensure_user_columns_sync` to use a tiny helper that wraps each `ALTER TABLE` in defensive error handling and logs a warning instead of crashing if a column was created concurrently during startup.
+- Re-ran the schema smoke checks to confirm metadata registration and legacy SQLite compatibility still hold after the review-driven changes.
+
+### What's Working
+- `python -m py_compile backend/database.py` passes.
+- The metadata/legacy SQLite verification script still confirms the expected Phase 1 tables are registered and that local startup can upgrade an older `users` table in place.
+
+### What's NOT Working Yet
+- This pass only addressed the review comments on the database schema/bootstrap layer.
+
+### Next Steps
+1. If more admin/auth review comes in, continue tightening the surrounding auth/runtime wiring in the remaining Phase 1 files.
+2. Consider adding a dedicated automated test around `_ensure_user_columns_sync` race-tolerance/logging behavior if this local bootstrap path becomes more critical.
+
+### Decisions Made
+- Chose warning-level logging instead of silent `pass` so concurrent schema-sync collisions are tolerated while still leaving a trace in logs for debugging.
+- Kept the conversation status index local to the model definition so `Base.metadata.create_all` will manage it automatically for fresh environments.
+
+### Blockers
+- None.
+
+
 ## Session 5.6 - March 19, 2026 (RBAC Schema + Admin Table Foundations)
 
 **Agent:** GPT-5.2-Codex  

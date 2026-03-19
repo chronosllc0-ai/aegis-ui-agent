@@ -121,7 +121,7 @@ class Conversation(Base):
     platform = Column(String(50), nullable=False)
     platform_chat_id = Column(String(255))
     title = Column(String(500))
-    status = Column(String(20), default="active")
+    status = Column(String(20), default="active", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -235,12 +235,20 @@ def _ensure_user_columns_sync(sync_conn) -> None:
         return
 
     user_columns = {column["name"] for column in inspector.get_columns("users")}
-    if "password_hash" not in user_columns:
-        sync_conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
-    if "role" not in user_columns:
-        sync_conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'"))
-    if "status" not in user_columns:
-        sync_conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'"))
+
+    def add_column_if_missing(column_name: str, ddl: str) -> None:
+        if column_name in user_columns:
+            return
+        try:
+            sync_conn.execute(text(ddl))
+            user_columns.add(column_name)
+        except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+            logger.warning("Skipping users.%s sync; assuming column already exists or was created concurrently: %s", column_name, exc)
+            user_columns.add(column_name)
+
+    add_column_if_missing("password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT")
+    add_column_if_missing("role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
+    add_column_if_missing("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
