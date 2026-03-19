@@ -27,7 +27,7 @@ class PaymentMethodCreate(BaseModel):
     brand: str = Field(min_length=1, max_length=30)
     last4: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
     exp_month: int = Field(ge=1, le=12)
-    exp_year: int = Field(ge=_CURRENT_YEAR)
+    exp_year: int = Field(ge=_CURRENT_YEAR, le=2100)
 
 
 class PlanUpdate(BaseModel):
