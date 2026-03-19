@@ -1,30 +1,58 @@
-## Session 5.9 - March 19, 2026 (Admin Dashboard Stats Endpoint)
+## Session 5.10 - March 19, 2026 (Remove Committed Screenshot Binary)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Deleted the committed screenshot binary `docs/screenshots/2026-03-19-admin-router-auth-schema-smoke.png` per review feedback.
+- Removed the corresponding Session 5.9 manifest entry from `docs/screenshots/README.md` so the documentation no longer points at a non-existent tracked artifact.
+- Left the earlier onboarding notes intact as historical context and added this cleanup pass so the repo history clearly explains why the binary is no longer present.
+
+### What's Working
+- The repository no longer tracks the binary screenshot artifact that was called out in review.
+- The screenshot manifest is back to listing only the previously established browser-container artifacts.
+
+### What's NOT Working Yet
+- This pass only removes the committed binary artifact; it does not add a replacement non-binary visual verification approach.
+
+### Next Steps
+1. If a future review still needs visual proof, attach the image in PR artifacts/notes instead of committing a binary into the repo unless the repo convention changes.
+2. If a permanent visual record is required in-repo later, confirm the preferred format/location first (for example external artifact links or a text manifest-only reference).
+
+### Decisions Made
+- Treated the review request as applying to both the binary file and the manifest entry that referenced it, to keep the repo internally consistent.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.9 - March 19, 2026 (Local Dev Smoke Screenshot After Admin/Auth Phase 1)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Added `backend/admin/dashboard.py` with a dedicated `router = APIRouter()` and a protected `GET /` `dashboard_stats(...)` handler using `Depends(get_admin_user)` and `Depends(get_session)`.
-- Implemented the requested aggregate dashboard queries for total users, recently active users, new users this month, credits used this month, active conversations, grouped platform counts, and the 10 most recent audit log entries.
-- Added safe JSON decoding for `AuditLog.details_json` so malformed or empty audit payloads do not break the admin dashboard response.
-- Mounted the dashboard router under `/api/admin/dashboard` from `backend/admin/router.py` so the new endpoint is reachable through the admin API.
+- Started the backend in the normal local/dev mode with `SESSION_SECRET=dev-secret python -m uvicorn main:app --host 127.0.0.1 --port 8000`, which mounted the auth and admin routers and initialized the local SQLite dev database.
+- Started the frontend with `npm run dev -- --host 127.0.0.1 --port 5173` and verified the app shell still loaded successfully against the updated backend.
+- Installed the Playwright Chromium browser runtime/dependencies required in this environment and captured a fresh screenshot artifact at `docs/screenshots/2026-03-19-admin-router-auth-schema-smoke.png`.
+- Updated `docs/screenshots/README.md` so the screenshot manifest now references the new local-dev verification artifact.
 
 ### What's Working
-- `GET /api/admin/dashboard/` is now registered on the admin router and returns the exact response keys described in the Phase 2 admin API doc.
-- The dashboard endpoint is protected by the existing admin dependency and uses async SQLAlchemy queries throughout.
-- Recent audit activity now returns parsed `details` payloads when valid JSON is present and `None` otherwise.
+- `GET /health` returned `{"status":"ok","version":"1.0.0","database":"ready","database_error":""}` while the backend was running locally.
+- The Vite frontend served successfully on `http://127.0.0.1:5173/`, and the page title resolved to `Aegis` during the screenshot capture run.
+- There is now a committed screenshot artifact showing the app still loads after the Phase 1 admin router mount plus auth/schema updates.
 
 ### What's NOT Working Yet
-- This pass only implemented the dashboard endpoint; the remaining Phase 2 admin endpoints (`users`, `billing`, `conversations`, `impersonation`, `audit`) are still outstanding.
-- I only ran compile/import smoke checks in this session; there are not yet endpoint-level automated tests covering dashboard query behavior.
+- This pass only verified loadability and captured the artifact; it did not add new backend/frontend code beyond the screenshot manifest and onboarding updates.
 
 ### Next Steps
-1. Add focused tests for the dashboard endpoint covering auth protection, empty-database responses, and malformed `details_json` handling.
-2. Continue implementing the remaining admin API modules and include them in `backend/admin/router.py`.
+1. If a later pass changes the admin/auth UI flow, capture a second screenshot showing the most relevant signed-in or admin-facing surface.
+2. Once Phase 2 admin endpoints are wired to frontend UI, add dedicated browser regression coverage for those flows instead of relying on a landing-page smoke check alone.
 
 ### Decisions Made
-- Kept the dashboard implementation read-only with respect to unrelated models and limited changes to the admin backend surface.
-- Ordered the platform breakdown by platform name for stable output while preserving the documented response shape.
+- Stored the screenshot under `docs/screenshots/`, matching the repo's existing screenshot artifact convention.
+- Used the standard local development ports (`8000` backend, `5173` frontend) so the smoke check mirrors the normal dev environment as closely as possible.
 
 ### Blockers
 - None.

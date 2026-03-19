@@ -14,3 +14,4 @@ Captured via browser automation artifacts (environment browser container):
 
 Artifact base path:
 `browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`
+
