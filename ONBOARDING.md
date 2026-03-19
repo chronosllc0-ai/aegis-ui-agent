@@ -1,3 +1,38 @@
+## Session 5.11 - March 19, 2026 (Admin Conversation API Endpoints)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/conversations.py` with an admin-protected `APIRouter` for conversation operations.
+- Implemented `GET /api/admin/conversations/` with filters for `user_id`, `platform`, `status`, `search`, `limit`, and `offset`, and included `message_count` plus a `{conversations, total}` response shape.
+- Implemented `GET /api/admin/conversations/{conversation_id}` to return a serialized conversation plus paginated messages, decoding each `metadata_json` field into `metadata`.
+- Implemented `GET /api/admin/conversations/user/{uid}` to reuse the standard listing response shape for a single user.
+- Implemented `GET /api/admin/conversations/stats` to return per-platform counts for conversations, messages, and unique users.
+- Mounted the new conversations router from `backend/admin/router.py`.
+
+### What's Working
+- Admin conversation endpoints are now grouped under `/api/admin/conversations` and inherit the existing admin auth dependency.
+- Conversation and message payloads serialize timestamps defensively as ISO 8601 strings for JSON responses.
+- Conversation list responses include aggregate message counts without requiring a separate query per row.
+
+### What's NOT Working Yet
+- This pass did not add automated request-level tests for the new admin conversation endpoints.
+- Search currently targets conversation identifiers/details plus basic user fields, but it does not search full message bodies.
+
+### Next Steps
+1. Add API tests covering auth enforcement, filter combinations, metadata decoding, and stats aggregation.
+2. If the admin frontend is built next, wire these endpoints into the conversations management UI and validate pagination behavior end-to-end.
+
+### Decisions Made
+- Used a shared internal listing helper so `/`, `/user/{uid}`, and future admin conversation views can stay response-compatible.
+- Returned invalid `metadata_json` content as the raw string instead of failing the entire response, keeping admin inspection resilient.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.10 - March 19, 2026 (Remove Committed Screenshot Binary)
 
 **Agent:** GPT-5.2-Codex  
