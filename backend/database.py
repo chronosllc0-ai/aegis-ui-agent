@@ -32,6 +32,8 @@ class User(Base):
     email = Column(String(320))
     name = Column(String(255))
     avatar_url = Column(Text)
+    role = Column(String(20), default="user")
+    status = Column(String(20), default="active")
     password_hash = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -159,6 +161,10 @@ def _ensure_user_columns_sync(sync_conn) -> None:
         return
 
     user_columns = {column["name"] for column in inspector.get_columns("users")}
+    if "role" not in user_columns:
+        sync_conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'"))
+    if "status" not in user_columns:
+        sync_conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'"))
     if "password_hash" not in user_columns:
         sync_conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
 

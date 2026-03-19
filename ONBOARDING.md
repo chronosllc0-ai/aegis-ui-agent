@@ -1,3 +1,34 @@
+## Session 5.6 - March 19, 2026 (Auth RBAC Session Payload Hardening)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `auth.py` so `_upsert_user()` now returns `role` and `status` for existing and newly created users.
+- Added suspended-account enforcement in `_upsert_user()` and `password_login()`, returning `HTTPException(403, "Account suspended")` before issuing sessions or verifying passwords for non-active users.
+- Added `ADMIN_EMAILS` config/env support, auto-assigning `role="admin"` on first login for matching emails and defaulting new accounts to `status="active"`.
+- Extended the lightweight database schema sync in `backend/database.py` so local environments add missing `role` and `status` columns automatically.
+- Added auth RBAC regression tests covering suspended accounts, admin auto-seeding, and session/cookie payload exposure of `role` and `status`.
+
+### What's Working
+- `pytest tests/test_auth_rbac.py tests/test_main_websocket.py -q` passes.
+- Session payloads remain HMAC-signed the same way while now exposing `role` and `status` for `/api/auth/me`, cookie-backed auth checks, and future admin endpoints.
+
+### What's NOT Working Yet
+- Existing deployed databases still need their normal startup/schema-sync path to run once so the new `role` and `status` columns are present if they were missing.
+
+### Next Steps
+1. Build the admin-only dependencies/endpoints that will consume the new RBAC fields from `_verify_session()`.
+2. Add frontend auth typing/routing assertions once admin UI routes start depending on `role` and `status`.
+
+### Decisions Made
+- Kept `_session_response()` and `_verify_session()` format backward-compatible by extending the signed user payload instead of changing the cookie structure.
+- Reused a single comma-separated `ADMIN_EMAILS` setting for first-login admin seeding across password, email, and OAuth account creation.
+
+### Blockers
+- None.
+
+
 ## Session 5.5 - March 18, 2026 (Railway Healthcheck Startup Hardening)
 
 **Agent:** GPT-5.2-Codex  
