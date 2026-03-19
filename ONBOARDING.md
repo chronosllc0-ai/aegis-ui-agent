@@ -1,3 +1,125 @@
+## Session 5.14 - March 19, 2026 (User Model Duplicate Status Cleanup)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Removed the duplicate `status` column declaration from the `User` SQLAlchemy model in `backend/database.py`, leaving a single canonical `status` field alongside `role` and `password_hash`.
+- Re-ran the targeted backend regression checks to confirm the cleanup did not change the admin billing or auth RBAC behavior.
+
+### What's Working
+- The `User` model no longer redeclares `status`, which avoids confusing mapper definitions and keeps the model aligned with the intended schema.
+- Existing billing/admin/auth tests still pass after the model cleanup.
+
+### What's NOT Working Yet
+- This pass only addressed the duplicate model-field definition noted in review; it did not introduce any broader schema or migration changes.
+
+### Next Steps
+1. If more model hygiene work is needed, scan the remaining SQLAlchemy models for duplicated or shadowed attributes.
+2. Consider adding a small metadata/model-shape assertion test if duplicate declarations become a recurring issue.
+
+### Decisions Made
+- Treated the duplicate `status` declaration as a straightforward model-definition bug and removed the redundant second assignment rather than changing the database bootstrap behavior.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.13 - March 19, 2026 (Billing Test Typing Cleanup)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Added explicit typing for the shared async engine/session factory globals in `backend/database.py` so test helpers can consume `_session_factory` without repeated `type: ignore[union-attr]` comments.
+- Refactored `tests/test_admin_billing.py` to use a typed `_require_session_factory()` helper and consolidated the create/default/delete integration flow into a single `asyncio.run(...)` block.
+- Cleaned up boolean assertions in the billing integration test to use direct truthiness checks instead of `is True` / `is False`.
+
+### What's Working
+- The admin billing tests no longer rely on the repeated `union-attr` ignores flagged in review.
+- The main billing integration test now creates only one event loop for its async setup/verification path while still exercising the sync FastAPI client requests.
+- The billing and auth regression suites still pass after the typing/test cleanup.
+
+### What's NOT Working Yet
+- This pass only addressed typing/test-structure review feedback; it did not change the runtime billing API behavior.
+
+### Next Steps
+1. If more async tests are added in this area, consider introducing a shared helper fixture/module for building typed async sessions across backend tests.
+2. If the project later adopts `pytest-asyncio`, convert these helper-heavy tests to native async pytest tests for cleaner structure.
+
+### Decisions Made
+- Fixed the root typing issue at `backend/database.py` rather than sprinkling additional ignores through the test suite.
+- Kept `TestClient`-based request execution synchronous and only wrapped the async setup/assertion work in a single coroutine to minimize churn.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.12 - March 19, 2026 (Billing Review Follow-up)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Tightened `backend/admin/billing.py` request validation with bounded Pydantic fields for payment-method metadata and non-negative plan allowances.
+- Added row-lock based payment-method loading helpers plus deterministic default reassignment logic to reduce race conditions when admins create, retarget, or delete default payment methods concurrently.
+- Replaced the ad-hoc month rollover logic in the billing plan update path with an exact cycle-bound helper and added new regression coverage in `tests/test_admin_billing.py`.
+
+### What's Working
+- Invalid billing payloads now fail validation before touching the database.
+- Default payment-method transitions now normalize the full locked set so the user keeps at most one default after create/set/delete flows.
+- The new admin billing regression tests cover validation, cycle-bound calculation, default-promotion behavior, and audit-log emission.
+
+### What's NOT Working Yet
+- This pass improved application-side race handling, but the database schema still does not enforce a unique partial constraint for `is_default`, so hard DB-level protection remains future work if stricter guarantees are needed across all code paths.
+
+### Next Steps
+1. If concurrent billing writes become common, add a database-level unique partial index/constraint for `(user_id)` where `is_default = true` in the production database.
+2. Consider reusing the new cycle-bound helper inside `backend/credit_service.py` so monthly rollover math is consistent everywhere in the billing stack.
+
+### Decisions Made
+- Used `SELECT ... FOR UPDATE` row locking in the admin billing router instead of trying to retrofit a migration in this pass.
+- Added focused regression tests around the reviewed concerns so future refactors can detect validation/default-selection regressions quickly.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.11 - March 19, 2026 (Admin Billing Routes)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/billing.py` with admin-protected billing endpoints for listing, creating, defaulting, deleting payment methods, and updating per-user plan/allowance metadata.
+- Mounted the new billing router under `/api/admin/billing` from `backend/admin/router.py`.
+- Fixed `backend/admin/audit_service.py` so admin audit helper calls now flush and refresh correctly instead of returning before the write completes.
+
+### What's Working
+- Admin billing endpoints now return JSON-friendly dictionaries with ISO-formatted timestamps where applicable.
+- Creating the first payment method automatically marks it as default, and default reassignment unsets competing defaults for the same user.
+- Plan updates now create/load `CreditBalance`, update plan metadata, and log old/new values in the admin audit trail.
+
+### What's NOT Working Yet
+- This pass did not add dedicated HTTP endpoint tests for the new admin billing routes.
+- Input validation is currently minimal beyond the request schema types (for example, card-brand normalization and expiration sanity checks are not yet enforced).
+
+### Next Steps
+1. Add focused API tests covering the admin billing CRUD/default-plan flows plus audit-log assertions.
+2. If product requirements harden, add stricter validation for payment-method fields and decide whether deleting a default method should always promote the oldest remaining method.
+
+### Decisions Made
+- Scoped the router itself with `Depends(get_admin_user)` so all billing endpoints inherit admin-only protection by default.
+- Kept audit logging transaction-aware by having the helper flush within the caller's session instead of committing independently.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.10 - March 19, 2026 (Remove Committed Screenshot Binary)
 
 **Agent:** GPT-5.2-Codex  
