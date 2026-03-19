@@ -26,7 +26,7 @@ async def get_admin_user(
     user = await session.get(User, uid)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if user.status and user.status != "active":
+    if user.status != "active":
         raise HTTPException(status_code=403, detail="Account suspended")
     if user.role not in {"admin", "superadmin"}:
         raise HTTPException(status_code=403, detail="Admin access required")
