@@ -1,3 +1,35 @@
+## Session 5.11 - March 19, 2026 (Admin Users API Endpoints)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/users.py` with admin-only user management endpoints for listing users, fetching user detail, updating profile fields, changing roles, suspending/reinstating accounts, and applying manual credit adjustments.
+- Added safe user-list sorting/filtering, user detail aggregation for balances/conversations/usage, and per-mutation audit logging payloads with before/after or amount/reason metadata.
+- Updated `backend/admin/router.py` to mount the new users router under `/api/admin/users` and repaired `backend/admin/audit_service.py` so audit entries are flushed correctly inside the surrounding transaction.
+
+### What's Working
+- `/api/admin/users` now exposes the requested admin CRUD/read surfaces behind admin authentication.
+- Mutating user admin routes now write audit log rows through the shared helper without the earlier unreachable-code bug in `audit_service.py`.
+- Targeted import and RBAC regression checks pass locally.
+
+### What's NOT Working Yet
+- This pass did not add dedicated automated tests for the new admin users endpoints themselves.
+- Other planned admin sub-routers from the larger admin roadmap are still not implemented in this repo snapshot.
+
+### Next Steps
+1. Add focused API tests for the new `/api/admin/users` endpoints, especially sorting/filter validation, detail aggregation, superadmin role changes, and credit adjustment edge cases.
+2. Implement the remaining admin sub-routers (dashboard, billing, conversations, impersonation, audit) when those phases are requested.
+
+### Decisions Made
+- Kept role changes off the general profile update path unless the caller already satisfies `require_superadmin`, while also exposing a dedicated superadmin-only `/role` endpoint.
+- Treated manual credit adjustments as balance-state mutations on `credits_used` / `overage_credits`, clamped so the resulting state cannot become negative or exceed the base monthly allowance bucket.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.10 - March 19, 2026 (Remove Committed Screenshot Binary)
 
 **Agent:** GPT-5.2-Codex  
