@@ -19,7 +19,7 @@ async def log_admin_action(
     details: dict[str, Any] | None = None,
     ip_address: str | None = None,
 ) -> AuditLog:
-    """Insert and commit an immutable admin audit log entry."""
+    """Insert an admin audit log entry into the current transaction."""
     audit_log = AuditLog(
         admin_id=admin_id,
         action=action,
@@ -28,7 +28,6 @@ async def log_admin_action(
         ip_address=ip_address,
     )
     session.add(audit_log)
-    session.add(audit_log)
-    return audit_log
+    await session.flush()
     await session.refresh(audit_log)
     return audit_log
