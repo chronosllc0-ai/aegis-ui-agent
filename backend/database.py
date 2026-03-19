@@ -170,7 +170,7 @@ class AuditLog(Base):
     target_user_id = Column(String(255), index=True)
     details_json = Column(Text)
     ip_address = Column(String(45))
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
 class ImpersonationSession(Base):
@@ -226,6 +226,7 @@ async def create_tables() -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns_sync)
+        await conn.run_sync(_ensure_audit_log_created_at_sync)
     logger.info("Database tables ensured")
 
 
@@ -250,6 +251,27 @@ def _ensure_user_columns_sync(sync_conn) -> None:
     add_column_if_missing("password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT")
     add_column_if_missing("role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
     add_column_if_missing("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
+
+
+def _ensure_audit_log_created_at_sync(sync_conn) -> None:
+    """Backfill missing audit timestamps so ordering and filters remain stable."""
+    inspector = inspect(sync_conn)
+    if "audit_logs" not in inspector.get_table_names():
+        return
+
+    audit_log_columns = {column["name"]: column for column in inspector.get_columns("audit_logs")}
+    created_at_column = audit_log_columns.get("created_at")
+    if not created_at_column:
+        return
+
+    null_count = sync_conn.execute(text("SELECT COUNT(*) FROM audit_logs WHERE created_at IS NULL")).scalar()
+    if not null_count:
+        return
+
+    try:
+        sync_conn.execute(text("UPDATE audit_logs SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+        logger.warning("Skipping audit_logs.created_at backfill; assuming another startup already repaired it: %s", exc)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
