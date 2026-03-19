@@ -37,7 +37,7 @@ setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Aegis UI Navigator", version="1.0.0")
-cors_origins = [origin for origin in {settings.FRONTEND_URL, settings.PUBLIC_BASE_URL} if origin]
+cors_origins = [origin for origin in {settings.resolved_frontend_url, settings.resolved_public_base_url} if origin]
 if settings.CORS_ORIGINS:
     cors_origins.extend([o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()])
 if not cors_origins:
@@ -53,8 +53,9 @@ if settings.SESSION_SECRET:
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.SESSION_SECRET,
-        same_site="lax",
+        same_site=settings.normalized_cookie_samesite,
         https_only=bool(settings.COOKIE_SECURE),
+        domain=settings.resolved_cookie_domain,
     )
 else:
     logger.warning("SESSION_SECRET is not set; OAuth flows will fail without session support.")

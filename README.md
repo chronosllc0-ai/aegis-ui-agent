@@ -76,9 +76,28 @@ Add a PostgreSQL plugin from the Railway dashboard, then set these env vars:
 | `SESSION_SECRET` | Random 32+ char string |
 | `ENCRYPTION_SECRET` | Random 32+ char string |
 | `ADMIN_EMAILS` | Comma-separated email list for auto-admin assignment |
+| `FRONTEND_URL` | `https://mohex.org` |
+| `PUBLIC_BASE_URL` | `https://api.mohex.org` (recommended) or your Railway URL |
+| `CORS_ORIGINS` | `https://mohex.org,https://www.mohex.org` |
+| `COOKIE_SECURE` | `true` |
+| `COOKIE_SAMESITE` | `lax` with `api.mohex.org`, or `none` if you keep the Railway URL |
 | `GEMINI_API_KEY` | (or any provider key) |
 
-Your backend will be live at something like `https://aegis-xyz.up.railway.app`.
+Recommended production topology:
+
+- Frontend: `https://mohex.org`
+- Backend: `https://api.mohex.org`
+
+Railway fallback topology:
+
+- Frontend: `https://mohex.org`
+- Backend: `https://your-service.up.railway.app`
+
+OAuth callback URLs are derived from `PUBLIC_BASE_URL`:
+
+- Google: `https://<backend-origin>/api/auth/google/callback`
+- GitHub: `https://<backend-origin>/api/auth/github/callback`
+- SSO: `https://<backend-origin>/api/auth/sso/callback`
 
 ### Step 2 — Deploy the frontend to Netlify
 
@@ -94,8 +113,9 @@ Your backend will be live at something like `https://aegis-xyz.up.railway.app`.
 
    | Variable | Value |
    |---|---|
-   | `VITE_API_URL` | `https://your-backend.up.railway.app` |
-   | `VITE_WS_URL` | `wss://your-backend.up.railway.app/ws/navigate` |
+   | `VITE_API_URL` | `https://api.mohex.org` |
+   | `VITE_WS_URL` | `wss://api.mohex.org/ws/navigate` |
+   | `VITE_DOCS_SITE_URL` | `https://docs.mohex.org` |
 
 5. Click **Deploy site**
 
@@ -114,8 +134,9 @@ netlify init
 # The CLI reads netlify.toml automatically
 
 # Set environment variables
-netlify env:set VITE_API_URL https://your-backend.up.railway.app
-netlify env:set VITE_WS_URL wss://your-backend.up.railway.app/ws/navigate
+netlify env:set VITE_API_URL https://api.mohex.org
+netlify env:set VITE_WS_URL wss://api.mohex.org/ws/navigate
+netlify env:set VITE_DOCS_SITE_URL https://docs.mohex.org
 
 # Deploy (preview)
 netlify deploy
@@ -129,8 +150,9 @@ netlify deploy --prod
 ```bash
 cd frontend
 npm ci
-VITE_API_URL=https://your-backend.up.railway.app \
-VITE_WS_URL=wss://your-backend.up.railway.app/ws/navigate \
+VITE_API_URL=https://api.mohex.org \
+VITE_WS_URL=wss://api.mohex.org/ws/navigate \
+VITE_DOCS_SITE_URL=https://docs.mohex.org \
 npm run build
 ```
 
@@ -139,7 +161,7 @@ Then drag the `frontend/dist/` folder into the Netlify dashboard deploy area.
 ### Step 3 — Custom domain (optional)
 
 1. In Netlify dashboard → **Domain management** → **Add custom domain**
-2. Add `mohex.org` (or your domain)
+2. Add `mohex.org` for the frontend and `api.mohex.org` for the backend
 3. Update DNS:
    - If using Netlify DNS: point nameservers to Netlify
    - If external DNS: add a CNAME record pointing to `your-site.netlify.app`
@@ -152,7 +174,10 @@ the backend allows cross-origin requests. In your Railway environment variables:
 
 | Variable | Value |
 |---|---|
-| `CORS_ORIGINS` | `https://mohex.org,https://your-site.netlify.app` |
+| `FRONTEND_URL` | `https://mohex.org` |
+| `CORS_ORIGINS` | `https://mohex.org,https://www.mohex.org` |
+| `COOKIE_SECURE` | `true` |
+| `COOKIE_SAMESITE` | `lax` when using `api.mohex.org`; `none` when using `*.up.railway.app` |
 
 ### Continuous deployment
 

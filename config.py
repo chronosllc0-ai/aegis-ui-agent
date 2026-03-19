@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     SESSION_SECRET: str = ""
     SESSION_TTL_SECONDS: int = 60 * 60 * 24 * 7
     COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
+    COOKIE_DOMAIN: str = ""
     ADMIN_EMAILS: str = ""  # comma-separated email list for auto-admin assignment
     PUBLIC_BASE_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:5173"
@@ -68,6 +70,36 @@ class Settings(BaseSettings):
     RAILWAY_PUBLIC_DOMAIN: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def resolved_public_base_url(self) -> str:
+        """Return the canonical backend base URL for callbacks and docs."""
+        if self.PUBLIC_BASE_URL.strip():
+            return self.PUBLIC_BASE_URL.rstrip("/")
+        if self.RAILWAY_PUBLIC_DOMAIN.strip():
+            return f"https://{self.RAILWAY_PUBLIC_DOMAIN.strip()}".rstrip("/")
+        return f"http://localhost:{self.PORT}"
+
+    @property
+    def resolved_frontend_url(self) -> str:
+        """Return the canonical frontend URL for redirects."""
+        if self.FRONTEND_URL.strip():
+            return self.FRONTEND_URL.rstrip("/")
+        return "http://localhost:5173"
+
+    @property
+    def normalized_cookie_samesite(self) -> str:
+        """Return a browser-compatible SameSite cookie policy."""
+        value = self.COOKIE_SAMESITE.strip().lower()
+        if value not in {"lax", "strict", "none"}:
+            return "lax"
+        return value
+
+    @property
+    def resolved_cookie_domain(self) -> str | None:
+        """Return the cookie domain when explicitly configured."""
+        value = self.COOKIE_DOMAIN.strip()
+        return value or None
 
 
 settings = Settings()
