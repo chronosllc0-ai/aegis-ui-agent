@@ -105,12 +105,14 @@ export function EmbeddedDocsPage({ slug, onGoHome, onGoAuth, onGoDocsHome, onNav
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function slugFromDocsPath(pathname: string): string | null {
   if (pathname === '/docs') return null
   if (!pathname.startsWith('/docs/')) return null
   return pathname.slice('/docs/'.length) || null
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function docsHref(slug?: string | null): string {
   return docsPath(slug)
 }
