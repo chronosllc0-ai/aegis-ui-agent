@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import AsyncGenerator
 from uuid import uuid4
 
+from fastapi import HTTPException
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func, inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -189,6 +190,7 @@ class ImpersonationSession(Base):
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+_database_ready = False
 
 
 def _resolve_url(url: str) -> str:
@@ -206,7 +208,7 @@ def init_db(database_url: str | None = None) -> None:
     Call once at application startup.  If *database_url* is ``None`` the
     engine uses an in-memory SQLite database (for local dev / tests).
     """
-    global _engine, _session_factory
+    global _engine, _session_factory, _database_ready
 
     if database_url:
         url = _resolve_url(database_url)
@@ -216,16 +218,19 @@ def init_db(database_url: str | None = None) -> None:
 
     _engine = create_async_engine(url, echo=False, pool_pre_ping=True)
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+    _database_ready = False
 
 
 async def create_tables() -> None:
     """Create all tables if they don't exist."""
+    global _database_ready
     if _engine is None:
         raise RuntimeError("Call init_db() before create_tables()")
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns_sync)
         await conn.run_sync(_ensure_audit_log_created_at_sync)
+    _database_ready = True
     logger.info("Database tables ensured")
 
 
@@ -277,5 +282,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session (for FastAPI dependency injection)."""
     if _session_factory is None:
         raise RuntimeError("Call init_db() before using get_session()")
+    if not _database_ready:
+        raise HTTPException(status_code=503, detail="Database is still initializing")
     async with _session_factory() as session:
         yield session

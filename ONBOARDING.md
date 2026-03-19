@@ -1,3 +1,49 @@
+## Session 5.16 - March 19, 2026 (Auth Signup Recovery + Superadmin Seed)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Debugged the `failed to fetch` signup issue down to backend startup/database readiness, not CORS.
+- Confirmed the auth routes and CORS preflight were valid, then traced the real local failure to `DATABASE_URL` pointing at local PostgreSQL while the async PostgreSQL driver/runtime path was unavailable.
+- Updated `main.py` so database initialization now catches `init_db(...)` failures, surfaces them cleanly, and falls back to local SQLite automatically for localhost PostgreSQL configs during non-Railway development.
+- Added a database readiness guard in `backend/database.py` so request-scoped DB access returns a clean `503 Database is still initializing` instead of an opaque `500` if auth is hit too early during startup.
+- Added `scripts/seed_super_admin.py` plus `scripts/__init__.py` so a password-based `superadmin` account can be created or updated deterministically from the CLI.
+- Updated `.env.example` and local `.env` so local development defaults to SQLite by leaving `DATABASE_URL` blank unless a real database is intentionally configured.
+- Added regression tests for:
+  - local PostgreSQL startup fallback to SQLite
+  - DB readiness gating before session use
+  - superadmin seed creation/update behavior
+
+### What's Working
+- Local backend startup now reaches a working auth database state without requiring local PostgreSQL.
+- Password signup succeeds once `/health` reports `"database":"ready"`.
+- The superadmin seed script is present and tested.
+- Targeted regression tests pass:
+  - `pytest tests/test_database_readiness.py -q`
+  - `pytest tests/test_main_websocket.py -k sqlite -q`
+  - `pytest tests/test_seed_super_admin.py -q`
+- Live verification against a temporary uvicorn process passed: `/health` reached `database=ready` and `POST /api/auth/password/signup` returned `200`.
+
+### What's NOT Working Yet
+- Existing startup still uses FastAPI `@app.on_event(...)`; deprecation warnings remain and could be cleaned up later with lifespan handlers.
+- If the frontend submits auth requests before the backend reaches `database=ready`, the API now returns a clean `503` instead of failing silently, but the frontend UX could still present that state more gracefully.
+
+### Next Steps
+1. Restart the local backend so it picks up the new SQLite default and startup fallback logic.
+2. Retry signup after `/health` reports `database=ready`.
+3. If desired, improve the auth page UX for startup `503` responses with a retry/loading message instead of a generic error.
+4. Use `scripts/seed_super_admin.py` to bootstrap the first superadmin before testing admin flows.
+
+### Decisions Made
+- Kept production behavior strict: Railway/custom non-local database URLs do not silently fall back to SQLite.
+- Limited automatic fallback to local PostgreSQL URLs only, so deploy environments still surface real misconfiguration instead of masking it.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.15 - March 19, 2026 (Landing + Docs Recovery After React Icons Failure)
 
 **Agent:** GPT-5.2-Codex  

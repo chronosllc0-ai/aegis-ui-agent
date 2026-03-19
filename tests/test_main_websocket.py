@@ -100,3 +100,37 @@ def test_health_reports_initializing_database_state() -> None:
     assert response.json()["status"] == "ok"
     assert response.json()["database"] == "initializing"
     assert response.json()["database_error"] == "connection refused"
+
+
+def test_initialize_database_falls_back_to_sqlite_for_local_postgres_driver_failure(monkeypatch) -> None:
+    """Local PostgreSQL driver failures should transparently fall back to SQLite during dev."""
+    previous_db_ready = main.db_ready
+    previous_db_error = main.db_init_error
+    state: dict[str, str | None] = {"url": None}
+    init_calls: list[str | None] = []
+
+    def fake_init_db(url: str | None) -> None:
+        state["url"] = url
+        init_calls.append(url)
+
+    async def fake_create_tables() -> None:
+        if state["url"]:
+            raise ModuleNotFoundError("No module named 'asyncpg'")
+
+    monkeypatch.setattr(main, "init_db", fake_init_db)
+    monkeypatch.setattr(main, "create_tables", fake_create_tables)
+    monkeypatch.setattr(main.settings, "DATABASE_URL", "postgresql://aegis:password@localhost:5432/aegis")
+    monkeypatch.setattr(main.settings, "RAILWAY_ENVIRONMENT", "")
+    main.db_ready = False
+    main.db_init_error = None
+
+    try:
+        import asyncio
+
+        asyncio.run(main._initialize_database())
+        assert init_calls == ["postgresql://aegis:password@localhost:5432/aegis", None]
+        assert main.db_ready is True
+        assert main.db_init_error is None
+    finally:
+        main.db_ready = previous_db_ready
+        main.db_init_error = previous_db_error
