@@ -1,3 +1,64 @@
+## Session 5.7 - March 19, 2026 (Follow-up on DB Review Feedback)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Followed up on the database review feedback in `backend/database.py`.
+- Added an index to `Conversation.status` to support common status-based filtering.
+- Refactored `_ensure_user_columns_sync` to use a tiny helper that wraps each `ALTER TABLE` in defensive error handling and logs a warning instead of crashing if a column was created concurrently during startup.
+- Re-ran the schema smoke checks to confirm metadata registration and legacy SQLite compatibility still hold after the review-driven changes.
+
+### What's Working
+- `python -m py_compile backend/database.py` passes.
+- The metadata/legacy SQLite verification script still confirms the expected Phase 1 tables are registered and that local startup can upgrade an older `users` table in place.
+
+### What's NOT Working Yet
+- This pass only addressed the review comments on the database schema/bootstrap layer.
+
+### Next Steps
+1. If more admin/auth review comes in, continue tightening the surrounding auth/runtime wiring in the remaining Phase 1 files.
+2. Consider adding a dedicated automated test around `_ensure_user_columns_sync` race-tolerance/logging behavior if this local bootstrap path becomes more critical.
+
+### Decisions Made
+- Chose warning-level logging instead of silent `pass` so concurrent schema-sync collisions are tolerated while still leaving a trace in logs for debugging.
+- Kept the conversation status index local to the model definition so `Base.metadata.create_all` will manage it automatically for fresh environments.
+
+### Blockers
+- None.
+
+
+## Session 5.6 - March 19, 2026 (RBAC Schema + Admin Table Foundations)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `backend/database.py` imports to include `Boolean` and `ForeignKey`, then added `role` and `status` columns to the `User` model immediately after `password_hash`.
+- Added the five Phase 1 admin/auth SQLAlchemy models exactly per the prompt: `Conversation`, `ConversationMessage`, `PaymentMethod`, `AuditLog`, and `ImpersonationSession`, with the required table names and foreign-key targets.
+- Extended `_ensure_user_columns_sync` so local SQLite/dev databases that predate RBAC automatically gain `role` and `status` columns just like the existing `password_hash` backfill.
+- Verified that `Base.metadata.create_all` includes the new tables and that startup against a legacy SQLite `users` table still succeeds while adding the missing columns.
+
+### What's Working
+- `python -m py_compile backend/database.py` passes.
+- A metadata verification script confirmed all expected tables are registered on `Base.metadata`.
+- A legacy SQLite compatibility smoke test confirmed `create_tables()` adds `password_hash`, `role`, and `status` to an older `users` table and creates the new admin-related tables without requiring migrations.
+
+### What's NOT Working Yet
+- This pass only covered the database layer requested here; any follow-on auth/admin router work from the broader phase document still remains if needed in later sessions.
+
+### Next Steps
+1. Continue the Phase 1 auth/admin changes in `auth.py`, `config.py`, and the admin backend modules if you want the new RBAC schema wired into runtime behavior.
+2. Add focused backend tests around schema bootstrap/compatibility if you want this safety net automated in CI instead of validated ad hoc.
+
+### Decisions Made
+- Kept the local schema upgrade path lightweight and aligned with the existing no-migrations dev strategy by extending `_ensure_user_columns_sync` instead of introducing Alembic.
+- Preserved the exact table/foreign-key names from the prompt so later admin/auth work can rely on the documented schema contract.
+
+### Blockers
+- None.
+
+
 ## Session 5.5 - March 18, 2026 (Railway Healthcheck Startup Hardening)
 
 **Agent:** GPT-5.2-Codex  
