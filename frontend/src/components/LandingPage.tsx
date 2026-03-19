@@ -1,8 +1,6 @@
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { PROVIDERS } from '../lib/models'
-import { PublicFooter } from '../public/PublicFooter'
-import { PublicHeader } from '../public/PublicHeader'
 
 type LandingPageProps = {
   onGetStarted: () => void
@@ -121,71 +119,82 @@ const TRUST_BANDS = [
 
 export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPortalHref }: LandingPageProps) {
   return (
-    <main className='min-h-screen bg-[#070b12] text-zinc-100'>
-      <PublicHeader
-        onGoHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        onGoAuth={onGetStarted}
-        onGoDocsHome={onOpenDocsHome}
-        onGoDoc={onOpenDoc}
-        docsPortalHref={docsPortalHref}
-      />
+    <main className='min-h-screen bg-[#0b0b0b] text-zinc-100'>
+      {/* ── Nav ─────────────────────────────────────────────────────── */}
+      <header className='mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6'>
+        <div className='flex items-center gap-2'>
+          <img src='/shield.svg' alt='Aegis logo' className='h-7 w-7' />
+          <span className='text-lg font-semibold'>Aegis</span>
+          <span className='rounded-full border border-blue-500/40 px-2 py-0.5 text-[10px] text-blue-300'>by Chronos</span>
+        </div>
+        <nav className='flex items-center gap-4 text-sm text-zinc-300'>
+          <a href='#features' className='hover:text-white'>Features</a>
+          <a href='#how' className='hover:text-white'>How it works</a>
+          <a href='#byok' className='hover:text-white'>BYOK</a>
+          <a href='#pricing' className='hover:text-white'>Pricing</a>
+          <button
+            type='button'
+            onClick={onGetStarted}
+            className='rounded-md border border-blue-500/60 px-3 py-1.5 text-blue-200 hover:bg-blue-500/10'
+          >
+            Sign in
+          </button>
+        </nav>
+      </header>
 
-      <section className='relative overflow-hidden'>
-        <div className='absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.12),transparent_35%)]' />
-        <div className='relative mx-auto grid w-full max-w-7xl gap-14 px-6 py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
-          <div className='flex flex-col justify-center'>
-            <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>Story-led launch</p>
-            <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
-              Navigate any interface with a visual operator that can see, listen, and adapt.
-            </h1>
-            <p className='mt-6 max-w-2xl text-base leading-8 text-zinc-300 md:text-lg'>
-              Aegis is an AI-powered universal UI navigator. It watches the screen, reasons over live state, and acts with the operator still in control from the first instruction to the last step.
-            </p>
-            <div className='mt-8 flex flex-wrap gap-3'>
-              <button
-                type='button'
-                onClick={onGetStarted}
-                className='rounded-full bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400'
-              >
-                Start from auth
-              </button>
-              <button
-                type='button'
-                onClick={() => onOpenDoc('quickstart')}
-                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-              >
-                Read quickstart
-              </button>
-              <a
-                href={docsPortalHref}
-                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-              >
-                Open docs portal
-              </a>
-            </div>
-
-            <div className='mt-10 flex flex-wrap items-center gap-4'>
-              <p className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Supported providers</p>
-              <div className='flex flex-wrap gap-2'>
-                {PROVIDERS.map((provider) => (
-                  <span
-                    key={provider.id}
-                    title={provider.displayName}
-                    className='inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/3 px-3 text-sm text-zinc-200'
-                  >
-                    {provider.icon.startsWith('http') ? (
-                      <img src={provider.icon} alt={provider.displayName} className='h-5 w-5 rounded-sm' />
-                    ) : (
-                      provider.icon
-                    )}
-                  </span>
-                ))}
-              </div>
+      {/* ── Hero ────────────────────────────────────────────────────── */}
+      <section className='mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-10 px-6 py-20 lg:grid-cols-[1.2fr_1fr]'>
+        <div>
+          <p className='text-sm uppercase tracking-[0.2em] text-blue-300/80'>
+            AI-powered universal UI agent
+          </p>
+          <h1 className='mt-4 text-4xl font-semibold leading-tight md:text-5xl'>
+            Navigate any UI with
+            <br />
+            <span className='bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent'>
+              vision, voice, and AI.
+            </span>
+          </h1>
+          <p className='mt-5 max-w-lg text-base text-zinc-400'>
+            Aegis sees your screen, reasons about intent, and acts with precision.
+            Powered by your choice of model: Gemini, GPT-4.1, Claude, Mistral, or Groq,
+            with full BYOK support.
+          </p>
+          <div className='mt-6 flex flex-wrap gap-3'>
+            <button
+              type='button'
+              onClick={onGetStarted}
+              className='rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium hover:bg-blue-500'
+            >
+              Get started free
+            </button>
+            <a
+              href='#how'
+              className='rounded-lg border border-[#2a2a2a] px-5 py-2.5 text-sm text-zinc-300 hover:border-blue-500/60'
+            >
+              See how it works
+            </a>
+          </div>
+          <div className='mt-8 flex items-center gap-4'>
+            <p className='text-xs text-zinc-500'>Supported providers</p>
+            <div className='flex gap-2'>
+              {PROVIDERS.map((p) => (
+                <span
+                  key={p.id}
+                  title={p.displayName}
+                  className='inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#2a2a2a] bg-[#111] text-sm'
+                >
+                  {p.icon.startsWith('http') ? (
+                    <img src={p.icon} alt={p.displayName} className='h-4 w-4' />
+                  ) : (
+                    p.icon
+                  )}
+                </span>
+              ))}
             </div>
           </div>
-
-          <EntrySlider slides={LANDING_SLIDES} className='self-start lg:sticky lg:top-28' />
         </div>
+        <EntrySlider slides={LANDING_SLIDES} />
       </section>
 
       <section className='mx-auto grid w-full max-w-7xl gap-10 px-6 py-8 md:grid-cols-4'>
@@ -231,13 +240,58 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                 </a>
               </div>
             </div>
+          ))}
+        </div>
+      </section>
 
-            <div className='grid gap-4'>
-              {module.bullets.map((bullet) => (
-                <div key={bullet} className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
-                  {bullet}
-                </div>
-              ))}
+      {/* ── BYOK explainer ──────────────────────────────────────────── */}
+      <section id='byok' className='mx-auto w-full max-w-6xl px-6 py-16'>
+        <div className='rounded-2xl border border-[#1f1f1f] bg-[#111] p-8 md:p-10'>
+          <div className='grid gap-8 md:grid-cols-2'>
+            <div>
+              <p className='text-sm uppercase tracking-[0.2em] text-blue-300/80'>Bring Your Own Key</p>
+              <h2 className='mt-3 text-2xl font-semibold'>Your keys, your control</h2>
+              <p className='mt-4 text-sm text-zinc-400'>
+                Aegis encrypts your API keys with AES-256 before storing them.
+                Each request is billed directly to your provider account.
+                No middleman markup, no vendor lock-in.
+              </p>
+              <ul className='mt-5 space-y-2'>
+                {[
+                  'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
+                  'Keys encrypted at rest, never logged or shared',
+                  'Remove or rotate keys anytime from Settings',
+                  'Platform fallback when no user key is set',
+                ].map((item) => (
+                  <li key={item} className='flex items-start gap-2 text-sm text-zinc-300'>
+                    {Icons.check({ className: 'mt-0.5 h-4 w-4 shrink-0 text-emerald-400' })}
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className='flex items-center justify-center'>
+              <div className='w-full max-w-xs space-y-3'>
+                {PROVIDERS.slice(0, 4).map((p) => (
+                  <div
+                    key={p.id}
+                    className='flex items-center gap-3 rounded-xl border border-[#1f1f1f] bg-[#0f0f0f] px-4 py-3'
+                  >
+                    <span className='text-lg'>
+                      {p.icon.startsWith('http') ? (
+                        <img src={p.icon} alt={p.displayName} className='h-5 w-5' />
+                      ) : (
+                        p.icon
+                      )}
+                    </span>
+                    <span className='text-sm text-zinc-200'>{p.displayName}</span>
+                    <span className='ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-300'>
+                      <span className='h-1.5 w-1.5 rounded-full bg-emerald-400' />
+                      Connected
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </article>
         ))}

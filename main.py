@@ -19,7 +19,10 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
+from backend.admin import admin_router
 from backend.database import get_session, init_db, create_tables
+from backend.credit_rates import CREDIT_RATES, get_tier
+from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
 from backend.key_management import KeyManager
 from backend.providers import get_provider, list_providers
 from config import settings
@@ -34,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Aegis UI Navigator", version="1.0.0")
 cors_origins = [origin for origin in {settings.FRONTEND_URL, settings.PUBLIC_BASE_URL} if origin]
+if settings.CORS_ORIGINS:
+    cors_origins.extend([o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()])
 if not cors_origins:
     cors_origins = ["http://localhost:5173", "http://localhost:8000"]
 app.add_middleware(
@@ -54,10 +59,14 @@ else:
     logger.warning("SESSION_SECRET is not set; OAuth flows will fail without session support.")
 
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
 key_manager = KeyManager(settings.ENCRYPTION_SECRET)
+db_init_task: asyncio.Task[None] | None = None
+db_init_error: str | None = None
+db_ready = False
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -65,12 +74,51 @@ FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 # ── Database lifecycle ────────────────────────────────────────────────
 
 
+async def _initialize_database() -> None:
+    """Initialize the database with retries without blocking app readiness."""
+    global db_ready, db_init_error
+
+    init_db(settings.DATABASE_URL or None)
+
+    retry_delay_seconds = 5
+    while True:
+        try:
+            await create_tables()
+        except Exception as exc:  # noqa: BLE001
+            db_ready = False
+            db_init_error = str(exc)
+            logger.exception(
+                "Database initialization failed; retrying in %s seconds",
+                retry_delay_seconds,
+            )
+            await asyncio.sleep(retry_delay_seconds)
+        else:
+            db_ready = True
+            db_init_error = None
+            logger.info("Database initialized")
+            return
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Initialize database on application startup."""
-    init_db(settings.DATABASE_URL or None)
-    await create_tables()
-    logger.info("Database initialized")
+    """Kick off database initialization on application startup."""
+    global db_init_task
+
+    if db_init_task is None or db_init_task.done():
+        db_init_task = asyncio.create_task(_initialize_database())
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Cancel any outstanding background initialization tasks."""
+    global db_init_task
+
+    if db_init_task is not None and not db_init_task.done():
+        db_init_task.cancel()
+        try:
+            await db_init_task
+        except asyncio.CancelledError:
+            logger.info("Database initialization task cancelled during shutdown")
 
 
 # ── Auth helper ───────────────────────────────────────────────────────
@@ -219,13 +267,77 @@ async def delete_user_key(
     return {"ok": True, "provider": provider}
 
 
+# ── Usage / Credit API routes ─────────────────────────────────────────
+
+
+@app.get("/api/usage/balance")
+async def usage_balance(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return current credit balance for the authenticated user."""
+    user = _get_current_user(request)
+    return await check_credits(session, user["uid"])
+
+
+@app.get("/api/usage/summary")
+async def usage_summary(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return aggregated usage stats for the dashboard."""
+    user = _get_current_user(request)
+    return await get_usage_summary(session, user["uid"])
+
+
+@app.get("/api/usage/history")
+async def usage_history(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    limit: int = 50,
+    offset: int = 0,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Return paginated usage event log."""
+    user = _get_current_user(request)
+    return await get_usage_history(
+        session, user["uid"], limit=limit, offset=offset, provider=provider, model=model
+    )
+
+
+@app.get("/api/usage/rates")
+async def usage_rates() -> dict[str, Any]:
+    """Return all credit rates for client-side cost estimation."""
+    return {"rates": CREDIT_RATES}
+
+
+@app.put("/api/usage/spending-cap")
+async def set_spending_cap(
+    request: Request,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Set or remove the spending cap for the authenticated user."""
+    user = _get_current_user(request)
+    balance = await get_or_create_balance(session, user["uid"])
+    balance.spending_cap = payload.get("cap")
+    await session.commit()
+    return {"spending_cap": balance.spending_cap}
+
+
 # ── Health check ──────────────────────────────────────────────────────
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Return service health status."""
-    return {"status": "ok", "version": "1.0.0"}
+    """Return service health status without failing while dependencies warm up."""
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "database": "ready" if db_ready else "initializing",
+        "database_error": db_init_error or "",
+    }
 
 
 # ── WebSocket helpers ─────────────────────────────────────────────────

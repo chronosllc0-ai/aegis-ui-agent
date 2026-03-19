@@ -40,8 +40,10 @@ class Settings(BaseSettings):
     SESSION_SECRET: str = ""
     SESSION_TTL_SECONDS: int = 60 * 60 * 24 * 7
     COOKIE_SECURE: bool = False
+    ADMIN_EMAILS: str = ""  # comma-separated email list for auto-admin assignment
     PUBLIC_BASE_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:5173"
+    CORS_ORIGINS: str = ""  # comma-separated extra origins (e.g. "https://mohex.org,https://app.netlify.app")
 
     # ── OAuth providers ──────────────────────────────────────────────
     GOOGLE_OAUTH_CLIENT_ID: str = ""

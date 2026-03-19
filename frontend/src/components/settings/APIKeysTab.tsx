@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { PROVIDERS } from '../../lib/models'
+import { Icons } from '../icons'
+import { PROVIDERS, renderProviderIcon } from '../../lib/models'
 import { apiUrl } from '../../lib/api'
 
 type StoredKey = {
@@ -105,17 +106,13 @@ export function APIKeysTab() {
             <div key={provider.id} className='rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
               <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-2'>
-                  {provider.icon.startsWith('http') ? (
-                    <img src={provider.icon} alt={provider.displayName} className='h-5 w-5 rounded-sm' />
-                  ) : (
-                    <span className='text-base'>{provider.icon}</span>
-                  )}
+                  <span className='text-base text-zinc-100'>{renderProviderIcon(provider, 'h-5 w-5')}</span>
                   <span className='text-sm font-medium'>{provider.displayName}</span>
                 </div>
                 {stored ? (
                   <span className='inline-flex items-center gap-1 text-xs text-emerald-300'>
                     <span className='h-2 w-2 rounded-full bg-emerald-400' />
-                    Connected · {stored.key_hint}
+                    Connected / {stored.key_hint}
                   </span>
                 ) : (
                   <span className='text-xs text-zinc-500'>No key</span>
@@ -158,7 +155,11 @@ export function APIKeysTab() {
       </div>
 
       <div className='rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 text-xs text-zinc-300'>
-        <p className='font-medium text-blue-200'>🔐 How BYOK works</p>
+        <p className='inline-flex items-center gap-2 font-medium text-blue-200'>
+          {Icons.lock({ className: 'h-3.5 w-3.5' })}
+          <span>How BYOK works</span>
+        </p>
+        <p className='inline-flex items-center gap-2 font-medium text-blue-200'>{Icons.lock({ className: 'h-4 w-4' })}<span>How BYOK works</span></p>
         <ul className='mt-2 list-inside list-disc space-y-1 text-zinc-400'>
           <li>Keys are encrypted with AES-256 before storage — we never see your plaintext key.</li>
           <li>Each request to an LLM uses <em>your</em> key, billed directly to your provider account.</li>

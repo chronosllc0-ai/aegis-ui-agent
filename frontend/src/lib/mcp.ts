@@ -1,11 +1,17 @@
+import { createElement } from 'react'
+import type { IconType } from 'react-icons'
+import { FaDiscord, FaFolder, FaGlobe, FaLock, FaPlus, FaSlack, FaTelegram, FaTerminal } from 'react-icons/fa'
+
 export type AuthType = 'none' | 'api_key' | 'oauth'
 
 export type IntegrationStatus = 'connected' | 'error' | 'disabled'
+export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'custom'
+
 
 export type IntegrationConfig = {
   id: string
   name: string
-  icon: string
+  icon: IntegrationIcon
   description: string
   enabled: boolean
   status: IntegrationStatus
@@ -24,11 +30,29 @@ export type CustomServerForm = {
   apiKey: string
 }
 
+const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
+  'web-search': FaGlobe,
+  filesystem: FaFolder,
+  'code-exec': FaTerminal,
+  telegram: FaTelegram,
+  slack: FaSlack,
+  discord: FaDiscord,
+  custom: FaPlus,
+}
+
+const LEGACY_INTEGRATION_ICON_MAP: Record<string, IntegrationIcon> = {
+  '🌐': 'web-search',
+  '📁': 'filesystem',
+  '💻': 'code-exec',
+  '💬': 'slack',
+  '➕': 'custom',
+}
+
 export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'web-search',
     name: 'Web Search',
-    icon: '🌐',
+    icon: 'web-search',
     description: 'Search the web and extract content.',
     enabled: false,
     status: 'disabled',
@@ -38,7 +62,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'filesystem',
     name: 'File System',
-    icon: '📁',
+    icon: 'filesystem',
     description: 'Read/write local files and manage downloads.',
     enabled: false,
     status: 'disabled',
@@ -48,7 +72,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'code-exec',
     name: 'Code Execution',
-    icon: '💻',
+    icon: 'code-exec',
     description: 'Execute sandboxed snippets.',
     enabled: false,
     status: 'disabled',
@@ -58,7 +82,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'telegram',
     name: 'Telegram',
-    icon: 'https://i.postimg.cc/KYsDGq2L/download_19.png',
+    icon: 'telegram',
     description: 'Telegram bot messaging tools.',
     enabled: false,
     status: 'disabled',
@@ -73,7 +97,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'slack',
     name: 'Slack',
-    icon: '💬',
+    icon: 'slack',
     description: 'Slack channels and messaging tools.',
     enabled: false,
     status: 'disabled',
@@ -87,7 +111,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'discord',
     name: 'Discord',
-    icon: '💬',
+    icon: 'discord',
     description: 'Discord guild channels and files.',
     enabled: false,
     status: 'disabled',
@@ -98,6 +122,29 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
     tools: ['discord_get_messages', 'discord_send_message', 'discord_list_channels', 'discord_send_file'],
   },
 ]
+
+function isIntegrationIcon(value: string): value is IntegrationIcon {
+  return value in INTEGRATION_ICON_MAP
+}
+
+export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon = 'custom'): IntegrationIcon {
+  if (!icon) return fallback
+  if (isIntegrationIcon(icon)) return icon
+  return LEGACY_INTEGRATION_ICON_MAP[icon] ?? fallback
+}
+
+export function normalizeIntegrationConfig(integration: IntegrationConfig): IntegrationConfig {
+  return {
+    ...integration,
+    icon: normalizeIntegrationIcon(integration.icon, integration.id === 'telegram' ? 'telegram' : integration.id === 'discord' ? 'discord' : integration.id === 'slack' ? 'slack' : 'custom'),
+  }
+}
+
+export function renderIntegrationIcon(icon: string, className = 'h-4 w-4') {
+  const normalized = normalizeIntegrationIcon(icon)
+  const resolved = isIntegrationIcon(normalized) ? normalized : 'custom'
+  return createElement(INTEGRATION_ICON_MAP[resolved] ?? FaLock, { className, 'aria-hidden': 'true' })
+}
 
 export function maskSecret(value: string): string {
   if (!value) return ''

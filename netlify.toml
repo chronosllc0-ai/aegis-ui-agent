@@ -1,0 +1,41 @@
+# ──────────────────────────────────────────────────────────────────────
+# Netlify configuration for Aegis UI
+# Deploys the React/Vite frontend as a static site.
+# The FastAPI backend runs separately (Railway, Fly, etc.)
+# ──────────────────────────────────────────────────────────────────────
+
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+# SPA fallback — all routes serve index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ── Environment variables (set in Netlify dashboard) ─────────────────
+#
+#   VITE_API_URL    = https://your-backend.up.railway.app
+#   VITE_WS_URL     = wss://your-backend.up.railway.app/ws/navigate
+#
+# These are baked into the build at deploy time via Vite's env handling.
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# ── Security headers ─────────────────────────────────────────────────
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

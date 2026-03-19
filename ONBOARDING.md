@@ -1,37 +1,367 @@
-## Session 5.3 - March 19, 2026 (Public Site + Shared Docs Implementation)
+## Session 5.13 - March 19, 2026 (Admin Router Mount Expansion)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Updated `backend/admin/router.py` to import and mount the full current admin router set: dashboard, users, billing, conversations, impersonation, and audit.
+- Switched the impersonation mount path from `/impersonation` to `/impersonate` to match the requested admin API structure.
+- Left `main.py` unchanged because it already mounts `admin_router`.
+
+### What's Working
+- `/api/admin` now exposes the expected sub-router mount points for dashboard, users, billing, conversations, impersonation, and audit.
+- The admin router continues to use the existing `APIRouter(prefix="/api/admin", tags=["admin"])` configuration.
+
+### What's NOT Working Yet
+- This pass only adjusted router wiring; it did not add new endpoint implementations or dedicated automated tests.
+
+### Next Steps
+1. Add or expand targeted admin API tests that verify each mounted admin sub-router is reachable at the intended prefix.
+2. Confirm any frontend/admin client callers use the new `/api/admin/impersonate` path instead of the old `/api/admin/impersonation` prefix if they already exist.
+
+### Decisions Made
+- Kept the change scoped to router composition only, per request, and avoided touching `main.py`.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.12 - March 19, 2026 (Admin Impersonation API Endpoints)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Rebuilt the landing page into a story-led public surface with a richer header, footer, alternating product-story sections, contextual docs links, and a side slider.
-- Reworked the auth page into a two-column onboarding surface with a side slider, embedded docs entry points, and preserved password/SSO auth flows.
-- Added lightweight public routing in the main frontend for landing, auth, and embedded docs without breaking the signed-in operator shell.
-- Implemented a shared docs content source under `shared/docs/` covering quickstart, auth, provider keys, live sessions, voice, workflows, integrations, deployment, API reference, FAQ, and changelog.
-- Added embedded docs in the main frontend plus a true standalone `docs-site/` frontend app that renders the same shared docs content.
-- Added new public/frontend env templates for cross-linking the main app and standalone docs portal.
-- Updated `.gitignore` to ignore `.superpowers/` and the new docs-site build/install artifacts.
+- Added `backend/admin/impersonation.py` with admin-protected impersonation start/stop/status endpoints.
+- Implemented target resolution by email then uid, superadmin/self-protection checks, impersonation session persistence, audit logging, and signed cookie swap/restore behavior using the shared auth session helpers.
+- Updated `backend/admin/router.py` to mount the new impersonation router under `/api/admin/impersonation`.
 
 ### What's Working
-- Main frontend production build passes with the new public-site, auth, and embedded-docs routing.
-- Standalone docs-site production build passes.
-- Landing/auth/docs cross-linking is now wired in code, with optional env-based standalone docs URL support.
+- Admin users can now start impersonation sessions that preserve the original `aegis_session` in `aegis_admin_session` and replace it with an impersonated signed session payload.
+- Stopping impersonation restores the preserved admin cookie, clears the backup cookie, closes the latest active impersonation session row, and records an audit event.
+- Status checks now report whether the current session is impersonating and expose the impersonated target/admin identifiers when active.
 
 ### What's NOT Working Yet
-- Pricing is intentionally still deferred to the next pass.
-- `docs-site` dependency install timed out in this environment, so build verification was completed using a local `node_modules` junction to the already-installed frontend dependency tree.
+- This pass did not add dedicated automated tests for the new impersonation endpoints.
+- `POST /stop` currently requires a valid preserved `aegis_admin_session`; if that backup cookie is missing or expired, the route returns 401 instead of attempting any fallback recovery.
 
 ### Next Steps
-1. Add pricing to the landing page in the next pass.
-2. Decide deployment URLs for the standalone docs portal and set `VITE_DOCS_SITE_URL` / `VITE_PRODUCT_SITE_URL` accordingly.
-3. If you want zero local setup hacks, run a normal `npm install` inside `docs-site/` on your machine and keep its own lockfile.
+1. Add focused API tests for impersonation lifecycle edge cases, especially missing backup cookies, expired sessions, superadmin targets, and target resolution precedence.
+2. Consider whether impersonation should also be restricted from suspended/inactive target accounts, depending on the desired admin support workflow.
 
 ### Decisions Made
-- Kept the signed-in operator shell separate from the new public-site/docs surfaces while using one main frontend app domain as the canonical public entry point.
-- Shared the docs content source across both frontends, while keeping the docs rendering shell local to each app boundary for build stability.
+- Reused `auth._sign_session` / `auth._verify_session` and matched the existing auth cookie parameters instead of duplicating a new session format.
+- Logged impersonation lifecycle events through the shared admin audit service with `request.client.host if request.client else None` for IP capture on every audit write.
 
 ### Blockers
-- None in app code; only local `docs-site` package installation was slow in this environment.
+- None.
+
+---
+
+## Session 5.11 - March 19, 2026 (Admin Users API Endpoints)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/users.py` with admin-only user management endpoints for listing users, fetching user detail, updating profile fields, changing roles, suspending/reinstating accounts, and applying manual credit adjustments.
+- Added safe user-list sorting/filtering, user detail aggregation for balances/conversations/usage, and per-mutation audit logging payloads with before/after or amount/reason metadata.
+- Updated `backend/admin/router.py` to mount the new users router under `/api/admin/users` and repaired `backend/admin/audit_service.py` so audit entries are flushed correctly inside the surrounding transaction.
+
+### What's Working
+- `/api/admin/users` now exposes the requested admin CRUD/read surfaces behind admin authentication.
+- Mutating user admin routes now write audit log rows through the shared helper without the earlier unreachable-code bug in `audit_service.py`.
+- Targeted import and RBAC regression checks pass locally.
+
+### What's NOT Working Yet
+- This pass did not add dedicated automated tests for the new admin users endpoints themselves.
+- Other planned admin sub-routers from the larger admin roadmap are still not implemented in this repo snapshot.
+
+### Next Steps
+1. Add focused API tests for the new `/api/admin/users` endpoints, especially sorting/filter validation, detail aggregation, superadmin role changes, and credit adjustment edge cases.
+2. Implement the remaining admin sub-routers (dashboard, billing, conversations, impersonation, audit) when those phases are requested.
+
+### Decisions Made
+- Kept role changes off the general profile update path unless the caller already satisfies `require_superadmin`, while also exposing a dedicated superadmin-only `/role` endpoint.
+- Treated manual credit adjustments as balance-state mutations on `credits_used` / `overage_credits`, clamped so the resulting state cannot become negative or exceed the base monthly allowance bucket.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.10 - March 19, 2026 (Remove Committed Screenshot Binary)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Deleted the committed screenshot binary `docs/screenshots/2026-03-19-admin-router-auth-schema-smoke.png` per review feedback.
+- Removed the corresponding Session 5.9 manifest entry from `docs/screenshots/README.md` so the documentation no longer points at a non-existent tracked artifact.
+- Left the earlier onboarding notes intact as historical context and added this cleanup pass so the repo history clearly explains why the binary is no longer present.
+
+### What's Working
+- The repository no longer tracks the binary screenshot artifact that was called out in review.
+- The screenshot manifest is back to listing only the previously established browser-container artifacts.
+
+### What's NOT Working Yet
+- This pass only removes the committed binary artifact; it does not add a replacement non-binary visual verification approach.
+
+### Next Steps
+1. If a future review still needs visual proof, attach the image in PR artifacts/notes instead of committing a binary into the repo unless the repo convention changes.
+2. If a permanent visual record is required in-repo later, confirm the preferred format/location first (for example external artifact links or a text manifest-only reference).
+
+### Decisions Made
+- Treated the review request as applying to both the binary file and the manifest entry that referenced it, to keep the repo internally consistent.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.9 - March 19, 2026 (Local Dev Smoke Screenshot After Admin/Auth Phase 1)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Started the backend in the normal local/dev mode with `SESSION_SECRET=dev-secret python -m uvicorn main:app --host 127.0.0.1 --port 8000`, which mounted the auth and admin routers and initialized the local SQLite dev database.
+- Started the frontend with `npm run dev -- --host 127.0.0.1 --port 5173` and verified the app shell still loaded successfully against the updated backend.
+- Installed the Playwright Chromium browser runtime/dependencies required in this environment and captured a fresh screenshot artifact at `docs/screenshots/2026-03-19-admin-router-auth-schema-smoke.png`.
+- Updated `docs/screenshots/README.md` so the screenshot manifest now references the new local-dev verification artifact.
+
+### What's Working
+- `GET /health` returned `{"status":"ok","version":"1.0.0","database":"ready","database_error":""}` while the backend was running locally.
+- The Vite frontend served successfully on `http://127.0.0.1:5173/`, and the page title resolved to `Aegis` during the screenshot capture run.
+- There is now a committed screenshot artifact showing the app still loads after the Phase 1 admin router mount plus auth/schema updates.
+
+### What's NOT Working Yet
+- This pass only verified loadability and captured the artifact; it did not add new backend/frontend code beyond the screenshot manifest and onboarding updates.
+
+### Next Steps
+1. If a later pass changes the admin/auth UI flow, capture a second screenshot showing the most relevant signed-in or admin-facing surface.
+2. Once Phase 2 admin endpoints are wired to frontend UI, add dedicated browser regression coverage for those flows instead of relying on a landing-page smoke check alone.
+
+### Decisions Made
+- Stored the screenshot under `docs/screenshots/`, matching the repo's existing screenshot artifact convention.
+- Used the standard local development ports (`8000` backend, `5173` frontend) so the smoke check mirrors the normal dev environment as closely as possible.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.8 - March 19, 2026 (Admin Package Scaffolding)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Created the new `backend/admin/` package with `__init__.py`, `dependencies.py`, `audit_service.py`, and `router.py`.
+- Added admin auth dependencies that validate the signed session via `auth._verify_session`, load the `User` from the database, enforce active-account status, and gate access to admin vs. superadmin roles.
+- Added an audit helper that creates and commits `AuditLog` records.
+- Wired the new `admin_router` into `main.py` immediately after the auth router so the placeholder admin API surface is mounted.
+
+### What's Working
+- The backend now has a dedicated admin package entrypoint and placeholder router for future Phase 1 admin endpoints.
+- Admin dependency helpers centralize the current session, role, and account-status checks for future admin routes.
+- The audit logging helper can persist committed admin actions through the existing SQLAlchemy async session layer.
+
+### What's NOT Working Yet
+- The admin router is intentionally a placeholder and does not expose any endpoints yet.
+- This pass did not add automated tests for the new admin helpers.
+
+### Next Steps
+1. Add the first admin endpoints to `backend/admin/router.py` and protect them with `get_admin_user` / `require_superadmin`.
+2. Add focused tests covering admin session validation, suspended-account rejection, and audit-log persistence.
+
+### Decisions Made
+- Allowed both `admin` and `superadmin` through `get_admin_user`, with `require_superadmin` layering the stricter role check on top.
+- Reused the existing auth cookie/session verification flow rather than duplicating token parsing logic.
+
+### Blockers
+- None.
+
+---
+
+## Session 4.3 â€” March 19, 2026 (Config/docs follow-up: ADMIN_EMAILS documentation)
+**Agent:** GPT-5.2-Codex **Duration:** ~1 short pass
+### What Was Done
+- Added the inline `Settings.ADMIN_EMAILS` comment in `config.py` so the auth/session config block explicitly documents the value as a comma-separated email list for auto-admin assignment.
+- Updated `.env.example` and `README.md` so deployment/environment docs describe `ADMIN_EMAILS` consistently alongside the existing auth-related settings.
+
+### What's Working
+- `ADMIN_EMAILS` remains defined on the central settings object used by `auth.py`; no direct env reads were introduced.
+- Auth/deployment docs now consistently explain the variable's purpose.
+
+### What's NOT Working Yet
+- This pass only updated configuration/documentation surfaces; no runtime auth behavior changed.
+
+### Next Steps
+1. If more auth config cleanup is requested, align any remaining deploy docs or platform templates with the same wording.
+2. Add or extend tests only if future changes modify how auto-admin assignment is evaluated at runtime.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.7 - March 19, 2026 (Follow-up on DB Review Feedback)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Followed up on the database review feedback in `backend/database.py`.
+- Added an index to `Conversation.status` to support common status-based filtering.
+- Refactored `_ensure_user_columns_sync` to use a tiny helper that wraps each `ALTER TABLE` in defensive error handling and logs a warning instead of crashing if a column was created concurrently during startup.
+- Re-ran the schema smoke checks to confirm metadata registration and legacy SQLite compatibility still hold after the review-driven changes.
+
+### What's Working
+- `python -m py_compile backend/database.py` passes.
+- The metadata/legacy SQLite verification script still confirms the expected Phase 1 tables are registered and that local startup can upgrade an older `users` table in place.
+
+### What's NOT Working Yet
+- This pass only addressed the review comments on the database schema/bootstrap layer.
+
+### Next Steps
+1. If more admin/auth review comes in, continue tightening the surrounding auth/runtime wiring in the remaining Phase 1 files.
+2. Consider adding a dedicated automated test around `_ensure_user_columns_sync` race-tolerance/logging behavior if this local bootstrap path becomes more critical.
+
+### Decisions Made
+- Chose warning-level logging instead of silent `pass` so concurrent schema-sync collisions are tolerated while still leaving a trace in logs for debugging.
+- Kept the conversation status index local to the model definition so `Base.metadata.create_all` will manage it automatically for fresh environments.
+
+### Blockers
+- None.
+
+
+## Session 5.6 - March 19, 2026 (RBAC Schema + Admin Table Foundations)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `backend/database.py` imports to include `Boolean` and `ForeignKey`, then added `role` and `status` columns to the `User` model immediately after `password_hash`.
+- Added the five Phase 1 admin/auth SQLAlchemy models exactly per the prompt: `Conversation`, `ConversationMessage`, `PaymentMethod`, `AuditLog`, and `ImpersonationSession`, with the required table names and foreign-key targets.
+- Extended `_ensure_user_columns_sync` so local SQLite/dev databases that predate RBAC automatically gain `role` and `status` columns just like the existing `password_hash` backfill.
+- Verified that `Base.metadata.create_all` includes the new tables and that startup against a legacy SQLite `users` table still succeeds while adding the missing columns.
+
+### What's Working
+- `python -m py_compile backend/database.py` passes.
+- A metadata verification script confirmed all expected tables are registered on `Base.metadata`.
+- A legacy SQLite compatibility smoke test confirmed `create_tables()` adds `password_hash`, `role`, and `status` to an older `users` table and creates the new admin-related tables without requiring migrations.
+
+### What's NOT Working Yet
+- This pass only covered the database layer requested here; any follow-on auth/admin router work from the broader phase document still remains if needed in later sessions.
+
+### Next Steps
+1. Continue the Phase 1 auth/admin changes in `auth.py`, `config.py`, and the admin backend modules if you want the new RBAC schema wired into runtime behavior.
+2. Add focused backend tests around schema bootstrap/compatibility if you want this safety net automated in CI instead of validated ad hoc.
+
+### Decisions Made
+- Kept the local schema upgrade path lightweight and aligned with the existing no-migrations dev strategy by extending `_ensure_user_columns_sync` instead of introducing Alembic.
+- Preserved the exact table/foreign-key names from the prompt so later admin/auth work can rely on the documented schema contract.
+
+### Blockers
+- None.
+
+
+## Session 5.5 - March 18, 2026 (Railway Healthcheck Startup Hardening)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Investigated the Railway deploy failure and traced the most likely startup risk to synchronous database initialization during FastAPI startup, which could keep the service from becoming healthy within Railway's 30-second healthcheck window.
+- Changed `main.py` so database initialization now starts in the background with retry logging instead of blocking app readiness.
+- Expanded `/health` to report database warmup state while still returning HTTP 200 so Railway can mark the container healthy even if the database is still coming online.
+- Added a shutdown cleanup for the background initialization task.
+- Added/updated backend tests to verify the health endpoint remains available during database warmup and to reflect the current websocket event order.
+
+### What's Working
+- `pytest tests/test_main_websocket.py -q` passes.
+- `python -m py_compile main.py tests/test_main_websocket.py` passes.
+- A local `uvicorn` smoke run now serves `GET /health` successfully during startup and reports database readiness metadata.
+
+### What's NOT Working Yet
+- I did not run a real Railway redeploy from this environment, so the final confirmation still needs a fresh deploy on Railway.
+
+### Next Steps
+1. Redeploy the updated commit to Railway and confirm the service becomes healthy on the `/health` probe.
+2. If Railway still shows startup issues, inspect the runtime logs for external dependency failures (for example a bad `DATABASE_URL` or missing secrets) now that the app itself should no longer block readiness on initial DB connection.
+
+### Decisions Made
+- Prioritized fast container readiness over failing startup hard when the database is temporarily unavailable, because Railway healthchecks only need the web process to come up first.
+- Kept the fix localized to app startup/health behavior instead of changing deployment manifests.
+
+### Blockers
+- No direct Railway runtime console or redeploy control was available in this session, so the production confirmation step remains manual.
+
+
+## Session 5.4 - March 18, 2026 (Full Emoji Icon Cleanup + Frontend Lint Fixes)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Replaced the remaining app-facing emoji icon usage with React icon components, including MCP integration icons, the BYOK help heading, and the settings back navigation.
+- Refactored shared icon handling so integrations now render through reusable icon helpers instead of raw emoji strings.
+- Fixed the React/ESLint issues that were blocking `npm run lint`, including the settings context export structure, lazy settings tab initialization, and effect/ref handling in the websocket, screen view, and input bar flows.
+- Rebuilt and previewed the frontend locally to verify the updated bundle serves correctly.
+
+### What's Working
+- `cd frontend && npm run lint` passes.
+- `cd frontend && npm run build` passes.
+- `cd frontend && npm run preview -- --host 127.0.0.1 --port 4173` served successfully and responded with HTTP 200 when checked locally.
+- No remaining emoji icon glyphs were found in `frontend/src` after the cleanup pass.
+
+### What's NOT Working Yet
+- I still could not attach a browser screenshot artifact in this environment because the required browser/screenshot tool was not available in the current toolset.
+
+### Next Steps
+1. If you want a visual artifact attached to the task, rerun this in a browser-enabled session and capture the landing page plus settings screens.
+2. Optionally replace any remaining decorative unicode separators in visible copy if you want the entire UI text system to be icon- and typography-consistent.
+
+### Decisions Made
+- Kept provider and integration icon rendering centralized so future UI surfaces can reuse the same icon definitions.
+- Fixed the lint issues in code rather than suppressing rules so the frontend now validates cleanly.
+
+### Blockers
+- No screenshot-capable browser tool was available in this session.
+
+
+---## Session 5.3 - March 18, 2026 (Provider Icons Swapped from Emojis to React Icons)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Replaced the provider emoji/string icon setup in `frontend/src/lib/models.ts` with typed `react-icons` components and added a shared `renderProviderIcon()` helper.
+- Updated the main provider icon surfaces to use the new React icon renderer: the input bar model/provider picker, the API keys settings tab, and the landing page provider badges/cards.
+- Added the `react-icons` frontend dependency so provider icon rendering stays consistent and maintainable.
+
+### What's Working
+- `cd frontend && npm run build` passes with the new provider icon setup.
+- Provider icons now render via React components instead of emoji fallbacks in the updated views.
+
+### What's NOT Working Yet
+- `cd frontend && npm run lint` still fails because of pre-existing lint issues in `InputBar.tsx`, `ScreenView.tsx`, `SettingsPage.tsx`, `SettingsContext.tsx`, and `useWebSocket.ts` that were not introduced by this pass.
+- I did not capture a browser screenshot in this environment because the required browser screenshot tooling was not available in the current toolset.
+
+### Next Steps
+1. Fix the existing frontend lint violations so the repo returns to a clean `npm run lint` state.
+2. If desired, extend the same provider icon helper into any remaining provider/model UI surfaces for full visual consistency.
+3. Capture a visual regression screenshot in a browser-enabled run once screenshot tooling is available.
+
+### Decisions Made
+- Used `react-icons` components instead of remote image/emoji fallbacks to satisfy the request for real React icons while keeping the implementation lightweight.
+- Kept the provider/model data centralized in `frontend/src/lib/models.ts` so icon usage remains consistent across the app.
+
+### Blockers
+- No browser screenshot tool was available in this session, so I could not attach a live UI screenshot.
+
 
 ---## Session 5.2 - March 18, 2026 (Railway Deploy Guidance)
 
@@ -172,7 +502,7 @@
 ### Blockers
 - The local sandbox blocked Vite child-process spawning, so final build verification required an escalated run.
 
----## Session 4.7 — March 18, 2026 (Password Auth Fallback + CTA Copy Cleanup)
+---## Session 4.7 â€” March 18, 2026 (Password Auth Fallback + CTA Copy Cleanup)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -200,7 +530,7 @@
 ### Blockers
 - None from this pass.
 
----## Session 4.6 — March 18, 2026 (Env Alignment to Template)
+---## Session 4.6 â€” March 18, 2026 (Env Alignment to Template)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -227,7 +557,7 @@
 ### Blockers
 - None.
 
----## Session 4.5 — March 16, 2026 (IntegrationsTab A11y Labels)
+---## Session 4.5 â€” March 16, 2026 (IntegrationsTab A11y Labels)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -251,7 +581,7 @@
 - None.
 
 ---
-## Session 4.4 — March 16, 2026 (InputBar Voice Button Lint Fix)
+## Session 4.4 â€” March 16, 2026 (InputBar Voice Button Lint Fix)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -275,7 +605,7 @@
 - None.
 
 ---
-## Session 4.3 — March 16, 2026 (A11y Labels for Agent Settings)
+## Session 4.3 â€” March 16, 2026 (A11y Labels for Agent Settings)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -300,7 +630,7 @@
 - None.
 
 ---
-## Session 4.5 — March 18, 2026 (Installed Superpowers Skills)
+## Session 4.5 â€” March 18, 2026 (Installed Superpowers Skills)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -325,7 +655,7 @@
 - None.
 
 ---
-## Session 4.4 — March 17, 2026 (Diagnosis: Backend Not Listening on 8000)
+## Session 4.4 â€” March 17, 2026 (Diagnosis: Backend Not Listening on 8000)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -351,7 +681,7 @@
 - None.
 
 ---
-## Session 4.3 — March 16, 2026 (Port Alignment to 8000)
+## Session 4.3 â€” March 16, 2026 (Port Alignment to 8000)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -379,7 +709,7 @@
 - None.
 
 ---
-## Session 4.2 — March 16, 2026 (Env Setup + Test Attempt)
+## Session 4.2 â€” March 16, 2026 (Env Setup + Test Attempt)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -406,7 +736,7 @@
 ### Blockers
 - Build failure due to missing `SummaryCard` in `WorkflowView.tsx`.
 
----## Session 4.1 — March 16, 2026 (Auth URL Fixes + Better Email Errors)
+---## Session 4.1 â€” March 16, 2026 (Auth URL Fixes + Better Email Errors)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -435,7 +765,7 @@
 ### Blockers
 - None in code; validation depends on environment configuration.
 
----## Session 4.0 — March 16, 2026 (Live Auth + SSO + UI Icons)
+---## Session 4.0 â€” March 16, 2026 (Live Auth + SSO + UI Icons)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -467,7 +797,7 @@
 ### Blockers
 - None in code; live validation depends on credentials/network.
 
----## Session 3.9 — March 16, 2026 (Landing Page + Model Contrast + Live Telegram)
+---## Session 3.9 â€” March 16, 2026 (Landing Page + Model Contrast + Live Telegram)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -497,7 +827,7 @@
 ### Blockers
 - None in code; live validation depends on credentials/network.
 
----## Session 3.8 — March 16, 2026 (UI/WS Polish + Transcripts + Real Slack/Discord)
+---## Session 3.8 â€” March 16, 2026 (UI/WS Polish + Transcripts + Real Slack/Discord)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -506,7 +836,7 @@
 - Adjusted ScreenView to be scrollable and more responsive on small screens; example prompt clicks now prefill the input instead of auto-sending.
 - Added shared model definitions and surfaced a model selector near the steering controls with the provided model icon.
 - Added transcript event plumbing: backend now emits transcript messages, frontend captures them, and UI displays + plays back recent transcripts.
-- Hardened websocket client behavior: VITE_API_URL fallback for ws URL, throttled “not connected” log spam, and immediate working indicator on send.
+- Hardened websocket client behavior: VITE_API_URL fallback for ws URL, throttled â€œnot connectedâ€ log spam, and immediate working indicator on send.
 - Implemented real Slack/Discord API clients using httpx and added httpx to backend requirements.
 
 ### What's Working
@@ -530,7 +860,7 @@
 ### Blockers
 - None in code; live validation depends on credentials/network.
 
----## Session 3.7 — March 16, 2026 (Live API Audio + Integration Endpoints)
+---## Session 3.7 â€” March 16, 2026 (Live API Audio + Integration Endpoints)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -562,7 +892,7 @@
 - None in this pass.
 
 ---
-## Session 3.6 — March 16, 2026 (Final Pass: Live Wiring + Demo Data Removal)
+## Session 3.6 â€” March 16, 2026 (Final Pass: Live Wiring + Demo Data Removal)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -598,7 +928,7 @@
 
 ---
 
-## Session 3.5 — March 15, 2026 (Merge Conflict Cleanup + Frontend Boot Fix)
+## Session 3.5 â€” March 15, 2026 (Merge Conflict Cleanup + Frontend Boot Fix)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
@@ -623,8 +953,7 @@
 - None.
 
 ---
-## Session 3.4A — March 11, 2026 (Review Follow-up: Session ID Isolation + Env Filter Hardening)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 focused pass  ### What Was Improved - Fixed orchestrator ADK session identity handling so task execution now uses a session-scoped `user_id` derived from `session_id` instead of hardcoded `"user"`. This prevents cross-session collisions in the shared ADK session service. - Added a code execution integration module with safer subprocess environment filtering using explicit blocked prefixes (`API_`, `AWS_`, `AZURE_`, `GCP_`, `SECRET`, `TOKEN`, `PRIVATE`, `CREDENTIAL`) instead of broad substring matching. - Exported the new `CodeExecutionIntegration` in `integrations/__init__.py` for consistent import paths. - Added regression tests:   - `test_orchestrator_user_id.py` validates `create_session` and `Runner.run_async` receive the session-scoped user id.   - `test_code_execution_env_filter.py` validates sensitive env prefixes are filtered while non-sensitive variables are preserved.  ### Validation - `pytest -q` - `cd frontend && npm run lint` - `cd frontend && npm run build`  ### Notes - Review comments referencing integration manager webhook record access and Slack/Discord 429 loops map to newer integration files not present on this branch snapshot; this pass addressed the directly applicable conflicts and hardening items in the current tree.  ---  # ONBOARDING.md — Session Progress Log  > Update this file at the END of every coding session. This is how continuity is maintained between agents and sessions. Newest entries go at the top.  ---  <<<<<<< ours ## Session 3.2 — March 10, 2026 (Code Review Fixes: Settings Application + Workflow Edit + WS Cleanup) ======= ## Session 4.2 — March 11, 2026 (Review Fix: Remove Hardcoded API-Key Fallback) >>>>>>> theirs  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done <<<<<<< ours - Addressed code review P1: session settings are now applied in `orchestrator.execute_task(...)` before runner execution.   - Added `_apply_session_settings(...)` to consume model/system instruction settings.   - Added `_build_agent(...)` helper and rebuild logic when session model/personality prompt changes. - Addressed websocket reconnect lifecycle review item:   - Hardened reconnect timer handling in `useWebSocket` by clearing existing reconnect timers before scheduling new ones.   - Disabled `onclose` callback during hook cleanup to prevent reconnect scheduling while disposing. - Addressed workflows edit review item:   - `WorkflowsTab` Edit now persists edited instruction to workflow template data via `onChange(...)` instead of running it. - Addressed workflow save instruction derivation review item:   - `saveWorkflow` now prefers the selected task history instruction and falls back to first user-navigation step for the active task.   - Added guard filters to avoid system/config/queue messages being used as saved workflow instructions.  ### What's Working - Backend tests pass (`pytest -q`). - Frontend production build passes (`cd frontend && npm run build`). - Session settings are now functionally consumed before task execution. - Workflow edit behavior now updates templates correctly without accidental execution.  ### What's NOT Working Yet - Browser screenshot capture for this pass failed due a browser-container Chromium crash (SIGSEGV) in this environment.  ### Next Steps 1. Extend settings application to include behavior flags in orchestrator/tool invocation semantics. 2. Add targeted tests for `_apply_session_settings(...)` behavior and workflow-edit persistence. 3. Re-run screenshot capture in a stable browser environment.  ### Blockers - Browser container Playwright/Chromium instability (SIGSEGV) during screenshot attempt.  ---  ## Session 3.1 — March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge) ======= - Addressed review warning in `orchestrator.py` by removing the hardcoded Gemini API fallback (`"test-key"`). - Updated orchestrator client initialization to rely only on configured settings value. - Updated `main.py` to lazily initialize the orchestrator via `_get_orchestrator()` so app import/health/test paths do not eagerly instantiate Gemini client before runtime actions. - Preserved behavior for websocket task execution by routing execution through the lazy initializer.  ### What's Working - Backend tests pass after lazy-orchestrator refactor. - Frontend build remains green. - No hardcoded API fallback remains in orchestrator initialization.  ### What's NOT Working Yet - Runtime task execution still requires valid Gemini credentials at actual execution time (expected behavior).  ### Next Steps 1. Move secret injection to Cloud Run Secret Manager wiring in deploy script for production hygiene. 2. Add explicit startup/config diagnostics endpoint for missing runtime credentials. 3. Continue Pass 4 live deployment proof capture.  ### Decisions Made - Chose lazy initialization in `main.py` to keep tests/import paths stable while enforcing no hardcoded API fallbacks.  ### Blockers - None.  ---  ## Session 4.1 — March 11, 2026 (Review Follow-up: WebSocket Robustness) >>>>>>> theirs  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  <<<<<<< ours ### Regressions Found - Pass 3A regressed the previously polished dashboard experience: onboarding empty state was flattened, top bar polish and browser-style URL strip were reduced, ActionLog hierarchy/detail was simplified, and input/steering UX lost keyboard/polish parity. - Workflow fallback view was functional but visually weak for demos.  ### What Was Restored / Improved - Restored premium dashboard shell while keeping the new product architecture:   - Rich onboarding empty state in `ScreenView` (logo, headline, subtext, 4 clickable examples, helper text).   - Polished top bar (Aegis branding, status pill, session timer, New Session).   - Browser copilot URL/navigation strip (back/forward, current URL, Go submit).   - Enhanced ActionLog hierarchy (grouped by task, icons, status color coding, timestamp + elapsed seconds, copy log).   - Restored polished input + steering UX (segmented mode control, queue badge, multiline input, keyboard shortcuts, send spinner, queue panel). - Preserved all Pass 3 product additions:   - Sidebar history/search and bottom user area.   - Settings full-page tabs and return flow.   - Workflow toggle + save workflow.   - Settings context persistence and websocket `config` sends.   - Backend `workflow_step` and MCP integration scaffolding. - Improved workflow fallback visualization to be intentionally demo-ready:   - Ordered execution flow with parent relationships,   - Clear status styling,   - Right-hand step detail inspector. - Added lightweight dev/demo seed data to validate all major surfaces without live backend dependence:   - 3+ history items,   - 2+ workflow templates,   - 4+ action log entries,   - Multi-step workflow graph data,   - Integrations in mixed states,   - Auth view/sign-out state for auth screenshot.  ### Screenshot Evidence Captured - Captured screenshot set (artifact paths) and manifest at `docs/screenshots/README.md`. - Captured names:   - `01-dashboard-onboarding.png`   - `02-dashboard-sidebar-history.png`   - `03-dashboard-active-log.png`   - `04-settings-profile.png`   - `05-settings-agent-config.png`   - `06-settings-integrations.png`   - `07-settings-workflows.png`   - `08-workflow-view.png`   - `09-auth-page.png` - Artifact location prefix:   - `browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`  ### What's Working - Frontend build passes with restored non-regressed shell and settings/workflow integration. - Backend tests remain green. - Dashboard + settings + workflow + auth surfaces are all visually verified.  ### What's Stubbed / Incomplete - React Flow dependency remains unavailable in this environment; enhanced fallback workflow view is used. - Firestore sync is still placeholder-only. - MCP/messaging connectors remain mocked wiring (not live external APIs).  ### What Still Feels Weak - History replay is currently log-focused and not full screenshot timeline playback yet. - Sidebar responsive behavior is solid but could benefit from animation polish and persistent collapsed state.  ### Next Steps 1. Add real task replay timeline with screenshot snapshots per step. 2. Replace workflow fallback with React Flow when package install becomes available. 3. Implement Firestore sync and real messaging connector APIs with secure token handling.  ### Blockers - npm registry restrictions still prevent installing `reactflow` in this environment.  ---  ## Session 3 — March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring) ======= ### What Was Done - Followed up on additional review concerns and validated current code paths. - Confirmed previously flagged `chat_id`-casting warnings are not present in the current branch's `main.py` (no Telegram HTTP endpoints in this file scope). - Hardened frontend working-state classification in `useWebSocket` by centralizing non-execution step types (`queue`, `steer`, `config`) to avoid false running-state transitions on acknowledgements. - Added backend websocket regression coverage for malformed dequeue payloads to ensure protocol errors do not disconnect active sessions.  ### What's Working - Malformed `dequeue` payload now returns protocol error and keeps websocket session alive (validated by test). - Existing websocket smoke flow remains passing (frame + step + result). - Frontend build remains green with updated hook logic.  ### What's NOT Working Yet - No dedicated frontend unit-test harness is in place for hook state transitions (still relying on build + runtime behavior).  ### Next Steps 1. Add frontend hook-level tests for `isWorking` transitions on step/result/error combinations. 2. If Telegram HTTP endpoints are introduced in this branch, enforce shared payload validators for all numeric fields (`chat_id`, etc.). 3. Continue Pass 4 live GCP deployment execution and proof capture.  ### Decisions Made - Kept scope focused on code paths that exist in this branch; avoided speculative endpoint changes not present in source.  ### Blockers - None.  ---  ## Session 4.0 — March 11, 2026 (Cloud Run Deployment + Infra-as-Code)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Implemented Pass 4 deployment/infrastructure assets for one-command Cloud Run deployment. - Added `backend/` container assets:   - `backend/Dockerfile` (Python 3.11 slim + Playwright deps + Chromium install + uvicorn entrypoint)   - `backend/requirements.txt` (mirrored backend dependency list) - Added frontend containerization assets:   - `frontend/Dockerfile` (Node build stage + Nginx runtime)   - `frontend/nginx.conf.template` with SPA fallback + `/api/` and `/ws` proxy support. - Added infrastructure automation under `infrastructure/`:   - `deploy.sh` for full backend+frontend Cloud Run deploy, Firestore init, Storage bucket setup.   - `setup-gcp.sh` for first-time project/API/iam bootstrap.   - `cloudbuild.yaml` for frontend image builds with Vite runtime URL build args.   - `cors.json` for screenshot bucket CORS setup. - Added `docker-compose.yml` for local dual-service dev (frontend + backend containers). - Expanded `.env.example` with required GCP/frontend/integration variables. - Updated frontend WebSocket hook to support `VITE_WS_URL` override for cloud deployment. - Updated `README.md` with explicit deployment and infra instructions.  ### What's Working - Python test suite passes (`pytest tests/ -v`). - Frontend production build passes (`npm run build`). - Deployment scripts and compose flow are now present in-repo for hackathon automated deployment requirement.  ### What's NOT Working Yet - Deployment has not been executed against a live GCP project from this environment (no project/credentials provided here). - Firestore runtime integration is still mostly future-facing in application logic.  ### Next Steps 1. Run `./infrastructure/setup-gcp.sh` and `./infrastructure/deploy.sh` against real project credentials. 2. Capture Cloud Run URLs + screenshots/screen recording for submission proof. 3. Wire Firestore-backed session/task state in runtime (replace in-memory session service where appropriate). 4. Record final demo and finalize Devpost submission package.  ### Decisions Made - Kept existing monorepo source layout and introduced deployment-focused `backend/` + `infrastructure/` overlays to avoid risky code moves close to deadline. - Used build-time `VITE_WS_URL` override for frontend cloud endpoint configuration.  ### Blockers - Requires real GCP project, billing, and deploy credentials to complete live rollout proof.  ---  ## Session 2.8 — March 9, 2026 (Review Fixes: Dequeue Input Validation + Working-State Accuracy)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Implemented Codex review follow-up for malformed `dequeue` payload handling in `main.py`. - Updated `dequeue` action parsing to validate `index` conversion safely:   - Wrapped `int(...)` conversion in `try/except (TypeError, ValueError)`.   - Returns protocol error (`Invalid queue index`) for malformed input instead of crashing websocket session. - Implemented frontend working-state fix in `frontend/src/hooks/useWebSocket.ts`. - Updated step-message handling to avoid setting `isWorking=true` on non-execution acknowledgements (`queue`, `steer`). - Preserved task-progress behavior for real execution steps while preventing false “working” UI state after queue/dequeue operations.  ### What's Working - Backend websocket remains stable on malformed dequeue payloads (no teardown from conversion exceptions). - Frontend no longer gets stuck in false running mode after queue/dequeue acknowledgements. - Existing backend tests and frontend build pass.  ### What's NOT Working Yet - Queue synchronization is still optimistic/index-based and not yet id-based with authoritative queue snapshots.  ### Next Steps 1. Add websocket test coverage for malformed `dequeue` payload values (e.g., `"abc"`, `null`). 2. Add frontend tests for working-state transitions on `queue`/`steer` step types. 3. Move queue operations to server-generated item IDs for safer multi-update scenarios.  ### Decisions Made - Kept protocol contract unchanged while hardening validation and UI state transitions.  ### Blockers - None.  ---  ## Session 2.7 — March 9, 2026 (Security + Queue Semantics Review Follow-up) >>>>>>> theirs  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done <<<<<<< ours - Rebuilt the frontend shell around a persistent sidebar with top/middle/bottom sections: `New Task`, history search, workflow/settings shortcuts, and user avatar menu. - Added a full-page Settings experience with left tab nav and right content pane. New tabs implemented: `Profile`, `Agent Configuration`, `Integrations`, and `Workflows`. - Added app-wide settings state (`SettingsContext` + `useSettings`) with localStorage persistence, theme toggle state, workflow template storage, and websocket session config payload generation. - Added `UserMenu` dropdown entry point to Settings and a second entry point from sidebar settings gear/shortcut. - Added workflow visualization toggle in Action Log and implemented a fallback workflow view component that renders step cards from structured workflow websocket events. - Added “Save as Workflow” behavior from ActionLog and run/edit/delete controls in Workflows settings tab. - Added client MCP helpers/types and integrations UI supporting built-in integrations plus custom MCP server form (`authType`, URL, test/save stubs). - Added backend MCP + messaging stubs:   - `mcp_client.py` user-scoped registry and tool forwarding scaffold   - `integrations/base.py` interface   - `integrations/telegram.py`, `integrations/slack_connector.py`, `integrations/discord.py` mocked connectors and tool manifests   - `integrations/__init__.py` exports - Extended websocket backend contract with:   - `config` action to receive per-session settings   - `workflow_step` event emission for graph/list rendering payloads   - pass-through of settings/workflow callbacks into orchestrator execution - Extended orchestrator to emit structured workflow steps (id/parent/action/description/status/timestamp/duration/screenshot).  ### What's Working - `pytest` suite remains green (3 tests). - Frontend builds successfully with the new settings/integrations/workflow UI wiring. - Settings persist in localStorage and are sent as websocket `config` before task starts. - Backend emits `workflow_step` payloads while task steps stream.  ### What's NOT Working Yet - Real reactflow graph was requested, but npm registry access is blocked in this environment (403), so a fallback card-based workflow view is used. - Firestore sync is currently a no-op stub in `useSettings`; local persistence is working. - MCP protocol networking and messaging APIs are intentionally stubbed/mocked (tool manifests + execute paths wired, not full external API calls). - Token encryption-at-rest is not implemented yet; UI only stores masked display values.  ### Next Steps 1. Replace fallback workflow cards with real React Flow + auto-layout (dagre/elk) once package install is available. 2. Implement authenticated Firestore settings/workflow sync (read/write + conflict strategy). 3. Wire MCP client to real HTTP MCP servers with retries, auth handling, and per-user persisted server configs. 4. Implement real Telegram/Slack/Discord API clients with secure token storage and live status polling. 5. Add tests for settings serialization, workflow persistence, and websocket `workflow_step` schema contract.  ### Decisions Made - Prioritized end-to-end UI/data-flow wiring with stubs over full external API integration per pass instructions. - Chose fallback workflow rendering due to blocked dependency install to keep build green.  ### Blockers - npm package fetch for `reactflow` blocked by registry 403 in this environment. ======= - Implemented follow-up fixes requested by Codex review across backend and frontend. - Hardened SPA static serving path handling in `main.py`:   - Resolved requested file path and enforced it stays under `frontend/dist` using `relative_to`.   - Prevents traversal-style requests from reading files outside the built frontend root. - Fixed queue-drain interrupt starvation in `main.py`:   - Removed recursive `await` queue-drain behavior from `_run_navigation_task`.   - Added `_start_next_queued_task_if_ready(...)` that schedules at most one next queued task without blocking current control flow.   - Added cancellation-aware guard so queued work does not auto-start while an interrupt cancellation is active. - Added queue deletion server support in `main.py`:   - New websocket action: `dequeue` with index.   - Removes queued instruction by index and emits queue update step/error feedback. - Wired frontend queue delete UI to backend runtime in `App.tsx`:   - Queue item deletion now sends `{ action: "dequeue", index }` in addition to local UI state update.  ### What's Working - `pytest tests/ -v` passes after backend control-flow/security changes. - `npm run build` passes after frontend queue-delete wiring update. - Queue deletions in UI now propagate to backend queue state for this websocket session. - Interrupt instructions are no longer blocked by recursive queue-drain waits.  ### What's NOT Working Yet - Queue entries are still index-based and ephemeral; reconnect/session restart loses queued client/server sync context. - Frontend queue list still mirrors optimistic local state and does not yet consume authoritative queue snapshots from backend.  ### Next Steps 1. Add queue item IDs and explicit queue snapshot events for robust client/server synchronization. 2. Add dedicated tests for `dequeue` behavior and interrupt precedence with non-empty queues. 3. Consider stricter URL normalization/decoding tests for static file serving path safety regression coverage.  ### Decisions Made - Kept websocket protocol changes minimal by introducing a single `dequeue` action rather than refactoring queue schema. - Prioritized non-blocking interrupt semantics over recursive queue execution chaining.  ### Blockers - None. >>>>>>> theirs  ---  ## Session 2.6 — March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Addressed Codex review feedback in `frontend/src/hooks/useWebSocket.ts` by decoupling socket lifecycle from task-id changes. - Removed unintended websocket reconnect churn caused by `activeTaskId` dependency capture:   - Introduced `activeTaskIdRef` for message handlers,   - Kept `connect` stable (depends only on stable logger callback),   - Added `shouldReconnectRef` to avoid reconnect scheduling on intentional cleanup/unmount. - Addressed backend interrupt race in `main.py`:   - Interrupt now sets cancellation and waits for the currently running task to settle before starting the new task,   - Prevents `cancel_event` from being cleared by a new task before prior task has observed cancellation. - Addressed stuck `task_running` failure path in `main.py`:   - Wrapped navigation execution in `try/except/finally`,   - Ensures `task_running` is always reset even on runtime failures,   - Emits websocket error/result payloads when task execution fails. - Added `_start_navigation_task(...)` helper to centralize task creation and reduce duplicated task-launch code paths.  ### What's Working - Backend tests pass after race/failure handling changes. - Frontend production build passes after websocket-hook stabilization changes. - WebSocket connection remains stable when starting new tasks (no reconnect churn triggered by task id state updates).  ### What's NOT Working Yet - Queue deletion is still UI-local and not yet synchronized with backend queue removal/reorder protocol. - Action metadata is still partially inferred client-side from freeform step text.  ### Next Steps 1. Add server-side queue IDs and delete/reorder websocket actions for full queue sync. 2. Emit structured step payload fields from backend (e.g., `action_kind`, `target`, `url`) to reduce frontend heuristics. 3. Add targeted tests for interrupt timing behavior and failure-path task-state reset.  ### Decisions Made - Preserved existing websocket action contract while fixing race conditions internally. - Kept reconnect behavior automatic but guarded with explicit cleanup semantics.  ### Blockers - None.  ---  ## Session 2.5 — March 9, 2026 (UI Polish + UX Upgrades)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Polished the frontend UX while preserving the core layout and websocket protocol. - Added a richer header with Aegis branding, semantic connection status labels/dots, live session timer, and a `New Session` reset button. - Added a URL command bar between header and screen panel, including back/forward controls, URL display/edit input, and direct navigation submit behavior. - Replaced the blank screen empty state with an onboarding hero: large Aegis icon, “Tell me what to do”, and 4 clickable example prompt cards that submit instantly. - Upgraded `ScreenView` with a thin top progress indicator while working and crossfade transitions between incoming screenshot frames. - Enhanced input UX: multiline textarea, keyboard hints, `Enter` send, `Shift+Enter` newline, `Esc` clear, `Tab` mode cycle, steer glow, interrupt warning border, queue badge, and send loading spinner. - Enhanced log UX: grouped entries by task (collapsible), per-step icons, status color coding, elapsed time per step, smooth autoscroll, and Copy Log export button. - Added responsive behavior: narrow-screen log collapse/restore affordance and draggable divider for desktop panel resizing. - Added success/error toast feedback and dynamic tab title (`Aegis` vs `Aegis · Working...`). - Added shield favicon (`frontend/public/shield.svg`) and updated `index.html` title/favicon metadata.  ### What's Working - Frontend builds cleanly with all polish features enabled. - Empty-state example prompts can trigger task submission flow immediately. - Action log grouping, collapse, color coding, and copy export work in-browser. - Dynamic title, toasts, and frame transitions are functioning. - URL bar and header controls are wired to websocket command flow without protocol changes.  ### What's NOT Working Yet - Back/forward controls currently send steering text commands (`go back`, `go forward`) rather than explicit dedicated backend actions. - Queue item removal remains client-side UI only (no backend dequeue protocol yet). - Voice-active mic animation is wired as a UI placeholder only pending Pass 3 live audio integration.  ### Next Steps 1. Pass 3 voice integration: connect mic state + audio stream to websocket `audio_chunk` flow and playback handling. 2. Add server-side queue item IDs and delete/reorder protocol for fully synchronized queue UX. 3. Enrich websocket step payloads with structured action metadata (`action_kind`, `url`, `timings`) to reduce frontend heuristics. 4. Add focused frontend tests for log grouping, keyboard shortcuts, and mode styling states.  ### Decisions Made - Preserved existing websocket envelope/actions as requested; all polish is layered in UI/hook behavior. - Kept dark product aesthetic and Tailwind-only styling.  ### Blockers - None blocking Pass 2.5 completion.  ---  ## Session 2 — March 9, 2026 (Pass 2 Frontend + Real-time Steering)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Scaffolded a new React + TypeScript Vite app in `frontend/`, installed dependencies, and added Tailwind via `@tailwindcss/vite`. - Built the pass-2 UI shell with a dark dashboard layout in `App.tsx`: `ScreenView` (left), `ActionLog` (right), and `InputBar`/steering controls at the bottom. - Implemented frontend components:   - `ScreenView` for live frame rendering, pulsing working border, and transient “Steering...” overlay.   - `ActionLog` with timestamped step feed, monospace styling, and interrupt emphasis.   - `InputBar` that is always interactive, includes mode-aware send behavior + mic button UI.   - `SteeringControl` segmented toggle (`Steer` default, `Interrupt`, `Queue`).   - `MessageQueue` collapsible queued instruction list with count badge and per-item delete. - Added `useWebSocket` hook with connect/disconnect/reconnect handling, routing of `step`/`result`/`frame`/`error` messages, and connection status state. - Added Vite dev proxy for `/ws/*` to `http://localhost:8080` with WebSocket forwarding. - Updated backend `main.py` for pass-2 steering protocol support:   - Per-session runtime state (`task_running`, `cancel_event`, steering context list, queue).   - New actions: `steer`, `interrupt`, `queue`, plus existing `navigate`/`stop`/`audio_chunk`.   - Background task execution so users can send steering while task is running.   - Queue draining after active task completes.   - Frame streaming over websocket as `{"type":"frame","data":{"image":...}}`. - Updated `orchestrator.py` to support frame callbacks, cancellation checks, and steering-context checks between streamed steps. - Updated Dockerfile to multi-stage build frontend (`frontend/dist`) and run FastAPI with uvicorn. - Updated FastAPI to serve `frontend/dist` (assets + SPA fallback route) in production. - Updated websocket smoke test to validate frame + step + result flow.  ### What's Working - Frontend builds successfully (`npm run build`) and outputs to `frontend/dist`. - Backend test suite passes (`pytest tests/ -v`). - WebSocket smoke test validates frame, step, and result event flow. - Steering UI allows continuous input regardless of agent run-state. - Interrupt and queue actions are accepted and logged in real time.  ### What's NOT Working Yet - Live backend semantics for “steer changes next tool decision” are still a first-pass implementation; steering context is checked between streamed events but not yet deeply fused into ADK reasoning. - Queue deletion is currently frontend-only; if an item was already sent with `queue`, removing it in UI does not yet retract it server-side. - Vite dev server logs proxy warnings when backend is not running (expected in isolated frontend dev).  ### Next Steps 1. Add explicit orchestrator/tool-level consumption of steering messages before each tool call for tighter behavior. 2. Add backend protocol support to remove/reorder queued items from UI (queue IDs + delete action). 3. Stream richer result payloads to UI (task summaries, completion metadata, errors). 4. Start Pass 3 voice path: wire mic capture to `audio_chunk` websocket messages and playback for responses. 5. Add integration tests for interrupt + queue lifecycle.  ### Decisions Made - Frontend?backend communication remains websocket-only, including queue/interrupt/steer controls. - Default mode remains `Steer`, while first submission in idle state maps to `navigate`. - Production frontend hosting is handled by FastAPI static + SPA fallback, avoiding separate Nginx layer.  ### Blockers - None blocking pass completion.  ---  ## Session 1 — March 8, 2026 (Phase 1 Core Loop Hardening)  **Agent:** GPT-5.2-Codex **Duration:** ~1 pass  ### What Was Done - Installed Python dependencies from `requirements.txt` (already satisfied in this environment). - Attempted `playwright install chromium`; blocked by CDN 403 (`Domain forbidden`) in this environment. - Created local `.env` from `.env.example` (placeholder values retained; no key was available in env). - Refactored runtime imports to match the actual flat repo layout (removed broken `src.*` imports). - Reworked core modules (`executor.py`, `analyzer.py`, `navigator.py`, `orchestrator.py`, `main.py`, `session.py`, `config.py`) with stricter type hints, async-safe Gemini calls, structured parsing, and model detection utility. - Added `aegis_logging.py` and removed the logging module naming conflict by moving setup there. - Added Phase-1 validation tests: executor PNG bytes test, analyzer response parsing test, and websocket endpoint smoke test with stub orchestrator. - Added `scripts/ws_smoke_client.py` for manual websocket flow testing against a running local server.  ### What's Working - `pytest` suite added in this pass is green (`3 passed`). - Core modules compile and import successfully with installed ADK path (`google.adk.agents` / `google.adk.runners`). - FastAPI websocket endpoint path and request/response envelope are validated by test client. - Analyzer now requests strict JSON and normalizes parsed UI element output.  ### What's NOT Working Yet - Real browser runtime is blocked until Chromium download succeeds (`playwright install chromium` currently fails with 403 in this environment). - Real Gemini calls cannot be validated without a real `GEMINI_API_KEY` in `.env`. - End-to-end instruction execution (`go to google.com and search weather`) remains blocked by the two constraints above (browser binary + API key).  ### Next Steps 1. Provide a real `GEMINI_API_KEY` in `.env` (local/CI secret injection). 2. Resolve Playwright browser install path (mirror, allowed domain, or pre-baked browser in runtime image). 3. Run true E2E check: orchestrator task `go to google.com and search for weather in new york`. 4. Run `uvicorn main:app` + `scripts/ws_smoke_client.py` against real Gemini + browser and capture logs/artifacts. 5. Expand tests to include mocked orchestrator event stream and analyzer contract validation fixtures.  ### Decisions Made - Defaulted configurable model to `gemini-2.5-pro` with dynamic availability probing for `gemini-3-pro` / preview variants when API key is present. - Updated ADK imports to current installed package paths (`google.adk.agents.Agent`, `google.adk.runners.Runner`).  ### Blockers - No real Gemini API key available in this environment. - Playwright Chromium CDN blocked (403 Domain forbidden).  ---  ## Session 0 — March 8, 2026 (Project Bootstrap)  **Agent:** Viktor (via Slack) **Duration:** Initial scaffold  ### What Was Done - Created full project scaffold with all source files - Wrote `AGENTS.md` (the master guide you're reading alongside this) - Set up project structure: `src/agent/`, `src/live/`, `src/utils/`, `frontend/`, `tests/`, `scripts/` - Wrote core modules:   - `src/main.py` — FastAPI + WebSocket server   - `src/agent/orchestrator.py` — ADK agent with tool registration   - `src/agent/analyzer.py` — Gemini vision screenshot analysis   - `src/agent/executor.py` — Playwright browser control   - `src/agent/navigator.py` — ADK-compatible tool functions   - `src/live/session.py` — Live API session scaffolding   - `src/utils/config.py` — Pydantic Settings   - `src/utils/logging.py` — Structured logging - Created deployment files: `Dockerfile`, `cloudbuild.yaml`, `scripts/deploy.sh` - Created `requirements.txt`, `.env.example`, `.gitignore` - Wrote full `README.md` with architecture diagram  ### What's Working - Project structure is complete and follows best practices - All modules have proper type hints, docstrings, and async patterns - Dockerfile and deploy scripts are ready - No secrets in codebase (verified)  ### What's NOT Working Yet - No code has been tested (no API key set up yet) - Frontend not yet created (React app needs scaffolding) - Live API voice integration is stubbed, not implemented - Tests directory is empty - No GCP project configured  ### Next Steps (Priority Order) 1. **Install dependencies and verify imports** — `pip install -r requirements.txt && playwright install chromium` 2. **Get a Gemini API key** and add to `.env` 3. **Test the core loop locally:**    - Start with `executor.py`: can it launch a browser and take screenshots?    - Then `analyzer.py`: does Gemini return useful UI analysis?    - Then `navigator.py` + `orchestrator.py`: can the agent complete a simple task like "go to google.com and search for weather"? 4. **Build the React frontend** — voice controls, screen view, action log 5. **Implement Live API voice** — replace the stub in `session.py` 6. **Deploy to Cloud Run** — test with `scripts/deploy.sh` 7. **Record demo video** (< 4 min) before March 16  ### Decisions Needed - Which Gemini model version to use (verify `gemini-3-pro` availability vs `gemini-2.5-pro`) - Whether to use Computer Use tool directly or custom screenshot+click approach - Firestore schema for session state  ### Blockers - None currently. Just need API key and GCP project.  ---  <!--  TEMPLATE FOR NEW ENTRIES (copy this for each session):  ## Session N — [Date]  **Agent:** [Name] **Duration:** [Approximate time spent]  ### What Was Done -   ### What's Working -   ### What's NOT Working Yet -   ### Next Steps 1.   ### Decisions Made -   ### Blockers -  -->
-
+## Session 3.4A ï¿½ March 11, 2026 (Review Follow-up: Session ID Isolation + Env Filter Hardening)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 focused pass  ### What Was Improved - Fixed orchestrator ADK session identity handling so task execution now uses a session-scoped `user_id` derived from `session_id` instead of hardcoded `"user"`. This prevents cross-session collisions in the shared ADK session service. - Added a code execution integration module with safer subprocess environment filtering using explicit blocked prefixes (`API_`, `AWS_`, `AZURE_`, `GCP_`, `SECRET`, `TOKEN`, `PRIVATE`, `CREDENTIAL`) instead of broad substring matching. - Exported the new `CodeExecutionIntegration` in `integrations/__init__.py` for consistent import paths. - Added regression tests:   - `test_orchestrator_user_id.py` validates `create_session` and `Runner.run_async` receive the session-scoped user id.   - `test_code_execution_env_filter.py` validates sensitive env prefixes are filtered while non-sensitive variables are preserved.  ### Validation - `pytest -q` - `cd frontend && npm run lint` - `cd frontend && npm run build`  ### Notes - Review comments referencing integration manager webhook record access and Slack/Discord 429 loops map to newer integration files not present on this branch snapshot; this pass addressed the directly applicable conflicts and hardening items in the current tree.  ---  # ONBOARDING.md ï¿½ Session Progress Log  > Update this file at the END of every coding session. This is how continuity is maintained between agents and sessions. Newest entries go at the top.  ---  <<<<<<< ours ## Session 3.2 ï¿½ March 10, 2026 (Code Review Fixes: Settings Application + Workflow Edit + WS Cleanup) ======= ## Session 4.2 ï¿½ March 11, 2026 (Review Fix: Remove Hardcoded API-Key Fallback) >>>>>>> theirs  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done <<<<<<< ours - Addressed code review P1: session settings are now applied in `orchestrator.execute_task(...)` before runner execution.   - Added `_apply_session_settings(...)` to consume model/system instruction settings.   - Added `_build_agent(...)` helper and rebuild logic when session model/personality prompt changes. - Addressed websocket reconnect lifecycle review item:   - Hardened reconnect timer handling in `useWebSocket` by clearing existing reconnect timers before scheduling new ones.   - Disabled `onclose` callback during hook cleanup to prevent reconnect scheduling while disposing. - Addressed workflows edit review item:   - `WorkflowsTab` Edit now persists edited instruction to workflow template data via `onChange(...)` instead of running it. - Addressed workflow save instruction derivation review item:   - `saveWorkflow` now prefers the selected task history instruction and falls back to first user-navigation step for the active task.   - Added guard filters to avoid system/config/queue messages being used as saved workflow instructions.  ### What's Working - Backend tests pass (`pytest -q`). - Frontend production build passes (`cd frontend && npm run build`). - Session settings are now functionally consumed before task execution. - Workflow edit behavior now updates templates correctly without accidental execution.  ### What's NOT Working Yet - Browser screenshot capture for this pass failed due a browser-container Chromium crash (SIGSEGV) in this environment.  ### Next Steps 1. Extend settings application to include behavior flags in orchestrator/tool invocation semantics. 2. Add targeted tests for `_apply_session_settings(...)` behavior and workflow-edit persistence. 3. Re-run screenshot capture in a stable browser environment.  ### Blockers - Browser container Playwright/Chromium instability (SIGSEGV) during screenshot attempt.  ---  ## Session 3.1 ï¿½ March 10, 2026 (Pass 3.1: Regression Recovery + Product Shell Merge) ======= - Addressed review warning in `orchestrator.py` by removing the hardcoded Gemini API fallback (`"test-key"`). - Updated orchestrator client initialization to rely only on configured settings value. - Updated `main.py` to lazily initialize the orchestrator via `_get_orchestrator()` so app import/health/test paths do not eagerly instantiate Gemini client before runtime actions. - Preserved behavior for websocket task execution by routing execution through the lazy initializer.  ### What's Working - Backend tests pass after lazy-orchestrator refactor. - Frontend build remains green. - No hardcoded API fallback remains in orchestrator initialization.  ### What's NOT Working Yet - Runtime task execution still requires valid Gemini credentials at actual execution time (expected behavior).  ### Next Steps 1. Move secret injection to Cloud Run Secret Manager wiring in deploy script for production hygiene. 2. Add explicit startup/config diagnostics endpoint for missing runtime credentials. 3. Continue Pass 4 live deployment proof capture.  ### Decisions Made - Chose lazy initialization in `main.py` to keep tests/import paths stable while enforcing no hardcoded API fallbacks.  ### Blockers - None.  ---  ## Session 4.1 ï¿½ March 11, 2026 (Review Follow-up: WebSocket Robustness) >>>>>>> theirs  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  <<<<<<< ours ### Regressions Found - Pass 3A regressed the previously polished dashboard experience: onboarding empty state was flattened, top bar polish and browser-style URL strip were reduced, ActionLog hierarchy/detail was simplified, and input/steering UX lost keyboard/polish parity. - Workflow fallback view was functional but visually weak for demos.  ### What Was Restored / Improved - Restored premium dashboard shell while keeping the new product architecture:   - Rich onboarding empty state in `ScreenView` (logo, headline, subtext, 4 clickable examples, helper text).   - Polished top bar (Aegis branding, status pill, session timer, New Session).   - Browser copilot URL/navigation strip (back/forward, current URL, Go submit).   - Enhanced ActionLog hierarchy (grouped by task, icons, status color coding, timestamp + elapsed seconds, copy log).   - Restored polished input + steering UX (segmented mode control, queue badge, multiline input, keyboard shortcuts, send spinner, queue panel). - Preserved all Pass 3 product additions:   - Sidebar history/search and bottom user area.   - Settings full-page tabs and return flow.   - Workflow toggle + save workflow.   - Settings context persistence and websocket `config` sends.   - Backend `workflow_step` and MCP integration scaffolding. - Improved workflow fallback visualization to be intentionally demo-ready:   - Ordered execution flow with parent relationships,   - Clear status styling,   - Right-hand step detail inspector. - Added lightweight dev/demo seed data to validate all major surfaces without live backend dependence:   - 3+ history items,   - 2+ workflow templates,   - 4+ action log entries,   - Multi-step workflow graph data,   - Integrations in mixed states,   - Auth view/sign-out state for auth screenshot.  ### Screenshot Evidence Captured - Captured screenshot set (artifact paths) and manifest at `docs/screenshots/README.md`. - Captured names:   - `01-dashboard-onboarding.png`   - `02-dashboard-sidebar-history.png`   - `03-dashboard-active-log.png`   - `04-settings-profile.png`   - `05-settings-agent-config.png`   - `06-settings-integrations.png`   - `07-settings-workflows.png`   - `08-workflow-view.png`   - `09-auth-page.png` - Artifact location prefix:   - `browser:/tmp/codex_browser_invocations/388ce2e154a537fe/artifacts/docs/screenshots/`  ### What's Working - Frontend build passes with restored non-regressed shell and settings/workflow integration. - Backend tests remain green. - Dashboard + settings + workflow + auth surfaces are all visually verified.  ### What's Stubbed / Incomplete - React Flow dependency remains unavailable in this environment; enhanced fallback workflow view is used. - Firestore sync is still placeholder-only. - MCP/messaging connectors remain mocked wiring (not live external APIs).  ### What Still Feels Weak - History replay is currently log-focused and not full screenshot timeline playback yet. - Sidebar responsive behavior is solid but could benefit from animation polish and persistent collapsed state.  ### Next Steps 1. Add real task replay timeline with screenshot snapshots per step. 2. Replace workflow fallback with React Flow when package install becomes available. 3. Implement Firestore sync and real messaging connector APIs with secure token handling.  ### Blockers - npm registry restrictions still prevent installing `reactflow` in this environment.  ---  ## Session 3 ï¿½ March 9, 2026 (Pass 3A: Settings + Integrations + Workflow Wiring) ======= ### What Was Done - Followed up on additional review concerns and validated current code paths. - Confirmed previously flagged `chat_id`-casting warnings are not present in the current branch's `main.py` (no Telegram HTTP endpoints in this file scope). - Hardened frontend working-state classification in `useWebSocket` by centralizing non-execution step types (`queue`, `steer`, `config`) to avoid false running-state transitions on acknowledgements. - Added backend websocket regression coverage for malformed dequeue payloads to ensure protocol errors do not disconnect active sessions.  ### What's Working - Malformed `dequeue` payload now returns protocol error and keeps websocket session alive (validated by test). - Existing websocket smoke flow remains passing (frame + step + result). - Frontend build remains green with updated hook logic.  ### What's NOT Working Yet - No dedicated frontend unit-test harness is in place for hook state transitions (still relying on build + runtime behavior).  ### Next Steps 1. Add frontend hook-level tests for `isWorking` transitions on step/result/error combinations. 2. If Telegram HTTP endpoints are introduced in this branch, enforce shared payload validators for all numeric fields (`chat_id`, etc.). 3. Continue Pass 4 live GCP deployment execution and proof capture.  ### Decisions Made - Kept scope focused on code paths that exist in this branch; avoided speculative endpoint changes not present in source.  ### Blockers - None.  ---  ## Session 4.0 ï¿½ March 11, 2026 (Cloud Run Deployment + Infra-as-Code)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Implemented Pass 4 deployment/infrastructure assets for one-command Cloud Run deployment. - Added `backend/` container assets:   - `backend/Dockerfile` (Python 3.11 slim + Playwright deps + Chromium install + uvicorn entrypoint)   - `backend/requirements.txt` (mirrored backend dependency list) - Added frontend containerization assets:   - `frontend/Dockerfile` (Node build stage + Nginx runtime)   - `frontend/nginx.conf.template` with SPA fallback + `/api/` and `/ws` proxy support. - Added infrastructure automation under `infrastructure/`:   - `deploy.sh` for full backend+frontend Cloud Run deploy, Firestore init, Storage bucket setup.   - `setup-gcp.sh` for first-time project/API/iam bootstrap.   - `cloudbuild.yaml` for frontend image builds with Vite runtime URL build args.   - `cors.json` for screenshot bucket CORS setup. - Added `docker-compose.yml` for local dual-service dev (frontend + backend containers). - Expanded `.env.example` with required GCP/frontend/integration variables. - Updated frontend WebSocket hook to support `VITE_WS_URL` override for cloud deployment. - Updated `README.md` with explicit deployment and infra instructions.  ### What's Working - Python test suite passes (`pytest tests/ -v`). - Frontend production build passes (`npm run build`). - Deployment scripts and compose flow are now present in-repo for hackathon automated deployment requirement.  ### What's NOT Working Yet - Deployment has not been executed against a live GCP project from this environment (no project/credentials provided here). - Firestore runtime integration is still mostly future-facing in application logic.  ### Next Steps 1. Run `./infrastructure/setup-gcp.sh` and `./infrastructure/deploy.sh` against real project credentials. 2. Capture Cloud Run URLs + screenshots/screen recording for submission proof. 3. Wire Firestore-backed session/task state in runtime (replace in-memory session service where appropriate). 4. Record final demo and finalize Devpost submission package.  ### Decisions Made - Kept existing monorepo source layout and introduced deployment-focused `backend/` + `infrastructure/` overlays to avoid risky code moves close to deadline. - Used build-time `VITE_WS_URL` override for frontend cloud endpoint configuration.  ### Blockers - Requires real GCP project, billing, and deploy credentials to complete live rollout proof.  ---  ## Session 2.8 ï¿½ March 9, 2026 (Review Fixes: Dequeue Input Validation + Working-State Accuracy)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Implemented Codex review follow-up for malformed `dequeue` payload handling in `main.py`. - Updated `dequeue` action parsing to validate `index` conversion safely:   - Wrapped `int(...)` conversion in `try/except (TypeError, ValueError)`.   - Returns protocol error (`Invalid queue index`) for malformed input instead of crashing websocket session. - Implemented frontend working-state fix in `frontend/src/hooks/useWebSocket.ts`. - Updated step-message handling to avoid setting `isWorking=true` on non-execution acknowledgements (`queue`, `steer`). - Preserved task-progress behavior for real execution steps while preventing false ï¿½workingï¿½ UI state after queue/dequeue operations.  ### What's Working - Backend websocket remains stable on malformed dequeue payloads (no teardown from conversion exceptions). - Frontend no longer gets stuck in false running mode after queue/dequeue acknowledgements. - Existing backend tests and frontend build pass.  ### What's NOT Working Yet - Queue synchronization is still optimistic/index-based and not yet id-based with authoritative queue snapshots.  ### Next Steps 1. Add websocket test coverage for malformed `dequeue` payload values (e.g., `"abc"`, `null`). 2. Add frontend tests for working-state transitions on `queue`/`steer` step types. 3. Move queue operations to server-generated item IDs for safer multi-update scenarios.  ### Decisions Made - Kept protocol contract unchanged while hardening validation and UI state transitions.  ### Blockers - None.  ---  ## Session 2.7 ï¿½ March 9, 2026 (Security + Queue Semantics Review Follow-up) >>>>>>> theirs  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done <<<<<<< ours - Rebuilt the frontend shell around a persistent sidebar with top/middle/bottom sections: `New Task`, history search, workflow/settings shortcuts, and user avatar menu. - Added a full-page Settings experience with left tab nav and right content pane. New tabs implemented: `Profile`, `Agent Configuration`, `Integrations`, and `Workflows`. - Added app-wide settings state (`SettingsContext` + `useSettings`) with localStorage persistence, theme toggle state, workflow template storage, and websocket session config payload generation. - Added `UserMenu` dropdown entry point to Settings and a second entry point from sidebar settings gear/shortcut. - Added workflow visualization toggle in Action Log and implemented a fallback workflow view component that renders step cards from structured workflow websocket events. - Added ï¿½Save as Workflowï¿½ behavior from ActionLog and run/edit/delete controls in Workflows settings tab. - Added client MCP helpers/types and integrations UI supporting built-in integrations plus custom MCP server form (`authType`, URL, test/save stubs). - Added backend MCP + messaging stubs:   - `mcp_client.py` user-scoped registry and tool forwarding scaffold   - `integrations/base.py` interface   - `integrations/telegram.py`, `integrations/slack_connector.py`, `integrations/discord.py` mocked connectors and tool manifests   - `integrations/__init__.py` exports - Extended websocket backend contract with:   - `config` action to receive per-session settings   - `workflow_step` event emission for graph/list rendering payloads   - pass-through of settings/workflow callbacks into orchestrator execution - Extended orchestrator to emit structured workflow steps (id/parent/action/description/status/timestamp/duration/screenshot).  ### What's Working - `pytest` suite remains green (3 tests). - Frontend builds successfully with the new settings/integrations/workflow UI wiring. - Settings persist in localStorage and are sent as websocket `config` before task starts. - Backend emits `workflow_step` payloads while task steps stream.  ### What's NOT Working Yet - Real reactflow graph was requested, but npm registry access is blocked in this environment (403), so a fallback card-based workflow view is used. - Firestore sync is currently a no-op stub in `useSettings`; local persistence is working. - MCP protocol networking and messaging APIs are intentionally stubbed/mocked (tool manifests + execute paths wired, not full external API calls). - Token encryption-at-rest is not implemented yet; UI only stores masked display values.  ### Next Steps 1. Replace fallback workflow cards with real React Flow + auto-layout (dagre/elk) once package install is available. 2. Implement authenticated Firestore settings/workflow sync (read/write + conflict strategy). 3. Wire MCP client to real HTTP MCP servers with retries, auth handling, and per-user persisted server configs. 4. Implement real Telegram/Slack/Discord API clients with secure token storage and live status polling. 5. Add tests for settings serialization, workflow persistence, and websocket `workflow_step` schema contract.  ### Decisions Made - Prioritized end-to-end UI/data-flow wiring with stubs over full external API integration per pass instructions. - Chose fallback workflow rendering due to blocked dependency install to keep build green.  ### Blockers - npm package fetch for `reactflow` blocked by registry 403 in this environment. ======= - Implemented follow-up fixes requested by Codex review across backend and frontend. - Hardened SPA static serving path handling in `main.py`:   - Resolved requested file path and enforced it stays under `frontend/dist` using `relative_to`.   - Prevents traversal-style requests from reading files outside the built frontend root. - Fixed queue-drain interrupt starvation in `main.py`:   - Removed recursive `await` queue-drain behavior from `_run_navigation_task`.   - Added `_start_next_queued_task_if_ready(...)` that schedules at most one next queued task without blocking current control flow.   - Added cancellation-aware guard so queued work does not auto-start while an interrupt cancellation is active. - Added queue deletion server support in `main.py`:   - New websocket action: `dequeue` with index.   - Removes queued instruction by index and emits queue update step/error feedback. - Wired frontend queue delete UI to backend runtime in `App.tsx`:   - Queue item deletion now sends `{ action: "dequeue", index }` in addition to local UI state update.  ### What's Working - `pytest tests/ -v` passes after backend control-flow/security changes. - `npm run build` passes after frontend queue-delete wiring update. - Queue deletions in UI now propagate to backend queue state for this websocket session. - Interrupt instructions are no longer blocked by recursive queue-drain waits.  ### What's NOT Working Yet - Queue entries are still index-based and ephemeral; reconnect/session restart loses queued client/server sync context. - Frontend queue list still mirrors optimistic local state and does not yet consume authoritative queue snapshots from backend.  ### Next Steps 1. Add queue item IDs and explicit queue snapshot events for robust client/server synchronization. 2. Add dedicated tests for `dequeue` behavior and interrupt precedence with non-empty queues. 3. Consider stricter URL normalization/decoding tests for static file serving path safety regression coverage.  ### Decisions Made - Kept websocket protocol changes minimal by introducing a single `dequeue` action rather than refactoring queue schema. - Prioritized non-blocking interrupt semantics over recursive queue execution chaining.  ### Blockers - None. >>>>>>> theirs  ---  ## Session 2.6 ï¿½ March 9, 2026 (Review Fixes: Socket Stability + Interrupt Safety)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Addressed Codex review feedback in `frontend/src/hooks/useWebSocket.ts` by decoupling socket lifecycle from task-id changes. - Removed unintended websocket reconnect churn caused by `activeTaskId` dependency capture:   - Introduced `activeTaskIdRef` for message handlers,   - Kept `connect` stable (depends only on stable logger callback),   - Added `shouldReconnectRef` to avoid reconnect scheduling on intentional cleanup/unmount. - Addressed backend interrupt race in `main.py`:   - Interrupt now sets cancellation and waits for the currently running task to settle before starting the new task,   - Prevents `cancel_event` from being cleared by a new task before prior task has observed cancellation. - Addressed stuck `task_running` failure path in `main.py`:   - Wrapped navigation execution in `try/except/finally`,   - Ensures `task_running` is always reset even on runtime failures,   - Emits websocket error/result payloads when task execution fails. - Added `_start_navigation_task(...)` helper to centralize task creation and reduce duplicated task-launch code paths.  ### What's Working - Backend tests pass after race/failure handling changes. - Frontend production build passes after websocket-hook stabilization changes. - WebSocket connection remains stable when starting new tasks (no reconnect churn triggered by task id state updates).  ### What's NOT Working Yet - Queue deletion is still UI-local and not yet synchronized with backend queue removal/reorder protocol. - Action metadata is still partially inferred client-side from freeform step text.  ### Next Steps 1. Add server-side queue IDs and delete/reorder websocket actions for full queue sync. 2. Emit structured step payload fields from backend (e.g., `action_kind`, `target`, `url`) to reduce frontend heuristics. 3. Add targeted tests for interrupt timing behavior and failure-path task-state reset.  ### Decisions Made - Preserved existing websocket action contract while fixing race conditions internally. - Kept reconnect behavior automatic but guarded with explicit cleanup semantics.  ### Blockers - None.  ---  ## Session 2.5 ï¿½ March 9, 2026 (UI Polish + UX Upgrades)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Polished the frontend UX while preserving the core layout and websocket protocol. - Added a richer header with Aegis branding, semantic connection status labels/dots, live session timer, and a `New Session` reset button. - Added a URL command bar between header and screen panel, including back/forward controls, URL display/edit input, and direct navigation submit behavior. - Replaced the blank screen empty state with an onboarding hero: large Aegis icon, ï¿½Tell me what to doï¿½, and 4 clickable example prompt cards that submit instantly. - Upgraded `ScreenView` with a thin top progress indicator while working and crossfade transitions between incoming screenshot frames. - Enhanced input UX: multiline textarea, keyboard hints, `Enter` send, `Shift+Enter` newline, `Esc` clear, `Tab` mode cycle, steer glow, interrupt warning border, queue badge, and send loading spinner. - Enhanced log UX: grouped entries by task (collapsible), per-step icons, status color coding, elapsed time per step, smooth autoscroll, and Copy Log export button. - Added responsive behavior: narrow-screen log collapse/restore affordance and draggable divider for desktop panel resizing. - Added success/error toast feedback and dynamic tab title (`Aegis` vs `Aegis ï¿½ Working...`). - Added shield favicon (`frontend/public/shield.svg`) and updated `index.html` title/favicon metadata.  ### What's Working - Frontend builds cleanly with all polish features enabled. - Empty-state example prompts can trigger task submission flow immediately. - Action log grouping, collapse, color coding, and copy export work in-browser. - Dynamic title, toasts, and frame transitions are functioning. - URL bar and header controls are wired to websocket command flow without protocol changes.  ### What's NOT Working Yet - Back/forward controls currently send steering text commands (`go back`, `go forward`) rather than explicit dedicated backend actions. - Queue item removal remains client-side UI only (no backend dequeue protocol yet). - Voice-active mic animation is wired as a UI placeholder only pending Pass 3 live audio integration.  ### Next Steps 1. Pass 3 voice integration: connect mic state + audio stream to websocket `audio_chunk` flow and playback handling. 2. Add server-side queue item IDs and delete/reorder protocol for fully synchronized queue UX. 3. Enrich websocket step payloads with structured action metadata (`action_kind`, `url`, `timings`) to reduce frontend heuristics. 4. Add focused frontend tests for log grouping, keyboard shortcuts, and mode styling states.  ### Decisions Made - Preserved existing websocket envelope/actions as requested; all polish is layered in UI/hook behavior. - Kept dark product aesthetic and Tailwind-only styling.  ### Blockers - None blocking Pass 2.5 completion.  ---  ## Session 2 ï¿½ March 9, 2026 (Pass 2 Frontend + Real-time Steering)  **Agent:** GPT-5.2-Codex   **Duration:** ~1 pass  ### What Was Done - Scaffolded a new React + TypeScript Vite app in `frontend/`, installed dependencies, and added Tailwind via `@tailwindcss/vite`. - Built the pass-2 UI shell with a dark dashboard layout in `App.tsx`: `ScreenView` (left), `ActionLog` (right), and `InputBar`/steering controls at the bottom. - Implemented frontend components:   - `ScreenView` for live frame rendering, pulsing working border, and transient ï¿½Steering...ï¿½ overlay.   - `ActionLog` with timestamped step feed, monospace styling, and interrupt emphasis.   - `InputBar` that is always interactive, includes mode-aware send behavior + mic button UI.   - `SteeringControl` segmented toggle (`Steer` default, `Interrupt`, `Queue`).   - `MessageQueue` collapsible queued instruction list with count badge and per-item delete. - Added `useWebSocket` hook with connect/disconnect/reconnect handling, routing of `step`/`result`/`frame`/`error` messages, and connection status state. - Added Vite dev proxy for `/ws/*` to `http://localhost:8080` with WebSocket forwarding. - Updated backend `main.py` for pass-2 steering protocol support:   - Per-session runtime state (`task_running`, `cancel_event`, steering context list, queue).   - New actions: `steer`, `interrupt`, `queue`, plus existing `navigate`/`stop`/`audio_chunk`.   - Background task execution so users can send steering while task is running.   - Queue draining after active task completes.   - Frame streaming over websocket as `{"type":"frame","data":{"image":...}}`. - Updated `orchestrator.py` to support frame callbacks, cancellation checks, and steering-context checks between streamed steps. - Updated Dockerfile to multi-stage build frontend (`frontend/dist`) and run FastAPI with uvicorn. - Updated FastAPI to serve `frontend/dist` (assets + SPA fallback route) in production. - Updated websocket smoke test to validate frame + step + result flow.  ### What's Working - Frontend builds successfully (`npm run build`) and outputs to `frontend/dist`. - Backend test suite passes (`pytest tests/ -v`). - WebSocket smoke test validates frame, step, and result event flow. - Steering UI allows continuous input regardless of agent run-state. - Interrupt and queue actions are accepted and logged in real time.  ### What's NOT Working Yet - Live backend semantics for ï¿½steer changes next tool decisionï¿½ are still a first-pass implementation; steering context is checked between streamed events but not yet deeply fused into ADK reasoning. - Queue deletion is currently frontend-only; if an item was already sent with `queue`, removing it in UI does not yet retract it server-side. - Vite dev server logs proxy warnings when backend is not running (expected in isolated frontend dev).  ### Next Steps 1. Add explicit orchestrator/tool-level consumption of steering messages before each tool call for tighter behavior. 2. Add backend protocol support to remove/reorder queued items from UI (queue IDs + delete action). 3. Stream richer result payloads to UI (task summaries, completion metadata, errors). 4. Start Pass 3 voice path: wire mic capture to `audio_chunk` websocket messages and playback for responses. 5. Add integration tests for interrupt + queue lifecycle.  ### Decisions Made - Frontend?backend communication remains websocket-only, including queue/interrupt/steer controls. - Default mode remains `Steer`, while first submission in idle state maps to `navigate`. - Production frontend hosting is handled by FastAPI static + SPA fallback, avoiding separate Nginx layer.  ### Blockers - None blocking pass completion.  ---  ## Session 1 ï¿½ March 8, 2026 (Phase 1 Core Loop Hardening)  **Agent:** GPT-5.2-Codex **Duration:** ~1 pass  ### What Was Done - Installed Python dependencies from `requirements.txt` (already satisfied in this environment). - Attempted `playwright install chromium`; blocked by CDN 403 (`Domain forbidden`) in this environment. - Created local `.env` from `.env.example` (placeholder values retained; no key was available in env). - Refactored runtime imports to match the actual flat repo layout (removed broken `src.*` imports). - Reworked core modules (`executor.py`, `analyzer.py`, `navigator.py`, `orchestrator.py`, `main.py`, `session.py`, `config.py`) with stricter type hints, async-safe Gemini calls, structured parsing, and model detection utility. - Added `aegis_logging.py` and removed the logging module naming conflict by moving setup there. - Added Phase-1 validation tests: executor PNG bytes test, analyzer response parsing test, and websocket endpoint smoke test with stub orchestrator. - Added `scripts/ws_smoke_client.py` for manual websocket flow testing against a running local server.  ### What's Working - `pytest` suite added in this pass is green (`3 passed`). - Core modules compile and import successfully with installed ADK path (`google.adk.agents` / `google.adk.runners`). - FastAPI websocket endpoint path and request/response envelope are validated by test client. - Analyzer now requests strict JSON and normalizes parsed UI element output.  ### What's NOT Working Yet - Real browser runtime is blocked until Chromium download succeeds (`playwright install chromium` currently fails with 403 in this environment). - Real Gemini calls cannot be validated without a real `GEMINI_API_KEY` in `.env`. - End-to-end instruction execution (`go to google.com and search weather`) remains blocked by the two constraints above (browser binary + API key).  ### Next Steps 1. Provide a real `GEMINI_API_KEY` in `.env` (local/CI secret injection). 2. Resolve Playwright browser install path (mirror, allowed domain, or pre-baked browser in runtime image). 3. Run true E2E check: orchestrator task `go to google.com and search for weather in new york`. 4. Run `uvicorn main:app` + `scripts/ws_smoke_client.py` against real Gemini + browser and capture logs/artifacts. 5. Expand tests to include mocked orchestrator event stream and analyzer contract validation fixtures.  ### Decisions Made - Defaulted configurable model to `gemini-2.5-pro` with dynamic availability probing for `gemini-3-pro` / preview variants when API key is present. - Updated ADK imports to current installed package paths (`google.adk.agents.Agent`, `google.adk.runners.Runner`).  ### Blockers - No real Gemini API key available in this environment. - Playwright Chromium CDN blocked (403 Domain forbidden).  ---  ## Session 0 ï¿½ March 8, 2026 (Project Bootstrap)  **Agent:** Viktor (via Slack) **Duration:** Initial scaffold  ### What Was Done - Created full project scaffold with all source files - Wrote `AGENTS.md` (the master guide you're reading alongside this) - Set up project structure: `src/agent/`, `src/live/`, `src/utils/`, `frontend/`, `tests/`, `scripts/` - Wrote core modules:   - `src/main.py` ï¿½ FastAPI + WebSocket server   - `src/agent/orchestrator.py` ï¿½ ADK agent with tool registration   - `src/agent/analyzer.py` ï¿½ Gemini vision screenshot analysis   - `src/agent/executor.py` ï¿½ Playwright browser control   - `src/agent/navigator.py` ï¿½ ADK-compatible tool functions   - `src/live/session.py` ï¿½ Live API session scaffolding   - `src/utils/config.py` ï¿½ Pydantic Settings   - `src/utils/logging.py` ï¿½ Structured logging - Created deployment files: `Dockerfile`, `cloudbuild.yaml`, `scripts/deploy.sh` - Created `requirements.txt`, `.env.example`, `.gitignore` - Wrote full `README.md` with architecture diagram  ### What's Working - Project structure is complete and follows best practices - All modules have proper type hints, docstrings, and async patterns - Dockerfile and deploy scripts are ready - No secrets in codebase (verified)  ### What's NOT Working Yet - No code has been tested (no API key set up yet) - Frontend not yet created (React app needs scaffolding) - Live API voice integration is stubbed, not implemented - Tests directory is empty - No GCP project configured  ### Next Steps (Priority Order) 1. **Install dependencies and verify imports** ï¿½ `pip install -r requirements.txt && playwright install chromium` 2. **Get a Gemini API key** and add to `.env` 3. **Test the core loop locally:**    - Start with `executor.py`: can it launch a browser and take screenshots?    - Then `analyzer.py`: does Gemini return useful UI analysis?    - Then `navigator.py` + `orchestrator.py`: can the agent complete a simple task like "go to google.com and search for weather"? 4. **Build the React frontend** ï¿½ voice controls, screen view, action log 5. **Implement Live API voice** ï¿½ replace the stub in `session.py` 6. **Deploy to Cloud Run** ï¿½ test with `scripts/deploy.sh` 7. **Record demo video** (< 4 min) before March 16  ### Decisions Needed - Which Gemini model version to use (verify `gemini-3-pro` availability vs `gemini-2.5-pro`) - Whether to use Computer Use tool directly or custom screenshot+click approach - Firestore schema for session state  ### Blockers - None currently. Just need API key and GCP project.  ---  <!--  TEMPLATE FOR NEW ENTRIES (copy this for each session):  ## Session N ï¿½ [Date]  **Agent:** [Name] **Duration:** [Approximate time spent]  ### What Was Done -   ### What's Working -   ### What's NOT Working Yet -   ### Next Steps 1.   ### Decisions Made -   ### Blockers -  -->
 
 
 

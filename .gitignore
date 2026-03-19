@@ -5,6 +5,10 @@ node_modules/
 dist/
 .venv/
 *.egg-info/
+
+# Dev artifacts
+*.db
+*.log
 .superpowers/
 docs-site/node_modules/
 docs-site/dist/
