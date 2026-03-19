@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import users
+from . import dashboard
 
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
-admin_router.include_router(users.router, prefix="/users")
+admin_router.include_router(dashboard.router, prefix="/dashboard")
