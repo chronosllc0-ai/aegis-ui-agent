@@ -35,7 +35,6 @@ class User(Base):
     role = Column(String(20), default="user")
     status = Column(String(20), default="active")
     password_hash = Column(Text)
-    role = Column(String(20), default="user")
     status = Column(String(20), default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), onupdate=func.now())
