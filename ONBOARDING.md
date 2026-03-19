@@ -1,3 +1,36 @@
+## Session 5.9 - March 19, 2026 (Admin Dashboard Stats Endpoint)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/dashboard.py` with a dedicated `router = APIRouter()` and a protected `GET /` `dashboard_stats(...)` handler using `Depends(get_admin_user)` and `Depends(get_session)`.
+- Implemented the requested aggregate dashboard queries for total users, recently active users, new users this month, credits used this month, active conversations, grouped platform counts, and the 10 most recent audit log entries.
+- Added safe JSON decoding for `AuditLog.details_json` so malformed or empty audit payloads do not break the admin dashboard response.
+- Mounted the dashboard router under `/api/admin/dashboard` from `backend/admin/router.py` so the new endpoint is reachable through the admin API.
+
+### What's Working
+- `GET /api/admin/dashboard/` is now registered on the admin router and returns the exact response keys described in the Phase 2 admin API doc.
+- The dashboard endpoint is protected by the existing admin dependency and uses async SQLAlchemy queries throughout.
+- Recent audit activity now returns parsed `details` payloads when valid JSON is present and `None` otherwise.
+
+### What's NOT Working Yet
+- This pass only implemented the dashboard endpoint; the remaining Phase 2 admin endpoints (`users`, `billing`, `conversations`, `impersonation`, `audit`) are still outstanding.
+- I only ran compile/import smoke checks in this session; there are not yet endpoint-level automated tests covering dashboard query behavior.
+
+### Next Steps
+1. Add focused tests for the dashboard endpoint covering auth protection, empty-database responses, and malformed `details_json` handling.
+2. Continue implementing the remaining admin API modules and include them in `backend/admin/router.py`.
+
+### Decisions Made
+- Kept the dashboard implementation read-only with respect to unrelated models and limited changes to the admin backend surface.
+- Ordered the platform breakdown by platform name for stable output while preserving the documented response shape.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.8 - March 19, 2026 (Admin Package Scaffolding)
 
 **Agent:** GPT-5.2-Codex  
