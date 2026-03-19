@@ -8,8 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -33,16 +31,9 @@ def _init_test_db(tmp_path: Path) -> None:
     asyncio.run(database.create_tables())
 
 
-def _require_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the initialized async session factory for test helpers."""
-    session_factory = database._session_factory
-    assert session_factory is not None
-    return session_factory
-
-
 async def _seed_users() -> None:
     """Insert an admin and a regular target user for route tests."""
-    async with _require_session_factory()() as session:
+    async with database._session_factory() as session:  # type: ignore[union-attr]
         session.add_all(
             [
                 User(
@@ -70,8 +61,8 @@ def _build_client() -> TestClient:
     async def override_admin_user() -> User:
         return User(uid="admin-1", email="admin@example.com", role="admin", status="active")
 
-    async def override_session() -> AsyncGenerator[AsyncSession, None]:
-        async with _require_session_factory()() as session:
+    async def override_session() -> AsyncGenerator:
+        async with database._session_factory() as session:  # type: ignore[union-attr]
             yield session
 
     app.dependency_overrides[get_admin_user] = override_admin_user
@@ -81,7 +72,7 @@ def _build_client() -> TestClient:
 
 async def _fetch_payment_methods() -> list[PaymentMethod]:
     """Load payment methods for the seeded target user."""
-    async with _require_session_factory()() as session:
+    async with database._session_factory() as session:  # type: ignore[union-attr]
         result = await session.execute(
             select(PaymentMethod)
             .where(PaymentMethod.user_id == "user-1")
@@ -92,7 +83,7 @@ async def _fetch_payment_methods() -> list[PaymentMethod]:
 
 async def _fetch_audit_actions() -> list[str]:
     """Load audit action names for the seeded target user."""
-    async with _require_session_factory()() as session:
+    async with database._session_factory() as session:  # type: ignore[union-attr]
         result = await session.execute(
             select(AuditLog.action)
             .where(AuditLog.target_user_id == "user-1")
@@ -129,56 +120,52 @@ def test_cycle_bounds_handle_january_without_skipping_february() -> None:
 def test_payment_method_routes_keep_a_single_default_and_audit_actions(tmp_path: Path) -> None:
     """Create/default/delete flows should preserve a single default payment method."""
     _init_test_db(tmp_path)
+    asyncio.run(_seed_users())
     client = _build_client()
 
-    async def _run_test() -> None:
-        await _seed_users()
+    first_create = client.post(
+        "/api/admin/billing/users/user-1/payment-methods",
+        json={"type": "card", "brand": "visa", "last4": "1111", "exp_month": 1, "exp_year": 2030},
+    )
+    assert first_create.status_code == 200
+    first_id = first_create.json()["id"]
+    assert first_create.json()["is_default"] is True
 
-        first_create = client.post(
-            "/api/admin/billing/users/user-1/payment-methods",
-            json={"type": "card", "brand": "visa", "last4": "1111", "exp_month": 1, "exp_year": 2030},
-        )
-        assert first_create.status_code == 200
-        first_id = first_create.json()["id"]
-        assert first_create.json()["is_default"]
+    second_create = client.post(
+        "/api/admin/billing/users/user-1/payment-methods",
+        json={"type": "card", "brand": "mastercard", "last4": "2222", "exp_month": 2, "exp_year": 2031},
+    )
+    assert second_create.status_code == 200
+    second_id = second_create.json()["id"]
+    assert second_create.json()["is_default"] is False
 
-        second_create = client.post(
-            "/api/admin/billing/users/user-1/payment-methods",
-            json={"type": "card", "brand": "mastercard", "last4": "2222", "exp_month": 2, "exp_year": 2031},
-        )
-        assert second_create.status_code == 200
-        second_id = second_create.json()["id"]
-        assert not second_create.json()["is_default"]
+    set_default = client.put(f"/api/admin/billing/users/user-1/payment-methods/{second_id}/default")
+    assert set_default.status_code == 200
+    assert set_default.json()["id"] == second_id
+    assert set_default.json()["is_default"] is True
 
-        set_default = client.put(f"/api/admin/billing/users/user-1/payment-methods/{second_id}/default")
-        assert set_default.status_code == 200
-        assert set_default.json()["id"] == second_id
-        assert set_default.json()["is_default"]
+    delete_default = client.delete(f"/api/admin/billing/users/user-1/payment-methods/{second_id}")
+    assert delete_default.status_code == 200
+    assert delete_default.json()["deleted"] is True
 
-        delete_default = client.delete(f"/api/admin/billing/users/user-1/payment-methods/{second_id}")
-        assert delete_default.status_code == 200
-        assert delete_default.json()["deleted"]
+    listed = client.get("/api/admin/billing/users/user-1/payment-methods")
+    assert listed.status_code == 200
+    methods = listed.json()["payment_methods"]
+    assert len(methods) == 1
+    assert methods[0]["id"] == first_id
+    assert methods[0]["is_default"] is True
 
-        listed = client.get("/api/admin/billing/users/user-1/payment-methods")
-        assert listed.status_code == 200
-        methods = listed.json()["payment_methods"]
-        assert len(methods) == 1
-        assert methods[0]["id"] == first_id
-        assert methods[0]["is_default"]
+    payment_methods = asyncio.run(_fetch_payment_methods())
+    assert len(payment_methods) == 1
+    assert payment_methods[0].id == first_id
+    assert payment_methods[0].is_default is True
 
-        payment_methods = await _fetch_payment_methods()
-        assert len(payment_methods) == 1
-        assert payment_methods[0].id == first_id
-        assert payment_methods[0].is_default
-
-        actions = await _fetch_audit_actions()
-        assert Counter(actions) == Counter(
-            [
-                "billing.add_payment_method",
-                "billing.add_payment_method",
-                "billing.set_default_payment",
-                "billing.remove_payment_method",
-            ]
-        )
-
-    asyncio.run(_run_test())
+    actions = asyncio.run(_fetch_audit_actions())
+    assert Counter(actions) == Counter(
+        [
+            "billing.add_payment_method",
+            "billing.add_payment_method",
+            "billing.set_default_payment",
+            "billing.remove_payment_method",
+        ]
+    )
