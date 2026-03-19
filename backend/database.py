@@ -10,8 +10,9 @@ from datetime import datetime, timezone
 from typing import AsyncGenerator
 from uuid import uuid4
 
+from fastapi import HTTPException
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func, inspect, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,6 @@ class User(Base):
     role = Column(String(20), default="user")
     status = Column(String(20), default="active")
     password_hash = Column(Text)
-    status = Column(String(20), default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -170,7 +170,7 @@ class AuditLog(Base):
     target_user_id = Column(String(255), index=True)
     details_json = Column(Text)
     ip_address = Column(String(45))
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
 class ImpersonationSession(Base):
@@ -188,8 +188,9 @@ class ImpersonationSession(Base):
 
 # ── engine management ─────────────────────────────────────────────────
 
-_engine = None
-_session_factory = None
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
+_database_ready = False
 
 
 def _resolve_url(url: str) -> str:
@@ -207,7 +208,7 @@ def init_db(database_url: str | None = None) -> None:
     Call once at application startup.  If *database_url* is ``None`` the
     engine uses an in-memory SQLite database (for local dev / tests).
     """
-    global _engine, _session_factory
+    global _engine, _session_factory, _database_ready
 
     if database_url:
         url = _resolve_url(database_url)
@@ -217,15 +218,19 @@ def init_db(database_url: str | None = None) -> None:
 
     _engine = create_async_engine(url, echo=False, pool_pre_ping=True)
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+    _database_ready = False
 
 
 async def create_tables() -> None:
     """Create all tables if they don't exist."""
+    global _database_ready
     if _engine is None:
         raise RuntimeError("Call init_db() before create_tables()")
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns_sync)
+        await conn.run_sync(_ensure_audit_log_created_at_sync)
+    _database_ready = True
     logger.info("Database tables ensured")
 
 
@@ -252,9 +257,32 @@ def _ensure_user_columns_sync(sync_conn) -> None:
     add_column_if_missing("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
 
 
+def _ensure_audit_log_created_at_sync(sync_conn) -> None:
+    """Backfill missing audit timestamps so ordering and filters remain stable."""
+    inspector = inspect(sync_conn)
+    if "audit_logs" not in inspector.get_table_names():
+        return
+
+    audit_log_columns = {column["name"]: column for column in inspector.get_columns("audit_logs")}
+    created_at_column = audit_log_columns.get("created_at")
+    if not created_at_column:
+        return
+
+    null_count = sync_conn.execute(text("SELECT COUNT(*) FROM audit_logs WHERE created_at IS NULL")).scalar()
+    if not null_count:
+        return
+
+    try:
+        sync_conn.execute(text("UPDATE audit_logs SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+        logger.warning("Skipping audit_logs.created_at backfill; assuming another startup already repaired it: %s", exc)
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session (for FastAPI dependency injection)."""
     if _session_factory is None:
         raise RuntimeError("Call init_db() before using get_session()")
+    if not _database_ready:
+        raise HTTPException(status_code=503, detail="Database is still initializing")
     async with _session_factory() as session:
         yield session
