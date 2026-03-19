@@ -19,7 +19,7 @@ async def log_admin_action(
     details: dict[str, Any] | None = None,
     ip_address: str | None = None,
 ) -> AuditLog:
-    """Insert an immutable admin audit log entry without committing the caller's transaction."""
+    """Insert an admin audit log entry into the current transaction."""
     audit_log = AuditLog(
         admin_id=admin_id,
         action=action,
