@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import AsyncGenerator
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, func, inspect, text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -35,6 +35,8 @@ class User(Base):
     role = Column(String(20), default="user")
     status = Column(String(20), default="active")
     password_hash = Column(Text)
+    role = Column(String(20), default="user")
+    status = Column(String(20), default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -111,6 +113,80 @@ class CreditTopUp(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class Conversation(Base):
+    """Persistent conversation record across all platforms."""
+
+    __tablename__ = "conversations"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    platform = Column(String(50), nullable=False)
+    platform_chat_id = Column(String(255))
+    title = Column(String(500))
+    status = Column(String(20), default="active", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ConversationMessage(Base):
+    """Individual message within a conversation."""
+
+    __tablename__ = "conversation_messages"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    platform_message_id = Column(String(255))
+    metadata_json = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PaymentMethod(Base):
+    """Stored payment method for a user."""
+
+    __tablename__ = "payment_methods"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    stripe_customer_id = Column(String(255))
+    stripe_payment_method_id = Column(String(255))
+    type = Column(String(30))
+    brand = Column(String(30))
+    last4 = Column(String(4))
+    exp_month = Column(Integer)
+    exp_year = Column(Integer)
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    """Immutable log of all admin actions."""
+
+    __tablename__ = "audit_logs"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    admin_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    action = Column(String(100), nullable=False)
+    target_user_id = Column(String(255), index=True)
+    details_json = Column(Text)
+    ip_address = Column(String(45))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class ImpersonationSession(Base):
+    """Track when admins impersonate user accounts."""
+
+    __tablename__ = "impersonation_sessions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    admin_id = Column(String(255), ForeignKey("users.uid"), nullable=False)
+    target_user_id = Column(String(255), ForeignKey("users.uid"), nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    reason = Column(Text)
+
+
 # ── engine management ─────────────────────────────────────────────────
 
 _engine = None
@@ -161,12 +237,20 @@ def _ensure_user_columns_sync(sync_conn) -> None:
         return
 
     user_columns = {column["name"] for column in inspector.get_columns("users")}
-    if "role" not in user_columns:
-        sync_conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'"))
-    if "status" not in user_columns:
-        sync_conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'"))
-    if "password_hash" not in user_columns:
-        sync_conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+
+    def add_column_if_missing(column_name: str, ddl: str) -> None:
+        if column_name in user_columns:
+            return
+        try:
+            sync_conn.execute(text(ddl))
+            user_columns.add(column_name)
+        except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+            logger.warning("Skipping users.%s sync; assuming column already exists or was created concurrently: %s", column_name, exc)
+            user_columns.add(column_name)
+
+    add_column_if_missing("password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT")
+    add_column_if_missing("role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
+    add_column_if_missing("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
