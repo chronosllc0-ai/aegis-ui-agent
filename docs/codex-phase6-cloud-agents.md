@@ -949,9 +949,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database import AgentAction, AgentTask, get_session
+from backend.admin.dependencies import get_admin_user
+from backend.database import AgentAction, AgentTask, User, get_session
 
-router = APIRouter(prefix="/agents", tags=["admin-agents"])
+router = APIRouter(prefix="/agents", tags=["admin-agents"], dependencies=[Depends(get_admin_user)])
 
 
 @router.get("/tasks")
@@ -1122,20 +1123,31 @@ async def admin_agent_stats(
 
 ### 6b. Mount admin agents router
 
-In `main.py`, after existing admin router mounts (or create the admin router structure if not present):
+The admin router already exists at `backend/admin/router.py` and is mounted in `main.py` at line 62 via `app.include_router(admin_router)`. The admin prefix is `/api/admin`.
+
+In `backend/admin/router.py`, add the agents subrouter:
 
 ```python
-# If backend/admin/router.py exists, add agents subrouter there.
-# Otherwise add directly:
-from backend.admin.agents import router as admin_agents_router
+"""Admin API router placeholders."""
 
-# Mount under admin prefix (ensure admin auth middleware is applied)
-app.include_router(admin_agents_router, prefix="/api/admin")
+from fastapi import APIRouter
+
+from . import dashboard
+from . import agents
+
+admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
+admin_router.include_router(dashboard.router, prefix="/dashboard")
+admin_router.include_router(agents.router)
 ```
 
-If an admin auth dependency (`require_admin`) already exists from Phase 1/2, apply it to the router:
+The `get_admin_user` dependency from `backend/admin/dependencies.py` should be applied to each endpoint in `agents.py` to enforce admin-only access. Add to each endpoint:
+
 ```python
-app.include_router(admin_agents_router, prefix="/api/admin", dependencies=[Depends(require_admin)])
+from backend.admin.dependencies import get_admin_user
+from backend.database import User
+
+# Add to each endpoint signature:
+admin: User = Depends(get_admin_user),
 ```
 
 ---
