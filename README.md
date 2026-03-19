@@ -179,6 +179,9 @@ the backend allows cross-origin requests. In your Railway environment variables:
 | `COOKIE_SECURE` | `true` |
 | `COOKIE_SAMESITE` | `lax` when using `api.mohex.org`; `none` when using `*.up.railway.app` |
 
+Using `api.mohex.org` is recommended because it keeps the frontend and backend on
+the same site (`mohex.org`) and avoids cross-site auth-cookie issues.
+
 ### Continuous deployment
 
 Once connected via GitHub, every push to `main` triggers:
@@ -212,8 +215,16 @@ railway up
 ```
 
 Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
-`ENCRYPTION_SECRET`, `ADMIN_EMAILS` (if you want auto-admin assignment), and at least
-one LLM API key in environment variables.
+`ENCRYPTION_SECRET`, `ADMIN_EMAILS` (if you want auto-admin assignment), `PUBLIC_BASE_URL`,
+`FRONTEND_URL`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, and at least one LLM API key in environment variables.
+
+### Seed the first superadmin
+
+After the backend is up, seed the first password-based superadmin:
+
+```bash
+python scripts/seed_super_admin.py --email admin@mohex.org --password "ChangeThis123!" --name "Mohex Super Admin"
+```
 
 ---
 
@@ -223,6 +234,11 @@ one LLM API key in environment variables.
 |---|---|---|
 | `DATABASE_URL` | Yes (prod) | PostgreSQL connection string |
 | `SESSION_SECRET` | Yes | Random string for session signing |
+| `PUBLIC_BASE_URL` | Yes (prod) | Public backend origin used for OAuth callbacks |
+| `FRONTEND_URL` | Yes (split deploy) | Frontend origin for redirects and CORS |
+| `COOKIE_SECURE` | Yes (prod) | Must be `true` in production |
+| `COOKIE_SAMESITE` | Depends | `lax` for `api.mohex.org`, `none` for Railway default domain split |
+| `COOKIE_DOMAIN` | No | Optional explicit cookie domain override |
 | `ADMIN_EMAILS` | No | Comma-separated email list for auto-admin assignment |
 | `ENCRYPTION_SECRET` | Yes | Secret for BYOK key encryption |
 | `GEMINI_API_KEY` | No | Default Gemini API key |
@@ -230,7 +246,8 @@ one LLM API key in environment variables.
 | `ANTHROPIC_API_KEY` | No | Default Anthropic API key |
 | `MISTRAL_API_KEY` | No | Default Mistral API key |
 | `GROQ_API_KEY` | No | Default Groq API key |
-| `CORS_ORIGINS` | No | Comma-separated allowed origins (for split deploy) |
+| `CORS_ORIGINS` | No | Comma-separated allowed frontend origins |
+| `RAILWAY_PUBLIC_DOMAIN` | No | Railway-provided fallback domain if `PUBLIC_BASE_URL` is left blank |
 | `VITE_API_URL` | Frontend | Backend URL (only when frontend is hosted separately) |
 | `VITE_WS_URL` | Frontend | Backend WebSocket URL (only when hosted separately) |
 

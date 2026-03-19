@@ -3,6 +3,7 @@ import { Icons } from './icons'
 import { PROVIDERS, renderProviderIcon } from '../lib/models'
 import { PublicFooter } from '../public/PublicFooter'
 import { PublicHeader } from '../public/PublicHeader'
+import { Reveal } from './Reveal'
 
 type LandingPageProps = {
   onGetStarted: () => void
@@ -219,6 +220,8 @@ const PROVIDER_HIGHLIGHTS = PROVIDERS.map((p) => ({
   count: p.models.length,
 }))
 
+const revealDelay = (index: number, base = 90) => index * base
+
 export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPortalHref }: LandingPageProps) {
   const docsPortalBase = docsPortalHref.replace(/\/$/, '')
 
@@ -236,53 +239,61 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         <div className='absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.12),transparent_35%)]' />
         <div className='relative mx-auto grid w-full max-w-7xl gap-14 px-6 py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
           <div className='flex flex-col justify-center'>
-            <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>A Chronos AI product</p>
-            <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
-              Navigate any interface with a visual operator that can see, listen, and adapt.
-            </h1>
-            <p className='mt-6 max-w-2xl text-base leading-8 text-zinc-300 md:text-lg'>
-              Aegis is an AI-powered universal UI navigator. It watches the screen, reasons over live state, and acts with the operator still in control from the first instruction to the last step.
-            </p>
-            <div className='mt-8 flex flex-wrap gap-3'>
-              <button
-                type='button'
-                onClick={onGetStarted}
-                className='rounded-full bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400'
-              >
-                Get started free
-              </button>
-              <button
-                type='button'
-                onClick={() => onOpenDoc('quickstart')}
-                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-              >
-                Read quickstart
-              </button>
-              <a
-                href={docsPortalHref}
-                className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-              >
-                Open docs portal
-              </a>
-            </div>
-
-            <div className='mt-10 flex flex-wrap items-center gap-4'>
-              <p className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Supported providers</p>
-              <div className='flex flex-wrap gap-2'>
-                {PROVIDERS.map((provider) => (
-                  <span
-                    key={provider.id}
-                    title={provider.displayName}
-                    className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'
-                  >
-                    {renderProviderIcon(provider, 'h-7 w-7')}
-                  </span>
-                ))}
+            <Reveal mode='load' delayMs={40}>
+              <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>A Chronos AI product</p>
+              <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
+                Navigate any interface with a visual operator that can see, listen, and adapt.
+              </h1>
+              <p className='mt-6 max-w-2xl text-base leading-8 text-zinc-300 md:text-lg'>
+                Aegis is an AI-powered universal UI navigator. It watches the screen, reasons over live state, and acts with the operator still in control from the first instruction to the last step.
+              </p>
+            </Reveal>
+            <Reveal mode='load' delayMs={180}>
+              <div className='mt-8 flex flex-wrap gap-3'>
+                <button
+                  type='button'
+                  onClick={onGetStarted}
+                  className='rounded-full bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400'
+                >
+                  Get started free
+                </button>
+                <button
+                  type='button'
+                  onClick={() => onOpenDoc('quickstart')}
+                  className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                >
+                  Read quickstart
+                </button>
+                <a
+                  href={docsPortalHref}
+                  className='rounded-full border border-white/10 px-6 py-3 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                >
+                  Open docs portal
+                </a>
               </div>
-            </div>
+            </Reveal>
+
+            <Reveal mode='load' delayMs={280}>
+              <div className='mt-10 flex flex-wrap items-center gap-4'>
+                <p className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Supported providers</p>
+                <div className='flex flex-wrap gap-2'>
+                  {PROVIDERS.map((provider) => (
+                    <span
+                      key={provider.id}
+                      title={provider.displayName}
+                      className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'
+                    >
+                      {renderProviderIcon(provider, 'h-7 w-7')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
           </div>
 
-          <EntrySlider slides={LANDING_SLIDES} className='self-start lg:sticky lg:top-28' />
+          <Reveal mode='load' delayMs={160} className='self-start lg:sticky lg:top-28'>
+            <EntrySlider slides={LANDING_SLIDES} />
+          </Reveal>
         </div>
       </section>
 
@@ -290,265 +301,284 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         {PROVIDER_HIGHLIGHTS.map((ph) => {
           const provider = PROVIDERS.find((p) => p.id === ph.id)
           return (
-            <article key={ph.id} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
-              {provider && <span className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'>{renderProviderIcon(provider, 'h-7 w-7')}</span>}
-              <div>
-                <p className='text-sm font-medium text-white'>{ph.name}</p>
-                <p className='text-xs text-zinc-400'>{ph.count} models</p>
-              </div>
-            </article>
+            <Reveal key={ph.id} delayMs={revealDelay(PROVIDER_HIGHLIGHTS.indexOf(ph), 70)}>
+              <article className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
+                {provider && <span className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'>{renderProviderIcon(provider, 'h-7 w-7')}</span>}
+                <div>
+                  <p className='text-sm font-medium text-white'>{ph.name}</p>
+                  <p className='text-xs text-zinc-400'>{ph.count} models</p>
+                </div>
+              </article>
+            </Reveal>
           )
         })}
       </section>
 
       <section id='features' className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='mb-10 max-w-2xl'>
+        <Reveal className='mb-10 max-w-2xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Capability map</p>
           <h2 className='mt-4 text-4xl font-semibold text-white'>Everything needed to move from discovery to live execution.</h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
             This public surface has to do more than market the product. It needs to show operators, builders, and teammates how the system behaves before they ever sign in.
           </p>
-        </div>
+        </Reveal>
         <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
-          {FEATURES.map((feature) => (
-            <article key={feature.title} className='rounded-[28px] border border-white/8 bg-[#0c1018] p-6'>
-              <div className='inline-flex rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-3 text-cyan-200'>
-                {feature.icon({ className: 'h-5 w-5' })}
-              </div>
-              <h3 className='mt-5 text-lg font-semibold text-white'>{feature.title}</h3>
-              <p className='mt-3 text-sm leading-7 text-zinc-300'>{feature.description}</p>
-            </article>
+          {FEATURES.map((feature, index) => (
+            <Reveal key={feature.title} delayMs={revealDelay(index)}>
+              <article className='rounded-[28px] border border-white/8 bg-[#0c1018] p-6'>
+                <div className='inline-flex rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-3 text-cyan-200'>
+                  {feature.icon({ className: 'h-5 w-5' })}
+                </div>
+                <h3 className='mt-5 text-lg font-semibold text-white'>{feature.title}</h3>
+                <p className='mt-3 text-sm leading-7 text-zinc-300'>{feature.description}</p>
+              </article>
+            </Reveal>
           ))}
         </div>
       </section>
 
       <section className='mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-18'>
-        <div className='max-w-2xl'>
+        <Reveal className='max-w-2xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Product story</p>
           <h2 className='mt-4 text-4xl font-semibold text-white'>An alternating story of control, vision, and operational readiness.</h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
             The public surface teaches the product by moving between narrative explanation, docs entry points, and proof of how the operator shell actually works.
           </p>
-        </div>
+        </Reveal>
 
         {STORY_MODULES.map((module, index) => (
-          <article
-            key={module.id}
-            className={`grid gap-6 rounded-[32px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-2 ${index % 2 === 1 ? 'lg:[&>*:first-child]:order-2' : ''}`}
-          >
-            <div className='flex flex-col justify-center'>
-              <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>{module.eyebrow}</p>
-              <h3 className='mt-4 text-3xl font-semibold text-white'>{module.title}</h3>
-              <p className='mt-4 text-sm leading-8 text-zinc-300'>{module.body}</p>
-              <div className='mt-6 flex flex-wrap gap-3'>
-                <button
-                  type='button'
-                  onClick={() => onOpenDoc(module.docsSlug)}
-                  className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-                >
-                  {module.docsLabel}
-                </button>
-                <a
-                  href={`${docsPortalBase}/${module.docsSlug}`}
-                  className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-                >
-                  Read in docs portal
-                </a>
-              </div>
-            </div>
-
-            <div className='grid gap-4'>
-              {module.bullets.map((bullet) => (
-                <div key={bullet} className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
-                  {bullet}
+          <Reveal key={module.id} delayMs={revealDelay(index, 110)}>
+            <article
+              className={`grid gap-6 rounded-[32px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-2 ${index % 2 === 1 ? 'lg:[&>*:first-child]:order-2' : ''}`}
+            >
+              <div className='flex flex-col justify-center'>
+                <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>{module.eyebrow}</p>
+                <h3 className='mt-4 text-3xl font-semibold text-white'>{module.title}</h3>
+                <p className='mt-4 text-sm leading-8 text-zinc-300'>{module.body}</p>
+                <div className='mt-6 flex flex-wrap gap-3'>
+                  <button
+                    type='button'
+                    onClick={() => onOpenDoc(module.docsSlug)}
+                    className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                  >
+                    {module.docsLabel}
+                  </button>
+                  <a
+                    href={`${docsPortalBase}/${module.docsSlug}`}
+                    className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                  >
+                    Read in docs portal
+                  </a>
                 </div>
-              ))}
-            </div>
-          </article>
+              </div>
+
+              <div className='grid gap-4'>
+                {module.bullets.map((bullet) => (
+                  <div key={bullet} className='rounded-3xl border border-white/8 bg-white/4 p-5 text-sm leading-7 text-zinc-200'>
+                    {bullet}
+                  </div>
+                ))}
+              </div>
+            </article>
+          </Reveal>
         ))}
       </section>
 
       <section id='how' className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='rounded-[36px] border border-white/8 bg-[#0c1018] p-8 md:p-10'>
-          <div className='max-w-3xl'>
-            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>How it works</p>
-            <h2 className='mt-4 text-4xl font-semibold text-white'>A tight loop connects capture, reasoning, execution, and feedback.</h2>
-            <p className='mt-4 text-sm leading-8 text-zinc-300'>
-              The operator shell and docs should explain the same loop. The live product just makes that loop visible through frames, transcripts, logs, and workflow steps.
-            </p>
-          </div>
-          <div className='mt-8 grid gap-4 md:grid-cols-4'>
-            {STEPS.map((step, index) => (
-              <article key={step.title} className='rounded-3xl border border-white/8 bg-white/4 p-5'>
-                <div className='inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-cyan-400/12 text-sm font-semibold text-cyan-200'>
-                  {index + 1}
-                </div>
-                <h3 className='mt-4 text-lg font-semibold text-white'>{step.title}</h3>
-                <p className='mt-3 text-sm leading-7 text-zinc-300'>{step.text}</p>
-              </article>
-            ))}
-          </div>
-          <div className='mt-8 flex flex-wrap gap-3'>
-            <button
-              type='button'
-              onClick={() => onOpenDoc('api-auth-reference')}
-              className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-            >
-              Read API reference
-            </button>
-            <button
-              type='button'
-              onClick={() => onOpenDoc('first-live-run')}
-              className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-            >
-              Follow a tutorial
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='rounded-[36px] border border-cyan-400/20 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_30%),#0c1018] p-8 md:p-10'>
-          <div className='max-w-3xl'>
-            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Docs gateway</p>
-            <h2 className='mt-4 text-4xl font-semibold text-white'>Read docs where the story needs depth.</h2>
-            <p className='mt-4 text-sm leading-8 text-zinc-300'>
-              The landing page should not try to answer every technical question directly. It should route users into quickstart, API reference, tutorials, FAQ, and changelog at the exact points where confidence matters.
-            </p>
-          </div>
-          <div className='mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5'>
-            {DOCS_GATEWAY.map((item) => (
-              <button
-                key={item.slug}
-                type='button'
-                onClick={() => onOpenDoc(item.slug)}
-                className='rounded-3xl border border-white/8 bg-white/4 p-5 text-left transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-              >
-                <p className='text-sm font-semibold text-white'>{item.title}</p>
-                <p className='mt-3 text-sm leading-7 text-zinc-300'>{item.description}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.1fr_0.9fr]'>
-          <div>
-            <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Bring your own keys</p>
-            <h2 className='mt-4 text-4xl font-semibold text-white'>Use the providers you already trust.</h2>
-            <p className='mt-4 text-sm leading-8 text-zinc-300'>
-              Plug in your own API keys for any supported provider. Your keys are encrypted with AES-256, billed directly to your provider account, and never logged or shared.
-            </p>
-            <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
-              {[
-                'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
-                'Use one settings surface for providers and model selection',
-                'Pair BYOK setup with docs for auth, deployment, and workflows',
-              ].map((item) => (
-                <li key={item} className='flex items-start gap-2'>
-                  {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
-                  <span>{item}</span>
-                </li>
+        <Reveal>
+          <div className='rounded-[36px] border border-white/8 bg-[#0c1018] p-8 md:p-10'>
+            <div className='max-w-3xl'>
+              <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>How it works</p>
+              <h2 className='mt-4 text-4xl font-semibold text-white'>A tight loop connects capture, reasoning, execution, and feedback.</h2>
+              <p className='mt-4 text-sm leading-8 text-zinc-300'>
+                The operator shell and docs should explain the same loop. The live product just makes that loop visible through frames, transcripts, logs, and workflow steps.
+              </p>
+            </div>
+            <div className='mt-8 grid gap-4 md:grid-cols-4'>
+              {STEPS.map((step, index) => (
+                <Reveal key={step.title} delayMs={revealDelay(index, 85)}>
+                  <article className='rounded-3xl border border-white/8 bg-white/4 p-5'>
+                    <div className='inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-cyan-400/12 text-sm font-semibold text-cyan-200'>
+                      {index + 1}
+                    </div>
+                    <h3 className='mt-4 text-lg font-semibold text-white'>{step.title}</h3>
+                    <p className='mt-3 text-sm leading-7 text-zinc-300'>{step.text}</p>
+                  </article>
+                </Reveal>
               ))}
-            </ul>
+            </div>
+            <div className='mt-8 flex flex-wrap gap-3'>
+              <button
+                type='button'
+                onClick={() => onOpenDoc('api-auth-reference')}
+                className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Read API reference
+              </button>
+              <button
+                type='button'
+                onClick={() => onOpenDoc('first-live-run')}
+                className='rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Follow a tutorial
+              </button>
+            </div>
           </div>
-          <div className='grid gap-3'>
-            {PROVIDERS.slice(0, 4).map((provider) => (
-              <div key={provider.id} className='flex items-center gap-3 rounded-3xl border border-white/8 bg-[#111] px-4 py-4'>
-                <span className='inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.08]'>
-                  {renderProviderIcon(provider, 'h-8 w-8')}
-                </span>
-                <div>
-                  <p className='text-sm font-medium text-white'>{provider.displayName}</p>
-                  <p className='text-xs text-zinc-400'>{provider.models.length} models available</p>
-                </div>
-                <span className='ml-auto inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] text-emerald-200'>
-                  <span className='h-2 w-2 rounded-full bg-emerald-300' />
-                  Ready
-                </span>
-              </div>
-            ))}
+        </Reveal>
+      </section>
+
+      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <Reveal>
+          <div className='rounded-[36px] border border-cyan-400/20 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_30%),#0c1018] p-8 md:p-10'>
+            <div className='max-w-3xl'>
+              <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Docs gateway</p>
+              <h2 className='mt-4 text-4xl font-semibold text-white'>Read docs where the story needs depth.</h2>
+              <p className='mt-4 text-sm leading-8 text-zinc-300'>
+                The landing page should not try to answer every technical question directly. It should route users into quickstart, API reference, tutorials, FAQ, and changelog at the exact points where confidence matters.
+              </p>
+            </div>
+            <div className='mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5'>
+              {DOCS_GATEWAY.map((item, index) => (
+                <Reveal key={item.slug} delayMs={revealDelay(index, 80)}>
+                  <button
+                    type='button'
+                    onClick={() => onOpenDoc(item.slug)}
+                    className='rounded-3xl border border-white/8 bg-white/4 p-5 text-left transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                  >
+                    <p className='text-sm font-semibold text-white'>{item.title}</p>
+                    <p className='mt-3 text-sm leading-7 text-zinc-300'>{item.description}</p>
+                  </button>
+                </Reveal>
+              ))}
+            </div>
           </div>
-        </div>
+        </Reveal>
+      </section>
+
+      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+        <Reveal>
+          <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.1fr_0.9fr]'>
+            <div>
+              <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Bring your own keys</p>
+              <h2 className='mt-4 text-4xl font-semibold text-white'>Use the providers you already trust.</h2>
+              <p className='mt-4 text-sm leading-8 text-zinc-300'>
+                Plug in your own API keys for any supported provider. Your keys are encrypted with AES-256, billed directly to your provider account, and never logged or shared.
+              </p>
+              <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
+                {[
+                  'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
+                  'Use one settings surface for providers and model selection',
+                  'Pair BYOK setup with docs for auth, deployment, and workflows',
+                ].map((item) => (
+                  <li key={item} className='flex items-start gap-2'>
+                    {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className='grid gap-3'>
+              {PROVIDERS.slice(0, 4).map((provider, index) => (
+                <Reveal key={provider.id} delayMs={revealDelay(index, 75)}>
+                  <div className='flex items-center gap-3 rounded-3xl border border-white/8 bg-[#111] px-4 py-4'>
+                    <span className='inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.08]'>
+                      {renderProviderIcon(provider, 'h-8 w-8')}
+                    </span>
+                    <div>
+                      <p className='text-sm font-medium text-white'>{provider.displayName}</p>
+                      <p className='text-xs text-zinc-400'>{provider.models.length} models available</p>
+                    </div>
+                    <span className='ml-auto inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] text-emerald-200'>
+                      <span className='h-2 w-2 rounded-full bg-emerald-300' />
+                      Ready
+                    </span>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </Reveal>
       </section>
 
       <section id='pricing' className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='max-w-3xl'>
+        <Reveal className='max-w-3xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Pricing</p>
           <h2 className='mt-4 text-4xl font-semibold text-white'>Simple credit-based pricing. No hidden fees.</h2>
           <p className='mt-4 text-sm leading-8 text-zinc-300'>
             1 credit = $0.001. Every model call is metered transparently based on actual token usage with a simple 40% platform margin. Bring your own keys for zero-markup direct billing, or use platform credits for convenience.
           </p>
-        </div>
+        </Reveal>
         <div className='mt-8 grid gap-6 lg:grid-cols-3'>
-          {PRICING.map((plan) => (
-            <article
-              key={plan.name}
-              className={`rounded-[32px] border p-7 ${
-                plan.highlight
-                  ? 'border-cyan-400/35 bg-[linear-gradient(180deg,rgba(34,211,238,0.16),rgba(12,16,24,0.95))]'
-                  : 'border-white/8 bg-[#0c1018]'
-              }`}
-            >
-              {plan.highlight && (
-                <p className='mb-4 text-[11px] uppercase tracking-[0.22em] text-cyan-200'>Most popular</p>
-              )}
-              <h3 className='text-2xl font-semibold text-white'>{plan.name}</h3>
-              <div className='mt-3 flex items-end gap-1'>
-                <span className='text-4xl font-semibold text-white'>{plan.price}</span>
-                <span className='pb-1 text-sm text-zinc-400'>{plan.period}</span>
-              </div>
-              <p className='mt-4 text-sm leading-7 text-zinc-300'>{plan.description}</p>
-              <button
-                type='button'
-                onClick={onGetStarted}
-                className={`mt-6 w-full rounded-full px-4 py-3 text-sm font-medium transition ${
+          {PRICING.map((plan, index) => (
+            <Reveal key={plan.name} delayMs={revealDelay(index, 110)}>
+              <article
+                className={`rounded-[32px] border p-7 ${
                   plan.highlight
-                    ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
-                    : 'border border-white/10 text-zinc-100 hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                    ? 'border-cyan-400/35 bg-[linear-gradient(180deg,rgba(34,211,238,0.16),rgba(12,16,24,0.95))]'
+                    : 'border-white/8 bg-[#0c1018]'
                 }`}
               >
-                {plan.cta}
-              </button>
-              <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
-                {plan.features.map((feature) => (
-                  <li key={feature} className='flex items-start gap-2'>
-                    {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-            </article>
+                {plan.highlight && (
+                  <p className='mb-4 text-[11px] uppercase tracking-[0.22em] text-cyan-200'>Most popular</p>
+                )}
+                <h3 className='text-2xl font-semibold text-white'>{plan.name}</h3>
+                <div className='mt-3 flex items-end gap-1'>
+                  <span className='text-4xl font-semibold text-white'>{plan.price}</span>
+                  <span className='pb-1 text-sm text-zinc-400'>{plan.period}</span>
+                </div>
+                <p className='mt-4 text-sm leading-7 text-zinc-300'>{plan.description}</p>
+                <button
+                  type='button'
+                  onClick={onGetStarted}
+                  className={`mt-6 w-full rounded-full px-4 py-3 text-sm font-medium transition ${
+                    plan.highlight
+                      ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                      : 'border border-white/10 text-zinc-100 hover:border-cyan-400/30 hover:bg-cyan-400/8'
+                  }`}
+                >
+                  {plan.cta}
+                </button>
+                <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
+                  {plan.features.map((feature) => (
+                    <li key={feature} className='flex items-start gap-2'>
+                      {Icons.check({ className: 'mt-1 h-4 w-4 shrink-0 text-cyan-300' })}
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </Reveal>
           ))}
         </div>
       </section>
 
       <section className='mx-auto w-full max-w-7xl px-6 py-18'>
-        <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 text-center'>
-          <div>
-            <h2 className='text-3xl font-semibold text-white'>Ready to automate with AI?</h2>
-            <p className='mx-auto mt-4 max-w-xl text-sm leading-8 text-zinc-300'>
-              Sign up, connect your API keys, and start running live sessions in under a minute. Read the docs when you need a deeper walkthrough.
-            </p>
+        <Reveal>
+          <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 text-center'>
+            <div>
+              <h2 className='text-3xl font-semibold text-white'>Ready to automate with AI?</h2>
+              <p className='mx-auto mt-4 max-w-xl text-sm leading-8 text-zinc-300'>
+                Sign up, connect your API keys, and start running live sessions in under a minute. Read the docs when you need a deeper walkthrough.
+              </p>
+            </div>
+            <div className='flex flex-wrap justify-center gap-3'>
+              <button
+                type='button'
+                onClick={onGetStarted}
+                className='rounded-full bg-cyan-500 px-5 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-cyan-400'
+              >
+                Get started free
+              </button>
+              <button
+                type='button'
+                onClick={onOpenDocsHome}
+                className='rounded-full border border-white/10 px-5 py-2.5 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
+              >
+                Read the docs
+              </button>
+            </div>
           </div>
-          <div className='flex flex-wrap justify-center gap-3'>
-            <button
-              type='button'
-              onClick={onGetStarted}
-              className='rounded-full bg-cyan-500 px-5 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-cyan-400'
-            >
-              Get started free
-            </button>
-            <button
-              type='button'
-              onClick={onOpenDocsHome}
-              className='rounded-full border border-white/10 px-5 py-2.5 text-sm text-zinc-100 transition hover:border-cyan-400/30 hover:bg-cyan-400/8'
-            >
-              Read the docs
-            </button>
-          </div>
-        </div>
+        </Reveal>
       </section>
 
       <PublicFooter
