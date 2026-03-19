@@ -1,32 +1,29 @@
-## Session 5.11 - March 19, 2026 (Admin Conversation API Endpoints)
+## Session 5.11 - March 19, 2026 (Admin Users API Endpoints)
 
 **Agent:** GPT-5.2-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Added `backend/admin/conversations.py` with an admin-protected `APIRouter` for conversation operations.
-- Implemented `GET /api/admin/conversations/` with filters for `user_id`, `platform`, `status`, `search`, `limit`, and `offset`, and included `message_count` plus a `{conversations, total}` response shape.
-- Implemented `GET /api/admin/conversations/{conversation_id}` to return a serialized conversation plus paginated messages, decoding each `metadata_json` field into `metadata`.
-- Implemented `GET /api/admin/conversations/user/{uid}` to reuse the standard listing response shape for a single user.
-- Implemented `GET /api/admin/conversations/stats` to return per-platform counts for conversations, messages, and unique users.
-- Mounted the new conversations router from `backend/admin/router.py`.
+- Added `backend/admin/users.py` with admin-only user management endpoints for listing users, fetching user detail, updating profile fields, changing roles, suspending/reinstating accounts, and applying manual credit adjustments.
+- Added safe user-list sorting/filtering, user detail aggregation for balances/conversations/usage, and per-mutation audit logging payloads with before/after or amount/reason metadata.
+- Updated `backend/admin/router.py` to mount the new users router under `/api/admin/users` and repaired `backend/admin/audit_service.py` so audit entries are flushed correctly inside the surrounding transaction.
 
 ### What's Working
-- Admin conversation endpoints are now grouped under `/api/admin/conversations` and inherit the existing admin auth dependency.
-- Conversation and message payloads serialize timestamps defensively as ISO 8601 strings for JSON responses.
-- Conversation list responses include aggregate message counts without requiring a separate query per row.
+- `/api/admin/users` now exposes the requested admin CRUD/read surfaces behind admin authentication.
+- Mutating user admin routes now write audit log rows through the shared helper without the earlier unreachable-code bug in `audit_service.py`.
+- Targeted import and RBAC regression checks pass locally.
 
 ### What's NOT Working Yet
-- This pass did not add automated request-level tests for the new admin conversation endpoints.
-- Search currently targets conversation identifiers/details plus basic user fields, but it does not search full message bodies.
+- This pass did not add dedicated automated tests for the new admin users endpoints themselves.
+- Other planned admin sub-routers from the larger admin roadmap are still not implemented in this repo snapshot.
 
 ### Next Steps
-1. Add API tests covering auth enforcement, filter combinations, metadata decoding, and stats aggregation.
-2. If the admin frontend is built next, wire these endpoints into the conversations management UI and validate pagination behavior end-to-end.
+1. Add focused API tests for the new `/api/admin/users` endpoints, especially sorting/filter validation, detail aggregation, superadmin role changes, and credit adjustment edge cases.
+2. Implement the remaining admin sub-routers (dashboard, billing, conversations, impersonation, audit) when those phases are requested.
 
 ### Decisions Made
-- Used a shared internal listing helper so `/`, `/user/{uid}`, and future admin conversation views can stay response-compatible.
-- Returned invalid `metadata_json` content as the raw string instead of failing the entire response, keeping admin inspection resilient.
+- Kept role changes off the general profile update path unless the caller already satisfies `require_superadmin`, while also exposing a dedicated superadmin-only `/role` endpoint.
+- Treated manual credit adjustments as balance-state mutations on `credits_used` / `overage_credits`, clamped so the resulting state cannot become negative or exceed the base monthly allowance bucket.
 
 ### Blockers
 - None.
