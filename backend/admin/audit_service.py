@@ -28,6 +28,7 @@ async def log_admin_action(
         ip_address=ip_address,
     )
     session.add(audit_log)
-    await session.commit()
+    session.add(audit_log)
+    return audit_log
     await session.refresh(audit_log)
     return audit_log
