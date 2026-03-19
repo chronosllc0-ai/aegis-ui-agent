@@ -1,3 +1,32 @@
+## Session 5.13 - March 19, 2026 (Admin Router Mount Expansion)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Updated `backend/admin/router.py` to import and mount the full current admin router set: dashboard, users, billing, conversations, impersonation, and audit.
+- Switched the impersonation mount path from `/impersonation` to `/impersonate` to match the requested admin API structure.
+- Left `main.py` unchanged because it already mounts `admin_router`.
+
+### What's Working
+- `/api/admin` now exposes the expected sub-router mount points for dashboard, users, billing, conversations, impersonation, and audit.
+- The admin router continues to use the existing `APIRouter(prefix="/api/admin", tags=["admin"])` configuration.
+
+### What's NOT Working Yet
+- This pass only adjusted router wiring; it did not add new endpoint implementations or dedicated automated tests.
+
+### Next Steps
+1. Add or expand targeted admin API tests that verify each mounted admin sub-router is reachable at the intended prefix.
+2. Confirm any frontend/admin client callers use the new `/api/admin/impersonate` path instead of the old `/api/admin/impersonation` prefix if they already exist.
+
+### Decisions Made
+- Kept the change scoped to router composition only, per request, and avoided touching `main.py`.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.12 - March 19, 2026 (Admin Impersonation API Endpoints)
 
 **Agent:** GPT-5.2-Codex  
