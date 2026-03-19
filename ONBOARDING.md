@@ -1,3 +1,34 @@
+## Session 5.12 - March 19, 2026 (Admin Audit Log Listing Endpoint)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/admin/audit.py` with an admin-protected audit log listing router that supports dynamic filtering by admin, action, target user, date range, limit, and offset.
+- Implemented careful ISO timestamp parsing with 400 responses for invalid `date_from` / `date_to` values, plus defensive JSON decoding so malformed historic `details_json` rows are still returned safely.
+- Mounted the new audit router from `backend/admin/router.py` and added targeted regression coverage in `tests/test_admin_audit.py`.
+
+### What's Working
+- `/api/admin/audit/` now returns `{entries, total}` with stable descending ordering and the requested serialized audit fields.
+- Historic audit rows with malformed `details_json` no longer break the endpoint; they fall back to the raw stored string.
+- Targeted audit endpoint tests and Python compile checks pass locally.
+
+### What's NOT Working Yet
+- The broader admin test suite still has a pre-existing import/collection failure in `tests/test_admin_billing.py` related to `_get_cycle_bounds`, which this pass did not change.
+
+### Next Steps
+1. Resolve the existing `tests/test_admin_billing.py` import mismatch so the full admin regression slice can run together again.
+2. If requested later, add audit-route tests for offset pagination across multiple pages and mixed naive/aware timestamp storage behavior on different databases.
+
+### Decisions Made
+- Normalized naive ISO query timestamps to UTC for consistent filtering behavior while still accepting standard `Z`-suffixed ISO-8601 inputs.
+- Returned the original malformed `details_json` string when JSON decoding fails so operators can still inspect legacy data instead of silently losing it.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.11 - March 19, 2026 (Admin Users API Endpoints)
 
 **Agent:** GPT-5.2-Codex  
