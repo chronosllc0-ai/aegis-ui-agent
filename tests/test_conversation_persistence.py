@@ -221,14 +221,14 @@ def test_websocket_navigation_persists_user_and_assistant_messages(
     [
         (
             "slack",
-            "/api/integrations/slack/integration-1/register",
+            "/api/integrations/slack/register/integration-1",
             "/api/integrations/slack/integration-1/send_message",
             {"bot_token": "xoxb-test", "workspace": "Acme"},
             {"channel": "C123", "text": "hello slack"},
         ),
         (
             "discord",
-            "/api/integrations/discord/integration-1/register",
+            "/api/integrations/discord/register/integration-1",
             "/api/integrations/discord/integration-1/send_message",
             {"bot_token": "discord-test", "guild_id": "guild-1"},
             {"channel": "general", "text": "hello discord"},
@@ -256,7 +256,8 @@ def test_integration_registration_captures_owner_and_send_message_persists_conve
 
     try:
         client = TestClient(main.app)
-        register_response = client.post(register_path, json=config_payload, cookies={"aegis_session": token})
+        client.cookies.set("aegis_session", token)
+        register_response = client.post(register_path, json=config_payload)
         assert register_response.status_code == 200
 
         if platform == "slack":

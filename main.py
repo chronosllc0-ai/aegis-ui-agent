@@ -684,7 +684,6 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
             "content": f"Starting queued task: {queued_instruction}",
         },
     )
-    _start_navigation_task(websocket, runtime, session_id, queued_instruction)
     await _log_web_message(
         runtime,
         session_id,
@@ -693,6 +692,7 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
         title=queued_instruction[:200],
         metadata={"source": "websocket", "action": "queue"},
     )
+    _start_navigation_task(websocket, runtime, session_id, queued_instruction)
 
 
 async def _run_navigation_task(
@@ -717,7 +717,6 @@ async def _run_navigation_task(
             settings=runtime.settings,
             on_workflow_step=lambda step: _send_workflow_step(websocket, step),
         )
-        await websocket.send_json({"type": "result", "data": result})
         await _log_web_message(
             runtime,
             session_id,
@@ -730,13 +729,12 @@ async def _run_navigation_task(
                 "result": result if isinstance(result, dict) else str(result),
             },
         )
+        await websocket.send_json({"type": "result", "data": result})
     except asyncio.CancelledError:
         logger.info("Navigation task cancelled for session %s", session_id)
         raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("Navigation task failed for session %s", session_id)
-        await websocket.send_json({"type": "error", "data": {"message": str(exc)}})
-        await websocket.send_json({"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}})
         await _log_web_message(
             runtime,
             session_id,
@@ -749,6 +747,8 @@ async def _run_navigation_task(
                 "error": str(exc),
             },
         )
+        await websocket.send_json({"type": "error", "data": {"message": str(exc)}})
+        await websocket.send_json({"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}})
     finally:
         runtime.task_running = False
 
@@ -779,7 +779,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if runtime.task_running:
                     await websocket.send_json({"type": "error", "data": {"message": "Task already running"}})
                     continue
-                _start_navigation_task(websocket, runtime, session_id, instruction)
                 await _log_web_message(
                     runtime,
                     session_id,
@@ -788,6 +787,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     title=instruction[:200],
                     metadata={"source": "websocket", "action": "navigate"},
                 )
+                _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "steer":
                 runtime.steering_context.append(instruction)
                 await _send_step(websocket, {"type": "steer", "content": f"Steering note added: {instruction}"})
@@ -808,7 +808,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         logger.info("Current task cancelled during interrupt for session %s", session_id)
                     except Exception:  # noqa: BLE001
                         logger.exception("Interrupted task exited with error for session %s", session_id)
-                _start_navigation_task(websocket, runtime, session_id, instruction)
                 await _log_web_message(
                     runtime,
                     session_id,
@@ -817,6 +816,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     title=instruction[:200],
                     metadata={"source": "websocket", "action": "interrupt"},
                 )
+                _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "queue":
                 runtime.queued_instructions.append(instruction)
                 await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
@@ -854,7 +854,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                             metadata={"source": "voice", "action": "steer"},
                         )
                     else:
-                        _start_navigation_task(websocket, runtime, session_id, transcript)
                         await _log_web_message(
                             runtime,
                             session_id,
@@ -863,6 +862,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                             title=transcript[:200],
                             metadata={"source": "voice", "action": "navigate"},
                         )
+                        _start_navigation_task(websocket, runtime, session_id, transcript)
             elif action == "stop":
                 runtime.cancel_event.set()
                 break
