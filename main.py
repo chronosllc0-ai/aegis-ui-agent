@@ -529,6 +529,16 @@ async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice
     await websocket.send_json({"type": "transcript", "data": {"text": text, "source": source}})
 
 
+async def _send_context_update(websocket: WebSocket, tokens_used: int, context_limit: int, compacting: bool = False) -> None:
+    """Push a context-window usage update to the frontend meter."""
+    await websocket.send_json({
+        "type": "context_update",
+        "tokens_used": tokens_used,
+        "context_limit": context_limit,
+        "compacting": compacting,
+    })
+
+
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
     """Create and store the background navigation task for the current session."""
     runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))

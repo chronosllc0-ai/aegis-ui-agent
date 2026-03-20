@@ -32,7 +32,7 @@ export type WorkflowStep = {
 }
 
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick'
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -185,6 +185,10 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         return
       }
       if (payload.type === 'usage' || payload.type === 'usage_tick') {
+        onUsageMessage?.(payload as unknown as Record<string, unknown>)
+        return
+      }
+      if (payload.type === 'context_update') {
         onUsageMessage?.(payload as unknown as Record<string, unknown>)
         return
       }

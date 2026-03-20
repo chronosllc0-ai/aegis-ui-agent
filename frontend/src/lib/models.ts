@@ -20,6 +20,7 @@ export type ModelInfo = {
   label: string
   description: string
   vision?: boolean
+  contextLength: number  // max context window in tokens
 }
 
 export type ProviderInfo = {
@@ -38,11 +39,11 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.google,
     keyPrefix: '',
     models: [
-      { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Latest Gemini 3 series — cutting-edge reasoning & multimodal.', vision: true },
-      { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite Preview', description: 'First Flash-Lite in the Gemini 3 series — ultra-fast.', vision: true },
-      { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', description: 'Frontier-class speed that rivals larger models.', vision: true },
-      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Stable production model — best quality + complex reasoning.', vision: true },
-      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Stable production model — fast responses, lower latency.', vision: true },
+      { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Latest Gemini 3 series — cutting-edge reasoning & multimodal.', vision: true, contextLength: 2_000_000 },
+      { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite Preview', description: 'First Flash-Lite in the Gemini 3 series — ultra-fast.', vision: true, contextLength: 1_000_000 },
+      { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', description: 'Frontier-class speed that rivals larger models.', vision: true, contextLength: 1_000_000 },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Stable production model — best quality + complex reasoning.', vision: true, contextLength: 1_048_576 },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Stable production model — fast responses, lower latency.', vision: true, contextLength: 1_048_576 },
     ],
   },
   // ── OpenAI ──────────────────────────────────────────────────────────
@@ -52,16 +53,16 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.openai,
     keyPrefix: 'sk-',
     models: [
-      { id: 'gpt-5.2', label: 'GPT-5.2', description: 'Flagship — best for coding and agentic tasks.', vision: true },
-      { id: 'gpt-5.2-pro', label: 'GPT-5.2 Pro', description: 'Smarter, more precise responses on complex tasks.', vision: true },
-      { id: 'gpt-5', label: 'GPT-5', description: 'Intelligent reasoning model with configurable effort.', vision: true },
-      { id: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Fast, cost-efficient version of GPT-5.', vision: true },
-      { id: 'gpt-5-nano', label: 'GPT-5 Nano', description: 'Fastest, most cost-efficient GPT-5 variant.', vision: true },
-      { id: 'gpt-4.1', label: 'GPT-4.1', description: 'Smartest non-reasoning model.', vision: true },
-      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Fast and cost-effective.', vision: true },
-      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', description: 'Ultra-lightweight.', vision: true },
-      { id: 'o4-mini', label: 'o4-mini', description: 'Advanced reasoning, compact.', vision: true },
-      { id: 'o3', label: 'o3', description: 'Deep reasoning model.', vision: true },
+      { id: 'gpt-5.2', label: 'GPT-5.2', description: 'Flagship — best for coding and agentic tasks.', vision: true, contextLength: 256_000 },
+      { id: 'gpt-5.2-pro', label: 'GPT-5.2 Pro', description: 'Smarter, more precise responses on complex tasks.', vision: true, contextLength: 256_000 },
+      { id: 'gpt-5', label: 'GPT-5', description: 'Intelligent reasoning model with configurable effort.', vision: true, contextLength: 256_000 },
+      { id: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Fast, cost-efficient version of GPT-5.', vision: true, contextLength: 256_000 },
+      { id: 'gpt-5-nano', label: 'GPT-5 Nano', description: 'Fastest, most cost-efficient GPT-5 variant.', vision: true, contextLength: 128_000 },
+      { id: 'gpt-4.1', label: 'GPT-4.1', description: 'Smartest non-reasoning model.', vision: true, contextLength: 1_047_576 },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Fast and cost-effective.', vision: true, contextLength: 1_047_576 },
+      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', description: 'Ultra-lightweight.', vision: true, contextLength: 1_047_576 },
+      { id: 'o4-mini', label: 'o4-mini', description: 'Advanced reasoning, compact.', vision: true, contextLength: 200_000 },
+      { id: 'o3', label: 'o3', description: 'Deep reasoning model.', vision: true, contextLength: 200_000 },
     ],
   },
   // ── Anthropic ───────────────────────────────────────────────────────
@@ -71,11 +72,11 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.anthropic,
     keyPrefix: 'sk-ant-',
     models: [
-      { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent — agents and coding. 1M context.', vision: true },
-      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Best combo of speed + intelligence. 1M context.', vision: true },
-      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', description: 'Fastest Anthropic model — near-frontier intelligence.', vision: true },
-      { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', description: 'Previous generation balanced model.', vision: true },
-      { id: 'claude-3.5-sonnet-20241022', label: 'Claude 3.5 Sonnet', description: 'Excellent code and reasoning.', vision: true },
+      { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent — agents and coding. 1M context.', vision: true, contextLength: 1_000_000 },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Best combo of speed + intelligence. 1M context.', vision: true, contextLength: 1_000_000 },
+      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', description: 'Fastest Anthropic model — near-frontier intelligence.', vision: true, contextLength: 200_000 },
+      { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', description: 'Previous generation balanced model.', vision: true, contextLength: 200_000 },
+      { id: 'claude-3.5-sonnet-20241022', label: 'Claude 3.5 Sonnet', description: 'Excellent code and reasoning.', vision: true, contextLength: 200_000 },
     ],
   },
   // ── Mistral ─────────────────────────────────────────────────────────
@@ -85,12 +86,12 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.mistral,
     keyPrefix: '',
     models: [
-      { id: 'mistral-large-latest', label: 'Mistral Large 3', description: 'State-of-the-art open-weight multimodal model.', vision: true },
-      { id: 'mistral-medium-latest', label: 'Mistral Medium 3.1', description: 'Frontier-class multimodal — Aug 2025.', vision: true },
-      { id: 'mistral-small-latest', label: 'Mistral Small 4', description: 'Hybrid instruct, reasoning, and coding.', vision: false },
-      { id: 'codestral-latest', label: 'Codestral', description: 'Optimized for code generation.', vision: false },
-      { id: 'pixtral-large-latest', label: 'Pixtral Large', description: 'Multimodal vision model.', vision: true },
-      { id: 'devstral-small-2505', label: 'Devstral Small', description: 'Developer-focused small model.', vision: false },
+      { id: 'mistral-large-latest', label: 'Mistral Large 3', description: 'State-of-the-art open-weight multimodal model.', vision: true, contextLength: 128_000 },
+      { id: 'mistral-medium-latest', label: 'Mistral Medium 3.1', description: 'Frontier-class multimodal — Aug 2025.', vision: true, contextLength: 128_000 },
+      { id: 'mistral-small-latest', label: 'Mistral Small 4', description: 'Hybrid instruct, reasoning, and coding.', vision: false, contextLength: 128_000 },
+      { id: 'codestral-latest', label: 'Codestral', description: 'Optimized for code generation.', vision: false, contextLength: 256_000 },
+      { id: 'pixtral-large-latest', label: 'Pixtral Large', description: 'Multimodal vision model.', vision: true, contextLength: 128_000 },
+      { id: 'devstral-small-2505', label: 'Devstral Small', description: 'Developer-focused small model.', vision: false, contextLength: 128_000 },
     ],
   },
   // ── Groq ────────────────────────────────────────────────────────────
@@ -100,12 +101,12 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.groq,
     keyPrefix: 'gsk_',
     models: [
-      { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', description: 'Llama 4 on Groq — fast multimodal inference.', vision: true },
-      { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B', description: 'Fast open-source on Groq.', vision: false },
-      { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B', description: 'Ultra-low latency.', vision: false },
-      { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', description: 'OpenAI open-weight model on Groq LPU.', vision: false },
-      { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', description: 'Medium open-weight, extreme speed.', vision: false },
-      { id: 'moonshotai/kimi-k2-instruct-0905', label: 'Kimi K2', description: 'Moonshot K2 — strong reasoning on Groq.', vision: false },
+      { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', description: 'Llama 4 on Groq — fast multimodal inference.', vision: true, contextLength: 512_000 },
+      { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B', description: 'Fast open-source on Groq.', vision: false, contextLength: 128_000 },
+      { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B', description: 'Ultra-low latency.', vision: false, contextLength: 131_072 },
+      { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', description: 'OpenAI open-weight model on Groq LPU.', vision: false, contextLength: 128_000 },
+      { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', description: 'Medium open-weight, extreme speed.', vision: false, contextLength: 128_000 },
+      { id: 'moonshotai/kimi-k2-instruct-0905', label: 'Kimi K2', description: 'Moonshot K2 — strong reasoning on Groq.', vision: false, contextLength: 128_000 },
     ],
   },
 ]
@@ -126,6 +127,14 @@ export function modelInfo(modelId: string): ModelInfo | undefined {
     if (m) return m
   }
   return undefined
+}
+
+export function contextLengthForModel(modelId: string): number {
+  for (const p of PROVIDERS) {
+    const m = p.models.find((m) => m.id === modelId)
+    if (m) return m.contextLength
+  }
+  return 128_000 // safe default
 }
 
 export function allModelIds(): string[] {
