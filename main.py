@@ -22,7 +22,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
-from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage
+from backend.connectors.router import connector_router
+from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
 from backend.key_management import KeyManager
@@ -63,6 +64,7 @@ else:
 
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(connector_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()

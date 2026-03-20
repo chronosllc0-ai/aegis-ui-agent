@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     CORS_ORIGINS: str = ""  # comma-separated extra origins (e.g. "https://mohex.org,https://app.netlify.app")
 
-    # ── OAuth providers ──────────────────────────────────────────────
+    # ── OAuth providers (authentication) ────────────────────────────
     GOOGLE_OAUTH_CLIENT_ID: str = ""
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""
     GITHUB_OAUTH_CLIENT_ID: str = ""
@@ -56,6 +56,20 @@ class Settings(BaseSettings):
     SSO_CLIENT_ID: str = ""
     SSO_CLIENT_SECRET: str = ""
     SSO_SCOPE: str = "openid email profile"
+
+    # ── Connector OAuth2 (user integrations) ─────────────────────────
+    # Separate client IDs for connectors — these request broader scopes
+    # (e.g. Gmail read/send, Drive access) than the auth-only clients.
+    GOOGLE_CONNECTOR_CLIENT_ID: str = ""
+    GOOGLE_CONNECTOR_CLIENT_SECRET: str = ""
+    GITHUB_CONNECTOR_CLIENT_ID: str = ""
+    GITHUB_CONNECTOR_CLIENT_SECRET: str = ""
+    SLACK_CONNECTOR_CLIENT_ID: str = ""
+    SLACK_CONNECTOR_CLIENT_SECRET: str = ""
+    NOTION_CONNECTOR_CLIENT_ID: str = ""
+    NOTION_CONNECTOR_CLIENT_SECRET: str = ""
+    LINEAR_CONNECTOR_CLIENT_ID: str = ""
+    LINEAR_CONNECTOR_CLIENT_SECRET: str = ""
 
     # ── Email / SMTP ─────────────────────────────────────────────────
     SMTP_HOST: str = ""

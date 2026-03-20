@@ -278,6 +278,28 @@ def _ensure_audit_log_created_at_sync(sync_conn) -> None:
         logger.warning("Skipping audit_logs.created_at backfill; assuming another startup already repaired it: %s", exc)
 
 
+class UserConnection(Base):
+    """OAuth2 connection between a user and an external service (connector)."""
+
+    __tablename__ = "user_connections"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    connector_id = Column(String(50), nullable=False, index=True)  # google, github, slack, etc.
+    access_token_enc = Column(Text, nullable=False)  # Fernet-encrypted access token
+    refresh_token_enc = Column(Text, nullable=True)  # Fernet-encrypted refresh token
+    token_type = Column(String(50), default="Bearer")
+    scope = Column(Text, default="")
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    account_email = Column(String(320), nullable=True)  # Connected account email/username
+    account_name = Column(String(255), nullable=True)  # Display name from the service
+    account_avatar = Column(Text, nullable=True)
+    raw_metadata = Column(Text, nullable=True)  # JSON blob of extra auth response data
+    status = Column(String(20), default="active")  # active | expired | revoked
+    connected_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class SupportThread(Base):
     """A support / 'Talk to us' conversation between a customer and admin team."""
 
