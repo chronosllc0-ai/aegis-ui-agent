@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
-import type { CreditRates } from '../lib/creditRates'
-import { estimateTypicalCredits, getTier, TIER_CONFIG } from '../lib/creditRates'
 import { PROVIDERS, modelInfo, providerById, renderProviderIcon } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
@@ -12,6 +10,7 @@ type InputBarProps = {
   voiceActive: boolean
   voiceDisabled?: boolean
   voiceError?: string | null
+  isConnected?: boolean
   onToggleVoice: () => void
   sending: boolean
   onModeChange: (mode: SteeringMode) => void
@@ -25,7 +24,6 @@ type InputBarProps = {
   examplePrompt?: string | null
   onExampleHandled?: () => void
   transcripts?: TranscriptEntry[]
-  rates?: CreditRates | null
 }
 
 const MODE_ORDER: SteeringMode[] = ['steer', 'interrupt', 'queue']
@@ -37,22 +35,15 @@ function ModelPicker({
   model,
   onProviderChange,
   onModelChange,
-  rates,
 }: {
   provider: string
   model: string
   onProviderChange: (id: string) => void
   onModelChange: (id: string) => void
-  rates?: CreditRates | null
 }) {
   const currentProvider = providerById(provider) ?? PROVIDERS[0]
   const currentModel = modelInfo(model)
   const models = currentProvider.models
-
-  // Cost tier badge for the currently selected model
-  const currentTier = rates ? getTier(rates, provider, model) : null
-  const tierConfig = currentTier ? TIER_CONFIG[currentTier] : null
-  const typicalCredits = rates ? estimateTypicalCredits(rates, provider, model) : null
 
   return (
     <div className='flex items-center gap-1.5'>
@@ -81,33 +72,16 @@ function ModelPicker({
           value={model}
           onChange={(e) => onModelChange(e.target.value)}
           title={currentModel?.description ?? model}
-          className='max-w-[180px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          className='max-w-[220px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
           aria-label='Model'
         >
-          {models.map((m) => {
-            const t = rates ? getTier(rates, provider, m.id) : null
-            const tc = t ? TIER_CONFIG[t] : null
-            const cr = rates ? estimateTypicalCredits(rates, provider, m.id) : null
-            const suffix = tc && cr != null ? ` · ${tc.label} ~${cr} cr` : ''
-            return (
-              <option key={m.id} value={m.id} title={m.description} className='bg-[#0f0f0f] text-zinc-100'>
-                {m.label}{suffix}
-              </option>
-            )
-          })}
+          {models.map((m) => (
+            <option key={m.id} value={m.id} title={m.description} className='bg-[#0f0f0f] text-zinc-100'>
+              {m.label}
+            </option>
+          ))}
         </select>
       </label>
-
-      {/* Tier badge for current model */}
-      {tierConfig && typicalCredits != null && (
-        <span
-          className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ${tierConfig.bg} ${tierConfig.text}`}
-          title={`${tierConfig.label} tier — ~${typicalCredits} credits per typical message`}
-        >
-          <span className='inline-block h-1.5 w-1.5 rounded-full' style={{ backgroundColor: tierConfig.color }} />
-          ~{typicalCredits} cr
-        </span>
-      )}
     </div>
   )
 }
@@ -117,6 +91,7 @@ export function InputBar({
   voiceActive,
   voiceDisabled = false,
   voiceError = null,
+  isConnected = false,
   onToggleVoice,
   sending,
   onModeChange,
@@ -130,7 +105,6 @@ export function InputBar({
   examplePrompt,
   onExampleHandled,
   transcripts = [],
-  rates,
 }: InputBarProps) {
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
@@ -156,7 +130,8 @@ export function InputBar({
   const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
   let voiceButtonTitle = 'Start voice input'
   if (voiceActive) voiceButtonTitle = 'Stop voice input'
-  if (voiceDisabled) voiceButtonTitle = 'Voice input unavailable'
+  if (!isConnected) voiceButtonTitle = 'Connect to backend first'
+  if (voiceDisabled && isConnected) voiceButtonTitle = 'Microphone requires HTTPS or localhost'
   if (voiceError) voiceButtonTitle = voiceError
 
   const playTranscript = (text: string) => {
@@ -183,7 +158,6 @@ export function InputBar({
             model={model}
             onProviderChange={onProviderChange}
             onModelChange={onModelChange}
-            rates={rates}
           />
         </div>
         <button

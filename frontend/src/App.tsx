@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
 import { AuthPage } from './components/AuthPage'
-import { CostEstimator } from './components/CostEstimator'
+// CostEstimator removed from main UI — credit details live in Settings > Usage
 import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
 import { ScreenView } from './components/ScreenView'
@@ -36,7 +36,7 @@ function estimateTokens(text: string): number {
 }
 
 function App() {
-  const { balance, rates, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
+  const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const toastCtx = useToast()
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
@@ -61,9 +61,8 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
-  const [draftInput, setDraftInput] = useState('')
-  // draftInput is wired from InputBar's onChange → CostEstimator for pre-send cost preview
-  void setDraftInput // suppress unused warning — InputBar doesn't expose onChange yet
+  // draftInput reserved for future InputBar onChange wiring
+  void useState
 
   const docsSlug = slugFromDocsPath(pathname)
   const isDocsRoute = pathname === '/docs' || pathname.startsWith('/docs/')
@@ -459,6 +458,7 @@ function App() {
                 voiceActive={voiceActive}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 voiceError={voiceError}
+                isConnected={connectionStatus === 'connected'}
                 onToggleVoice={toggleVoice}
                 sending={sending}
                 onModeChange={setMode}
@@ -478,9 +478,7 @@ function App() {
                 examplePrompt={examplePrompt}
                 onExampleHandled={() => setExamplePrompt(null)}
                 transcripts={transcripts}
-                rates={rates}
               />
-              <CostEstimator text={draftInput} provider={settings.provider} model={settings.model} rates={rates} />
             </>
           )}
           <SpendingAlert balance={balance} />
