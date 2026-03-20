@@ -534,136 +534,14 @@ async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice
     await websocket.send_json({"type": "transcript", "data": {"text": text, "source": source}})
 
 
-def _extract_session_user_uid(token: str | None) -> str | None:
-    """Return the authenticated user id from a signed session token."""
-    try:
-        payload = _verify_session(token)
-    except Exception:  # noqa: BLE001
-        return None
-    if not payload or payload.get("uid") is None:
-        return None
-    return str(payload["uid"])
-
-
-def _extract_websocket_user_uid(websocket: WebSocket) -> str | None:
-    """Return the websocket session user id from parsed cookies or the raw header."""
-    token = websocket.cookies.get("aegis_session")
-    if not token:
-        cookie_header = websocket.headers.get("cookie", "")
-        if cookie_header:
-            parsed = SimpleCookie()
-            parsed.load(cookie_header)
-            morsel = parsed.get("aegis_session")
-            if morsel is not None:
-                token = morsel.value
-    return _extract_session_user_uid(token)
-
-
-async def _log_web_message(
-    runtime: SessionRuntime,
-    session_id: str,
-    role: str,
-    content: str,
-    *,
-    title: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> None:
-    """Persist a websocket user/assistant message without interrupting the session."""
-    if not runtime.user_uid:
-        return
-    session_factory = database._session_factory
-    if session_factory is None:
-        return
-
-    try:
-        async with session_factory() as db_session:
-            conversation_id = runtime.conversation_id
-            if conversation_id is None:
-                conversation = await get_or_create_conversation(
-                    db_session,
-                    runtime.user_uid,
-                    "web",
-                    session_id,
-                    title=title,
-                )
-                runtime.conversation_id = conversation.id
-                conversation_id = conversation.id
-
-            await append_message(
-                db_session,
-                conversation_id,
-                role,
-                content,
-                metadata=metadata,
-            )
-            if title:
-                await update_conversation_title(db_session, conversation_id, title)
-    except Exception:  # noqa: BLE001
-        logger.debug("Web conversation logging failed", exc_info=True)
-
-
-async def _log_platform_message(
-    user_uid: str | None,
-    *,
-    platform: str,
-    platform_chat_id: str | None,
-    role: str,
-    content: str,
-    title: str | None = None,
-    metadata: dict[str, Any] | None = None,
-    platform_message_id: str | None = None,
-) -> None:
-    """Persist a platform message when an owning Aegis user is available."""
-    if not user_uid:
-        return
-    session_factory = database._session_factory
-    if session_factory is None:
-        return
-
-    try:
-        async with session_factory() as db_session:
-            conversation = await get_or_create_conversation(
-                db_session,
-                user_uid,
-                platform,
-                platform_chat_id,
-                title=title,
-            )
-            await append_message(
-                db_session,
-                conversation.id,
-                role,
-                content,
-                metadata=metadata,
-                platform_message_id=platform_message_id,
-            )
-            if title:
-                await update_conversation_title(db_session, conversation.id, title)
-    except Exception:  # noqa: BLE001
-        logger.debug("%s conversation logging failed", platform.capitalize(), exc_info=True)
-
-
-def _extract_telegram_message(update: dict[str, Any]) -> tuple[str | None, str, str | None]:
-    """Extract chat id, text content, and message id from a Telegram update."""
-    message = (
-        update.get("message")
-        or update.get("edited_message")
-        or update.get("channel_post")
-        or update.get("edited_channel_post")
-        or {}
-    )
-    if not isinstance(message, dict):
-        return None, "", None
-
-    chat = message.get("chat") or {}
-    chat_id = chat.get("id")
-    content = str(message.get("text") or message.get("caption") or "").strip()
-    message_id = message.get("message_id")
-    return (
-        str(chat_id) if chat_id not in (None, "") else None,
-        content,
-        str(message_id) if message_id not in (None, "") else None,
-    )
+async def _send_context_update(websocket: WebSocket, tokens_used: int, context_limit: int, compacting: bool = False) -> None:
+    """Push a context-window usage update to the frontend meter."""
+    await websocket.send_json({
+        "type": "context_update",
+        "tokens_used": tokens_used,
+        "context_limit": context_limit,
+        "compacting": compacting,
+    })
 
 
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:

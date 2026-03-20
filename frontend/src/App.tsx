@@ -1,23 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
 import { AuthPage } from './components/AuthPage'
-import { CostEstimator } from './components/CostEstimator'
+// CostEstimator removed from main UI — credit details live in Settings > Usage
 import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
 import { ScreenView } from './components/ScreenView'
 import { SpendingAlert } from './components/SpendingAlert'
-import { UsageMeterBar } from './components/UsageMeterBar'
+import { UsageDropdown } from './components/UsageDropdown'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { useToast } from './hooks/useToast'
+import { useContextMeter } from './hooks/useContextMeter'
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
-import { PROVIDERS, providerById } from './lib/models'
+import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
@@ -29,12 +30,19 @@ type TaskHistoryItem = {
   instruction: string
 }
 
+// Rough token estimate for context tracking (≈4 chars per token)
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
 function App() {
-  const { balance, sessionCredits, sessionMessages, streaming, rates, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
+  const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const toastCtx = useToast()
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
+
+  const contextMeter = useContextMeter(settings.model)
 
   const [mode, setMode] = useState<SteeringMode>('steer')
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
@@ -53,13 +61,15 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
-  const [draftInput, setDraftInput] = useState('')
-  // draftInput is wired from InputBar's onChange → CostEstimator for pre-send cost preview
-  void setDraftInput // suppress unused warning — InputBar doesn't expose onChange yet
+  // draftInput reserved for future InputBar onChange wiring
+  void useState
 
   const docsSlug = slugFromDocsPath(pathname)
   const isDocsRoute = pathname === '/docs' || pathname.startsWith('/docs/')
   const isAuthRoute = pathname === '/auth'
+
+  const currentModelMeta = modelInfo(settings.model)
+  const currentModelLabel = currentModelMeta?.label ?? settings.model
 
   const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -149,6 +159,39 @@ function App() {
     })
   }, [logs])
 
+  // ── Context tracking: feed log tokens into the context meter ──
+  useEffect(() => {
+    if (logs.length === 0) return
+    const latest = logs[logs.length - 1]
+    if (!latest) return
+    // Estimate tokens from the latest log entry
+    const tokens = estimateTokens(latest.message)
+    const { shouldCompact } = contextMeter.addTokens(tokens)
+    if (shouldCompact) {
+      // Trigger auto-compaction
+      contextMeter.startCompacting()
+      // Simulate compaction (in production the backend would do this)
+      window.setTimeout(() => {
+        contextMeter.finishCompacting()
+      }, 2500)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs.length])
+
+  // ── Context: sync model changes ──
+  useEffect(() => {
+    contextMeter.updateModel(settings.model)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.model])
+
+  // ── Context: sync task switches ──
+  useEffect(() => {
+    if (selectedTaskId) {
+      contextMeter.switchTask(selectedTaskId)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTaskId])
+
   const filteredHistory = useMemo(
     () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
     [historySearch, taskHistory],
@@ -158,6 +201,24 @@ function App() {
     if (!selectedTaskId) return logs
     return logs.filter((entry) => entry.taskId === selectedTaskId)
   }, [logs, selectedTaskId])
+
+  // ── Inject compaction entries into visible logs ──
+  const enrichedLogs: LogEntry[] = useMemo(() => {
+    const result = [...visibleLogs]
+    if (contextMeter.isCompacting) {
+      result.push({
+        id: '__compacting__',
+        taskId: selectedTaskId ?? 'idle',
+        message: 'Automatically compacting context…',
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'step',
+        status: 'in_progress',
+        stepKind: 'other',
+        elapsedSeconds: 0,
+      })
+    }
+    return result
+  }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
   const handleSend = (instruction: string, selectedMode: SteeringMode) => {
     const trimmed = instruction.trim()
@@ -193,6 +254,7 @@ function App() {
     setDurationSeconds(0)
     resetClientState()
     resetUsageSession()
+    contextMeter.reset()
     setSelectedTaskId(null)
     setShowWorkflow(false)
     void stopVoice()
@@ -277,12 +339,15 @@ function App() {
   return (
     <main className='h-screen bg-[#111] p-3 text-zinc-100'>
       <div className='mx-auto flex h-full max-w-[1750px] gap-3'>
+        {/* ───────────── Sidebar ───────────── */}
         <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] md:translate-x-0'} fixed inset-y-3 left-3 z-30 w-[280px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition md:static md:translate-x-0 flex min-h-0 flex-col`}>
           <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
             New Task
           </button>
           <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm' />
-          <div className='min-h-0 flex-1 overflow-y-auto space-y-3'>
+
+          {/* ── Task list with independent scroll ── */}
+          <div className='min-h-0 flex-1 overflow-y-auto space-y-3 scrollbar-thin'>
             {['Today', 'Yesterday'].map((group) => {
               const items = filteredHistory.filter((item) => item.dateLabel === group)
               if (!items.length) return null
@@ -301,7 +366,19 @@ function App() {
               )
             })}
           </div>
+
+          {/* ── Bottom section: Usage → Workflows → Settings → User ── */}
           <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
+            {/* Usage dropdown (Botpress-style) — above workflow templates */}
+            <UsageDropdown
+              balance={balance}
+              context={{
+                current: contextMeter.current,
+                percent: contextMeter.percent,
+                isCompacting: contextMeter.isCompacting,
+              }}
+              modelLabel={currentModelLabel}
+            />
             <button type='button' onClick={() => setShowSettings(true)} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.workflows({ className: 'h-3.5 w-3.5' })}
               <span>Workflow templates ({settings.workflowTemplates.length})</span>
@@ -324,6 +401,7 @@ function App() {
           </div>
         </aside>
 
+        {/* ───────────── Main content ───────────── */}
         <section className='flex min-h-0 flex-1 flex-col gap-3 md:ml-0'>
           <header className='space-y-2'>
             <div className='flex items-center justify-between rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
@@ -342,9 +420,6 @@ function App() {
                 <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-3 py-1.5 hover:border-blue-500/60 hover:bg-zinc-900'>New Session</button>
               </div>
             </div>
-            {isAuthenticated && (
-              <UsageMeterBar balance={balance} sessionCredits={sessionCredits} sessionMessages={sessionMessages} streaming={streaming} />
-            )}
           </header>
 
           {!showSettings && (
@@ -371,7 +446,7 @@ function App() {
                 ) : (
                   <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} />
                 )}
-                <ActionLog entries={visibleLogs} showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+                <ActionLog entries={enrichedLogs} showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
               </div>
             )}
           </div>
@@ -383,6 +458,7 @@ function App() {
                 voiceActive={voiceActive}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 voiceError={voiceError}
+                isConnected={connectionStatus === 'connected'}
                 onToggleVoice={toggleVoice}
                 sending={sending}
                 onModeChange={setMode}
@@ -402,9 +478,7 @@ function App() {
                 examplePrompt={examplePrompt}
                 onExampleHandled={() => setExamplePrompt(null)}
                 transcripts={transcripts}
-                rates={rates}
               />
-              <CostEstimator text={draftInput} provider={settings.provider} model={settings.model} rates={rates} />
             </>
           )}
           <SpendingAlert balance={balance} />
