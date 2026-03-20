@@ -1,3 +1,67 @@
+## Session 5.18 - March 20, 2026 (Phase 3 Conversation Persistence + Admin Audit)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented Phase 3 conversation persistence in the backend.
+- Added `backend/conversation_service.py` with helpers to:
+  - get or create a conversation by user/platform/chat
+  - append conversation messages with metadata
+  - update conversation titles
+- Updated `main.py` so websocket navigation sessions now persist:
+  - user navigate messages
+  - queue-started instructions
+  - interrupt replacement instructions
+  - voice-driven navigate / steer transcripts
+  - assistant success / failure summaries
+- Added websocket cookie parsing fallback so auth extraction works even if only the raw `Cookie` header is present.
+- Wired integration persistence in `main.py` for:
+  - Telegram inbound webhook messages
+  - Telegram outbound send / draft sends
+  - Slack outbound send_message
+  - Discord outbound send_message
+- Anchored integration conversations to the Aegis user who registered the integration by storing `owner_user_id` in the in-memory registry config during registration.
+- Fixed an existing app-startup blocker in `backend/admin/messaging.py` by switching it from the nonexistent `require_admin` dependency to `get_admin_user`.
+- Added `tests/test_conversation_persistence.py` covering:
+  - conversation service deduplication + metadata
+  - websocket persistence
+  - Slack / Discord registration-owner capture + send logging
+  - Telegram webhook logging
+- Ran a background audit agent against `docs/codex-phase2-admin-api.md` to compare the live admin API against the requested spec.
+
+### What's Working
+- Phase 3 persistence is working for the backend paths above.
+- Targeted verification passes:
+  - `python -m py_compile main.py backend\\conversation_service.py backend\\admin\\messaging.py tests\\test_conversation_persistence.py`
+  - `pytest tests/test_conversation_persistence.py tests/test_main_websocket.py -q`
+- The websocket protocol still passes the existing smoke tests after persistence wiring.
+- The app can skip landing/auth if an old valid `aegis_session` cookie still exists; clearing site data or logging out returns the public flow.
+
+### What's NOT Working Yet
+- FastAPI still emits `@app.on_event(...)` deprecation warnings.
+- The Phase 2 admin API is not fully spec-complete based on the audit:
+  - some response shapes differ from `docs/codex-phase2-admin-api.md`
+  - `PUT /api/admin/users/{uid}` is only partially aligned with the spec payload
+  - several admin areas still lack dedicated route tests
+  - impersonation cookie behavior still differs from auth cookie settings
+
+### Next Steps
+1. Decide whether to do a cleanup pass on the Phase 2 admin API mismatches from the audit.
+2. Add broader regression coverage for admin dashboard / users / conversations / impersonation routes if Phase 2 is going to be hardened.
+3. Consider converting FastAPI startup/shutdown hooks to lifespan handlers to remove the current deprecation warnings.
+
+### Decisions Made
+- Did not use synthetic platform-only `user_id` values like `telegram:<chat_id>` for conversations because the real schema enforces `conversations.user_id -> users.uid`.
+- Instead, platform conversations are attached to the authenticated Aegis account that registered the integration, which keeps the foreign key valid and makes admin/user views coherent.
+- Kept all persistence logging wrapped so database failures do not break the live websocket or integration responses.
+
+### Blockers
+- None for Phase 3 persistence itself.
+- Separate follow-up work is still needed if the admin API must exactly match the Phase 2 spec.
+
+---
+
 ## Session 5.17 - March 19, 2026 (Railway + Netlify Deploy Readiness, Landing Reveal)
 
 **Agent:** GPT-5.2-Codex  
