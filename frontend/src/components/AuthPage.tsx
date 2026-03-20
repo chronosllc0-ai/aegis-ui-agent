@@ -101,12 +101,19 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
+        if (response.status === 503) {
+          throw new Error('The backend is still starting. Retry in a few seconds.')
+        }
         throw new Error(data?.detail ?? (mode === 'signup' ? 'Sign-up failed.' : 'Sign-in failed.'))
       }
       if (data?.user) onAuthenticated(data.user as AuthUser)
       else setMessage(mode === 'signup' ? 'Account created.' : 'Signed in.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : mode === 'signup' ? 'Sign-up failed.' : 'Sign-in failed.')
+      if (err instanceof TypeError) {
+        setError('Could not reach the backend. Check the deployed API URL and try again.')
+      } else {
+        setError(err instanceof Error ? err.message : mode === 'signup' ? 'Sign-up failed.' : 'Sign-in failed.')
+      }
     } finally {
       setBusy(false)
     }

@@ -118,7 +118,8 @@ def _session_response(user: dict[str, Any], redirect: str | None = None) -> Redi
         max_age=int(settings.SESSION_TTL_SECONDS),
         httponly=True,
         secure=bool(settings.COOKIE_SECURE),
-        samesite="lax",
+        samesite=settings.normalized_cookie_samesite,
+        domain=settings.resolved_cookie_domain,
         path="/",
     )
     return response
@@ -190,12 +191,12 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
 
 
 def _callback_url(provider: str) -> str:
-    base = settings.PUBLIC_BASE_URL.rstrip("/")
+    base = settings.resolved_public_base_url
     return f"{base}/api/auth/{provider}/callback"
 
 
 def _frontend_redirect() -> str:
-    return settings.FRONTEND_URL or "/"
+    return settings.resolved_frontend_url or "/"
 
 
 async def _send_email(recipient: str, subject: str, body: str) -> None:

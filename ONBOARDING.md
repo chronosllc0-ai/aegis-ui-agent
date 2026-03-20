@@ -1,3 +1,73 @@
+## Session 5.17 - March 19, 2026 (Railway + Netlify Deploy Readiness, Landing Reveal)
+
+**Agent:** GPT-5.2-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Finished hardening the split-deploy path for Netlify frontend + Railway backend.
+- Added deploy-aware auth/session settings in `config.py`:
+  - `COOKIE_SAMESITE`
+  - `COOKIE_DOMAIN`
+  - `resolved_public_base_url`
+  - `resolved_frontend_url`
+  - `normalized_cookie_samesite`
+- Updated `auth.py` and `main.py` to use the new settings for:
+  - OAuth callback URL generation
+  - frontend redirect target
+  - signed auth cookie attributes
+  - Starlette `SessionMiddleware`
+  - CORS origin derivation
+- Added `.dockerignore` so Railway Docker builds do not upload the full local workspace, including `node_modules`, docs-site artifacts, `.git`, and local DB/log files.
+- Expanded `.env.example`, `frontend/.env.example`, `docs-site/.env.example`, `netlify.toml`, and `README.md` with explicit production guidance for:
+  - `https://mohex.org`
+  - recommended backend `https://api.mohex.org`
+  - Railway fallback domains
+  - exact OAuth callback URL shapes
+  - Netlify `VITE_API_URL` / `VITE_WS_URL` / docs portal variables
+- Improved `frontend/src/components/AuthPage.tsx` so deploy-time backend startup failures are surfaced as useful messages (`503` warm-up vs backend unreachable).
+- Added a new reveal system for the landing page:
+  - new `frontend/src/components/Reveal.tsx`
+  - staged hero reveal on first load
+  - scroll-triggered fade/lift reveals across landing sections, cards, pricing, and CTA blocks
+  - reduced-motion aware behavior
+- Confirmed the superadmin seed script works as a real CLI command, not just in isolated test code.
+
+### What's Working
+- `python scripts/seed_super_admin.py --email admin@mohex.org --password ChangeThis123! --name "Mohex Super Admin"` works and updates/creates the seeded account.
+- Deploy/auth regression tests pass:
+  - `pytest tests/test_auth_deploy_config.py tests/test_database_readiness.py tests/test_seed_super_admin.py -q`
+  - `pytest tests/test_main_websocket.py -k sqlite -q`
+- Frontend production build passes:
+  - `cd frontend && npm run build`
+- Standalone docs site production build passes:
+  - `cd docs-site && npm run build`
+- Landing page now has reveal animation without breaking the existing layout.
+
+### What's NOT Working Yet
+- FastAPI still emits deprecation warnings for `@app.on_event(...)`; this is cosmetic for now but should eventually move to lifespan handlers.
+- The README still contains some legacy encoding artifacts in older sections; deploy guidance added in this pass is correct, but the file could use a broader text cleanup pass later.
+
+### Next Steps
+1. In Railway, set `PUBLIC_BASE_URL=https://api.mohex.org`, `FRONTEND_URL=https://mohex.org`, `COOKIE_SECURE=true`, and `COOKIE_SAMESITE=lax` if using the recommended custom backend domain.
+2. If using a Railway-generated backend domain instead of `api.mohex.org`, set `COOKIE_SAMESITE=none` and keep `COOKIE_SECURE=true`.
+3. In Netlify, set:
+   - `VITE_API_URL=https://api.mohex.org`
+   - `VITE_WS_URL=wss://api.mohex.org/ws/navigate`
+   - `VITE_DOCS_SITE_URL=https://docs.mohex.org`
+4. Configure OAuth providers with callback URLs based on `PUBLIC_BASE_URL`:
+   - `/api/auth/google/callback`
+   - `/api/auth/github/callback`
+   - `/api/auth/sso/callback`
+
+### Decisions Made
+- Recommended the custom backend domain `api.mohex.org` over the raw Railway domain so frontend (`mohex.org`) and backend stay same-site for cleaner auth cookie behavior.
+- Kept the landing-page reveal restrained: hero-first load reveal plus scroll-based section fade/lift, no aggressive motion system or parallax.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.16 - March 19, 2026 (Auth Signup Recovery + Superadmin Seed)
 
 **Agent:** GPT-5.2-Codex  
