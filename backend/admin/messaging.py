@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import SupportMessage, SupportThread, User, get_session
-from .dependencies import require_admin
+from .dependencies import get_admin_user
 
 router = APIRouter(tags=["admin-messaging"])
 
@@ -29,7 +29,7 @@ class UpdateThreadBody(BaseModel):
 async def list_threads(
     status: str | None = None,
     db: AsyncSession = Depends(get_session),
-    _admin: dict[str, Any] = Depends(require_admin),
+    _admin: User = Depends(get_admin_user),
 ) -> dict[str, Any]:
     """List all support threads (newest first), with optional status filter."""
     q = select(SupportThread).order_by(SupportThread.updated_at.desc())
@@ -70,7 +70,7 @@ async def list_threads(
 async def get_thread(
     thread_id: str,
     db: AsyncSession = Depends(get_session),
-    _admin: dict[str, Any] = Depends(require_admin),
+    _admin: User = Depends(get_admin_user),
 ) -> dict[str, Any]:
     """Get a single support thread with all its messages."""
     result = await db.execute(select(SupportThread).where(SupportThread.id == thread_id))
@@ -126,7 +126,7 @@ async def admin_reply(
     thread_id: str,
     body: AdminReplyBody,
     db: AsyncSession = Depends(get_session),
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: User = Depends(get_admin_user),
 ) -> dict[str, Any]:
     """Admin sends a reply to a support thread."""
     result = await db.execute(select(SupportThread).where(SupportThread.id == thread_id))
@@ -136,7 +136,7 @@ async def admin_reply(
 
     msg = SupportMessage(
         thread_id=thread_id,
-        sender_id=admin["uid"],
+        sender_id=admin.uid,
         sender_role="admin",
         content=body.content.strip(),
     )
@@ -161,7 +161,7 @@ async def update_thread(
     thread_id: str,
     body: UpdateThreadBody,
     db: AsyncSession = Depends(get_session),
-    _admin: dict[str, Any] = Depends(require_admin),
+    _admin: User = Depends(get_admin_user),
 ) -> dict[str, str]:
     """Update thread status or priority."""
     result = await db.execute(select(SupportThread).where(SupportThread.id == thread_id))

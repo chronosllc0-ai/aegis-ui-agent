@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Awaitable, Callable
+from http.cookies import SimpleCookie
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
+from backend import database
+from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
@@ -255,6 +258,8 @@ class SessionRuntime:
         self.steering_context: list[str] = []
         self.queued_instructions: list[str] = []
         self.settings: dict[str, Any] = {}
+        self.conversation_id: str | None = None
+        self.user_uid: str | None = None
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -529,6 +534,138 @@ async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice
     await websocket.send_json({"type": "transcript", "data": {"text": text, "source": source}})
 
 
+def _extract_session_user_uid(token: str | None) -> str | None:
+    """Return the authenticated user id from a signed session token."""
+    try:
+        payload = _verify_session(token)
+    except Exception:  # noqa: BLE001
+        return None
+    if not payload or payload.get("uid") is None:
+        return None
+    return str(payload["uid"])
+
+
+def _extract_websocket_user_uid(websocket: WebSocket) -> str | None:
+    """Return the websocket session user id from parsed cookies or the raw header."""
+    token = websocket.cookies.get("aegis_session")
+    if not token:
+        cookie_header = websocket.headers.get("cookie", "")
+        if cookie_header:
+            parsed = SimpleCookie()
+            parsed.load(cookie_header)
+            morsel = parsed.get("aegis_session")
+            if morsel is not None:
+                token = morsel.value
+    return _extract_session_user_uid(token)
+
+
+async def _log_web_message(
+    runtime: SessionRuntime,
+    session_id: str,
+    role: str,
+    content: str,
+    *,
+    title: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Persist a websocket user/assistant message without interrupting the session."""
+    if not runtime.user_uid:
+        return
+    session_factory = database._session_factory
+    if session_factory is None:
+        return
+
+    try:
+        async with session_factory() as db_session:
+            conversation_id = runtime.conversation_id
+            if conversation_id is None:
+                conversation = await get_or_create_conversation(
+                    db_session,
+                    runtime.user_uid,
+                    "web",
+                    session_id,
+                    title=title,
+                )
+                runtime.conversation_id = conversation.id
+                conversation_id = conversation.id
+
+            await append_message(
+                db_session,
+                conversation_id,
+                role,
+                content,
+                metadata=metadata,
+            )
+            if title:
+                await update_conversation_title(db_session, conversation_id, title)
+    except Exception:  # noqa: BLE001
+        logger.debug("Web conversation logging failed", exc_info=True)
+
+
+async def _log_platform_message(
+    user_uid: str | None,
+    *,
+    platform: str,
+    platform_chat_id: str | None,
+    role: str,
+    content: str,
+    title: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    platform_message_id: str | None = None,
+) -> None:
+    """Persist a platform message when an owning Aegis user is available."""
+    if not user_uid:
+        return
+    session_factory = database._session_factory
+    if session_factory is None:
+        return
+
+    try:
+        async with session_factory() as db_session:
+            conversation = await get_or_create_conversation(
+                db_session,
+                user_uid,
+                platform,
+                platform_chat_id,
+                title=title,
+            )
+            await append_message(
+                db_session,
+                conversation.id,
+                role,
+                content,
+                metadata=metadata,
+                platform_message_id=platform_message_id,
+            )
+            if title:
+                await update_conversation_title(db_session, conversation.id, title)
+    except Exception:  # noqa: BLE001
+        logger.debug("%s conversation logging failed", platform.capitalize(), exc_info=True)
+
+
+def _extract_telegram_message(update: dict[str, Any]) -> tuple[str | None, str, str | None]:
+    """Extract chat id, text content, and message id from a Telegram update."""
+    message = (
+        update.get("message")
+        or update.get("edited_message")
+        or update.get("channel_post")
+        or update.get("edited_channel_post")
+        or {}
+    )
+    if not isinstance(message, dict):
+        return None, "", None
+
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    content = str(message.get("text") or message.get("caption") or "").strip()
+    message_id = message.get("message_id")
+    return (
+        str(chat_id) if chat_id not in (None, "") else None,
+        content,
+        str(message_id) if message_id not in (None, "") else None,
+    )
+
+
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
     """Create and store the background navigation task for the current session."""
     runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
@@ -548,6 +685,14 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
         },
     )
     _start_navigation_task(websocket, runtime, session_id, queued_instruction)
+    await _log_web_message(
+        runtime,
+        session_id,
+        "user",
+        queued_instruction,
+        title=queued_instruction[:200],
+        metadata={"source": "websocket", "action": "queue"},
+    )
 
 
 async def _run_navigation_task(
@@ -573,6 +718,18 @@ async def _run_navigation_task(
             on_workflow_step=lambda step: _send_workflow_step(websocket, step),
         )
         await websocket.send_json({"type": "result", "data": result})
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            f"Task completed: {instruction}",
+            metadata={
+                "source": "websocket",
+                "action": "result",
+                "status": result.get("status") if isinstance(result, dict) else "completed",
+                "result": result if isinstance(result, dict) else str(result),
+            },
+        )
     except asyncio.CancelledError:
         logger.info("Navigation task cancelled for session %s", session_id)
         raise
@@ -580,6 +737,18 @@ async def _run_navigation_task(
         logger.exception("Navigation task failed for session %s", session_id)
         await websocket.send_json({"type": "error", "data": {"message": str(exc)}})
         await websocket.send_json({"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}})
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            f"Task failed: {instruction}",
+            metadata={
+                "source": "websocket",
+                "action": "result",
+                "status": "failed",
+                "error": str(exc),
+            },
+        )
     finally:
         runtime.task_running = False
 
@@ -595,6 +764,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = await live_manager.create_session()
     runtime = SessionRuntime()
+    runtime.user_uid = _extract_websocket_user_uid(websocket)
 
     try:
         await _get_orchestrator().executor.ensure_browser()
@@ -610,9 +780,24 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "data": {"message": "Task already running"}})
                     continue
                 _start_navigation_task(websocket, runtime, session_id, instruction)
+                await _log_web_message(
+                    runtime,
+                    session_id,
+                    "user",
+                    instruction,
+                    title=instruction[:200],
+                    metadata={"source": "websocket", "action": "navigate"},
+                )
             elif action == "steer":
                 runtime.steering_context.append(instruction)
                 await _send_step(websocket, {"type": "steer", "content": f"Steering note added: {instruction}"})
+                await _log_web_message(
+                    runtime,
+                    session_id,
+                    "user",
+                    instruction,
+                    metadata={"source": "websocket", "action": "steer"},
+                )
             elif action == "interrupt":
                 runtime.cancel_event.set()
                 await _send_step(websocket, {"type": "interrupt", "content": "Task interrupted"})
@@ -624,6 +809,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     except Exception:  # noqa: BLE001
                         logger.exception("Interrupted task exited with error for session %s", session_id)
                 _start_navigation_task(websocket, runtime, session_id, instruction)
+                await _log_web_message(
+                    runtime,
+                    session_id,
+                    "user",
+                    instruction,
+                    title=instruction[:200],
+                    metadata={"source": "websocket", "action": "interrupt"},
+                )
             elif action == "queue":
                 runtime.queued_instructions.append(instruction)
                 await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
@@ -653,8 +846,23 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await _send_transcript(websocket, transcript)
                     if runtime.task_running:
                         runtime.steering_context.append(transcript)
+                        await _log_web_message(
+                            runtime,
+                            session_id,
+                            "user",
+                            transcript,
+                            metadata={"source": "voice", "action": "steer"},
+                        )
                     else:
                         _start_navigation_task(websocket, runtime, session_id, transcript)
+                        await _log_web_message(
+                            runtime,
+                            session_id,
+                            "user",
+                            transcript,
+                            title=transcript[:200],
+                            metadata={"source": "voice", "action": "navigate"},
+                        )
             elif action == "stop":
                 runtime.cancel_event.set()
                 break
@@ -663,9 +871,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("Websocket disconnected")
     finally:
-        if runtime.current_task is not None and not runtime.current_task.done():
+        if runtime.current_task is not None and not runtime.current_task.done() and runtime.task_running:
             runtime.cancel_event.set()
             runtime.current_task.cancel()
+            try:
+                await runtime.current_task
+            except asyncio.CancelledError:
+                logger.info("Cancelled active websocket task during shutdown for session %s", session_id)
         await live_manager.close_session(session_id)
 
 
@@ -684,16 +896,30 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
         raise HTTPException(status_code=403, detail="Invalid secret token")
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
+    owner_user_id = str(config.get("owner_user_id", "")).strip() or None
+    chat_id, text_content, platform_message_id = _extract_telegram_message(update)
+    if chat_id and text_content:
+        await _log_platform_message(
+            owner_user_id,
+            platform="telegram",
+            platform_chat_id=chat_id,
+            role="user",
+            content=text_content,
+            title=text_content[:200],
+            metadata={"integration_id": integration_id, "source": "webhook"},
+            platform_message_id=platform_message_id,
+        )
     return {"ok": True, "result": result}
 
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
-async def register_telegram_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def register_telegram_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "delivery_mode": str(payload.get("delivery_mode", "polling")).strip(),
         "webhook_url": str(payload.get("webhook_url", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
+        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
     }
     integration = TelegramIntegration()
     connection = await integration.connect(config)
@@ -723,6 +949,17 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
     result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text})
+    config = telegram_registry.get_config(integration_id)
+    if bool(result.get("ok")):
+        await _log_platform_message(
+            str(config.get("owner_user_id", "")).strip() or None,
+            platform="telegram",
+            platform_chat_id=str(chat_id),
+            role="assistant",
+            content=text,
+            title=f"Telegram {chat_id}",
+            metadata={"integration_id": integration_id, "source": "send_message", "draft": False},
+        )
     return {"ok": bool(result.get("ok")), "result": result}
 
 
@@ -739,15 +976,27 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
     result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text, "draft": True})
+    config = telegram_registry.get_config(integration_id)
+    if bool(result.get("ok")):
+        await _log_platform_message(
+            str(config.get("owner_user_id", "")).strip() or None,
+            platform="telegram",
+            platform_chat_id=str(chat_id),
+            role="assistant",
+            content=text,
+            title=f"Telegram {chat_id}",
+            metadata={"integration_id": integration_id, "source": "send_message", "draft": True},
+        )
     return {"ok": bool(result.get("ok")), "result": result}
 
 
 @app.post("/api/integrations/slack/register/{integration_id}")
-async def register_slack_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def register_slack_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "oauth_token": str(payload.get("oauth_token", "")).strip(),
         "workspace": str(payload.get("workspace", "")).strip(),
+        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
     }
     integration = SlackIntegration()
     connection = await integration.connect(config)
@@ -776,14 +1025,26 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
     result = await integration.execute_tool("slack_send_message", {"channel": channel, "text": text})
+    config = slack_registry.get_config(integration_id)
+    if bool(result.get("ok")):
+        await _log_platform_message(
+            str(config.get("owner_user_id", "")).strip() or None,
+            platform="slack",
+            platform_chat_id=channel,
+            role="assistant",
+            content=text,
+            title=f"Slack {channel}",
+            metadata={"integration_id": integration_id, "source": "send_message"},
+        )
     return {"ok": bool(result.get("ok")), "result": result}
 
 
 @app.post("/api/integrations/discord/register/{integration_id}")
-async def register_discord_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def register_discord_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "guild_id": str(payload.get("guild_id", "")).strip(),
+        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
     }
     integration = DiscordIntegration()
     connection = await integration.connect(config)
@@ -812,6 +1073,17 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
     result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": text})
+    config = discord_registry.get_config(integration_id)
+    if bool(result.get("ok")):
+        await _log_platform_message(
+            str(config.get("owner_user_id", "")).strip() or None,
+            platform="discord",
+            platform_chat_id=channel,
+            role="assistant",
+            content=text,
+            title=f"Discord {channel}",
+            metadata={"integration_id": integration_id, "source": "send_message"},
+        )
     return {"ok": bool(result.get("ok")), "result": result}
 
 
