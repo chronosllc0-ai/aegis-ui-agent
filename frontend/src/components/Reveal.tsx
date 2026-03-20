@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 
 type RevealProps = {
   children: ReactNode
@@ -7,6 +7,17 @@ type RevealProps = {
   durationMs?: number
   distance?: number
   mode?: 'scroll' | 'load'
+}
+
+/* Detect prefers-reduced-motion via useSyncExternalStore (no setState in effect) */
+function getReducedMotionSnapshot(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+function subscribeReducedMotion(cb: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  mq.addEventListener('change', cb)
+  return () => mq.removeEventListener('change', cb)
 }
 
 export function Reveal({
@@ -18,26 +29,16 @@ export function Reveal({
   mode = 'scroll',
 }: RevealProps) {
   const ref = useRef<HTMLDivElement | null>(null)
-  const [visible, setVisible] = useState(mode === 'load' ? false : false)
-  const [reducedMotion, setReducedMotion] = useState(false)
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotionSnapshot, () => false)
+  const [visible, setVisible] = useState(reducedMotion)
+
+  const reveal = useCallback(() => setVisible(true), [])
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const update = () => setReducedMotion(media.matches)
-    update()
-    media.addEventListener('change', update)
-    return () => media.removeEventListener('change', update)
-  }, [])
-
-  useEffect(() => {
-    if (reducedMotion) {
-      setVisible(true)
-      return
-    }
+    if (reducedMotion || visible) return
 
     if (mode === 'load') {
-      const frameId = window.requestAnimationFrame(() => setVisible(true))
+      const frameId = window.requestAnimationFrame(reveal)
       return () => window.cancelAnimationFrame(frameId)
     }
 
@@ -47,7 +48,7 @@ export function Reveal({
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          setVisible(true)
+          reveal()
           observer.disconnect()
         }
       },
@@ -56,7 +57,7 @@ export function Reveal({
 
     observer.observe(node)
     return () => observer.disconnect()
-  }, [mode, reducedMotion])
+  }, [mode, reducedMotion, visible, reveal])
 
   const style: CSSProperties | undefined = reducedMotion
     ? undefined

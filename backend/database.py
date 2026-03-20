@@ -278,6 +278,33 @@ def _ensure_audit_log_created_at_sync(sync_conn) -> None:
         logger.warning("Skipping audit_logs.created_at backfill; assuming another startup already repaired it: %s", exc)
 
 
+class SupportThread(Base):
+    """A support / 'Talk to us' conversation between a customer and admin team."""
+
+    __tablename__ = "support_threads"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    subject = Column(String(500), nullable=False)
+    status = Column(String(20), default="open", index=True)  # open | resolved | closed
+    priority = Column(String(20), default="normal")  # low | normal | high | urgent
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SupportMessage(Base):
+    """Individual message within a support thread."""
+
+    __tablename__ = "support_messages"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    thread_id = Column(String(255), ForeignKey("support_threads.id"), nullable=False, index=True)
+    sender_id = Column(String(255), ForeignKey("users.uid"), nullable=False)
+    sender_role = Column(String(20), nullable=False)  # user | admin | system
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session (for FastAPI dependency injection)."""
     if _session_factory is None:

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icons } from '../icons'
+import { useToast } from '../../hooks/useToast'
 import { PROVIDERS, renderProviderIcon } from '../../lib/models'
 import { apiUrl } from '../../lib/api'
 
@@ -15,6 +16,7 @@ export function APIKeysTab() {
   const [saving, setSaving] = useState<string | null>(null)
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const toast = useToast()
 
   const loadKeys = async () => {
     setLoading(true)
@@ -45,11 +47,14 @@ export function APIKeysTab() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data?.detail ?? 'Failed to save key')
+      toast.success('API key saved', `${providerId} key connected successfully.`)
       setMessage({ type: 'ok', text: `${providerId} key saved.` })
       setInputs((prev) => ({ ...prev, [providerId]: '' }))
       await loadKeys()
     } catch (err) {
-      setMessage({ type: 'err', text: err instanceof Error ? err.message : 'Failed to save key' })
+      const errMsg = err instanceof Error ? err.message : 'Failed to save key'
+      toast.error('Failed to save key', errMsg)
+      setMessage({ type: 'err', text: errMsg })
     } finally {
       setSaving(null)
     }
@@ -67,10 +72,13 @@ export function APIKeysTab() {
         const data = await res.json().catch(() => ({}))
         throw new Error(data?.detail ?? 'Failed to delete key')
       }
+      toast.success('API key removed', `${providerId} key disconnected.`)
       setMessage({ type: 'ok', text: `${providerId} key removed.` })
       await loadKeys()
     } catch (err) {
-      setMessage({ type: 'err', text: err instanceof Error ? err.message : 'Failed to delete key' })
+      const errMsg = err instanceof Error ? err.message : 'Failed to delete key'
+      toast.error('Failed to remove key', errMsg)
+      setMessage({ type: 'err', text: errMsg })
     } finally {
       setSaving(null)
     }

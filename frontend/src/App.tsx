@@ -11,6 +11,7 @@ import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
+import { useToast } from './hooks/useToast'
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
@@ -30,6 +31,7 @@ type TaskHistoryItem = {
 
 function App() {
   const { balance, sessionCredits, sessionMessages, streaming, rates, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
+  const toastCtx = useToast()
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -258,6 +260,7 @@ function App() {
         onAuthenticated={(user) => {
           setAuthUser(user)
           setIsAuthenticated(true)
+          toastCtx.success('Welcome back!', `Signed in as ${user.name || user.email}`)
           navigateTo('/')
         }}
         onBack={openHome}

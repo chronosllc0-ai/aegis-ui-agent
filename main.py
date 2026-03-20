@@ -15,13 +15,14 @@ from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
-from backend.database import get_session, init_db, create_tables
+from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
 from backend.key_management import KeyManager
@@ -363,6 +364,123 @@ async def set_spending_cap(
     balance.spending_cap = payload.get("cap")
     await session.commit()
     return {"spending_cap": balance.spending_cap}
+
+
+# ── Customer support messaging ────────────────────────────────────────
+
+
+@app.get("/api/support/threads")
+async def list_my_support_threads(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """List the current user's support threads."""
+    user = _get_current_user(request)
+    result = await session.execute(
+        select(SupportThread).where(SupportThread.user_id == user["uid"]).order_by(SupportThread.updated_at.desc())
+    )
+    threads = result.scalars().all()
+    return {
+        "threads": [
+            {
+                "id": t.id,
+                "subject": t.subject,
+                "status": t.status,
+                "priority": t.priority,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in threads
+        ]
+    }
+
+
+@app.post("/api/support/threads")
+async def create_support_thread(
+    request: Request,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Create a new support thread (customer opens a conversation)."""
+    user = _get_current_user(request)
+    subject = (payload.get("subject") or "").strip()
+    message = (payload.get("message") or "").strip()
+    if not subject or not message:
+        raise HTTPException(400, "subject and message are required")
+    thread = SupportThread(user_id=user["uid"], subject=subject)
+    session.add(thread)
+    await session.flush()
+    msg = SupportMessage(thread_id=thread.id, sender_id=user["uid"], sender_role="user", content=message)
+    session.add(msg)
+    await session.commit()
+    await session.refresh(thread)
+    return {"thread_id": thread.id, "status": "created"}
+
+
+@app.get("/api/support/threads/{thread_id}")
+async def get_support_thread(
+    thread_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Get messages in a support thread (for the customer)."""
+    user = _get_current_user(request)
+    result = await session.execute(
+        select(SupportThread).where(SupportThread.id == thread_id, SupportThread.user_id == user["uid"])
+    )
+    thread = result.scalar_one_or_none()
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    msgs = await session.execute(
+        select(SupportMessage).where(SupportMessage.thread_id == thread_id).order_by(SupportMessage.created_at.asc())
+    )
+    messages = msgs.scalars().all()
+    return {
+        "thread": {"id": thread.id, "subject": thread.subject, "status": thread.status},
+        "messages": [
+            {
+                "id": m.id,
+                "sender_role": m.sender_role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in messages
+        ],
+    }
+
+
+@app.post("/api/support/threads/{thread_id}/reply")
+async def reply_support_thread(
+    thread_id: str,
+    request: Request,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Customer sends a reply in their support thread."""
+    user = _get_current_user(request)
+    result = await session.execute(
+        select(SupportThread).where(SupportThread.id == thread_id, SupportThread.user_id == user["uid"])
+    )
+    thread = result.scalar_one_or_none()
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    content = (payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "content is required")
+    msg = SupportMessage(thread_id=thread_id, sender_id=user["uid"], sender_role="user", content=content)
+    session.add(msg)
+    from datetime import datetime
+    thread.updated_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(msg)
+    return {
+        "message": {
+            "id": msg.id,
+            "sender_role": "user",
+            "content": msg.content,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        }
+    }
 
 
 # ── Health check ──────────────────────────────────────────────────────

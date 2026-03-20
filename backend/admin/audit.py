@@ -7,11 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-<<<<<<< codex/create-audit.py-with-get-endpoint-wpn666
-from sqlalchemy import func, select
-=======
 from sqlalchemy import func, nulls_last, select
->>>>>>> main
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.admin.dependencies import get_admin_user
@@ -98,11 +94,7 @@ async def list_audit_entries(
         total_query = total_query.where(audit_filter)
 
     entries_query = (
-<<<<<<< codex/create-audit.py-with-get-endpoint-wpn666
-        entries_query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-=======
         entries_query.order_by(nulls_last(AuditLog.created_at.desc()), AuditLog.id.desc())
->>>>>>> main
         .offset(offset)
         .limit(limit)
     )

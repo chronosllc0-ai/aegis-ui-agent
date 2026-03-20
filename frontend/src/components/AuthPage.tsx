@@ -3,6 +3,7 @@ import { apiUrl } from '../lib/api'
 import { getStandaloneDocUrl } from '../lib/site'
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
+import { useToast } from '../hooks/useToast'
 import { PublicHeader } from '../public/PublicHeader'
 
 const GOOGLE_ICON_URL = 'https://i.postimg.cc/2SwWrKwz/download_1.jpg'
@@ -80,6 +81,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
 
   const submit = async () => {
     if (!email || !password) return
@@ -110,9 +112,13 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
       else setMessage(mode === 'signup' ? 'Account created.' : 'Signed in.')
     } catch (err) {
       if (err instanceof TypeError) {
-        setError('Could not reach the backend. Check the deployed API URL and try again.')
+        const errMsg = 'Could not reach the backend. Check the deployed API URL and try again.'
+        setError(errMsg)
+        toast.error('Connection error', errMsg)
       } else {
-        setError(err instanceof Error ? err.message : mode === 'signup' ? 'Sign-up failed.' : 'Sign-in failed.')
+        const errMsg = err instanceof Error ? err.message : mode === 'signup' ? 'Sign-up failed.' : 'Sign-in failed.'
+        setError(errMsg)
+        toast.error(mode === 'signup' ? 'Sign-up failed' : 'Sign-in failed', errMsg)
       }
     } finally {
       setBusy(false)

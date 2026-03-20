@@ -71,6 +71,7 @@ const PRICING = [
     period: '/month',
     description: 'Get started with 1,000 credits and your own provider keys.',
     cta: 'Start free',
+    ctaAction: 'auth' as const,
     features: [
       '1,000 credits included (1 credit = $0.001)',
       'BYOK sessions with all 5 providers',
@@ -86,6 +87,7 @@ const PRICING = [
     period: '/month',
     description: 'For operators who need serious throughput and saved workflows.',
     cta: 'Start Pro trial',
+    ctaAction: 'auth' as const,
     features: [
       '50,000 credits/month (~$50 of model usage)',
       'Everything in Free',
@@ -100,13 +102,31 @@ const PRICING = [
     price: '$79',
     period: '/seat/month',
     description: 'Shared operations, SSO, and team-level credit pools.',
-    cta: 'Talk to us',
+    cta: 'Get started',
+    ctaAction: 'auth' as const,
     features: [
       '200,000 credits/seat/month',
       'Everything in Pro',
       'Shared API key pools across the team',
       'Team workflow library',
       'SSO, admin dashboard, and audit logs',
+    ],
+    highlight: false,
+  },
+  {
+    name: 'Enterprise',
+    price: '$299',
+    period: '/month',
+    description: 'Dedicated support, custom limits, and advanced security for large teams.',
+    cta: 'Talk to us',
+    ctaAction: 'contact' as const,
+    features: [
+      '1,000,000+ credits/month (custom allocation)',
+      'Everything in Team',
+      'Dedicated account manager',
+      'Custom model fine-tuning and hosting',
+      'SAML SSO, SCIM provisioning, and audit exports',
+      'SLA-backed uptime and priority engineering support',
     ],
     highlight: false,
   },
@@ -508,7 +528,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
             1 credit = $0.001. Every model call is metered transparently based on actual token usage with a simple 40% platform margin. Bring your own keys for zero-markup direct billing, or use platform credits for convenience.
           </p>
         </Reveal>
-        <div className='mt-8 grid gap-6 lg:grid-cols-3'>
+        <div className='mt-8 grid gap-6 lg:grid-cols-4'>
           {PRICING.map((plan, index) => (
             <Reveal key={plan.name} delayMs={revealDelay(index, 110)}>
               <article
@@ -529,7 +549,13 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                 <p className='mt-4 text-sm leading-7 text-zinc-300'>{plan.description}</p>
                 <button
                   type='button'
-                  onClick={onGetStarted}
+                  onClick={() => {
+                    if (plan.ctaAction === 'contact') {
+                      onGetStarted()
+                    } else {
+                      onGetStarted()
+                    }
+                  }}
                   className={`mt-6 w-full rounded-full px-4 py-3 text-sm font-medium transition ${
                     plan.highlight
                       ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
