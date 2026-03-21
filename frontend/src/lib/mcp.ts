@@ -30,6 +30,7 @@ export type CustomServerForm = {
   apiKey: string
 }
 
+/* react-icons map used as fallback for generic tool icons */
 const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
   'web-search': FaGlobe,
   filesystem: FaFolder,
@@ -38,6 +39,13 @@ const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
   slack: FaSlack,
   discord: FaDiscord,
   custom: FaPlus,
+}
+
+/* Hosted brand images — used for platform icons so the correct logo always shows */
+const PLATFORM_IMAGE_URL: Record<string, string> = {
+  telegram: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
+  discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
+  slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
 }
 
 const LEGACY_INTEGRATION_ICON_MAP: Record<string, IntegrationIcon> = {
@@ -143,6 +151,13 @@ export function normalizeIntegrationConfig(integration: IntegrationConfig): Inte
 export function renderIntegrationIcon(icon: string, className = 'h-4 w-4') {
   const normalized = normalizeIntegrationIcon(icon)
   const resolved = isIntegrationIcon(normalized) ? normalized : 'custom'
+
+  /* Use hosted brand images for platform icons so the correct logo always shows */
+  const imgUrl = PLATFORM_IMAGE_URL[resolved]
+  if (imgUrl) {
+    return createElement('img', { src: imgUrl, alt: resolved, className: `${className} object-contain`, 'aria-hidden': 'true' })
+  }
+
   return createElement(INTEGRATION_ICON_MAP[resolved] ?? FaLock, { className, 'aria-hidden': 'true' })
 }
 

@@ -40,7 +40,7 @@ type ActionMeta = {
 
 const PLATFORM_ICONS: Record<string, string> = {
   telegram: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
-  discord: 'https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
+  discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
   slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
 }
 
