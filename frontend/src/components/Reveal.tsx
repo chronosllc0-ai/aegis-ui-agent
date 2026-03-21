@@ -7,6 +7,9 @@ type RevealProps = {
   durationMs?: number
   distance?: number
   mode?: 'scroll' | 'load'
+  /** Safety-net: max ms to wait before forcing the element visible even if
+   *  the IntersectionObserver has not fired. Set to 0 to disable. */
+  maxWaitMs?: number
 }
 
 /* Detect prefers-reduced-motion via useSyncExternalStore (no setState in effect) */
@@ -27,6 +30,7 @@ export function Reveal({
   durationMs = 700,
   distance = 28,
   mode = 'scroll',
+  maxWaitMs = 2500,
 }: RevealProps) {
   const ref = useRef<HTMLDivElement | null>(null)
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotionSnapshot, () => false)
@@ -56,8 +60,20 @@ export function Reveal({
     )
 
     observer.observe(node)
-    return () => observer.disconnect()
-  }, [mode, reducedMotion, visible, reveal])
+
+    // Fallback: guarantee content becomes visible even when the observer
+    // never fires (e.g. overflow: hidden stuck, broken scroll, SSR hydration
+    // mismatch). The per-element transitionDelay still staggers the entrance.
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined
+    if (maxWaitMs > 0) {
+      fallbackTimer = setTimeout(reveal, maxWaitMs + delayMs)
+    }
+
+    return () => {
+      observer.disconnect()
+      if (fallbackTimer !== undefined) clearTimeout(fallbackTimer)
+    }
+  }, [mode, reducedMotion, visible, reveal, maxWaitMs, delayMs])
 
   const style: CSSProperties | undefined = reducedMotion
     ? undefined
