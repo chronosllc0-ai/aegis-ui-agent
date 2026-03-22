@@ -55,7 +55,7 @@ function ModelPicker({
         <select
           value={provider}
           onChange={(e) => onProviderChange(e.target.value)}
-          className='rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          className='min-w-[80px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
           aria-label='Provider'
         >
           {PROVIDERS.map((p) => (
@@ -72,7 +72,7 @@ function ModelPicker({
           value={model}
           onChange={(e) => onModelChange(e.target.value)}
           title={currentModel?.description ?? model}
-          className='max-w-[220px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          className='min-w-[130px] max-w-[220px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
           aria-label='Model'
         >
           {models.map((m) => (
