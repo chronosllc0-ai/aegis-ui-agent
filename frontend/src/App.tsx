@@ -50,6 +50,7 @@ function App() {
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
   const [showWorkflow, setShowWorkflow] = useState(false)
   const [urlInput, setUrlInput] = useState('about:blank')
   const [sending, setSending] = useState(false)
@@ -404,11 +405,11 @@ function App() {
               }}
               modelLabel={currentModelLabel}
             />
-            <button type='button' onClick={() => setShowSettings(true)} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { setSettingsInitialTab('Workflows'); setShowSettings(true) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.workflows({ className: 'h-3.5 w-3.5' })}
               <span>Workflow templates ({settings.workflowTemplates.length})</span>
             </button>
-            <button type='button' onClick={() => setShowSettings(true)} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { setSettingsInitialTab(undefined); setShowSettings(true) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.settings({ className: 'h-3.5 w-3.5' })}
               <span>Settings</span>
             </button>
@@ -463,7 +464,7 @@ function App() {
 
           <div className='min-h-0 flex-1'>
             {showSettings ? (
-              <SettingsPage onBack={() => setShowSettings(false)} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} />
+              <SettingsPage onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined) }} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} initialTab={settingsInitialTab as any} />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (
