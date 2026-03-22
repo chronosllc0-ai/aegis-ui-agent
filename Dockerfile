@@ -2,6 +2,7 @@ FROM node:22-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
+COPY shared/ /app/shared/
 COPY frontend/ ./
 RUN npm run build
 
