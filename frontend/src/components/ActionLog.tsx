@@ -50,7 +50,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
   }
 
   return (
-    <section className='min-h-[100px] rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-2 sm:rounded-2xl sm:p-3 xl:h-full xl:min-h-0'>
+    <section className='h-full min-h-0 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-2 sm:rounded-2xl sm:p-3'>
       <div className='mb-2 flex items-center justify-between sm:mb-3'>
         <h2 className='text-xs font-semibold text-zinc-200 sm:text-sm'>Action Log</h2>
         <div className='flex items-center gap-1 text-[10px] sm:gap-2 sm:text-xs'>

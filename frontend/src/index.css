@@ -28,7 +28,6 @@ body {
   height: 100%;
   touch-action: manipulation;
   overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
 }
 
 #root {

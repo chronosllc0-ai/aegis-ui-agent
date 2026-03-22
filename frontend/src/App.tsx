@@ -440,11 +440,11 @@ function App() {
             </section>
           )}
 
-          <div className='min-h-0 flex-1 overflow-y-auto xl:overflow-hidden'>
+          <div className='min-h-0 flex-1'>
             {showSettings ? (
               <SettingsPage onBack={() => setShowSettings(false)} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} />
             ) : (
-              <div className='grid min-h-0 grid-cols-1 gap-1.5 sm:gap-2 lg:gap-3 xl:h-full xl:grid-cols-[2.2fr_1fr]'>
+              <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (
                   <WorkflowView steps={workflowSteps} />
                 ) : (

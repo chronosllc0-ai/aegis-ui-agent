@@ -32,7 +32,7 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
   const hasFrame = Boolean(displayFrame)
 
   return (
-    <section className='relative min-h-[280px] overflow-auto rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] xl:h-full xl:min-h-0'>
+    <section className='relative h-full min-h-0 overflow-auto rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
       <div className='absolute inset-x-0 top-0 z-20 h-0.5 bg-zinc-800'>
         <div className={`h-full bg-blue-500 transition-all ${isWorking ? 'w-full animate-pulse' : 'w-0'}`} />
       </div>
@@ -47,7 +47,7 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
       {hasFrame ? (
         <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
       ) : (
-        <div className='flex flex-col items-center justify-start px-3 py-5 text-center sm:px-6 sm:py-8 md:justify-center xl:min-h-full'>
+        <div className='flex min-h-full flex-col items-center justify-start px-3 py-5 text-center sm:px-6 sm:py-8 md:justify-center'>
           <img src='/shield.svg' alt='Aegis logo' className='mb-3 h-10 w-10 opacity-90 sm:mb-5 sm:h-16 sm:w-16' />
           <h2 className='text-xl font-semibold sm:text-2xl md:text-3xl'>Tell me what to do</h2>
           <p className='mb-4 mt-1.5 max-w-xl text-xs text-zinc-400 sm:mb-8 sm:mt-2 sm:text-sm'>Aegis can operate any UI with visual understanding. Start with a natural language instruction or choose an example below.</p>
