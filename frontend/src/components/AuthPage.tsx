@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiUrl } from '../lib/api'
 import { getStandaloneDocUrl } from '../lib/site'
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { useToast } from '../hooks/useToast'
 import { PublicHeader } from '../public/PublicHeader'
+import { PasswordInput } from './PasswordInput'
+import { PasswordStrength, usePasswordCriteria } from './PasswordStrength'
 
 const GOOGLE_ICON_URL = 'https://i.postimg.cc/2SwWrKwz/download_1.jpg'
 const GITHUB_ICON_URL = 'https://i.postimg.cc/BZXzgmHC/download_27.png'
@@ -72,6 +74,60 @@ const AUTH_SLIDES: EntrySlide[] = [
   },
 ]
 
+/* ── Email-exists debounced check ─────────────────────────────────── */
+
+function useEmailExistsCheck() {
+  const [emailExists, setEmailExists] = useState<boolean | null>(null)
+  const [checking, setChecking] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const check = useCallback((email: string, mode: 'signin' | 'signup') => {
+    // Reset when not in signup or email is incomplete
+    setEmailExists(null)
+    setChecking(false)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (abortRef.current) abortRef.current.abort()
+
+    if (mode !== 'signup') return
+    const trimmed = email.trim().toLowerCase()
+    if (!trimmed || !trimmed.includes('@') || !trimmed.includes('.')) return
+
+    setChecking(true)
+    timerRef.current = setTimeout(async () => {
+      const controller = new AbortController()
+      abortRef.current = controller
+      try {
+        const res = await fetch(apiUrl('/api/auth/email/check'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmed }),
+          signal: controller.signal,
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setEmailExists(data.exists ?? null)
+        }
+      } catch {
+        /* ignore abort / network errors */
+      } finally {
+        setChecking(false)
+      }
+    }, 600) // 600ms debounce
+  }, [])
+
+  const reset = useCallback(() => {
+    setEmailExists(null)
+    setChecking(false)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (abortRef.current) abortRef.current.abort()
+  }, [])
+
+  return { emailExists, checking, check, reset }
+}
+
+/* ── Main component ──────────────────────────────────────────────── */
+
 export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }: AuthPageProps) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [name, setName] = useState('')
@@ -83,12 +139,33 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
 
+  const { emailExists, checking: emailChecking, check: checkEmail, reset: resetEmailCheck } = useEmailExistsCheck()
+  const { criteria } = usePasswordCriteria(password)
+  const allCriteriaMet = criteria.every((c) => c.met)
+
+  // Debounce email check on change
+  useEffect(() => {
+    checkEmail(email, mode)
+  }, [email, mode, checkEmail])
+
   const submit = async () => {
     if (!email || !password) return
-    if (mode === 'signup' && password !== confirmPassword) {
-      setError('Passwords do not match.')
-      setMessage(null)
-      return
+    if (mode === 'signup') {
+      if (!allCriteriaMet) {
+        setError('Please meet all password requirements above.')
+        setMessage(null)
+        return
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords do not match.')
+        setMessage(null)
+        return
+      }
+      if (emailExists) {
+        setError('An account with this email already exists. Switch to Sign in.')
+        setMessage(null)
+        return
+      }
     }
 
     setBusy(true)
@@ -125,6 +202,17 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
     }
   }
 
+  const switchMode = (newMode: 'signin' | 'signup') => {
+    setMode(newMode)
+    setError(null)
+    setMessage(null)
+    resetEmailCheck()
+  }
+
+  // Determine if the Create Account button should be disabled in signup mode
+  const signupDisabled =
+    mode === 'signup' && (!allCriteriaMet || !confirmPassword || password !== confirmPassword || emailExists === true)
+
   return (
     <main className='min-h-screen bg-[#070b12] text-zinc-100'>
       <PublicHeader
@@ -145,23 +233,25 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
             </div>
           </div>
 
+          {/* ── mode toggle ── */}
           <div className='mt-6 grid grid-cols-2 rounded-2xl border border-white/8 bg-[#080b12] p-1 text-sm'>
             <button
               type='button'
-              onClick={() => { setMode('signin'); setError(null); setMessage(null) }}
+              onClick={() => switchMode('signin')}
               className={`rounded-2xl px-4 py-3 transition ${mode === 'signin' ? 'bg-cyan-500 text-slate-950' : 'text-zinc-300 hover:bg-white/6'}`}
             >
               Sign in
             </button>
             <button
               type='button'
-              onClick={() => { setMode('signup'); setError(null); setMessage(null) }}
+              onClick={() => switchMode('signup')}
               className={`rounded-2xl px-4 py-3 transition ${mode === 'signup' ? 'bg-cyan-500 text-slate-950' : 'text-zinc-300 hover:bg-white/6'}`}
             >
               Sign up
             </button>
           </div>
 
+          {/* ── OAuth providers ── */}
           <div className='mt-6 grid gap-3'>
             <button
               type='button'
@@ -195,6 +285,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
             <span className='h-px w-full bg-white/8' />
           </div>
 
+          {/* ── form fields ── */}
           <div className='grid gap-3 text-left text-sm'>
             {mode === 'signup' && (
               <>
@@ -203,48 +294,92 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder='Your name'
+                  autoComplete='name'
                   className='w-full rounded-2xl border border-white/8 bg-[#090c13] px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-cyan-400/30'
                 />
               </>
             )}
 
             <label className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Email</label>
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder='you@company.com'
-              className='w-full rounded-2xl border border-white/8 bg-[#090c13] px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-cyan-400/30'
-            />
+            <div className='relative'>
+              <input
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder='you@company.com'
+                autoComplete='email'
+                className={`w-full rounded-2xl border bg-[#090c13] px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-cyan-400/30 ${
+                  emailExists ? 'border-amber-500/50' : 'border-white/8'
+                }`}
+              />
+              {emailChecking && (
+                <span className='absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500'>checking…</span>
+              )}
+            </div>
+            {emailExists && mode === 'signup' && (
+              <p className='flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200'>
+                <svg viewBox='0 0 16 16' className='h-3.5 w-3.5 shrink-0' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round'>
+                  <circle cx='8' cy='8' r='6' /><path d='M8 5v3M8 10.5h.01' />
+                </svg>
+                This email is already registered.{' '}
+                <button type='button' onClick={() => switchMode('signin')} className='font-medium text-cyan-400 underline underline-offset-2 hover:text-cyan-300'>
+                  Sign in instead
+                </button>
+              </p>
+            )}
 
             <label className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Password</label>
-            <input
-              type='password'
+            <PasswordInput
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={setPassword}
               placeholder='Enter your password'
-              className='w-full rounded-2xl border border-white/8 bg-[#090c13] px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-cyan-400/30'
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
             />
+
+            {/* password strength indicator — only during signup */}
+            {mode === 'signup' && <PasswordStrength password={password} />}
 
             {mode === 'signup' && (
               <>
                 <label className='text-xs uppercase tracking-[0.22em] text-zinc-500'>Confirm password</label>
-                <input
-                  type='password'
+                <PasswordInput
                   value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  onChange={setConfirmPassword}
                   placeholder='Repeat your password'
-                  className='w-full rounded-2xl border border-white/8 bg-[#090c13] px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-cyan-400/30'
+                  autoComplete='new-password'
                 />
+                {confirmPassword && password !== confirmPassword && (
+                  <p className='text-xs text-red-400'>Passwords do not match.</p>
+                )}
+                {confirmPassword && password === confirmPassword && confirmPassword.length > 0 && (
+                  <p className='flex items-center gap-1.5 text-xs text-emerald-400'>
+                    <svg viewBox='0 0 16 16' className='h-3 w-3' fill='none' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round'>
+                      <path d='m3 8 3.5 3.5L13 5' />
+                    </svg>
+                    Passwords match
+                  </p>
+                )}
               </>
             )}
 
             <button
               type='button'
               onClick={submit}
-              disabled={busy || !email || !password || (mode === 'signup' && !confirmPassword)}
+              disabled={busy || !email || !password || (mode === 'signup' && (signupDisabled || !confirmPassword))}
               className='mt-2 rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60'
             >
-              {mode === 'signup' ? 'Create account' : 'Sign in'}
+              {busy ? (
+                <span className='flex items-center justify-center gap-2'>
+                  <svg className='h-4 w-4 animate-spin' viewBox='0 0 24 24' fill='none'>
+                    <circle cx='12' cy='12' r='10' stroke='currentColor' strokeWidth='3' className='opacity-25' />
+                    <path d='M4 12a8 8 0 0 1 8-8' stroke='currentColor' strokeWidth='3' strokeLinecap='round' className='opacity-75' />
+                  </svg>
+                  {mode === 'signup' ? 'Creating account…' : 'Signing in…'}
+                </span>
+              ) : mode === 'signup' ? (
+                'Create account'
+              ) : (
+                'Sign in'
+              )}
             </button>
 
             {message && <p className='rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200'>{message}</p>}

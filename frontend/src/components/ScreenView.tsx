@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 type ScreenViewProps = {
+  dataTour?: string
   frameSrc: string
   isWorking: boolean
   steeringFlashKey: number
@@ -14,7 +15,7 @@ const EXAMPLES = [
   'Go to Wikipedia and summarize the article on quantum computing',
 ]
 
-export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick }: ScreenViewProps) {
+export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour }: ScreenViewProps) {
   const [displayFrame, setDisplayFrame] = useState('')
 
   useEffect(() => {
@@ -32,7 +33,7 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
   const hasFrame = Boolean(displayFrame)
 
   return (
-    <section className='relative h-full min-h-0 overflow-auto rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
+    <section data-tour={dataTour} className='relative h-full min-h-0 overflow-auto rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
       <div className='absolute inset-x-0 top-0 z-20 h-0.5 bg-zinc-800'>
         <div className={`h-full bg-blue-500 transition-all ${isWorking ? 'w-full animate-pulse' : 'w-0'}`} />
       </div>

@@ -4,6 +4,8 @@ import { AuthPage } from './components/AuthPage'
 // CostEstimator removed from main UI — credit details live in Settings > Usage
 import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
+import { OnboardingWizard, isOnboardingComplete } from './components/OnboardingWizard'
+import { ProductTour, isTourComplete } from './components/ProductTour'
 import { ScreenView } from './components/ScreenView'
 import { SpendingAlert } from './components/SpendingAlert'
 import { UsageDropdown } from './components/UsageDropdown'
@@ -61,6 +63,8 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [showTour, setShowTour] = useState(false)
   // draftInput reserved for future InputBar onChange wiring
   void useState
 
@@ -322,7 +326,11 @@ function App() {
         onAuthenticated={(user) => {
           setAuthUser(user)
           setIsAuthenticated(true)
-          toastCtx.success('Welcome back!', `Signed in as ${user.name || user.email}`)
+          if (!isOnboardingComplete()) {
+            setShowOnboarding(true)
+          } else {
+            toastCtx.success('Welcome back!', `Signed in as ${user.name || user.email}`)
+          }
           navigateTo('/')
         }}
         onBack={openHome}
@@ -338,13 +346,26 @@ function App() {
 
   return (
     <main className='h-screen bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
+      {showOnboarding && (
+        <OnboardingWizard
+          userName={authUser?.name ?? settings.displayName}
+          userEmail={authUser?.email ?? settings.email}
+          onComplete={(data) => {
+            patchSettings({ displayName: data.displayName })
+            setShowOnboarding(false)
+            if (!isTourComplete()) setShowTour(true)
+            toastCtx.success('Welcome!', `Let's get started, ${data.displayName.split(' ')[0]}!`)
+          }}
+        />
+      )}
+      {showTour && <ProductTour onComplete={() => setShowTour(false)} />}
       <div className='mx-auto flex h-full max-w-[1750px] gap-1.5 sm:gap-2 lg:gap-3'>
         {/* ───────────── Sidebar ───────────── */}
         {/* Mobile backdrop */}
         {sidebarOpen && (
           <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
         )}
-        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
+        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
           <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
             New Task
           </button>
@@ -448,15 +469,15 @@ function App() {
                 {showWorkflow ? (
                   <WorkflowView steps={workflowSteps} />
                 ) : (
-                  <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} />
+                  <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' />
                 )}
-                <ActionLog entries={enrichedLogs} showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+                <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
               </div>
             )}
           </div>
 
           {!showSettings && (
-            <>
+            <div data-tour='input-bar'>
               <InputBar
                 mode={mode}
                 voiceActive={voiceActive}
@@ -483,7 +504,7 @@ function App() {
                 onExampleHandled={() => setExamplePrompt(null)}
                 transcripts={transcripts}
               />
-            </>
+            </div>
           )}
           <SpendingAlert balance={balance} />
         </section>

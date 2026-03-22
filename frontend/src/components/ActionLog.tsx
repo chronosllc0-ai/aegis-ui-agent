@@ -3,6 +3,7 @@ import type { LogEntry } from '../hooks/useWebSocket'
 import { Icons } from './icons'
 
 type ActionLogProps = {
+  dataTour?: string
   entries: LogEntry[]
   showWorkflow: boolean
   onToggleWorkflow: () => void
@@ -25,7 +26,7 @@ const STATUS_CLASS: Record<LogEntry['status'], string> = {
   steered: 'text-amber-300 border-amber-500/30',
 }
 
-export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkflow }: ActionLogProps) {
+export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkflow, dataTour }: ActionLogProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [collapsedTasks, setCollapsedTasks] = useState<Record<string, boolean>>({})
 
@@ -50,7 +51,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
   }
 
   return (
-    <section className='h-full min-h-0 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-2 sm:rounded-2xl sm:p-3'>
+    <section data-tour={dataTour} className='h-full min-h-0 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-2 sm:rounded-2xl sm:p-3'>
       <div className='mb-2 flex items-center justify-between sm:mb-3'>
         <h2 className='text-xs font-semibold text-zinc-200 sm:text-sm'>Action Log</h2>
         <div className='flex items-center gap-1 text-[10px] sm:gap-2 sm:text-xs'>

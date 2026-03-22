@@ -391,6 +391,16 @@ async def email_start(payload: dict[str, Any], session: AsyncSession = Depends(g
     return {"ok": True}
 
 
+@router.post("/email/check")
+async def email_check(payload: dict[str, Any], session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Check whether a password-based account already exists for the given email."""
+    email = str(payload.get("email", "")).strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    existing = await session.get(User, _password_uid(email))
+    return {"exists": existing is not None}
+
+
 @router.post("/password/signup")
 async def password_signup(payload: dict[str, Any], session: AsyncSession = Depends(get_session)) -> JSONResponse:
     """Create a password-based account and sign the user in."""
