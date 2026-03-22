@@ -36,19 +36,19 @@ PROVIDER_CATALOGUE: dict[str, dict[str, Any]] = {
         "key_prefix": "",
         "default_model": "gemini-2.5-pro",
     },
-    "mistral": {
-        "module": "backend.providers.mistral_provider",
-        "class": "MistralProvider",
-        "display_name": "Mistral AI",
-        "key_prefix": "",
-        "default_model": "mistral-large-latest",
+    "xai": {
+        "module": "backend.providers.xai_provider",
+        "class": "XAIProvider",
+        "display_name": "xAI",
+        "key_prefix": "xai-",
+        "default_model": "grok-4-20250720",
     },
-    "groq": {
-        "module": "backend.providers.groq_provider",
-        "class": "GroqProvider",
-        "display_name": "Groq",
-        "key_prefix": "gsk_",
-        "default_model": "llama-3.3-70b-versatile",
+    "openrouter": {
+        "module": "backend.providers.openrouter_provider",
+        "class": "OpenRouterProvider",
+        "display_name": "OpenRouter",
+        "key_prefix": "sk-or-",
+        "default_model": "openai/gpt-5.4",
     },
 }
 
@@ -70,7 +70,7 @@ def get_provider(provider_name: str, api_key: str, **kwargs: Any) -> BaseProvide
     Parameters
     ----------
     provider_name:
-        One of ``openai``, ``anthropic``, ``google``, ``mistral``, ``groq``.
+        One of ``openai``, ``anthropic``, ``google``, ``xai``, ``openrouter``.
     api_key:
         The API key for the chosen provider.
     **kwargs:

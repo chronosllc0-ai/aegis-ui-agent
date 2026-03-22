@@ -224,7 +224,7 @@ export function OnboardingWizard({ userName, userEmail, onComplete }: WizardProp
                         }`}
                       >
                         {renderProviderIcon(p, 'h-5 w-5 rounded-sm')}
-                        <span className='text-zinc-300'>{p.id === 'google' ? 'Google' : p.id === 'openai' ? 'OpenAI' : p.id === 'anthropic' ? 'Anthropic' : p.id === 'mistral' ? 'Mistral' : 'Groq'}</span>
+                        <span className='text-zinc-300'>{p.id === 'google' ? 'Google' : p.id === 'openai' ? 'OpenAI' : p.id === 'anthropic' ? 'Anthropic' : p.id === 'xai' ? 'xAI' : p.id === 'openrouter' ? 'OpenRouter' : p.displayName}</span>
                       </button>
                     ))}
                   </div>

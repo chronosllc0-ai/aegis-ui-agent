@@ -30,7 +30,7 @@ const FEATURES = [
   },
   {
     title: 'Bring your own keys',
-    description: 'Use your own provider accounts across Gemini, OpenAI, Anthropic, Mistral, and Groq from one settings surface.',
+    description: 'Use your own provider accounts across Gemini, OpenAI, Anthropic, xAI, and OpenRouter from one settings surface.',
     icon: Icons.settings,
   },
   {
@@ -75,7 +75,7 @@ const PRICING = [
     features: [
       '1,000 credits included (1 credit = $0.001)',
       'BYOK sessions with all 5 providers',
-      '32+ models across OpenAI, Anthropic, Google, Mistral, Groq',
+      '40+ models across OpenAI, Anthropic, Google, xAI, OpenRouter',
       'Embedded docs access',
       'Real-time usage meter',
     ],
@@ -486,7 +486,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
               </p>
               <ul className='mt-6 grid gap-3 text-sm text-zinc-200'>
                 {[
-                  'Add keys for OpenAI, Anthropic, Google, Mistral, or Groq',
+                  'Add keys for OpenAI, Anthropic, Google, xAI, or OpenRouter',
                   'Use one settings surface for providers and model selection',
                   'Pair BYOK setup with docs for auth, deployment, and workflows',
                 ].map((item) => (

@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
-    MISTRAL_API_KEY: str = ""
-    GROQ_API_KEY: str = ""
+    XAI_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
 
     # ── Default provider / model ─────────────────────────────────────
     DEFAULT_PROVIDER: str = "google"

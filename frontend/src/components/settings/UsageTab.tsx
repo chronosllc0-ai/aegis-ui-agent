@@ -66,11 +66,11 @@ function meterColor(pct: number): string {
 }
 
 const PROVIDER_COLORS: Record<string, string> = {
-  openai: '#10b981',
-  anthropic: '#f97316',
-  google: '#3b82f6',
-  mistral: '#a855f7',
-  groq: '#eab308',
+  openai:     '#10b981',
+  anthropic:  '#f97316',
+  google:     '#3b82f6',
+  xai:        '#9ca3af',
+  openrouter: '#8b5cf6',
 }
 
 function providerColor(p: string): string {
@@ -282,7 +282,7 @@ export function UsageTab() {
                 aria-label='Filter by provider'
               >
                 <option value=''>All providers</option>
-                {['openai', 'anthropic', 'google', 'mistral', 'groq'].map((p) => (
+                {['openai', 'anthropic', 'google', 'xai', 'openrouter'].map((p) => (
                   <option key={p} value={p} className='capitalize'>{p}</option>
                 ))}
               </select>
