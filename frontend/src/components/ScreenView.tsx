@@ -47,18 +47,18 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
       {hasFrame ? (
         <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
       ) : (
-        <div className='flex min-h-full flex-col items-center justify-start px-6 py-8 text-center md:justify-center'>
-          <img src='/shield.svg' alt='Aegis logo' className='mb-5 h-16 w-16 opacity-90' />
-          <h2 className='text-3xl font-semibold'>Tell me what to do</h2>
-          <p className='mb-8 mt-2 max-w-xl text-sm text-zinc-400'>Aegis can operate any UI with visual understanding. Start with a natural language instruction or choose an example below.</p>
-          <div className='grid w-full max-w-3xl gap-3 md:grid-cols-2'>
+        <div className='flex min-h-full flex-col items-center justify-start px-3 py-5 text-center sm:px-6 sm:py-8 md:justify-center'>
+          <img src='/shield.svg' alt='Aegis logo' className='mb-3 h-10 w-10 opacity-90 sm:mb-5 sm:h-16 sm:w-16' />
+          <h2 className='text-xl font-semibold sm:text-2xl md:text-3xl'>Tell me what to do</h2>
+          <p className='mb-4 mt-1.5 max-w-xl text-xs text-zinc-400 sm:mb-8 sm:mt-2 sm:text-sm'>Aegis can operate any UI with visual understanding. Start with a natural language instruction or choose an example below.</p>
+          <div className='grid w-full max-w-3xl gap-2 sm:gap-3 sm:grid-cols-2'>
             {EXAMPLES.map((prompt) => (
-              <button key={prompt} type='button' onClick={() => onExampleClick(prompt)} className='rounded-xl border border-[#2a2a2a] bg-[#111] p-3 text-left text-sm text-zinc-200 transition hover:border-blue-500/60 hover:bg-zinc-900'>
+              <button key={prompt} type='button' onClick={() => onExampleClick(prompt)} className='rounded-lg border border-[#2a2a2a] bg-[#111] p-2 text-left text-xs text-zinc-200 transition hover:border-blue-500/60 hover:bg-zinc-900 sm:rounded-xl sm:p-3 sm:text-sm'>
                 {prompt}
               </button>
             ))}
           </div>
-          <p className='mt-5 text-xs text-zinc-500'>Waiting for first live frame...</p>
+          <p className='mt-3 text-[10px] text-zinc-500 sm:mt-5 sm:text-xs'>Waiting for first live frame...</p>
         </div>
       )}
     </section>

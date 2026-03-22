@@ -337,10 +337,14 @@ function App() {
   }
 
   return (
-    <main className='h-screen bg-[#111] p-3 text-zinc-100'>
-      <div className='mx-auto flex h-full max-w-[1750px] gap-3'>
+    <main className='h-screen bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
+      <div className='mx-auto flex h-full max-w-[1750px] gap-1.5 sm:gap-2 lg:gap-3'>
         {/* ───────────── Sidebar ───────────── */}
-        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] md:translate-x-0'} fixed inset-y-3 left-3 z-30 w-[280px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition md:static md:translate-x-0 flex min-h-0 flex-col`}>
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
+        )}
+        <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
           <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
             New Task
           </button>
@@ -402,37 +406,37 @@ function App() {
         </aside>
 
         {/* ───────────── Main content ───────────── */}
-        <section className='flex min-h-0 flex-1 flex-col gap-3 md:ml-0'>
-          <header className='space-y-2'>
-            <div className='flex items-center justify-between rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2'>
-              <div className='flex items-center gap-2'>
-                <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs md:hidden' aria-label='Toggle sidebar'>
+        <section className='flex min-h-0 flex-1 flex-col gap-1.5 sm:gap-2 lg:gap-3'>
+          <header className='space-y-1.5 sm:space-y-2'>
+            <div className='flex items-center justify-between gap-2 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:rounded-2xl sm:px-4 sm:py-2'>
+              <div className='flex items-center gap-1.5 sm:gap-2'>
+                <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
                 </button>
-                <img src='/shield.svg' alt='Aegis' className='h-5 w-5' />
-                <h1 className='text-lg font-semibold'>Aegis</h1>
+                <img src='/shield.svg' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
+                <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
               </div>
-              <div className='flex items-center gap-3 text-xs text-zinc-300'>
-                <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-2 py-1'>
-                  <span className={`h-2.5 w-2.5 rounded-full ${connectionLabel.cls}`} /> {connectionLabel.label}
+              <div className='flex items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
+                <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-1.5 py-0.5 sm:px-2 sm:py-1'>
+                  <span className={`h-2 w-2 rounded-full sm:h-2.5 sm:w-2.5 ${connectionLabel.cls}`} /> <span className='hidden xs:inline'>{connectionLabel.label}</span>
                 </span>
-                <span>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</span>
-                <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-3 py-1.5 hover:border-blue-500/60 hover:bg-zinc-900'>New Session</button>
+                <span className='hidden sm:inline'>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</span>
+                <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:border-blue-500/60 hover:bg-zinc-900 sm:px-3 sm:py-1.5'>New</button>
               </div>
             </div>
           </header>
 
           {!showSettings && (
-            <section className='flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2'>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800' aria-label='Back'>
+            <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
+              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
               </button>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800' aria-label='Forward'>
+              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Forward'>
                 {Icons.chevronRight({ className: 'h-4 w-4' })}
               </button>
               <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>
-              <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-sm outline-none focus:border-blue-500/70' />
-              <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-3 py-1 text-xs hover:bg-zinc-800'>Go</button>
+              <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm' />
+              <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 sm:px-3'>Go</button>
             </section>
           )}
 
@@ -440,7 +444,7 @@ function App() {
             {showSettings ? (
               <SettingsPage onBack={() => setShowSettings(false)} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} />
             ) : (
-              <div className='grid h-full min-h-0 grid-cols-1 gap-3 xl:grid-cols-[2.2fr_1fr]'>
+              <div className='grid h-full min-h-0 grid-cols-1 gap-1.5 sm:gap-2 lg:gap-3 xl:grid-cols-[2.2fr_1fr]'>
                 {showWorkflow ? (
                   <WorkflowView steps={workflowSteps} />
                 ) : (

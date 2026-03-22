@@ -149,16 +149,18 @@ export function InputBar({
         : 'border-[#2a2a2a]'
 
   return (
-    <section className={`space-y-3 rounded-2xl border bg-[#1a1a1a] p-3 transition ${modeStyling}`}>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <div className='flex flex-wrap items-center gap-2'>
+    <section className={`space-y-2 rounded-xl border bg-[#1a1a1a] p-2 transition sm:space-y-3 sm:rounded-2xl sm:p-3 ${modeStyling}`}>
+      <div className='flex flex-wrap items-center justify-between gap-1.5 sm:gap-2'>
+        <div className='flex flex-wrap items-center gap-1.5 sm:gap-2'>
           <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
-          <ModelPicker
-            provider={provider}
-            model={model}
-            onProviderChange={onProviderChange}
-            onModelChange={onModelChange}
-          />
+          <div className='hidden sm:block'>
+            <ModelPicker
+              provider={provider}
+              model={model}
+              onProviderChange={onProviderChange}
+              onModelChange={onModelChange}
+            />
+          </div>
         </div>
         <button
           type='button'
@@ -166,17 +168,26 @@ export function InputBar({
           disabled={voiceDisabled}
           aria-pressed={voiceActive}
           title={voiceButtonTitle}
-          className={`rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : ''} ${voiceDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+          className={`rounded-md border border-[#2a2a2a] px-2 py-1.5 text-sm text-zinc-300 transition hover:bg-zinc-800 sm:px-3 sm:py-2 ${voiceActive ? 'animate-pulse border-blue-500/80 text-blue-200' : ''} ${voiceDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
           aria-label='Voice input'
         >
           {Icons.mic({ className: 'h-4 w-4' })}
         </button>
       </div>
-      <div className='flex gap-2'>
+      {/* Model picker shown below controls on mobile */}
+      <div className='sm:hidden'>
+        <ModelPicker
+          provider={provider}
+          model={model}
+          onProviderChange={onProviderChange}
+          onModelChange={onModelChange}
+        />
+      </div>
+      <div className='flex gap-1.5 sm:gap-2'>
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          rows={2}
+          rows={1}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
@@ -189,14 +200,14 @@ export function InputBar({
               onModeChange(MODE_ORDER[(idx + 1) % MODE_ORDER.length])
             }
           }}
-          placeholder='Type a new instruction, steer, interrupt, or queue next task...'
-          className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2'
+          placeholder='Type an instruction...'
+          className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-2 py-1.5 text-xs text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2 sm:px-3 sm:py-2 sm:text-sm'
         />
-        <button type='button' onClick={() => submit()} className='rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-400'>
+        <button type='button' onClick={() => submit()} className='rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-400 sm:px-4 sm:py-2 sm:text-sm'>
           {sending ? <span className='inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white' /> : 'Send'}
         </button>
       </div>
-      <p className='text-xs text-zinc-500'>Enter to send - Esc to clear - Tab to switch mode - Shift+Enter for newline</p>
+      <p className='hidden text-xs text-zinc-500 sm:block'>Enter to send - Esc to clear - Tab to switch mode - Shift+Enter for newline</p>
       {recentTranscripts.length > 0 && (
         <div className='rounded-lg border border-[#2a2a2a] bg-[#111] p-2 text-xs text-zinc-300'>
           <div className='mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-zinc-500'>

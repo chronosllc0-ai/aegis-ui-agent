@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* Custom xs breakpoint for very small screens */
+@custom-media --xs (width >= 480px);
+@variant xs (@media (--xs));
+
 /* Chronos "C" logo spin — slow elegant rotation */
 @keyframes chronos-spin {
   from { transform: rotate(0deg); }

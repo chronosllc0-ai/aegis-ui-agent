@@ -135,8 +135,8 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
         docsPortalHref={getStandaloneDocUrl()}
       />
 
-      <div className='mx-auto grid w-full max-w-7xl gap-10 px-6 py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-18'>
-        <section className='rounded-[32px] border border-white/8 bg-[#0c1018] p-7 shadow-[0_24px_70px_rgba(0,0,0,0.32)]'>
+      <div className='mx-auto grid w-full max-w-7xl gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-18'>
+        <section className='rounded-2xl border border-white/8 bg-[#0c1018] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.32)] sm:rounded-[32px] sm:p-7'>
           <div className='flex items-center gap-3'>
             <img src='/shield.svg' alt='Aegis logo' className='h-11 w-11' />
             <div>

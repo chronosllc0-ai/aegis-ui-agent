@@ -257,14 +257,14 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
 
       <section className='relative overflow-hidden'>
         <div className='absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.12),transparent_35%)]' />
-        <div className='relative mx-auto grid w-full max-w-7xl gap-14 px-6 py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
+        <div className='relative mx-auto grid w-full max-w-7xl gap-8 px-4 py-12 sm:gap-14 sm:px-6 sm:py-20 lg:grid-cols-[1.02fr_0.98fr] lg:py-28'>
           <div className='flex flex-col justify-center'>
             <Reveal mode='load' delayMs={40}>
               <p className='text-[11px] uppercase tracking-[0.28em] text-cyan-200'>A Chronos AI product</p>
-              <h1 className='mt-5 max-w-4xl text-5xl font-semibold leading-[1.02] text-white md:text-6xl'>
+              <h1 className='mt-4 max-w-4xl text-3xl font-semibold leading-[1.08] text-white sm:mt-5 sm:text-4xl md:text-5xl lg:text-6xl lg:leading-[1.02]'>
                 Navigate any interface with a visual operator that can see, listen, and adapt.
               </h1>
-              <p className='mt-6 max-w-2xl text-base leading-8 text-zinc-300 md:text-lg'>
+              <p className='mt-4 max-w-2xl text-sm leading-7 text-zinc-300 sm:mt-6 sm:text-base sm:leading-8 md:text-lg'>
                 Aegis is an AI-powered universal UI navigator. It watches the screen, reasons over live state, and acts with the operator still in control from the first instruction to the last step.
               </p>
             </Reveal>
@@ -317,7 +317,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </div>
       </section>
 
-      <section className='mx-auto flex w-full max-w-7xl flex-wrap justify-center gap-4 px-6 py-8'>
+      <section className='mx-auto flex w-full max-w-7xl flex-wrap justify-center gap-2 px-4 py-6 sm:gap-4 sm:px-6 sm:py-8'>
         {PROVIDER_HIGHLIGHTS.map((ph) => {
           const provider = PROVIDERS.find((p) => p.id === ph.id)
           return (
@@ -334,10 +334,10 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         })}
       </section>
 
-      <section id='features' className='mx-auto w-full max-w-7xl px-6 py-18'>
+      <section id='features' className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal className='mb-10 max-w-2xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Capability map</p>
-          <h2 className='mt-4 text-4xl font-semibold text-white'>Everything needed to move from discovery to live execution.</h2>
+          <h2 className='mt-4 text-2xl font-semibold text-white sm:text-3xl md:text-4xl'>Everything needed to move from discovery to live execution.</h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
             This public surface has to do more than market the product. It needs to show operators, builders, and teammates how the system behaves before they ever sign in.
           </p>
@@ -357,10 +357,10 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </div>
       </section>
 
-      <section className='mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-18'>
+      <section className='mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal className='max-w-2xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Product story</p>
-          <h2 className='mt-4 text-4xl font-semibold text-white'>An alternating story of control, vision, and operational readiness.</h2>
+          <h2 className='mt-4 text-2xl font-semibold text-white sm:text-3xl md:text-4xl'>An alternating story of control, vision, and operational readiness.</h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
             The public surface teaches the product by moving between narrative explanation, docs entry points, and proof of how the operator shell actually works.
           </p>
@@ -373,7 +373,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
             >
               <div className='flex flex-col justify-center'>
                 <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>{module.eyebrow}</p>
-                <h3 className='mt-4 text-3xl font-semibold text-white'>{module.title}</h3>
+                <h3 className='mt-3 text-xl font-semibold text-white sm:mt-4 sm:text-2xl md:text-3xl'>{module.title}</h3>
                 <p className='mt-4 text-sm leading-8 text-zinc-300'>{module.body}</p>
                 <div className='mt-6 flex flex-wrap gap-3'>
                   <button
@@ -404,17 +404,17 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         ))}
       </section>
 
-      <section id='how' className='mx-auto w-full max-w-7xl px-6 py-18'>
+      <section id='how' className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal>
           <div className='rounded-[36px] border border-white/8 bg-[#0c1018] p-8 md:p-10'>
             <div className='max-w-3xl'>
               <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>How it works</p>
-              <h2 className='mt-4 text-4xl font-semibold text-white'>A tight loop connects capture, reasoning, execution, and feedback.</h2>
+              <h2 className='mt-4 text-2xl font-semibold text-white sm:text-3xl md:text-4xl'>A tight loop connects capture, reasoning, execution, and feedback.</h2>
               <p className='mt-4 text-sm leading-8 text-zinc-300'>
                 The operator shell and docs should explain the same loop. The live product just makes that loop visible through frames, transcripts, logs, and workflow steps.
               </p>
             </div>
-            <div className='mt-8 grid gap-4 md:grid-cols-4'>
+            <div className='mt-6 grid gap-3 grid-cols-2 sm:mt-8 sm:gap-4 md:grid-cols-4'>
               {STEPS.map((step, index) => (
                 <Reveal key={step.title} delayMs={revealDelay(index, 85)}>
                   <article className='rounded-3xl border border-white/8 bg-white/4 p-5'>
@@ -447,12 +447,12 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </Reveal>
       </section>
 
-      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+      <section className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal>
           <div className='rounded-[36px] border border-cyan-400/20 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_30%),#0c1018] p-8 md:p-10'>
             <div className='max-w-3xl'>
               <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Docs gateway</p>
-              <h2 className='mt-4 text-4xl font-semibold text-white'>Read docs where the story needs depth.</h2>
+              <h2 className='mt-4 text-2xl font-semibold text-white sm:text-3xl md:text-4xl'>Read docs where the story needs depth.</h2>
               <p className='mt-4 text-sm leading-8 text-zinc-300'>
                 The landing page should not try to answer every technical question directly. It should route users into quickstart, API reference, tutorials, FAQ, and changelog at the exact points where confidence matters.
               </p>
@@ -475,12 +475,12 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </Reveal>
       </section>
 
-      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+      <section className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal>
           <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 lg:grid-cols-[1.1fr_0.9fr]'>
             <div>
               <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Bring your own keys</p>
-              <h2 className='mt-4 text-4xl font-semibold text-white'>Use the providers you already trust.</h2>
+              <h2 className='mt-4 text-2xl font-semibold text-white sm:text-3xl md:text-4xl'>Use the providers you already trust.</h2>
               <p className='mt-4 text-sm leading-8 text-zinc-300'>
                 Plug in your own API keys for any supported provider. Your keys are encrypted with AES-256, billed directly to your provider account, and never logged or shared.
               </p>
@@ -520,15 +520,15 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </Reveal>
       </section>
 
-      <section id='pricing' className='mx-auto w-full max-w-7xl px-6 py-18'>
+      <section id='pricing' className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal className='max-w-3xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Pricing</p>
-          <h2 className='mt-4 text-4xl font-semibold text-white'>Simple credit-based pricing. No hidden fees.</h2>
+          <h2 className='mt-4 text-2xl font-semibold text-white sm:text-3xl md:text-4xl'>Simple credit-based pricing. No hidden fees.</h2>
           <p className='mt-4 text-sm leading-8 text-zinc-300'>
             1 credit = $0.001. Every model call is metered transparently based on actual token usage with a simple 40% platform margin. Bring your own keys for zero-markup direct billing, or use platform credits for convenience.
           </p>
         </Reveal>
-        <div className='mt-8 grid gap-6 lg:grid-cols-4'>
+        <div className='mt-6 grid gap-4 sm:mt-8 sm:gap-6 sm:grid-cols-2 lg:grid-cols-4'>
           {PRICING.map((plan, index) => (
             <Reveal key={plan.name} delayMs={revealDelay(index, 110)}>
               <article
@@ -578,11 +578,11 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
         </div>
       </section>
 
-      <section className='mx-auto w-full max-w-7xl px-6 py-18'>
+      <section className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal>
           <div className='grid gap-6 rounded-[36px] border border-white/8 bg-[#0c1018] p-8 text-center'>
             <div>
-              <h2 className='text-3xl font-semibold text-white'>Ready to automate with AI?</h2>
+              <h2 className='text-2xl font-semibold text-white sm:text-3xl'>Ready to automate with AI?</h2>
               <p className='mx-auto mt-4 max-w-xl text-sm leading-8 text-zinc-300'>
                 Sign up, connect your API keys, and start running live sessions in under a minute. Read the docs when you need a deeper walkthrough.
               </p>
