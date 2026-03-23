@@ -1,4 +1,5 @@
 import { CHRONOS_LOGO_URL } from '../lib/models'
+import { navigateTo, PRIVACY_PATH } from '../lib/routes'
 
 type PublicFooterProps = {
   onGoHome: () => void
@@ -94,6 +95,20 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
               </div>
             </section>
           ))}
+        </div>
+      </div>
+
+      {/* Legal bar */}
+      <div className='border-t border-white/6 px-6 py-4'>
+        <div className='mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs text-zinc-600'>
+          <span>© {new Date().getFullYear()} Chronos Intelligence Systems. All rights reserved.</span>
+          <button
+            type='button'
+            onClick={() => navigateTo(PRIVACY_PATH)}
+            className='transition hover:text-zinc-300'
+          >
+            Privacy Policy
+          </button>
         </div>
       </div>
     </footer>

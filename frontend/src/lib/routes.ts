@@ -27,3 +27,5 @@ export function usePathname(): string {
 export function docsPath(slug?: string | null): string {
   return slug ? `/docs/${slug}` : '/docs'
 }
+
+export const PRIVACY_PATH = '/privacy'

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
 import { NotificationBell } from './components/NotificationBell'
+import { PrivacyPage } from './components/PrivacyPage'
 import { useNotifications } from './context/NotificationContext'
 import { AuthPage } from './components/AuthPage'
 // CostEstimator removed from main UI — credit details live in Settings > Usage
@@ -23,7 +24,7 @@ import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
-import { docsPath, navigateTo, usePathname } from './lib/routes'
+import { docsPath, navigateTo, usePathname, PRIVACY_PATH } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
@@ -76,6 +77,7 @@ function App() {
   const docsSlug = slugFromDocsPath(pathname)
   const isDocsRoute = pathname === '/docs' || pathname.startsWith('/docs/')
   const isAuthRoute = pathname === '/auth'
+  const isPrivacyRoute = pathname === PRIVACY_PATH
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
@@ -141,7 +143,7 @@ function App() {
   }, [isWorking])
 
   useEffect(() => {
-    document.body.style.overflow = isAuthenticated && !isDocsRoute ? 'hidden' : 'auto'
+    document.body.style.overflow = isAuthenticated && !isDocsRoute && !isPrivacyRoute ? 'hidden' : 'auto'
     return () => {
       document.body.style.overflow = 'auto'
     }
@@ -355,6 +357,9 @@ function App() {
     if (isDocsRoute) {
       return <EmbeddedDocsPage slug={docsSlug} onGoHome={openHome} onGoAuth={openAuth} onGoDocsHome={openDocsHome} onNavigateToSlug={openDoc} />
     }
+    if (isPrivacyRoute) {
+      return <PrivacyPage onGoHome={openHome} onGoAuth={openAuth} />
+    }
     if (!isAuthRoute) {
       return (
         <LandingPage
@@ -386,6 +391,9 @@ function App() {
 
   if (isDocsRoute) {
     return <EmbeddedDocsPage slug={docsSlug} onGoHome={openHome} onGoAuth={openAuth} onGoDocsHome={openDocsHome} onNavigateToSlug={openDoc} />
+  }
+  if (isPrivacyRoute) {
+    return <PrivacyPage onGoHome={openHome} onGoAuth={openAuth} />
   }
 
   return (
