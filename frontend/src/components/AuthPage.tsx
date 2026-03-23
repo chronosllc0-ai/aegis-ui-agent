@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiUrl } from '../lib/api'
 import { getStandaloneDocUrl } from '../lib/site'
-import { navigateTo, PRIVACY_PATH } from '../lib/routes'
+import { navigateTo, PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { useToast } from '../hooks/useToast'
@@ -407,9 +407,14 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
               <button type='button' onClick={onBack} className='text-sm text-zinc-400 transition hover:text-white'>
                 Back to home
               </button>
-              <button type='button' onClick={() => navigateTo(PRIVACY_PATH)} className='text-xs text-zinc-600 transition hover:text-zinc-400'>
-                Privacy Policy
-              </button>
+              <div className='flex gap-4'>
+                <button type='button' onClick={() => navigateTo(PRIVACY_PATH)} className='text-xs text-zinc-600 transition hover:text-zinc-400'>
+                  Privacy Policy
+                </button>
+                <button type='button' onClick={() => navigateTo(TERMS_PATH)} className='text-xs text-zinc-600 transition hover:text-zinc-400'>
+                  Terms of Service
+                </button>
+              </div>
             </div>
           </div>
         </section>
