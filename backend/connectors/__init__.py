@@ -67,7 +67,7 @@ CONNECTOR_CATALOGUE: dict[str, dict] = {
         "id": "linear",
         "name": "Linear",
         "description": "Issues, projects, and team workflows",
-        "icon": "https://linear.app/apple-touch-icon.png",
+        "icon": "https://avatars.githubusercontent.com/u/26504447?s=128&v=4",
         "services": ["Issues", "Projects", "Cycles", "Teams"],
         "scopes_summary": "Read & manage issues and projects",
         "category": "development",

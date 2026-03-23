@@ -51,7 +51,7 @@ const CONNECTOR_ICONS: Record<string, string> = {
   github: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
   slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
   notion: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Notion_app_logo.png',
-  linear: 'https://linear.app/apple-touch-icon.png',
+  linear: 'https://avatars.githubusercontent.com/u/26504447?s=128&v=4',
 }
 
 // ── Main Component ───────────────────────────────────────────────────
