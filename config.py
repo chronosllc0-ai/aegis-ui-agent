@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     COOKIE_SAMESITE: str = "lax"
     COOKIE_DOMAIN: str = ""
     ADMIN_EMAILS: str = ""  # comma-separated email list for auto-admin assignment
+    SUPERADMIN_EMAIL: str = ""  # auto-seed a password-based superadmin on startup
+    SUPERADMIN_PASSWORD: str = ""  # password for the auto-seeded superadmin
+    SUPERADMIN_NAME: str = "Super Admin"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:5173"
     CORS_ORIGINS: str = ""  # comma-separated extra origins (e.g. "https://mohex.org,https://app.netlify.app")

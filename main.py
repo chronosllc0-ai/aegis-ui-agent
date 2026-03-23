@@ -113,6 +113,20 @@ async def _initialize_database() -> None:
             db_ready = True
             db_init_error = None
             logger.info("Database initialized")
+            # Auto-seed superadmin if env vars are set
+            if settings.SUPERADMIN_EMAIL and settings.SUPERADMIN_PASSWORD:
+                try:
+                    from scripts.seed_super_admin import seed_super_admin
+                    result = await seed_super_admin(
+                        email=settings.SUPERADMIN_EMAIL,
+                        password=settings.SUPERADMIN_PASSWORD,
+                        name=settings.SUPERADMIN_NAME or "Super Admin",
+                        database_url=configured_database_url,
+                    )
+                    action = "created" if result.get("created") else "updated"
+                    logger.info("Superadmin %s: %s", action, result.get("email"))
+                except Exception as seed_exc:  # noqa: BLE001
+                    logger.warning("Superadmin seed failed (non-fatal): %s", seed_exc)
             return
 
 

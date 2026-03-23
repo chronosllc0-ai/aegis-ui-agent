@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
+import { NotificationBell } from './components/NotificationBell'
+import { useNotifications } from './context/NotificationContext'
 import { AuthPage } from './components/AuthPage'
 // CostEstimator removed from main UI — credit details live in Settings > Usage
 import { InputBar } from './components/InputBar'
@@ -40,7 +42,9 @@ function estimateTokens(text: string): number {
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const toastCtx = useToast()
+  const { addNotification } = useNotifications()
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
+  const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
 
@@ -85,6 +89,43 @@ function App() {
     }
   }, [connectionStatus, voiceActive, stopVoice])
 
+  // Track WebSocket connection changes → notify on disconnect / reconnect
+  useEffect(() => {
+    const prev = prevConnectionStatus.current
+    if (prev === 'connected' && connectionStatus === 'disconnected') {
+      addNotification({
+        type: 'warning',
+        title: 'Agent disconnected',
+        message: 'Lost connection to the Aegis backend. Attempting to reconnect automatically…',
+        source: 'websocket',
+      })
+    } else if (prev !== 'connected' && prev !== 'connecting' && connectionStatus === 'connected') {
+      addNotification({ type: 'success', title: 'Agent reconnected', message: 'Connection to Aegis restored.', source: 'websocket' })
+    }
+    prevConnectionStatus.current = connectionStatus
+  }, [connectionStatus, addNotification])
+
+  // Detect credit / quota errors in WebSocket log messages
+  useEffect(() => {
+    if (!logs.length) return
+    const last = logs[logs.length - 1]
+    if (last.type !== 'error') return
+    const msg = last.message?.toLowerCase() ?? ''
+    const isCreditError =
+      msg.includes('insufficient') || msg.includes('quota') || msg.includes('credits') ||
+      msg.includes('rate limit') || msg.includes('402') || msg.includes('429') ||
+      msg.includes('billing') || msg.includes('out of credits') || msg.includes('usage limit')
+    if (isCreditError) {
+      addNotification({
+        type: 'error',
+        title: 'API credit / quota error',
+        message: last.message,
+        source: 'credit',
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs])
+
   const connectionLabel = useMemo(() => {
     if (connectionStatus === 'connected') return { cls: 'bg-emerald-400', label: 'Connected' }
     if (connectionStatus === 'connecting') return { cls: 'bg-yellow-400', label: 'Reconnecting...' }
@@ -123,6 +164,8 @@ function App() {
         if (active && data?.user) {
           setAuthUser(data.user)
           setIsAuthenticated(true)
+          // Redirect away from /auth after session restored (e.g. post-OAuth page reload)
+          if (window.location.pathname === '/auth') navigateTo('/')
         }
       } finally {
         if (active) setAuthLoading(false)
@@ -443,6 +486,7 @@ function App() {
                   <span className={`h-2 w-2 rounded-full sm:h-2.5 sm:w-2.5 ${connectionLabel.cls}`} /> <span className='hidden xs:inline'>{connectionLabel.label}</span>
                 </span>
                 <span className='hidden sm:inline'>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</span>
+                <NotificationBell />
                 <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:border-blue-500/60 hover:bg-zinc-900 sm:px-3 sm:py-1.5'>New</button>
               </div>
             </div>

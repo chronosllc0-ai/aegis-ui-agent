@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Icons } from '../icons'
 import { useToast } from '../../hooks/useToast'
+import { useNotifications } from '../../context/NotificationContext'
 import { PROVIDERS, renderProviderIcon } from '../../lib/models'
 import { apiUrl } from '../../lib/api'
 
@@ -17,6 +18,7 @@ export function APIKeysTab() {
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const toast = useToast()
+  const { addNotification } = useNotifications()
 
   const loadKeys = async () => {
     setLoading(true)
@@ -48,12 +50,14 @@ export function APIKeysTab() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data?.detail ?? 'Failed to save key')
       toast.success('API key saved', `${providerId} key connected successfully.`)
+      addNotification({ type: 'success', title: `${providerId} API key connected`, message: 'Key saved and encrypted. Charges go to your provider account.', source: 'api_key' })
       setMessage({ type: 'ok', text: `${providerId} key saved.` })
       setInputs((prev) => ({ ...prev, [providerId]: '' }))
       await loadKeys()
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Failed to save key'
       toast.error('Failed to save key', errMsg)
+      addNotification({ type: 'error', title: 'API key save failed', message: errMsg, source: 'api_key' })
       setMessage({ type: 'err', text: errMsg })
     } finally {
       setSaving(null)

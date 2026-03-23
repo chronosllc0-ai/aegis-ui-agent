@@ -55,11 +55,11 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab }: SettingsPage
     <section className='flex h-full flex-col rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] md:flex-row'>
       {/* ── Mobile top bar (visible < md) ── */}
       <div className='flex items-center justify-between border-b border-[#2a2a2a] px-3 py-2 md:hidden'>
-        <button type='button' onClick={onBack} className='inline-flex items-center gap-1 text-xs text-blue-300'>
+        <button type='button' onClick={sidebarOpen ? onBack : () => setSidebarOpen(true)} className='inline-flex items-center gap-1 text-xs text-blue-300'>
           {Icons.back({ className: 'h-3.5 w-3.5' })}
-          <span>Back</span>
+          <span>{sidebarOpen ? 'Dashboard' : 'Settings'}</span>
         </button>
-        <span className='text-xs font-semibold text-zinc-200'>{activeTab}</span>
+        <span className='text-xs font-semibold text-zinc-200'>{sidebarOpen ? 'Settings' : activeTab}</span>
         <button
           type='button'
           onClick={() => setSidebarOpen((o) => !o)}
