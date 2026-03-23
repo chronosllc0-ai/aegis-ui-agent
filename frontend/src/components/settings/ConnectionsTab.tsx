@@ -38,10 +38,20 @@ type ActionMeta = {
 
 // ── Platform icons (hosted) ──────────────────────────────────────────
 
+// Bot integration icons (token-based)
 const PLATFORM_ICONS: Record<string, string> = {
   telegram: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
   discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
   slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+}
+
+// OAuth connector icons — override backend-provided icon to ensure correct logos always display
+const CONNECTOR_ICONS: Record<string, string> = {
+  google: 'https://www.gstatic.com/images/branding/googleg/1x/googleg_standard_color_128dp.png',
+  github: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
+  slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+  notion: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Notion_app_logo.png',
+  linear: 'https://linear.app/apple-touch-icon.png',
 }
 
 // ── Main Component ───────────────────────────────────────────────────
@@ -291,7 +301,7 @@ export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) 
                   {/* Card header */}
                   <div className="flex items-center gap-4 p-4">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800">
-                      <img src={c.icon} alt={c.name} className="h-6 w-6 rounded object-contain" />
+                      <img src={CONNECTOR_ICONS[c.id] || c.icon} alt={c.name} className="h-6 w-6 rounded object-contain" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
