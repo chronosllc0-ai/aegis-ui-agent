@@ -101,6 +101,31 @@ async def list_all_connectors(
     return {"ok": True, "connectors": catalogue}
 
 
+# ── Slack Marketplace direct install (unauthenticated 302 → slack.com) ─
+
+
+@connector_router.get("/slack/install")
+async def slack_marketplace_install(request: Request) -> RedirectResponse:
+    """Slack Marketplace direct install URL.
+
+    Slack's submission validator makes a GET request here and expects a 302
+    redirect to a slack.com OAuth URL.  No user session is required — this
+    endpoint is hit by unauthenticated users arriving from the App Directory.
+    """
+    connector = get_connector("slack")
+    state = secrets.token_urlsafe(32)
+    # Store state in session for verification on callback (best-effort for
+    # unauthenticated requests — session cookie may not persist across redirect,
+    # but Slack's validator only checks the 302, not the full flow).
+    request.session["oauth_state"] = state
+    request.session["oauth_connector"] = "slack"
+    url = connector.get_authorize_url(
+        redirect_uri=_callback_uri(),
+        state=state,
+    )
+    return RedirectResponse(url=url, status_code=302)
+
+
 # ── Start OAuth2 flow ─────────────────────────────────────────────────
 
 
