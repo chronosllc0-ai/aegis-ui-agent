@@ -374,7 +374,9 @@ async def save_connector_credentials(
     Allows admins to configure connectors through the UI without setting
     Railway environment variables.
     """
-    _get_current_user(request)  # must be authenticated
+    current_user = _get_current_user(request)  # must be authenticated
+    if current_user.get("role") not in {"admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Only admins can configure OAuth app credentials")
 
     client_id = payload.get("client_id", "").strip()
     client_secret = payload.get("client_secret", "").strip()

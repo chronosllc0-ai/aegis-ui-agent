@@ -7,6 +7,7 @@ import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfi
 type ConnectionsTabProps = {
   integrations: IntegrationConfig[]
   onChange: (integrations: IntegrationConfig[]) => void
+  isAdmin?: boolean
 }
 
 // ── OAuth connector types (from backend) ─────────────────────────────
@@ -56,7 +57,7 @@ const CONNECTOR_ICONS: Record<string, string> = {
 
 // ── Main Component ───────────────────────────────────────────────────
 
-export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) {
+export function ConnectionsTab({ integrations, onChange, isAdmin = false }: ConnectionsTabProps) {
   // — OAuth state
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [oauthLoading, setOauthLoading] = useState(true)
@@ -377,10 +378,14 @@ export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) 
                         <button type="button" onClick={() => handleOAuthConnect(c.id)} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
                           {busy ? 'Connecting...' : 'Connect'}
                         </button>
-                      ) : (
+                      ) : isAdmin ? (
                         <button type="button" onClick={() => openCredForm(c.id)} className="rounded-lg bg-zinc-700 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-600" title="Enter OAuth app credentials to enable this connector">
                           Setup
                         </button>
+                      ) : (
+                        <span className="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs text-zinc-500" title="Not configured — contact your admin">
+                          Not configured
+                        </span>
                       )}
                     </div>
                   </div>

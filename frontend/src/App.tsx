@@ -67,7 +67,7 @@ function App() {
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null } | null>(null)
+  const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string } | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
@@ -516,7 +516,7 @@ function App() {
 
           <div className='min-h-0 flex-1'>
             {showSettings ? (
-              <SettingsPage onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined) }} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} initialTab={settingsInitialTab as any} />
+              <SettingsPage onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined) }} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} initialTab={settingsInitialTab as any} isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'} />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (

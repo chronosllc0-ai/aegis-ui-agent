@@ -15,12 +15,13 @@ type SettingsPageProps = {
   onBack: () => void
   onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
   initialTab?: (typeof TABS)[number]
+  isAdmin?: boolean
 }
 
 const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Connections', 'Workflows', 'Support'] as const
 const TAB_KEY = 'aegis.settings.activeTab'
 
-export function SettingsPage({ onBack, onRunWorkflow, initialTab }: SettingsPageProps) {
+export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false }: SettingsPageProps) {
   const { settings, patchSettings } = useSettingsContext()
 
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(() => {
@@ -110,7 +111,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab }: SettingsPage
         {activeTab === 'API Keys' && <APIKeysTab />}
         {activeTab === 'Usage' && <UsageTab />}
         {activeTab === 'Connections' && (
-          <ConnectionsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} />
+          <ConnectionsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} isAdmin={isAdmin} />
         )}
         {activeTab === 'Workflows' && (
           <WorkflowsTab
