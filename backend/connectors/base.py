@@ -145,16 +145,59 @@ class BaseConnector(ABC):
 
     @property
     def _client_id(self) -> str:
-        """Read client_id from settings. Override if needed."""
+        """Read client_id from settings, falling back to DB-stored credentials."""
         from config import settings
 
         attr = f"{self.connector_id.upper()}_CONNECTOR_CLIENT_ID"
-        return getattr(settings, attr, "")
+        val = getattr(settings, attr, "")
+        if val:
+            return val
+        return self._get_db_credential("client_id")
 
     @property
     def _client_secret(self) -> str:
-        """Read client_secret from settings. Override if needed."""
+        """Read client_secret from settings, falling back to DB-stored credentials."""
         from config import settings
 
         attr = f"{self.connector_id.upper()}_CONNECTOR_CLIENT_SECRET"
-        return getattr(settings, attr, "")
+        val = getattr(settings, attr, "")
+        if val:
+            return val
+        return self._get_db_credential("client_secret")
+
+    def _get_db_credential(self, field: str) -> str:
+        """Sync helper to read credential from DB (falls back gracefully)."""
+        import asyncio
+
+        async def _fetch() -> str:
+            from sqlalchemy import select
+            from backend.database import _session_factory, OAuthAppCredential
+            from backend.key_management import KeyManager
+            from config import settings
+
+            if _session_factory is None:
+                return ""
+            km = KeyManager(settings.ENCRYPTION_SECRET)
+            async with _session_factory() as session:
+                row = await session.execute(
+                    select(OAuthAppCredential).where(OAuthAppCredential.connector_id == self.connector_id)
+                )
+                cred = row.scalar_one_or_none()
+                if not cred:
+                    return ""
+                enc = cred.client_id_enc if field == "client_id" else cred.client_secret_enc
+                try:
+                    return km.decrypt(enc) or ""
+                except Exception:
+                    return ""
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, _fetch())
+                    return future.result(timeout=5)
+            return loop.run_until_complete(_fetch())
+        except Exception:
+            return ""

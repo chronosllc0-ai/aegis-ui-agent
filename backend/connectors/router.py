@@ -86,9 +86,17 @@ async def list_all_connectors(
             entry["account_avatar"] = None
             entry["connected_at"] = None
 
-        # Check if connector is configured (has client ID)
-        attr = f"{entry['id'].upper()}_CONNECTOR_CLIENT_ID"
-        entry["configured"] = bool(getattr(settings, attr, ""))
+        # Check if connector is configured (env var OR DB credentials)
+        env_attr = f"{entry['id'].upper()}_CONNECTOR_CLIENT_ID"
+        env_configured = bool(getattr(settings, env_attr, ""))
+        if not env_configured:
+            from backend.database import OAuthAppCredential
+            db_cred = await session.execute(
+                select(OAuthAppCredential).where(OAuthAppCredential.connector_id == entry["id"])
+            )
+            entry["configured"] = db_cred.scalar_one_or_none() is not None
+        else:
+            entry["configured"] = True
 
     return {"ok": True, "connectors": catalogue}
 
@@ -349,6 +357,50 @@ async def execute_connector_action(
     except Exception as exc:
         logger.exception("Connector action failed: %s/%s", connector_id, action_id)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Save OAuth app credentials ────────────────────────────────────────
+
+
+@connector_router.post("/{connector_id}/credentials")
+async def save_connector_credentials(
+    connector_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Save OAuth app credentials (client_id / client_secret) to the DB.
+
+    Allows admins to configure connectors through the UI without setting
+    Railway environment variables.
+    """
+    _get_current_user(request)  # must be authenticated
+
+    client_id = payload.get("client_id", "").strip()
+    client_secret = payload.get("client_secret", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=400, detail="client_id and client_secret are required")
+
+    from backend.database import OAuthAppCredential
+
+    existing = await session.execute(
+        select(OAuthAppCredential).where(OAuthAppCredential.connector_id == connector_id)
+    )
+    cred = existing.scalar_one_or_none()
+    if cred:
+        cred.client_id_enc = _key_manager.encrypt(client_id)
+        cred.client_secret_enc = _key_manager.encrypt(client_secret)
+    else:
+        cred = OAuthAppCredential(
+            connector_id=connector_id,
+            client_id_enc=_key_manager.encrypt(client_id),
+            client_secret_enc=_key_manager.encrypt(client_secret),
+        )
+        session.add(cred)
+
+    await session.commit()
+    logger.info("Saved OAuth app credentials for connector %s", connector_id)
+    return {"ok": True}
 
 
 # ── List actions ──────────────────────────────────────────────────────

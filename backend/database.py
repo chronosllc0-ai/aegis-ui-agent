@@ -327,6 +327,18 @@ class SupportMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class OAuthAppCredential(Base):
+    """Global OAuth app credential (client_id/secret) stored by an admin."""
+
+    __tablename__ = "oauth_app_credentials"
+
+    connector_id = Column(String(50), primary_key=True)  # google, github, slack, etc.
+    client_id_enc = Column(Text, nullable=False)         # Fernet-encrypted client_id
+    client_secret_enc = Column(Text, nullable=False)     # Fernet-encrypted client_secret
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session (for FastAPI dependency injection)."""
     if _session_factory is None:

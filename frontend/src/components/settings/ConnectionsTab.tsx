@@ -64,6 +64,12 @@ export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) 
   const [oauthExpandedId, setOauthExpandedId] = useState<string | null>(null)
   const [oauthActions, setOauthActions] = useState<Record<string, ActionMeta[]>>({})
 
+  // — Credential setup form state
+  const [credFormId, setCredFormId] = useState<string | null>(null)
+  const [credForm, setCredForm] = useState<{ client_id: string; client_secret: string }>({ client_id: '', client_secret: '' })
+  const [credSaving, setCredSaving] = useState(false)
+  const [credError, setCredError] = useState<string | null>(null)
+
   // — Bot-token state
   const [botExpandedId, setBotExpandedId] = useState<string | null>(null)
   const [botBusyId, setBotBusyId] = useState<string | null>(null)
@@ -162,6 +168,46 @@ export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) 
     const next = oauthExpandedId === id ? null : id
     setOauthExpandedId(next)
     if (next) loadActions(id)
+  }
+
+  // ── Credential setup handlers ──────────────────────────────────────
+  const openCredForm = (connectorId: string) => {
+    setCredFormId(connectorId)
+    setCredForm({ client_id: '', client_secret: '' })
+    setCredError(null)
+  }
+
+  const closeCredForm = () => {
+    setCredFormId(null)
+    setCredError(null)
+  }
+
+  const handleSaveCredentials = async (connectorId: string) => {
+    if (!credForm.client_id.trim() || !credForm.client_secret.trim()) {
+      setCredError('Both Client ID and Client Secret are required.')
+      return
+    }
+    setCredSaving(true)
+    setCredError(null)
+    try {
+      const resp = await fetch(apiUrl(`/api/connectors/${connectorId}/credentials`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: credForm.client_id.trim(), client_secret: credForm.client_secret.trim() }),
+      })
+      const data = await resp.json()
+      if (data.ok) {
+        closeCredForm()
+        await fetchConnectors()
+      } else {
+        setCredError(data.detail || 'Failed to save credentials.')
+      }
+    } catch {
+      setCredError('Network error. Please try again.')
+    } finally {
+      setCredSaving(false)
+    }
   }
 
   // ── Bot-token handlers ─────────────────────────────────────────────
@@ -327,9 +373,13 @@ export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) 
                         <button type="button" onClick={() => handleOAuthDisconnect(c.id)} disabled={busy} className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40 disabled:opacity-50">
                           {busy ? 'Disconnecting...' : 'Disconnect'}
                         </button>
-                      ) : (
-                        <button type="button" onClick={() => handleOAuthConnect(c.id)} disabled={busy || !c.configured} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50" title={!c.configured ? 'Not configured — admin needs to set OAuth credentials' : undefined}>
+                      ) : c.configured ? (
+                        <button type="button" onClick={() => handleOAuthConnect(c.id)} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
                           {busy ? 'Connecting...' : 'Connect'}
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => openCredForm(c.id)} className="rounded-lg bg-zinc-700 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-600" title="Enter OAuth app credentials to enable this connector">
+                          Setup
                         </button>
                       )}
                     </div>
@@ -343,6 +393,52 @@ export function ConnectionsTab({ integrations, onChange }: ConnectionsTabProps) 
                       ))}
                     </div>
                   </div>
+
+                  {/* Credential setup form (shown when not configured) */}
+                  {credFormId === c.id && (
+                    <div className="border-t border-zinc-800 px-4 py-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h5 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">OAuth App Credentials</h5>
+                        <button type="button" onClick={closeCredForm} className="text-xs text-zinc-500 hover:text-zinc-300">✕ Cancel</button>
+                      </div>
+                      <p className="mb-3 text-[11px] text-zinc-500">
+                        Enter the Client ID and Client Secret from your OAuth app (e.g. from Google Cloud Console, GitHub OAuth Apps).
+                      </p>
+                      <div className="grid gap-2">
+                        <div>
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-500">Client ID</label>
+                          <input
+                            type="text"
+                            value={credForm.client_id}
+                            onChange={(e) => setCredForm((f) => ({ ...f, client_id: e.target.value }))}
+                            placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
+                            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-white placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-500">Client Secret</label>
+                          <input
+                            type="password"
+                            value={credForm.client_secret}
+                            onChange={(e) => setCredForm((f) => ({ ...f, client_secret: e.target.value }))}
+                            placeholder="Your client secret"
+                            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-white placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
+                            autoComplete="new-password"
+                          />
+                        </div>
+                        {credError && <p className="text-[11px] text-red-400">{credError}</p>}
+                        <button
+                          type="button"
+                          onClick={() => handleSaveCredentials(c.id)}
+                          disabled={credSaving}
+                          className="mt-1 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                        >
+                          {credSaving ? 'Saving…' : 'Save Credentials'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Expanded actions */}
                   {expanded && (
