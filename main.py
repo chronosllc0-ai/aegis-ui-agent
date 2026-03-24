@@ -25,6 +25,7 @@ from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
 from backend import database
+from backend.automation import automation_router
 from backend.connectors.router import connector_router
 from backend.payments import payments_router
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
@@ -69,6 +70,7 @@ else:
 
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(automation_router)
 app.include_router(connector_router)
 app.include_router(payments_router)
 
@@ -163,11 +165,14 @@ def _should_fallback_to_local_sqlite(database_url: str | None, exc: Exception) -
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Kick off database initialization on application startup."""
+    """Kick off database initialization and cron scheduler on application startup."""
     global db_init_task
+    from backend.task_runner import start_scheduler
 
     if db_init_task is None or db_init_task.done():
         db_init_task = asyncio.create_task(_initialize_database())
+
+    start_scheduler()
 
 
 @app.on_event("shutdown")
