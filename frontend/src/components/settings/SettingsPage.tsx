@@ -10,6 +10,7 @@ import { ProfileTab } from './ProfileTab'
 import { SupportTab } from './SupportTab'
 import { UsageTab } from './UsageTab'
 import { WorkflowsTab } from './WorkflowsTab'
+import { AdminPanel } from '../admin/AdminPanel'
 
 type SettingsPageProps = {
   onBack: () => void
@@ -18,7 +19,7 @@ type SettingsPageProps = {
   isAdmin?: boolean
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Connections', 'Workflows', 'Support'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Connections', 'Workflows', 'Support', 'Admin'] as const
 const TAB_KEY = 'aegis.settings.activeTab'
 
 export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false }: SettingsPageProps) {
@@ -89,16 +90,16 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         </button>
         <h2 className='mb-2 text-sm font-semibold'>Settings</h2>
         <div className='space-y-1'>
-          {TABS.map((tab) => (
+          {TABS.filter((tab) => tab !== 'Admin' || isAdmin).map((tab) => (
             <button
               key={tab}
               type='button'
               onClick={() => selectTab(tab)}
               className={`w-full rounded px-2 py-2 text-left text-sm ${
                 activeTab === tab ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
-              }`}
+              } ${tab === 'Admin' ? 'mt-2 border-t border-[#2a2a2a] pt-3 text-red-400 hover:bg-red-500/10' : ''}`}
             >
-              {tab}
+              {tab === 'Admin' ? '⚙ Admin' : tab}
             </button>
           ))}
         </div>
@@ -121,6 +122,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
           />
         )}
         {activeTab === 'Support' && <SupportTab />}
+        {activeTab === 'Admin' && isAdmin && <AdminPanel />}
       </div>
     </section>
   )
