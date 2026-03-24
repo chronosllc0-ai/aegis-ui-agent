@@ -620,20 +620,22 @@ export function AdminPanel() {
         </div>
       </div>
 
-      {/* Sub-tab nav */}
-      <div className='flex gap-1 rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
-        {ADMIN_TABS.map((tab) => (
-          <button
-            key={tab}
-            type='button'
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition ${
-              activeTab === tab ? 'bg-[#1e1e1e] text-zinc-100 shadow' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
+      {/* Sub-tab nav — horizontally scrollable on mobile */}
+      <div className='overflow-x-auto scrollbar-none rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
+        <div className='flex min-w-max gap-1'>
+          {ADMIN_TABS.map((tab) => (
+            <button
+              key={tab}
+              type='button'
+              onClick={() => setActiveTab(tab)}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition ${
+                activeTab === tab ? 'bg-[#1e1e1e] text-zinc-100 shadow' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tab content */}
