@@ -12,7 +12,7 @@ interface Section {
 }
 
 const EFFECTIVE_DATE = 'March 23, 2026'
-const COMPANY = 'Chronos Intelligence Systems'
+const COMPANY = 'Chronos AI'
 const PRODUCT = 'Aegis'
 const SITE = 'mohex.org'
 const CONTACT_EMAIL = 'legal@mohex.org'

@@ -279,4 +279,4 @@ See `.env.example` for the full list.
 
 ## License
 
-Proprietary — © 2024-2026 Chronos Intelligence Systems
+Proprietary — © 2024-2026 Chronos AI

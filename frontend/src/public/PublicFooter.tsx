@@ -101,7 +101,7 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
       {/* Legal bar */}
       <div className='border-t border-white/6 px-6 py-4'>
         <div className='mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs text-zinc-600'>
-          <span>© {new Date().getFullYear()} Chronos Intelligence Systems. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} Chronos AI. All rights reserved.</span>
           <div className='flex gap-5'>
             <button
               type='button'
