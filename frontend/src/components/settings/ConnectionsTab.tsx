@@ -548,6 +548,14 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                     <p className="text-xs text-red-300">{botErrors[integration.id]}</p>
                   </div>
                 )}
+
+                {/* Bot Config Panel — shown after successful connection */}
+                {isConn && (
+                  <BotConfigPanel
+                    platform={integration.id}
+                    integrationId={integration.id}
+                  />
+                )}
               </div>
             )
           })}
@@ -709,6 +717,310 @@ function DiscordForm({ integration, busy, onUpdate, onConnect, onTest }: BotForm
         <button type="button" onClick={onTest} disabled={busy} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
           Test
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Bot Config Panel ─────────────────────────────────────────────────
+
+type BotConfig = {
+  slash_commands_enabled: boolean
+  ack_reaction: string
+  stream_enabled: boolean
+  allow_from: string[]
+  model_sync: boolean
+}
+
+const DEFAULT_BOT_CONFIG: BotConfig = {
+  slash_commands_enabled: true,
+  ack_reaction: '',
+  stream_enabled: false,
+  allow_from: [],
+  model_sync: true,
+}
+
+function BotConfigPanel({
+  platform,
+  integrationId,
+  onSaved,
+}: {
+  platform: string
+  integrationId: string
+  onSaved?: () => void
+}) {
+  const [config, setConfig] = useState<BotConfig>(DEFAULT_BOT_CONFIG)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveOk, setSaveOk] = useState(false)
+
+  // Collapsible section state
+  const [openSlash, setOpenSlash] = useState(true)
+  const [openBehavior, setOpenBehavior] = useState(true)
+  const [openModel, setOpenModel] = useState(true)
+
+  // Allow-from input buffer
+  const [allowFromInput, setAllowFromInput] = useState('')
+
+  // Load config on mount
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const resp = await fetch(apiUrl(`/api/integrations/${platform}/config/${integrationId}`), { credentials: 'include' })
+        if (!resp.ok) return
+        const data = await resp.json()
+        if (!cancelled && data) {
+          setConfig({
+            slash_commands_enabled: data.slash_commands_enabled ?? true,
+            ack_reaction: data.ack_reaction ?? '',
+            stream_enabled: data.stream_enabled ?? false,
+            allow_from: Array.isArray(data.allow_from) ? data.allow_from : [],
+            model_sync: data.model_sync ?? true,
+          })
+        }
+      } catch {
+        /* silent — use defaults */
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [platform, integrationId])
+
+  const set = <K extends keyof BotConfig>(key: K, val: BotConfig[K]) => {
+    setConfig((prev) => ({ ...prev, [key]: val }))
+    setSaveOk(false)
+  }
+
+  const addAllowFrom = () => {
+    const trimmed = allowFromInput.trim()
+    if (!trimmed || config.allow_from.includes(trimmed)) return
+    set('allow_from', [...config.allow_from, trimmed])
+    setAllowFromInput('')
+  }
+
+  const removeAllowFrom = (item: string) => {
+    set('allow_from', config.allow_from.filter((x) => x !== item))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveError(null)
+    setSaveOk(false)
+    try {
+      const resp = await fetch(apiUrl(`/api/integrations/${platform}/config/${integrationId}`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : 'Save failed')
+      setSaveOk(true)
+      onSaved?.()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const chevron = (open: boolean) => (
+    <svg
+      className={`h-3.5 w-3.5 text-zinc-500 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+    </svg>
+  )
+
+  if (loading) {
+    return (
+      <div className="border-t border-[#2a2a2a] px-4 py-3">
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <div className="h-3 w-3 animate-spin rounded-full border border-zinc-600 border-t-zinc-400" />
+          Loading config…
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border-t border-[#2a2a2a] bg-[#111] px-4 py-3">
+      <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Bot Configuration</p>
+
+      <div className="space-y-1">
+
+        {/* ── Section 1: Slash Commands ── */}
+        <div className="rounded-lg border border-[#2a2a2a] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setOpenSlash((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-white/[0.03]"
+          >
+            <span className="text-xs font-medium text-zinc-300">Slash Commands</span>
+            {chevron(openSlash)}
+          </button>
+          {openSlash && (
+            <div className="border-t border-[#2a2a2a] px-3 py-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-zinc-200">Enable slash commands</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Allow users to trigger Aegis with /aegis or /ask in your platform</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.slash_commands_enabled}
+                  onClick={() => set('slash_commands_enabled', !config.slash_commands_enabled)}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${config.slash_commands_enabled ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${config.slash_commands_enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-zinc-200">Auto-stream screenshots</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Sends browser frames every ~3s while Aegis is working</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.stream_enabled}
+                  onClick={() => set('stream_enabled', !config.stream_enabled)}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${config.stream_enabled ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${config.stream_enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Section 2: Behavior ── */}
+        <div className="rounded-lg border border-[#2a2a2a] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setOpenBehavior((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-white/[0.03]"
+          >
+            <span className="text-xs font-medium text-zinc-300">Behavior</span>
+            {chevron(openBehavior)}
+          </button>
+          {openBehavior && (
+            <div className="border-t border-[#2a2a2a] px-3 py-2.5 space-y-3">
+              {/* Ack reaction */}
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                  Ack reaction
+                </label>
+                <input
+                  type="text"
+                  value={config.ack_reaction}
+                  onChange={(e) => set('ack_reaction', e.target.value)}
+                  placeholder="e.g. 👀"
+                  maxLength={10}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-white placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1 text-[11px] text-zinc-500">Emoji reaction added when the bot receives a message</p>
+              </div>
+
+              {/* Allow from */}
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                  Allow from
+                </label>
+                <p className="mb-1.5 text-[11px] text-zinc-500">Only these user IDs can trigger the bot. Leave empty to allow everyone.</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={allowFromInput}
+                    onChange={(e) => setAllowFromInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAllowFrom() } }}
+                    placeholder="User ID or @username"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={addAllowFrom}
+                    disabled={!allowFromInput.trim()}
+                    className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    + Add
+                  </button>
+                </div>
+                {config.allow_from.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {config.allow_from.map((item) => (
+                      <span
+                        key={item}
+                        className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2.5 py-0.5 text-[11px] text-zinc-300"
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => removeAllowFrom(item)}
+                          className="ml-0.5 text-zinc-500 hover:text-zinc-200"
+                          aria-label={`Remove ${item}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Section 3: Model Sync ── */}
+        <div className="rounded-lg border border-[#2a2a2a] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setOpenModel((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-white/[0.03]"
+          >
+            <span className="text-xs font-medium text-zinc-300">Model Sync</span>
+            {chevron(openModel)}
+          </button>
+          {openModel && (
+            <div className="border-t border-[#2a2a2a] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-zinc-200">Sync model with Aegis app</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Bot uses the same model selected in your Aegis settings</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.model_sync}
+                  onClick={() => set('model_sync', !config.model_sync)}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${config.model_sync ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${config.model_sync ? 'left-[18px]' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Save button */}
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save config'}
+        </button>
+        {saveOk && <span className="text-xs text-emerald-400">✓ Saved</span>}
+        {saveError && <span className="text-xs text-red-400">{saveError}</span>}
       </div>
     </div>
   )

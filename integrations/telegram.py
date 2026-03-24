@@ -117,6 +117,26 @@ class TelegramIntegration(BaseIntegration):
         data = await self._request("sendMessage", json={"chat_id": chat_id, "text": text})
         return {"ok": bool(data.get("ok")), "tool": "telegram_send_message", "result": data}
 
+    async def set_my_commands(self, commands: list[dict[str, str]]) -> dict[str, Any]:
+        """Register slash commands with Telegram BotFather API."""
+        return await self._request("setMyCommands", json={"commands": commands})
+
+    async def send_photo(self, chat_id: Any, image_b64: str) -> dict[str, Any]:
+        """Send a base64-encoded PNG as a photo to a Telegram chat."""
+        import base64, io
+        url = f"{TELEGRAM_API_BASE}/bot{self._token}/sendPhoto"
+        image_bytes = base64.b64decode(image_b64)
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                url,
+                data={"chat_id": str(chat_id)},
+                files={"photo": ("frame.png", io.BytesIO(image_bytes), "image/png")},
+            )
+        try:
+            return response.json()
+        except ValueError:
+            return {"ok": False, "description": response.text}
+
     async def _request(
         self,
         method: str,

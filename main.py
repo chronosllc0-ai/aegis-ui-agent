@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from http.cookies import SimpleCookie
 import logging
 from pathlib import Path
+import time as _time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -183,6 +184,21 @@ async def shutdown_event() -> None:
 # ── Auth helper ───────────────────────────────────────────────────────
 
 
+def _extract_session_user_uid(token: str | None) -> str | None:
+    """Extract user UID from a session token string."""
+    payload = _verify_session(token)
+    return payload["uid"] if payload else None
+
+
+def _extract_websocket_user_uid(websocket: WebSocket) -> str | None:
+    """Extract user UID from a WebSocket connection's session cookie."""
+    cookie_header = websocket.headers.get("cookie", "")
+    jar = SimpleCookie()
+    jar.load(cookie_header)
+    token = jar["aegis_session"].value if "aegis_session" in jar else None
+    return _extract_session_user_uid(token)
+
+
 def _get_current_user(request: Request) -> dict[str, Any]:
     """Extract the authenticated user from the session cookie."""
     token = request.cookies.get("aegis_session")
@@ -254,6 +270,15 @@ class DiscordRegistry:
 
 slack_registry = SlackRegistry()
 discord_registry = DiscordRegistry()
+
+# Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
+_user_runtimes: dict[str, "SessionRuntime"] = {}
+
+# Stream subscribers: user_uid -> {platform, integration_id, chat_id, last_sent_at}
+_stream_subscribers: dict[str, dict[str, Any]] = {}
+
+# Bot config: integration_id -> config dict
+_bot_configs: dict[str, dict[str, Any]] = {}
 
 
 def _get_orchestrator() -> AgentOrchestrator:
@@ -560,6 +585,36 @@ async def _send_context_update(websocket: WebSocket, tokens_used: int, context_l
     })
 
 
+async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str | None) -> None:
+    """Send frame to websocket AND any active stream subscribers (rate-limited)."""
+    await _send_frame(websocket, image_b64)
+    if not user_uid:
+        return
+    sub = _stream_subscribers.get(user_uid)
+    if not sub:
+        return
+    now = _time.monotonic()
+    if now - sub.get("last_sent_at", 0) < 3.0:
+        return  # rate limit: max 1 frame per 3 seconds
+    sub["last_sent_at"] = now
+    platform = sub.get("platform")
+    integration_id = sub.get("integration_id")
+    chat_id = sub.get("chat_id")
+    if platform == "telegram":
+        integration = telegram_registry.get_telegram(integration_id)
+        if integration:
+            asyncio.create_task(
+                integration.send_photo(chat_id, image_b64)
+            )
+    elif platform == "discord":
+        integration = discord_registry.get_discord(integration_id)
+        if integration:
+            channel = sub.get("channel_id", chat_id)
+            asyncio.create_task(
+                integration.send_image(channel, image_b64)
+            )
+
+
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
     """Create and store the background navigation task for the current session."""
     runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
@@ -605,7 +660,7 @@ async def _run_navigation_task(
             session_id=session_id,
             instruction=instruction,
             on_step=callback,
-            on_frame=lambda image_b64: _send_frame(websocket, image_b64),
+            on_frame=lambda image_b64: _on_frame_combined(websocket, image_b64, runtime.user_uid),
             cancel_event=runtime.cancel_event,
             steering_context=runtime.steering_context,
             settings=runtime.settings,
@@ -659,6 +714,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     session_id = await live_manager.create_session()
     runtime = SessionRuntime()
     runtime.user_uid = _extract_websocket_user_uid(websocket)
+    if runtime.user_uid:
+        _user_runtimes[runtime.user_uid] = runtime
 
     try:
         await _get_orchestrator().executor.ensure_browser()
@@ -772,6 +829,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 await runtime.current_task
             except asyncio.CancelledError:
                 logger.info("Cancelled active websocket task during shutdown for session %s", session_id)
+        if runtime.user_uid:
+            _user_runtimes.pop(runtime.user_uid, None)
         await live_manager.close_session(session_id)
 
 
@@ -792,6 +851,29 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
     chat_id, text_content, platform_message_id = _extract_telegram_message(update)
+
+    # Slash command handling
+    if chat_id and text_content and text_content.startswith("/"):
+        bot_cfg = _bot_configs.get(f"telegram:{integration_id}", {})
+        # Allow-from check
+        allow_from = bot_cfg.get("allow_from", [])
+        if allow_from:
+            sender_id = str(_get_telegram_sender_id(update))
+            if sender_id not in allow_from:
+                return {"ok": True}  # silently ignore unauthorized senders
+        ack_reaction = bot_cfg.get("ack_reaction", "")
+        cmd_response = await _handle_slash_command(
+            text=text_content,
+            owner_uid=owner_user_id,
+            platform="telegram",
+            integration_id=integration_id,
+            chat_id=chat_id,
+            ack_reaction=ack_reaction,
+        )
+        if cmd_response:
+            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
+        return {"ok": True}
+
     if chat_id and text_content:
         await _log_platform_message(
             owner_user_id,
@@ -818,6 +900,9 @@ async def register_telegram_integration(integration_id: str, payload: dict[str, 
     integration = TelegramIntegration()
     connection = await integration.connect(config)
     telegram_registry.upsert(integration_id, integration, config)
+    # Auto-register slash commands
+    if connection.get("connected"):
+        asyncio.create_task(_register_telegram_commands(integration))
     return {"ok": True, "connection": connection}
 
 
@@ -979,6 +1064,251 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
             metadata={"integration_id": integration_id, "source": "send_message"},
         )
     return {"ok": bool(result.get("ok")), "result": result}
+
+
+# ── Bot slash command infrastructure ────────────────────────────────
+
+
+TELEGRAM_SLASH_COMMANDS = [
+    {"command": "run", "description": "Start a task: /run <instruction>"},
+    {"command": "steer", "description": "Steer mid-task: /steer <guidance>"},
+    {"command": "interrupt", "description": "Stop the current task"},
+    {"command": "queue", "description": "Queue a task: /queue <instruction>"},
+    {"command": "status", "description": "Show agent status and credits"},
+    {"command": "model", "description": "Show current model"},
+    {"command": "models", "description": "List models and switch"},
+    {"command": "stream", "description": "Live browser screenshots: /stream start|stop"},
+    {"command": "help", "description": "Show all commands"},
+]
+
+
+async def _register_telegram_commands(integration: TelegramIntegration) -> None:
+    try:
+        await integration.set_my_commands(TELEGRAM_SLASH_COMMANDS)
+        logger.info("Telegram slash commands registered")
+    except Exception as exc:
+        logger.warning("Failed to register Telegram commands: %s", exc)
+
+
+async def _on_frame_for_stream(user_uid: str, image_b64: str) -> None:
+    """Forward a frame to stream subscribers (used when task is triggered from bot)."""
+    sub = _stream_subscribers.get(user_uid)
+    if not sub:
+        return
+    now = _time.monotonic()
+    if now - sub.get("last_sent_at", 0) < 3.0:
+        return
+    sub["last_sent_at"] = now
+    platform = sub.get("platform")
+    integration_id = sub.get("integration_id")
+    chat_id = sub.get("chat_id")
+    if platform == "telegram":
+        integration = telegram_registry.get_telegram(integration_id)
+        if integration:
+            await integration.send_photo(chat_id, image_b64)
+    elif platform == "discord":
+        integration = discord_registry.get_discord(integration_id)
+        if integration:
+            await integration.send_image(sub.get("channel_id", chat_id), image_b64)
+
+
+async def _run_navigation_task_from_bot(
+    runtime: "SessionRuntime",
+    owner_uid: str,
+    platform: str,
+    integration_id: str,
+    chat_id: Any,
+    instruction: str,
+) -> None:
+    """Run a navigation task triggered from a bot command (no websocket)."""
+    runtime.task_running = True
+    runtime.cancel_event.clear()
+    steps: list[Any] = []
+    try:
+        result = await _get_orchestrator().execute_task(
+            session_id=f"bot_{owner_uid}",
+            instruction=instruction,
+            on_step=lambda step: steps.append(step),
+            on_frame=lambda img: _on_frame_for_stream(owner_uid, img),
+            cancel_event=runtime.cancel_event,
+            steering_context=runtime.steering_context,
+            settings=runtime.settings,
+            on_workflow_step=lambda _: None,
+        )
+        status = result.get("status", "completed")
+        reply = f"✅ Task {status}: {instruction[:60]}"
+    except asyncio.CancelledError:
+        reply = "🛑 Task was interrupted."
+    except Exception as exc:
+        reply = f"❌ Task failed: {exc}"
+    finally:
+        runtime.task_running = False
+    # Send result back to bot
+    if platform == "telegram":
+        integration = telegram_registry.get_telegram(integration_id)
+        if integration:
+            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": reply})
+    elif platform == "discord":
+        integration = discord_registry.get_discord(integration_id)
+        if integration:
+            await integration.execute_tool("discord_send_message", {"channel": str(chat_id), "text": reply})
+
+
+def _get_telegram_sender_id(update: dict[str, Any]) -> str:
+    msg = update.get("message") or update.get("edited_message") or {}
+    return str((msg.get("from") or {}).get("id", ""))
+
+
+async def _handle_slash_command(
+    text: str,
+    owner_uid: str | None,
+    platform: str,
+    integration_id: str,
+    chat_id: Any,
+    ack_reaction: str = "",
+) -> str | None:
+    """Parse a slash command and execute the appropriate action. Returns a reply string or None."""
+    parts = text.strip().split(None, 1)
+    cmd = parts[0].lstrip("/").lower().split("@")[0]  # strip bot username suffix
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    runtime = _user_runtimes.get(owner_uid) if owner_uid else None
+
+    if cmd == "help":
+        return (
+            "🤖 *Aegis Bot Commands*\n\n"
+            "/run <instruction> — start a task\n"
+            "/steer <guidance> — nudge mid-task\n"
+            "/interrupt — stop current task\n"
+            "/queue <instruction> — queue for later\n"
+            "/status — agent status + credits\n"
+            "/model — current model\n"
+            "/models — list & switch model\n"
+            "/stream start|stop — live screenshots\n"
+            "/help — this message"
+        )
+
+    if cmd == "status":
+        if not runtime:
+            return "⚪ Agent offline — open the Aegis app to start a session."
+        state = "🟢 Working" if runtime.task_running else "🟡 Idle"
+        queued = len(runtime.queued_instructions)
+        model = runtime.settings.get("model", "default")
+        provider = runtime.settings.get("provider", "")
+        credits_info = ""
+        try:
+            from backend.database import get_session as _get_db_session
+            async for db in _get_db_session():
+                bal = await get_or_create_balance(db, owner_uid)
+                credits_info = f"\n💳 Credits: {bal.balance:.4f}"
+                break
+        except Exception:
+            pass
+        return f"{state}\n🧠 Model: {model} ({provider})\n📋 Queued: {queued}{credits_info}"
+
+    if cmd == "model":
+        if not runtime:
+            return "⚪ No active session."
+        model = runtime.settings.get("model", "not set")
+        provider = runtime.settings.get("provider", "")
+        return f"🧠 Current model: *{model}* ({provider})"
+
+    if cmd == "models":
+        providers = list_providers()
+        lines = ["🧠 *Available models:*\n"]
+        for p in providers[:5]:  # cap at 5 providers to avoid wall of text
+            lines.append(f"*{p['displayName']}*")
+            for m in p.get("models", [])[:3]:
+                lines.append(f"  • {m['label']} — /setmodel {p['id']} {m['id']}")
+        lines.append("\nUse /setmodel <provider> <model_id> to switch")
+        return "\n".join(lines)
+
+    if cmd == "setmodel":
+        parts2 = arg.split(None, 1)
+        if len(parts2) < 2:
+            return "Usage: /setmodel <provider> <model_id>"
+        provider_id, model_id = parts2[0], parts2[1]
+        if runtime:
+            runtime.settings["provider"] = provider_id
+            runtime.settings["model"] = model_id
+            return f"✅ Model switched to *{model_id}* ({provider_id})"
+        return "⚪ No active session to update."
+
+    if cmd == "run":
+        if not arg:
+            return "Usage: /run <instruction>"
+        if not runtime:
+            return "⚪ No active session. Open the Aegis app first."
+        if runtime.task_running:
+            runtime.queued_instructions.append(arg)
+            return f"📋 Task queued (agent is busy): {arg[:80]}"
+        asyncio.create_task(_run_navigation_task_from_bot(runtime, owner_uid, platform, integration_id, chat_id, arg))
+        return f"🚀 Starting task: {arg[:80]}"
+
+    if cmd == "steer":
+        if not arg:
+            return "Usage: /steer <guidance>"
+        if not runtime:
+            return "⚪ No active session."
+        runtime.steering_context.append(arg)
+        return f"🎯 Steering note added: {arg[:80]}"
+
+    if cmd == "interrupt":
+        if not runtime or not runtime.task_running:
+            return "⚪ No task is currently running."
+        runtime.cancel_event.set()
+        return "🛑 Interrupt signal sent."
+
+    if cmd == "queue":
+        if not arg:
+            return "Usage: /queue <instruction>"
+        if not runtime:
+            return "⚪ No active session."
+        runtime.queued_instructions.append(arg)
+        return f"📋 Queued: {arg[:80]}"
+
+    if cmd == "stream":
+        sub_cmd = arg.lower()
+        if sub_cmd == "start":
+            if not runtime:
+                return "⚪ No active session. Open the Aegis app first."
+            _stream_subscribers[owner_uid] = {
+                "platform": platform,
+                "integration_id": integration_id,
+                "chat_id": chat_id,
+                "last_sent_at": 0,
+            }
+            return "📸 Screenshot stream started! You'll receive browser frames every ~3s while the agent works."
+        elif sub_cmd == "stop":
+            _stream_subscribers.pop(owner_uid, None)
+            return "⏹ Screenshot stream stopped."
+        else:
+            return "Usage: /stream start|stop"
+
+    return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
+
+
+# ── Bot config endpoints ─────────────────────────────────────────────
+
+
+@app.get("/api/integrations/{platform}/config/{integration_id}")
+async def get_bot_config(platform: str, integration_id: str, request: Request) -> dict[str, Any]:
+    _get_current_user(request)  # auth check
+    cfg = _bot_configs.get(f"{platform}:{integration_id}", {})
+    return {"ok": True, "config": cfg}
+
+
+@app.post("/api/integrations/{platform}/config/{integration_id}")
+async def save_bot_config(platform: str, integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    _get_current_user(request)
+    key = f"{platform}:{integration_id}"
+    _bot_configs[key] = payload
+    # Auto-register Telegram slash commands if token available
+    if platform == "telegram":
+        integration = telegram_registry.get_telegram(integration_id)
+        if integration and payload.get("slash_commands_enabled", True):
+            asyncio.create_task(_register_telegram_commands(integration))
+    return {"ok": True}
 
 
 # ── Frontend static files ────────────────────────────────────────────

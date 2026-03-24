@@ -103,6 +103,24 @@ class DiscordIntegration(BaseIntegration):
         ok = bool(data.get("id")) if isinstance(data, dict) else False
         return {"ok": ok, "tool": "discord_send_message", "result": data}
 
+    async def send_image(self, channel: str, image_b64: str) -> dict[str, Any]:
+        """Send a base64-encoded PNG to a Discord channel."""
+        import base64, io
+        url = f"{DISCORD_API_BASE}/channels/{channel}/messages"
+        headers = {"Authorization": f"Bot {self._token}"}
+        image_bytes = base64.b64decode(image_b64)
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                files={"file": ("frame.png", io.BytesIO(image_bytes), "image/png")},
+            )
+        try:
+            data = response.json()
+        except ValueError:
+            data = {"message": response.text}
+        return {"ok": bool(data.get("id")) if isinstance(data, dict) else False, "result": data}
+
     async def _request(
         self,
         method: str,
