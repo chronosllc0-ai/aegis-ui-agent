@@ -405,7 +405,7 @@ function App() {
   }
 
   return (
-    <main className='h-screen bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
+    <main className='h-[100dvh] bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
       {showOnboarding && (
         <OnboardingWizard
           userName={authUser?.name ?? settings.displayName}
@@ -545,6 +545,7 @@ function App() {
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 voiceError={voiceError}
                 isConnected={connectionStatus === 'connected'}
+                isWorking={isWorking}
                 onToggleVoice={toggleVoice}
                 sending={sending}
                 onModeChange={setMode}

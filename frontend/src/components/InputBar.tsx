@@ -11,6 +11,7 @@ type InputBarProps = {
   voiceDisabled?: boolean
   voiceError?: string | null
   isConnected?: boolean
+  isWorking?: boolean
   onToggleVoice: () => void
   sending: boolean
   onModeChange: (mode: SteeringMode) => void
@@ -92,6 +93,7 @@ export function InputBar({
   voiceDisabled = false,
   voiceError = null,
   isConnected = false,
+  isWorking = false,
   onToggleVoice,
   sending,
   onModeChange,
@@ -152,7 +154,10 @@ export function InputBar({
     <section className={`space-y-2 rounded-xl border bg-[#1a1a1a] p-2 transition sm:space-y-3 sm:rounded-2xl sm:p-3 ${modeStyling}`}>
       <div className='flex flex-wrap items-center justify-between gap-1.5 sm:gap-2'>
         <div className='flex flex-wrap items-center gap-1.5 sm:gap-2'>
-          <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+          {/* Steering bar: only visible when agent is actively working */}
+          {isWorking && (
+            <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+          )}
           <div className='hidden sm:block'>
             <ModelPicker
               provider={provider}
