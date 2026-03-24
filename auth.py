@@ -24,6 +24,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import AuthCode, User, get_session
+from backend.email_service import send_magic_link_email, send_welcome_email
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,14 @@ async def _upsert_user(session: AsyncSession, profile: dict[str, Any]) -> dict[s
             "created_at": now,
             "last_login_at": now,
         }
+        await session.commit()
+        # Fire-and-forget welcome email for new users
+        if user.email:
+            try:
+                await send_welcome_email(user.email, user.name or "")
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to send welcome email to %s", user.email)
+        return payload
     await session.commit()
     return payload
 
@@ -383,7 +392,7 @@ async def email_start(payload: dict[str, Any], session: AsyncSession = Depends(g
         else:
             session.add(AuthCode(email=email, code_hash=code_hash, expires_at=expires_at))
         await session.commit()
-        await _send_email(email, "Your Aegis sign-in code", f"Your code is {code}. It expires in 10 minutes.")
+        await send_magic_link_email(email, code)
     except Exception as exc:
         logger.exception("Email sign-in failed for %s", email)
         raise HTTPException(status_code=500, detail=f"Email sign-in failed: {exc}") from exc

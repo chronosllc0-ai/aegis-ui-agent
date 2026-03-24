@@ -18,6 +18,7 @@ import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
+import { AutomationsPage } from './components/AutomationsPage'
 import { useToast } from './hooks/useToast'
 import { useContextMeter } from './hooks/useContextMeter'
 import { useSettingsContext } from './context/useSettingsContext'
@@ -58,6 +59,7 @@ function App() {
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [showAutomations, setShowAutomations] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
   const [showWorkflow, setShowWorkflow] = useState(false)
   const [urlInput, setUrlInput] = useState('about:blank')
@@ -428,7 +430,7 @@ function App() {
           <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
         )}
         <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
-          <button type='button' onClick={newSession} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
+          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
             New Task
           </button>
           <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm' />
@@ -466,18 +468,22 @@ function App() {
               }}
               modelLabel={currentModelLabel}
             />
-            <button type='button' onClick={() => { setSettingsInitialTab('Workflows'); setShowSettings(true) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { setShowAutomations(true); setShowSettings(false); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left ${showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a]'}`}>
+              {Icons.clock({ className: 'h-3.5 w-3.5' })}
+              <span>Automations</span>
+            </button>
+            <button type='button' onClick={() => { setSettingsInitialTab('Workflows'); setShowSettings(true); setShowAutomations(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.workflows({ className: 'h-3.5 w-3.5' })}
               <span>Workflow templates ({settings.workflowTemplates.length})</span>
             </button>
-            <button type='button' onClick={() => { setSettingsInitialTab(undefined); setShowSettings(true) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { setSettingsInitialTab(undefined); setShowSettings(true); setShowAutomations(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.settings({ className: 'h-3.5 w-3.5' })}
               <span>Settings</span>
             </button>
             <UserMenu
               name={authUser?.name ?? settings.displayName}
               avatarUrl={authUser?.avatar_url ?? settings.avatarUrl}
-              onOpenSettings={() => setShowSettings(true)}
+              onOpenSettings={() => { setShowSettings(true); setShowAutomations(false) }}
               onSignOut={async () => {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
                 setAuthUser(null)
@@ -511,7 +517,7 @@ function App() {
             </div>
           </header>
 
-          {!showSettings && (
+          {!showSettings && !showAutomations && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
               <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
@@ -528,6 +534,8 @@ function App() {
           <div className='min-h-0 flex-1'>
             {showSettings ? (
               <SettingsPage onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined) }} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} initialTab={settingsInitialTab as any} isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'} />
+            ) : showAutomations ? (
+              <AutomationsPage />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (
@@ -540,7 +548,7 @@ function App() {
             )}
           </div>
 
-          {!showSettings && (
+          {!showSettings && !showAutomations && (
             <div data-tour='input-bar'>
               <InputBar
                 mode={mode}

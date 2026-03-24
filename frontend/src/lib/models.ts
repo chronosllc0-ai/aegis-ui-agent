@@ -1,5 +1,5 @@
 // ── Provider + Model catalogue ───────────────────────────────────────
-// Last updated: 2026-03-18 — sourced from official provider docs
+// Last updated: 2026-03-24 — sourced from official provider docs
 
 import { createElement } from 'react'
 
@@ -119,8 +119,8 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'minimax/minimax-m2.5', label: 'MiniMax M2.5', description: 'SOTA LLM for real-world productivity.', vision: false, contextLength: 197_000 },
       { id: 'nvidia/nemotron-3-super', label: 'Nemotron 3 Super', description: 'NVIDIA 120B-param open hybrid MoE model.', vision: false, contextLength: 262_144 },
       { id: 'nvidia/nemotron-3-super:free', label: 'Nemotron 3 Super (free)', description: 'Free tier of NVIDIA Nemotron 3 Super.', vision: false, contextLength: 262_144 },
-      { id: 'z-ai/glm-5-turbo', label: 'GLM 5 Turbo', description: 'Fast inference and strong performance by Z.ai.', vision: false, contextLength: 203_000 },
-      { id: 'z-ai/glm-5', label: 'GLM 5', description: "Z.ai's flagship open-source foundation model.", vision: false, contextLength: 80_000 },
+      { id: 'z-ai/glm-5-turbo', label: 'GLM 5 Turbo', description: 'Fast inference and strong performance by Z.ai.', vision: false, contextLength: 200_000 },
+      { id: 'z-ai/glm-5', label: 'GLM 5', description: "Z.ai's flagship open-source foundation model.", vision: false, contextLength: 200_000 },
       { id: 'bytedance-seed/seed-2.0-lite', label: 'Seed-2.0-Lite', description: 'Versatile, cost-efficient enterprise workhorse by ByteDance.', vision: false, contextLength: 262_144 },
       { id: 'xiaomi/mimo-v2-omni', label: 'MiMo-V2-Omni', description: 'Frontier omni-modal model by Xiaomi — processes image, video, audio.', vision: true, contextLength: 262_144 },
       { id: 'xiaomi/mimo-v2-pro', label: 'MiMo-V2-Pro', description: "Xiaomi's flagship 1T+ parameter foundation model.", vision: true, contextLength: 1_048_576 },

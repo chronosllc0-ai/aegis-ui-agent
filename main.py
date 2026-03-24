@@ -26,6 +26,7 @@ from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
 from backend import database
 from backend.connectors.router import connector_router
+from backend.payments import payments_router
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -69,6 +70,7 @@ else:
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(connector_router)
+app.include_router(payments_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()

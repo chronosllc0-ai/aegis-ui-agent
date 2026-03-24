@@ -274,4 +274,23 @@ async def update_user_plan(
     )
     await session.commit()
     await session.refresh(balance)
+
+    # Send plan upgrade email when plan changes
+    if balance.plan != previous_plan:
+        try:
+            from backend.email_service import send_plan_upgrade_email  # lazy import
+            import asyncio as _asyncio
+            target = await _get_target_user(session, uid)
+            if target.email:
+                _asyncio.ensure_future(
+                    send_plan_upgrade_email(
+                        target.email,
+                        target.name or "",
+                        balance.plan,
+                        balance.monthly_allowance,
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
     return _serialize_credit_balance(balance)

@@ -13,7 +13,7 @@ from sqlalchemy import func as sqlfunc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.credit_rates import PLAN_ALLOWANCES, calculate_credits
-from backend.database import CreditBalance, CreditTopUp, UsageEvent
+from backend.database import CreditBalance, CreditTopUp, User, UsageEvent
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,30 @@ async def record_usage(
         balance.overage_credits += overage_portion
 
     await session.flush()
+
+    # ── Credit-low warning (fire-and-forget at ≥80 % usage threshold) ──
+    if balance.monthly_allowance > 0:
+        total_used = balance.credits_used + balance.overage_credits
+        pct = total_used / balance.monthly_allowance * 100
+        if pct >= 80:
+            try:
+                from backend.email_service import send_credit_low_warning_email  # lazy import
+                from sqlalchemy import select as _select
+                import asyncio as _asyncio
+                user_row = await session.execute(_select(User).where(User.uid == user_id))
+                user_obj = user_row.scalar_one_or_none()
+                if user_obj and user_obj.email:
+                    remaining = max(0, balance.monthly_allowance - int(total_used))
+                    _asyncio.ensure_future(
+                        send_credit_low_warning_email(
+                            user_obj.email,
+                            user_obj.name or "",
+                            pct,
+                            remaining,
+                        )
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to schedule credit-low warning email for %s", user_id)
 
     return {
         "input_tokens": input_tokens,

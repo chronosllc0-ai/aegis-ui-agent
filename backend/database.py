@@ -230,6 +230,7 @@ async def create_tables() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns_sync)
         await conn.run_sync(_ensure_audit_log_created_at_sync)
+        await conn.run_sync(_ensure_scheduled_tasks_table)
     _database_ready = True
     logger.info("Database tables ensured")
 
@@ -337,6 +338,57 @@ class OAuthAppCredential(Base):
     client_secret_enc = Column(Text, nullable=False)     # Fernet-encrypted client_secret
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ScheduledTask(Base):
+    """A user-defined cron job that runs an agent prompt on a schedule."""
+
+    __tablename__ = "scheduled_tasks"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    prompt = Column(Text, nullable=False)           # the agent instruction to run
+    cron_expr = Column(String(100), nullable=False)  # e.g. "0 9 * * 1" (every Monday 9am)
+    timezone = Column(String(100), default="UTC")
+    enabled = Column(Boolean, default=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    last_status = Column(String(20), default="pending")  # pending | running | success | failed
+    last_error = Column(Text, nullable=True)
+    run_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+def _ensure_scheduled_tasks_table(sync_conn) -> None:
+    """Ensure the scheduled_tasks table has all required columns (idempotent)."""
+    inspector = inspect(sync_conn)
+    if "scheduled_tasks" not in inspector.get_table_names():
+        return  # table was just created by create_all; nothing to migrate
+
+    existing = {col["name"] for col in inspector.get_columns("scheduled_tasks")}
+
+    migrations = [
+        ("description", "ALTER TABLE scheduled_tasks ADD COLUMN description TEXT"),
+        ("timezone", "ALTER TABLE scheduled_tasks ADD COLUMN timezone VARCHAR(100) DEFAULT 'UTC'"),
+        ("enabled", "ALTER TABLE scheduled_tasks ADD COLUMN enabled BOOLEAN DEFAULT TRUE"),
+        ("last_run_at", "ALTER TABLE scheduled_tasks ADD COLUMN last_run_at TIMESTAMP WITH TIME ZONE"),
+        ("next_run_at", "ALTER TABLE scheduled_tasks ADD COLUMN next_run_at TIMESTAMP WITH TIME ZONE"),
+        ("last_status", "ALTER TABLE scheduled_tasks ADD COLUMN last_status VARCHAR(20) DEFAULT 'pending'"),
+        ("last_error", "ALTER TABLE scheduled_tasks ADD COLUMN last_error TEXT"),
+        ("run_count", "ALTER TABLE scheduled_tasks ADD COLUMN run_count INTEGER DEFAULT 0"),
+    ]
+    for col_name, ddl in migrations:
+        if col_name not in existing:
+            try:
+                sync_conn.execute(text(ddl))
+                existing.add(col_name)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping scheduled_tasks.%s sync; assuming already exists: %s", col_name, exc
+                )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

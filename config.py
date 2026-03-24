@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     LINEAR_CONNECTOR_CLIENT_ID: str = ""
     LINEAR_CONNECTOR_CLIENT_SECRET: str = ""
 
+    # ── Resend email API ─────────────────────────────────────────────
+    RESEND_API_KEY: str = ""
+
     # ── Email / SMTP ─────────────────────────────────────────────────
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -81,6 +84,13 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_SENDER: str = ""
     SMTP_USE_TLS: bool = True
+
+    # ── Payments ─────────────────────────────────────────────────────
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    COINBASE_COMMERCE_API_KEY: str = ""
+    COINBASE_COMMERCE_WEBHOOK_SECRET: str = ""
 
     # ── Railway / Deployment ─────────────────────────────────────────
     RAILWAY_ENVIRONMENT: str = ""

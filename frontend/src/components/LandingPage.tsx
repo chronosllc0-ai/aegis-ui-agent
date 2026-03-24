@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { PROVIDERS, renderProviderIcon } from '../lib/models'
 import { PublicFooter } from '../public/PublicFooter'
 import { PublicHeader } from '../public/PublicHeader'
 import { Reveal } from './Reveal'
+import { CheckoutModal } from './CheckoutModal'
 
 type LandingPageProps = {
   onGetStarted: () => void
@@ -244,9 +246,13 @@ const revealDelay = (index: number, base = 90) => index * base
 
 export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPortalHref }: LandingPageProps) {
   const docsPortalBase = docsPortalHref.replace(/\/$/, '')
+  const [checkoutPlan, setCheckoutPlan] = useState<'pro' | 'team' | 'enterprise' | null>(null)
 
   return (
     <main className='min-h-screen bg-[#070b12] text-zinc-100'>
+      {checkoutPlan && (
+        <CheckoutModal plan={checkoutPlan} onClose={() => setCheckoutPlan(null)} />
+      )}
       <PublicHeader
         onGoHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
         onGoAuth={onGetStarted}
@@ -552,8 +558,10 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                   onClick={() => {
                     if (plan.ctaAction === 'contact') {
                       onGetStarted()
-                    } else {
+                    } else if (plan.name === 'Free') {
                       onGetStarted()
+                    } else {
+                      setCheckoutPlan(plan.name.toLowerCase() as 'pro' | 'team' | 'enterprise')
                     }
                   }}
                   className={`mt-6 w-full rounded-full px-4 py-3 text-sm font-medium transition ${

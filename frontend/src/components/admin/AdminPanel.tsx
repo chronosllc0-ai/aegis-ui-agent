@@ -3,6 +3,7 @@ import { Icons } from '../icons'
 import { useToast } from '../../hooks/useToast'
 import { apiUrl } from '../../lib/api'
 import { AdminMessaging } from './AdminMessaging'
+import { PaymentSettingsModal } from './PaymentSettingsModal'
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
@@ -71,6 +72,7 @@ const STATUS_COLORS: Record<string, string> = {
 function DashboardTab() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showPaymentSettings, setShowPaymentSettings] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
@@ -137,6 +139,31 @@ function DashboardTab() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Payment Methods settings card */}
+      <div>
+        <h3 className='mb-3 text-sm font-medium text-zinc-300'>Configuration</h3>
+        <div
+          className='flex cursor-pointer items-center gap-4 rounded-xl border border-[#2a2a2a] bg-[#111] px-4 py-4 transition hover:border-white/16 hover:bg-white/4'
+          onClick={() => setShowPaymentSettings(true)}
+          role='button'
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setShowPaymentSettings(true) }}
+        >
+          <div className='flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400'>
+            {Icons.settings({ className: 'h-4 w-4' })}
+          </div>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium text-white'>Payment Methods</p>
+            <p className='text-[12px] text-zinc-500'>Enable or disable Stripe and Coinbase Commerce</p>
+          </div>
+          {Icons.chevronRight({ className: 'h-4 w-4 text-zinc-600' })}
+        </div>
+      </div>
+
+      {showPaymentSettings && (
+        <PaymentSettingsModal onClose={() => setShowPaymentSettings(false)} />
       )}
     </div>
   )
