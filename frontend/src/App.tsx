@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
+import { ChangelogModal, useChangelog } from './components/ChangelogModal'
 import { NotificationBell } from './components/NotificationBell'
 import { PrivacyPage } from './components/PrivacyPage'
 import { TermsPage } from './components/TermsPage'
@@ -43,6 +44,7 @@ function estimateTokens(text: string): number {
 
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
+  const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
   const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
@@ -405,7 +407,7 @@ function App() {
   }
 
   return (
-    <main className='h-[100dvh] bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
+    <main className='h-[100dvh] overflow-x-hidden bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
       {showOnboarding && (
         <OnboardingWizard
           userName={authUser?.name ?? settings.displayName}
@@ -503,6 +505,7 @@ function App() {
                 </span>
                 <span className='hidden sm:inline'>Session {Math.floor(durationSeconds / 60)}:{String(durationSeconds % 60).padStart(2, '0')}</span>
                 <NotificationBell />
+                <span className='hidden text-[10px] text-zinc-600 sm:inline'>v{appVersion}</span>
                 <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:border-blue-500/60 hover:bg-zinc-900 sm:px-3 sm:py-1.5'>New</button>
               </div>
             </div>
@@ -571,6 +574,7 @@ function App() {
           <SpendingAlert balance={balance} />
         </section>
       </div>
+      {showChangelog && <ChangelogModal onClose={dismissChangelog} />}
     </main>
   )
 }

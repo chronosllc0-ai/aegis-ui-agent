@@ -30,6 +30,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  VITE_APP_VERSION = "1.1.0"
   VITE_API_URL = "https://web-production-89bf4.up.railway.app"
   VITE_WS_URL = "wss://web-production-89bf4.up.railway.app/ws/navigate"
 

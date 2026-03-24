@@ -47,16 +47,16 @@ function ModelPicker({
   const models = currentProvider.models
 
   return (
-    <div className='flex items-center gap-1.5'>
+    <div className='flex min-w-0 items-center gap-1.5 overflow-hidden'>
       {/* Provider selector */}
-      <label className='flex items-center gap-1.5 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+      <label className='flex min-w-0 shrink items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
         <span className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-xs'>
           {renderProviderIcon(currentProvider)}
         </span>
         <select
           value={provider}
           onChange={(e) => onProviderChange(e.target.value)}
-          className='min-w-[80px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          className='w-full min-w-0 max-w-[110px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
           aria-label='Provider'
         >
           {PROVIDERS.map((p) => (
@@ -68,12 +68,12 @@ function ModelPicker({
       </label>
 
       {/* Model selector */}
-      <label className='flex items-center gap-1.5 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+      <label className='flex min-w-0 shrink items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
         <select
           value={model}
           onChange={(e) => onModelChange(e.target.value)}
           title={currentModel?.description ?? model}
-          className='min-w-[130px] max-w-[220px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+          className='w-full min-w-0 max-w-[160px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
           aria-label='Model'
         >
           {models.map((m) => (
@@ -180,7 +180,7 @@ export function InputBar({
         </button>
       </div>
       {/* Model picker shown below controls on mobile */}
-      <div className='sm:hidden'>
+      <div className='w-full overflow-hidden sm:hidden'>
         <ModelPicker
           provider={provider}
           model={model}
