@@ -57,6 +57,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
+  const pingIntervalRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
   const lastStepAtRef = useRef(0)
@@ -107,8 +108,21 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
-    ws.onopen = () => setConnectionStatus('connected')
+    ws.onopen = () => {
+      setConnectionStatus('connected')
+      // Client-side keepalive ping every 25s to prevent proxy idle-timeout drops
+      if (pingIntervalRef.current !== null) window.clearInterval(pingIntervalRef.current)
+      pingIntervalRef.current = window.setInterval(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ action: 'ping' }))
+        }
+      }, 25000)
+    }
     ws.onclose = () => {
+      if (pingIntervalRef.current !== null) {
+        window.clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
+      }
       setConnectionStatus('disconnected')
       setIsWorking(false)
       if (shouldReconnectRef.current) {
@@ -118,7 +132,13 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         reconnectRef.current = window.setTimeout(() => connectRef.current(), 1500)
       }
     }
-    ws.onerror = () => setConnectionStatus('disconnected')
+    ws.onerror = () => {
+      if (pingIntervalRef.current !== null) {
+        window.clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
+      }
+      setConnectionStatus('disconnected')
+    }
     ws.onmessage = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as WebSocketPayload
       const taskId = activeTaskIdRef.current
@@ -212,6 +232,10 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       if (reconnectRef.current !== null) {
         window.clearTimeout(reconnectRef.current)
         reconnectRef.current = null
+      }
+      if (pingIntervalRef.current !== null) {
+        window.clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
       }
       if (wsRef.current) {
         wsRef.current.onclose = null

@@ -821,6 +821,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                             metadata={"source": "voice", "action": "navigate"},
                         )
                         _start_navigation_task(websocket, runtime, session_id, transcript)
+            elif action == "ping":
+                # Client keepalive ping — just ignore silently (server already handles ws-level pings)
+                pass
             elif action == "stop":
                 runtime.cancel_event.set()
                 break

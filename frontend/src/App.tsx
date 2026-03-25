@@ -472,18 +472,18 @@ function App() {
               {Icons.clock({ className: 'h-3.5 w-3.5' })}
               <span>Automations</span>
             </button>
-            <button type='button' onClick={() => { setSettingsInitialTab('Workflows'); setShowSettings(true); setShowAutomations(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { setSettingsInitialTab('Workflows'); setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.workflows({ className: 'h-3.5 w-3.5' })}
               <span>Workflow templates ({settings.workflowTemplates.length})</span>
             </button>
-            <button type='button' onClick={() => { setSettingsInitialTab(undefined); setShowSettings(true); setShowAutomations(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { setSettingsInitialTab(undefined); setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.settings({ className: 'h-3.5 w-3.5' })}
               <span>Settings</span>
             </button>
             <UserMenu
               name={authUser?.name ?? settings.displayName}
               avatarUrl={authUser?.avatar_url ?? settings.avatarUrl}
-              onOpenSettings={() => { setShowSettings(true); setShowAutomations(false) }}
+              onOpenSettings={() => { setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }}
               onSignOut={async () => {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
                 setAuthUser(null)
