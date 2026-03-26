@@ -67,18 +67,27 @@ async def send_admin_email(
 
     sent = 0
     failed = 0
+    first_error: str | None = None
 
     async def _send_one(user: User) -> None:
-        nonlocal sent, failed
+        nonlocal sent, failed, first_error
         try:
             await send_custom_email(user.email, subject, body)  # type: ignore[arg-type]
             sent += 1
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to send admin email to %s", user.email)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to send admin email to %s: %s", user.email, exc)
             failed += 1
+            if first_error is None:
+                first_error = str(exc)
 
     # Send concurrently (Resend API handles rate limiting gracefully)
     await asyncio.gather(*[_send_one(u) for u in users])
 
     logger.info("Admin email broadcast: sent=%d, failed=%d, subject=%r", sent, failed, subject)
+
+    # If every single send failed, surface the error so the admin knows why
+    if failed > 0 and sent == 0 and first_error:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=502, detail=first_error)
+
     return {"sent": sent, "failed": failed}

@@ -346,12 +346,12 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
               return (
                 <div key={c.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 transition-colors hover:border-zinc-700">
                   {/* Card header */}
-                  <div className="flex items-center gap-4 p-4">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800">
                       <img src={CONNECTOR_ICONS[c.id] || c.icon} alt={c.name} className="h-6 w-6 rounded object-contain" />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1" style={{minWidth: '120px'}}>
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-white">{c.name}</span>
                         {isConn && <StatusDot color="emerald" label="Connected" />}
                         {c.status === 'expired' && <StatusDot color="amber" label="Expired" />}
@@ -364,7 +364,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                         </div>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
                       {isConn && (
                         <button type="button" onClick={() => toggleOAuthExpand(c.id)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
                           {expanded ? 'Hide' : 'Actions'}
@@ -372,19 +372,19 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                       )}
                       {isConn ? (
                         <button type="button" onClick={() => handleOAuthDisconnect(c.id)} disabled={busy} className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40 disabled:opacity-50">
-                          {busy ? 'Disconnecting...' : 'Disconnect'}
+                          {busy ? 'Working…' : 'Disconnect'}
                         </button>
                       ) : c.configured ? (
                         <button type="button" onClick={() => handleOAuthConnect(c.id)} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
-                          {busy ? 'Connecting...' : 'Connect'}
+                          {busy ? 'Working…' : 'Connect'}
                         </button>
                       ) : isAdmin ? (
                         <button type="button" onClick={() => openCredForm(c.id)} className="rounded-lg bg-zinc-700 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-600" title="Enter OAuth app credentials to enable this connector">
                           Setup
                         </button>
                       ) : (
-                        <span className="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs text-zinc-500" title="Not configured — contact your admin">
-                          Not configured
+                        <span className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-500" title="Not configured — contact your admin">
+                          Not set up
                         </span>
                       )}
                     </div>
@@ -490,7 +490,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
 
             return (
               <div key={integration.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 transition-colors hover:border-zinc-700">
-                <div className="flex items-center gap-4 p-4">
+                <div className="flex flex-wrap items-center gap-3 p-4">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800">
                     {icon ? (
                       <img src={icon} alt={integration.name} className="h-6 w-6 object-contain" />
@@ -498,8 +498,8 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                       <span className="text-lg">{integration.name.charAt(0)}</span>
                     )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1" style={{minWidth: '120px'}}>
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-white">{integration.name}</span>
                       {isConn && <StatusDot color="emerald" label="Connected" />}
                       {integration.status === 'error' && <StatusDot color="red" label="Error" />}
@@ -507,7 +507,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                     <p className="mt-0.5 text-xs text-zinc-400">{integration.description}</p>
                     <p className="mt-0.5 text-[11px] text-zinc-500">Tools: {integration.tools.join(', ')}</p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setBotExpandedId(expanded ? null : integration.id)}

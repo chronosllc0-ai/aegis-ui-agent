@@ -110,11 +110,9 @@ def _cta_button(label: str, url: str) -> str:
 
 
 async def _send(*, to: str, subject: str, html: str) -> None:
-    """Low-level send via Resend API.  Logs and swallows errors so they never
-    crash the calling request."""
+    """Low-level send via Resend API.  Raises on failure so callers can handle errors."""
     if not settings.RESEND_API_KEY:
-        logger.warning("RESEND_API_KEY not set — skipping email to %s", to)
-        return
+        raise RuntimeError("RESEND_API_KEY is not configured on this server")
 
     payload: dict[str, Any] = {
         "from": _FROM_ADDRESS,
@@ -123,27 +121,25 @@ async def _send(*, to: str, subject: str, html: str) -> None:
         "html": html,
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                _RESEND_API_URL,
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {settings.RESEND_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
-        if resp.status_code >= 400:
-            logger.error(
-                "Resend API error %s sending to %s: %s",
-                resp.status_code,
-                to,
-                resp.text[:200],
-            )
-        else:
-            logger.info("Email sent to %s — subject: %s", to, subject)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to send email to %s: %s", to, exc)
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            _RESEND_API_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+        )
+    if resp.status_code >= 400:
+        # Surface the actual Resend error message for debugging
+        try:
+            err_body = resp.json()
+            err_msg = err_body.get("message") or err_body.get("name") or resp.text[:200]
+        except Exception:  # noqa: BLE001
+            err_msg = resp.text[:200]
+        logger.error("Resend API error %s sending to %s: %s", resp.status_code, to, err_msg)
+        raise RuntimeError(f"Resend error ({resp.status_code}): {err_msg}")
+    logger.info("Email sent to %s — subject: %s", to, subject)
 
 
 # ── Public email helpers ──────────────────────────────────────────────────────

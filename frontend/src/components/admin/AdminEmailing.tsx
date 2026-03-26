@@ -125,18 +125,22 @@ export function AdminEmailing() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error((err as { detail?: string }).detail ?? 'Failed to send email')
+        throw new Error((err as { detail?: string }).detail ?? `Server error (${res.status})`)
       }
       const result = (await res.json()) as { sent: number; failed: number }
       setSentResult(result)
-      toast.success(
-        'Email sent',
-        `Delivered to ${result.sent} recipient${result.sent !== 1 ? 's' : ''}${result.failed ? ` (${result.failed} failed)` : ''}.`,
-      )
-      // Reset form
-      setSubject('')
-      setBody('')
-      clearRecipient()
+      if (result.sent > 0) {
+        toast.success(
+          'Email sent',
+          `Delivered to ${result.sent} recipient${result.sent !== 1 ? 's' : ''}${result.failed ? ` (${result.failed} failed)` : ''}.`,
+        )
+        // Reset form only on success
+        setSubject('')
+        setBody('')
+        clearRecipient()
+      } else {
+        toast.error('Email not delivered', `${result.failed} failed to send. Check Railway logs for details.`)
+      }
     } catch (err) {
       toast.error('Send failed', err instanceof Error ? err.message : 'Unknown error')
     } finally {
