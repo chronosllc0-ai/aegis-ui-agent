@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { LuLoader, LuZap, LuCalendar, LuChartBar, LuAtSign } from 'react-icons/lu'
+import { LuLoader, LuZap, LuCalendar, LuChartBar } from 'react-icons/lu'
 import { useToast } from '../../hooks/useToast'
 import { apiUrl } from '../../lib/api'
 
@@ -206,7 +206,7 @@ export function AdminEmailing() {
           <div className='flex-1 space-y-1'>
             <label className='text-xs text-zinc-400'>Username</label>
             <div className='flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2.5 focus-within:border-zinc-500 transition'>
-              <LuAtSign className='h-3.5 w-3.5 shrink-0 text-zinc-500' />
+              <span className='shrink-0 text-zinc-500 text-sm select-none'>@</span>
               <input
                 type='text'
                 value={fromUsername}
