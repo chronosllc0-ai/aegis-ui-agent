@@ -21,6 +21,7 @@ import { SettingsPage } from './components/settings/SettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
 import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
+import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
 import { useContextMeter } from './hooks/useContextMeter'
 import { useSettingsContext } from './context/useSettingsContext'
@@ -95,6 +96,8 @@ function App() {
   const currentModelLabel = currentModelMeta?.label ?? settings.model
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
+  const isAdminPath = isAdmin && pathname.startsWith('/admin')
+  const { status: impersonationStatus, checkStatus } = useImpersonation()
 
   const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -178,7 +181,10 @@ function App() {
         }
         const data = await response.json().catch(() => ({}))
         if (active && data?.user) {
-          setAuthUser(data.user)
+          setAuthUser({
+            ...data.user,
+            impersonating: data.user?.impersonating === true || data?.impersonating === true,
+          })
           setIsAuthenticated(true)
           // Redirect away from /auth after session restored (e.g. post-OAuth page reload)
           if (window.location.pathname === '/auth') navigateTo('/')
@@ -192,6 +198,11 @@ function App() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!isAuthenticated || !isImpersonating) return
+    void checkStatus()
+  }, [isAuthenticated, isImpersonating, checkStatus])
 
   useEffect(() => {
     if (isWorking && taskStartedAt === null) {
@@ -431,7 +442,7 @@ function App() {
 
   return (
     <>
-      {isImpersonating && <ImpersonationBanner email={authUser?.email ?? ''} />}
+      {isImpersonating && <ImpersonationBanner email={impersonationStatus?.target_user?.email ?? authUser?.email ?? ''} />}
       <main className={`h-[100dvh] overflow-x-hidden bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3 ${isImpersonating ? 'pt-10' : ''}`}>
       {showOnboarding && (
         <OnboardingWizard
@@ -565,8 +576,13 @@ function App() {
           )}
 
           <div className='min-h-0 flex-1'>
-            {showSettings ? (
-              <SettingsPage onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined) }} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} initialTab={settingsInitialTab} isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'} />
+            {showSettings || isAdminPath ? (
+              <SettingsPage
+                onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
+                onRunWorkflow={(instruction) => handleSend(instruction, 'steer')}
+                initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
+                isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+              />
             ) : showAutomations ? (
               <AutomationsPage />
             ) : (

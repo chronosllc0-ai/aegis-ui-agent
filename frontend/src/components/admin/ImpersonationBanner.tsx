@@ -12,10 +12,14 @@ export function ImpersonationBanner({ email }: ImpersonationBannerProps) {
   const handleExit = useCallback(async () => {
     setExiting(true)
     try {
-      await fetch(apiUrl('/api/admin/impersonate/stop'), {
+      const response = await fetch(apiUrl('/api/admin/impersonate/stop'), {
         method: 'POST',
         credentials: 'include',
       })
+      if (!response.ok) {
+        setExiting(false)
+        return
+      }
       window.location.href = '/admin/users'
     } catch {
       setExiting(false)

@@ -1249,3 +1249,38 @@
 
 ### Blockers
 - Missing browser screenshot tooling in this environment.
+
+## Session 5.20 - March 26, 2026 (Phase 5 Review Follow-up: Impersonation Data Flow + Exit Routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Patched `App.tsx` auth session restore logic so `authUser.impersonating` is explicitly populated from the `/api/auth/me` response payload shape.
+- Added impersonation status hydration in `App.tsx` using `useImpersonation().checkStatus()` whenever an authenticated impersonating session is detected.
+- Updated banner email source in `App.tsx` to prefer `impersonationStatus.target_user.email` and only fall back to `authUser.email`.
+- Added admin-route handling in `App.tsx` so `/admin/*` paths open the settings shell directly on the Admin tab (`isAdminPath`), which makes `/admin/users` a handled route flow in this app shell.
+- Hardened `ImpersonationBanner` stop behavior to redirect only when `/api/admin/impersonate/stop` returns an OK response.
+
+### What's Working
+- Frontend build still passes after the review-follow-up fixes.
+- Banner data flow now has explicit impersonation status wiring and target-user email resolution.
+- `/admin/users` now resolves into the Admin settings panel path in this app architecture rather than dropping users into the default dashboard view.
+
+### What's NOT Working Yet
+- Frontend lint remains failing due existing unrelated lint violations in pre-existing files (`react-refresh/only-export-components` and `react-hooks/set-state-in-effect` in `SettingsPage`).
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. Run a browser E2E check for review cases:
+   - Start impersonation from Admin Users
+   - Verify banner shows target-user email
+   - Exit impersonation and confirm return path behavior.
+2. Clean the pre-existing frontend lint issues so `npm run lint` becomes green.
+
+### Decisions Made
+- Kept redirect target as `/admin/users`, and taught `App.tsx` to interpret `/admin/*` paths consistently.
+- Kept banner fallback to `authUser.email` for resilience if status fetch fails transiently.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
