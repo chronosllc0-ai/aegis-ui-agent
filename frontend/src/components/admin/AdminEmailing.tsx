@@ -223,7 +223,9 @@ export function AdminEmailing() {
         <div className='flex items-center gap-2 rounded-lg bg-[#0f0f0f] border border-[#1a1a1a] px-3 py-2'>
           <span className='text-[11px] text-zinc-500'>Sends as:</span>
           <span className='text-[12px] text-zinc-300 font-mono'>
-            {fromAddress || <span className='text-zinc-600 italic'>fill in username above</span>}
+            {fromAddress
+              ? fromAddress
+              : <span className='text-zinc-600 italic'>fill in username above</span>}
           </span>
         </div>
       </div>
