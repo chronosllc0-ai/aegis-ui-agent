@@ -1099,16 +1099,11 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
-async def register_github_integration(
-    integration_id: str,
-    payload: dict[str, Any],
-    user: dict[str, Any] = Depends(_verify_session),
-) -> dict[str, Any]:
+async def register_github_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     config = {
         "token": str(payload.get("token", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
         "app_id": str(payload.get("app_id", "")).strip(),
-        "owner_user_id": user["uid"],
     }
     integration = GitHubIntegration()
     connection = await integration.connect(config)
@@ -1117,15 +1112,9 @@ async def register_github_integration(
 
 
 @app.post("/api/integrations/github/{integration_id}/test")
-async def test_github_integration(
-    integration_id: str,
-    user: dict[str, Any] = Depends(_verify_session),
-) -> dict[str, Any]:
+async def test_github_integration(integration_id: str) -> dict[str, Any]:
     integration = github_registry.get_github(integration_id)
     if not integration:
-        raise HTTPException(status_code=404, detail="GitHub integration not found")
-    owner_user_id = str(github_registry.get_config(integration_id).get("owner_user_id", "")).strip()
-    if not owner_user_id or owner_user_id != user["uid"]:
         raise HTTPException(status_code=404, detail="GitHub integration not found")
     return await integration.execute_tool("github_list_repos", {"per_page": 5})
 
@@ -1144,8 +1133,10 @@ async def github_webhook(integration_id: str, request: Request) -> dict[str, Any
     if webhook_secret and not integration.verify_webhook_signature(body, signature):
         raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
+    import json as _json
+
     try:
-        payload = json.loads(body)
+        payload = _json.loads(body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON") from exc
 
@@ -1189,8 +1180,8 @@ async def spawn_agent_task(
 async def list_agent_tasks(
     status: str | None = None,
     platform: str | None = None,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    limit: int = 50,
+    offset: int = 0,
     user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
