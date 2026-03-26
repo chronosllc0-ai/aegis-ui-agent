@@ -1,3 +1,61 @@
+## Session 5.21 - March 26, 2026 (Phase 6 Cloud Agents + GitHub Integration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented Phase 6 backend GitHub integration support:
+  - Added `integrations/github_connector.py` with token validation, webhook signature verification, and GitHub tool execution.
+  - Registered `GitHubIntegration` in `integrations/__init__.py`.
+  - Added in-memory `GitHubRegistry` and GitHub integration endpoints in `main.py`:
+    - `POST /api/integrations/github/register/{integration_id}`
+    - `POST /api/integrations/github/{integration_id}/test`
+    - `POST /api/integrations/github/{integration_id}/webhook`
+- Implemented cloud-agent task persistence and APIs:
+  - Added `AgentTask` and `AgentAction` models to `backend/database.py`.
+  - Added `backend/agent_spawn.py` service helpers for create/list/detail/status/action logs.
+  - Added user task API endpoints in `main.py`:
+    - `POST /api/agents/spawn`
+    - `GET /api/agents/tasks`
+    - `GET /api/agents/tasks/{task_id}`
+    - `POST /api/agents/tasks/{task_id}/cancel`
+- Implemented admin cloud-agent management:
+  - Added `backend/admin/agents.py` endpoints:
+    - `GET /api/admin/agents/tasks`
+    - `GET /api/admin/agents/tasks/{task_id}`
+    - `POST /api/admin/agents/tasks/{task_id}/cancel`
+    - `GET /api/admin/agents/stats`
+  - Mounted admin agents router in `backend/admin/router.py`.
+- Implemented frontend Phase 6 integration updates:
+  - Added GitHub icon/type/default config in `frontend/src/lib/mcp.ts`.
+  - Added GitHub icon rendering to `frontend/src/components/icons.tsx`.
+  - Added GitHub connect/test/configure UI flow in `frontend/src/components/settings/IntegrationsTab.tsx`.
+  - Removed `MODEL_ICON_URL` from `frontend/src/lib/models.ts`.
+  - Added `FaGithub` / `SiGithub` typings to `frontend/src/types/react-icons.d.ts`.
+
+### What's Working
+- Python modules compile for the new backend files and updated entrypoints.
+- Frontend production build succeeds with the new GitHub integration UI and icon map changes.
+- Phase 6 route surfaces and model symbols are present in the codebase for both user and admin cloud-agent APIs.
+
+### What's NOT Working Yet
+- This pass did not add dedicated automated API tests for the new GitHub and cloud-agent endpoints.
+- Browser screenshot tooling is still unavailable in this environment, so no visual artifact was captured.
+
+### Next Steps
+1. Add backend route tests for `/api/integrations/github/*`, `/api/agents/*`, and `/api/admin/agents/*`.
+2. Wire real task-execution workers to `AgentTask` status/action updates (running/completed/failed lifecycle).
+3. Add frontend admin pages for agent task browsing/cancellation (currently backend/admin APIs exist but UI pass is separate).
+
+### Decisions Made
+- Kept existing Telegram/Slack/Discord flows untouched and added GitHub in parallel using the existing in-memory registry pattern.
+- Preserved backward compatibility for integration icon normalization while adding first-class GitHub support.
+
+### Blockers
+- No functional blockers; only missing screenshot tooling in this execution environment.
+
+---
+
 ## Session 5.18 - March 20, 2026 (Phase 3 Conversation Persistence + Admin Audit)
 
 **Agent:** GPT-5.2-Codex  
@@ -1207,3 +1265,80 @@
 - None
 
 ---
+
+## Session 5.19 - March 26, 2026 (Phase 5 Impersonation UI Integration + Admin UX Polish)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added a dedicated `ImpersonationBanner` component for active impersonation sessions with an amber top bar and an `Exit Impersonation` action that calls `POST /api/admin/impersonate/stop` and returns to `/admin/users`.
+- Added a reusable `useImpersonation` frontend hook to encapsulate impersonation status checks and start/stop API calls.
+- Updated `App.tsx` to:
+  - track `authUser.impersonating`
+  - render the banner globally when impersonating
+  - offset the full app layout with top padding while the fixed banner is visible
+  - add an explicit sidebar `Admin Panel` button for users with `admin` or `superadmin` role.
+- Updated `AdminPanel` Users UI to support the requested “View as User” flow:
+  - confirmation prompt before impersonation
+  - impersonation from both user-detail and table-row quick action button
+  - redirect to `/app` after successful impersonation start.
+- Polished admin loading/empty states in dashboard/users/audit tabs using `react-icons/lu` spinner and search-empty visuals (no emoji icons).
+- Extended local `react-icons` type declarations for `LuEye` and `LuSearch`.
+
+### What's Working
+- Frontend production build passes with the impersonation/banner/admin-sidebar updates.
+- Impersonation banner now appears globally (including admin surfaces) when `authUser.impersonating === true`.
+- The app content offsets under banner mode (`pt-10`) so top content is not hidden.
+- Users tab now supports “View as User” from both detail panel and row-level quick action.
+
+### What's NOT Working Yet
+- `npm run lint` still fails because of pre-existing lint issues outside this pass (react-refresh and set-state-in-effect violations in unrelated files), plus one existing `any` cast in `App.tsx`.
+- I could not capture a browser screenshot artifact in this environment because no browser/screenshot tool is available in the current toolset.
+
+### Next Steps
+1. Exercise the impersonation path end-to-end in-browser: admin user detail/table action → `/app` client view with banner → exit back to `/admin/users`.
+2. Clean existing frontend lint violations in the unrelated files so `npm run lint` is fully green.
+3. If screenshot tooling is available in a follow-up session, capture Phase 5 UI evidence (impersonation banner + view-as-user action).
+
+### Decisions Made
+- Kept impersonation API calls centralized in `useImpersonation` so all admin surfaces can reuse consistent behavior.
+- Used full page navigation (`window.location.href`) after start/stop to guarantee cookie-backed session transitions are immediately reflected.
+
+### Blockers
+- Missing browser screenshot tooling in this environment.
+
+## Session 5.20 - March 26, 2026 (Phase 5 Review Follow-up: Impersonation Data Flow + Exit Routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Patched `App.tsx` auth session restore logic so `authUser.impersonating` is explicitly populated from the `/api/auth/me` response payload shape.
+- Added impersonation status hydration in `App.tsx` using `useImpersonation().checkStatus()` whenever an authenticated impersonating session is detected.
+- Updated banner email source in `App.tsx` to prefer `impersonationStatus.target_user.email` and only fall back to `authUser.email`.
+- Added admin-route handling in `App.tsx` so `/admin/*` paths open the settings shell directly on the Admin tab (`isAdminPath`), which makes `/admin/users` a handled route flow in this app shell.
+- Hardened `ImpersonationBanner` stop behavior to redirect only when `/api/admin/impersonate/stop` returns an OK response.
+
+### What's Working
+- Frontend build still passes after the review-follow-up fixes.
+- Banner data flow now has explicit impersonation status wiring and target-user email resolution.
+- `/admin/users` now resolves into the Admin settings panel path in this app architecture rather than dropping users into the default dashboard view.
+
+### What's NOT Working Yet
+- Frontend lint remains failing due existing unrelated lint violations in pre-existing files (`react-refresh/only-export-components` and `react-hooks/set-state-in-effect` in `SettingsPage`).
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. Run a browser E2E check for review cases:
+   - Start impersonation from Admin Users
+   - Verify banner shows target-user email
+   - Exit impersonation and confirm return path behavior.
+2. Clean the pre-existing frontend lint issues so `npm run lint` becomes green.
+
+### Decisions Made
+- Kept redirect target as `/admin/users`, and taught `App.tsx` to interpret `/admin/*` paths consistently.
+- Kept banner fallback to `authUser.email` for resilience if status fetch fails transiently.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
