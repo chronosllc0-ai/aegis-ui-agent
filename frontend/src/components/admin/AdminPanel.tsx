@@ -637,7 +637,7 @@ export function AdminPanel() {
   const [activeTab, setActiveTab] = useState<AdminTab>('Dashboard')
 
   return (
-    <div className='flex h-full flex-col gap-4'>
+    <div className='flex h-full min-w-0 flex-col gap-4'>
       {/* Header */}
       <div className='flex items-center gap-2 border-b border-[#2a2a2a] pb-4'>
         <div className='flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/10'>

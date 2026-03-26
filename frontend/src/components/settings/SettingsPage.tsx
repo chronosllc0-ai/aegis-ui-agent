@@ -108,7 +108,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
       </nav>
 
       {/* ── Content area ── */}
-      <div className={`${sidebarOpen ? 'hidden md:block' : 'block'} min-h-0 flex-1 overflow-y-auto p-3 sm:p-4`}>
+      <div className={`${sidebarOpen ? 'hidden md:block' : 'block'} min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4`}>
         {activeTab === 'Profile' && <ProfileTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
