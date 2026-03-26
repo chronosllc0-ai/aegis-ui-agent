@@ -6,6 +6,7 @@ import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 from http.cookies import SimpleCookie
+import json
 import logging
 from pathlib import Path
 import time as _time
@@ -13,7 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import uvicorn
-from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
