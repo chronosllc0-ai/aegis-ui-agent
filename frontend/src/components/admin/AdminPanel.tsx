@@ -3,6 +3,7 @@ import { Icons } from '../icons'
 import { useToast } from '../../hooks/useToast'
 import { apiUrl } from '../../lib/api'
 import { AdminMessaging } from './AdminMessaging'
+import { AdminEmailing } from './AdminEmailing'
 import { PaymentSettingsModal } from './PaymentSettingsModal'
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
@@ -40,7 +41,7 @@ type AuditEntry = {
 
 /* ─── Sub-tabs ───────────────────────────────────────────────────────── */
 
-const ADMIN_TABS = ['Dashboard', 'Users', 'Messaging', 'Audit Log'] as const
+const ADMIN_TABS = ['Dashboard', 'Users', 'Messaging', 'Emailing', 'Audit Log'] as const
 type AdminTab = (typeof ADMIN_TABS)[number]
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -670,6 +671,7 @@ export function AdminPanel() {
         {activeTab === 'Dashboard' && <DashboardTab />}
         {activeTab === 'Users' && <UsersTab />}
         {activeTab === 'Messaging' && <AdminMessaging />}
+        {activeTab === 'Emailing' && <AdminEmailing />}
         {activeTab === 'Audit Log' && <AuditLogTab />}
       </div>
     </div>
