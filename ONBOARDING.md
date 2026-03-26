@@ -1207,3 +1207,45 @@
 - None
 
 ---
+
+## Session 5.19 - March 26, 2026 (Phase 5 Impersonation UI Integration + Admin UX Polish)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added a dedicated `ImpersonationBanner` component for active impersonation sessions with an amber top bar and an `Exit Impersonation` action that calls `POST /api/admin/impersonate/stop` and returns to `/admin/users`.
+- Added a reusable `useImpersonation` frontend hook to encapsulate impersonation status checks and start/stop API calls.
+- Updated `App.tsx` to:
+  - track `authUser.impersonating`
+  - render the banner globally when impersonating
+  - offset the full app layout with top padding while the fixed banner is visible
+  - add an explicit sidebar `Admin Panel` button for users with `admin` or `superadmin` role.
+- Updated `AdminPanel` Users UI to support the requested “View as User” flow:
+  - confirmation prompt before impersonation
+  - impersonation from both user-detail and table-row quick action button
+  - redirect to `/app` after successful impersonation start.
+- Polished admin loading/empty states in dashboard/users/audit tabs using `react-icons/lu` spinner and search-empty visuals (no emoji icons).
+- Extended local `react-icons` type declarations for `LuEye` and `LuSearch`.
+
+### What's Working
+- Frontend production build passes with the impersonation/banner/admin-sidebar updates.
+- Impersonation banner now appears globally (including admin surfaces) when `authUser.impersonating === true`.
+- The app content offsets under banner mode (`pt-10`) so top content is not hidden.
+- Users tab now supports “View as User” from both detail panel and row-level quick action.
+
+### What's NOT Working Yet
+- `npm run lint` still fails because of pre-existing lint issues outside this pass (react-refresh and set-state-in-effect violations in unrelated files), plus one existing `any` cast in `App.tsx`.
+- I could not capture a browser screenshot artifact in this environment because no browser/screenshot tool is available in the current toolset.
+
+### Next Steps
+1. Exercise the impersonation path end-to-end in-browser: admin user detail/table action → `/app` client view with banner → exit back to `/admin/users`.
+2. Clean existing frontend lint violations in the unrelated files so `npm run lint` is fully green.
+3. If screenshot tooling is available in a follow-up session, capture Phase 5 UI evidence (impersonation banner + view-as-user action).
+
+### Decisions Made
+- Kept impersonation API calls centralized in `useImpersonation` so all admin surfaces can reuse consistent behavior.
+- Used full page navigation (`window.location.href`) after start/stop to guarantee cookie-backed session transitions are immediately reflected.
+
+### Blockers
+- Missing browser screenshot tooling in this environment.
