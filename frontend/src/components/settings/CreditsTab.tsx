@@ -121,7 +121,10 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
             cancel_url: `${origin}/?plan_cancelled=1`,
           }),
         })
-        if (!res.ok) throw new Error('Failed to create checkout session')
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}))
+          throw new Error((errJson as { detail?: string }).detail ?? `Server error (${res.status})`)
+        }
         const data = (await res.json()) as { checkout_url: string }
         window.location.href = data.checkout_url
       } else {
@@ -131,7 +134,10 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
           credentials: 'include',
           body: JSON.stringify({ plan: plan.key }),
         })
-        if (!res.ok) throw new Error('Failed to create crypto charge')
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}))
+          throw new Error((errJson as { detail?: string }).detail ?? `Server error (${res.status})`)
+        }
         const data = (await res.json()) as { hosted_url: string }
         window.location.href = data.hosted_url
       }
@@ -142,8 +148,7 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
     }
   }
 
-  const creditBalance = balance ? balance.allowance - balance.used + (balance.remaining ?? 0) : 0
-  const balanceUsd = (creditBalance / 1000).toFixed(2)
+  const creditsRemaining = balance ? Math.max(0, balance.allowance - balance.used) : 0
   const currentPlanName = balance?.plan
     ? balance.plan.charAt(0).toUpperCase() + balance.plan.slice(1)
     : 'Free'
@@ -180,7 +185,7 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
           </div>
         ) : (
           <>
-            <p className='mt-3 text-3xl font-semibold text-white'>${balanceUsd}</p>
+            <p className='mt-3 text-3xl font-semibold text-white'>{creditsRemaining.toLocaleString()} <span className='text-lg font-normal text-zinc-500'>credits</span></p>
             {balance && (
               <div className='mt-3 grid grid-cols-2 gap-3'>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
@@ -195,11 +200,11 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
                 </div>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
                   <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Credits used</p>
-                  <p className='mt-1 text-xs text-zinc-300'>{balance.used.toLocaleString()}</p>
+                  <p className='mt-1 text-xs text-zinc-300'>{balance.used.toLocaleString()} / {balance.allowance.toLocaleString()}</p>
                 </div>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
-                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Monthly allowance</p>
-                  <p className='mt-1 text-xs text-zinc-300'>{balance.allowance.toLocaleString()}</p>
+                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Credits remaining</p>
+                  <p className='mt-1 text-xs font-medium text-emerald-400'>{creditsRemaining.toLocaleString()}</p>
                 </div>
               </div>
             )}

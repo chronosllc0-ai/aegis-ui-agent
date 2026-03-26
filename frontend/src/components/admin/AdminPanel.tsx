@@ -261,7 +261,7 @@ function UsersTab() {
     try {
       await doAction(`/api/admin/users/${uid}/credit-adjustment`, 'POST', {
         amount,
-        note: creditNote || 'Admin adjustment',
+        reason: creditNote || 'Admin adjustment',
       })
       toast.success(`Credits adjusted by ${amount}`)
       setCreditAdjust('')
@@ -392,20 +392,21 @@ function UsersTab() {
 
           {/* Credit adjustment */}
           <div className='rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-4'>
-            <p className='mb-2 text-xs font-medium text-zinc-300'>Credit Adjustment</p>
+            <p className='mb-1 text-xs font-medium text-zinc-300'>Add / Adjust Credits</p>
+            <p className='mb-3 text-[11px] text-zinc-600'>Positive number adds credits, negative deducts. E.g. <span className='text-zinc-500'>5000</span> adds 5,000 credits.</p>
             <div className='flex gap-2'>
               <input
                 type='number'
                 value={creditAdjust}
                 onChange={(e) => setCreditAdjust(e.target.value)}
-                placeholder='e.g. 500 or -100'
-                className='w-28 rounded-lg border border-[#2a2a2a] bg-[#111] px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 outline-none focus:border-blue-500/60'
+                placeholder='e.g. 5000 or -100'
+                className='w-32 rounded-lg border border-[#2a2a2a] bg-[#111] px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 outline-none focus:border-blue-500/60'
               />
               <input
                 type='text'
                 value={creditNote}
                 onChange={(e) => setCreditNote(e.target.value)}
-                placeholder='Note (optional)'
+                placeholder='Reason (optional)'
                 className='flex-1 rounded-lg border border-[#2a2a2a] bg-[#111] px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 outline-none focus:border-blue-500/60'
               />
               <button
