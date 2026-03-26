@@ -73,6 +73,10 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string } | null>(null)
+  const [, setPendingCreditsUsd] = useState<number | null>(() => {
+    const v = sessionStorage.getItem('aegis.pendingCreditsUsd')
+    return v ? Number(v) : null
+  })
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
@@ -376,6 +380,11 @@ function App() {
           onOpenDocsHome={openDocsHome}
           onOpenDoc={openDoc}
           docsPortalHref={getStandaloneDocUrl()}
+          onBuyCredits={(usd) => {
+            sessionStorage.setItem('aegis.pendingCreditsUsd', String(usd))
+            setPendingCreditsUsd(usd)
+            openAuth()
+          }}
         />
       )
     }
@@ -384,12 +393,20 @@ function App() {
         onAuthenticated={(user) => {
           setAuthUser(user)
           setIsAuthenticated(true)
-          if (!isOnboardingComplete()) {
+          const pending = sessionStorage.getItem('aegis.pendingCreditsUsd')
+          if (pending) {
+            sessionStorage.removeItem('aegis.pendingCreditsUsd')
+            setPendingCreditsUsd(null)
+            navigateTo('/')
+            setShowSettings(true)
+            setSettingsInitialTab('Credits')
+          } else if (!isOnboardingComplete()) {
             setShowOnboarding(true)
+            navigateTo('/')
           } else {
             toastCtx.success('Welcome back!', `Signed in as ${user.name || user.email}`)
+            navigateTo('/')
           }
-          navigateTo('/')
         }}
         onBack={openHome}
         onOpenDocsHome={openDocsHome}

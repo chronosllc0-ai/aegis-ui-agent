@@ -10,6 +10,7 @@ import { ProfileTab } from './ProfileTab'
 import { SupportTab } from './SupportTab'
 import { UsageTab } from './UsageTab'
 import { WorkflowsTab } from './WorkflowsTab'
+import { CreditsTab } from './CreditsTab'
 import { AdminPanel } from '../admin/AdminPanel'
 
 type SettingsPageProps = {
@@ -19,7 +20,7 @@ type SettingsPageProps = {
   isAdmin?: boolean
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Connections', 'Workflows', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Connections', 'Workflows', 'Support', 'Admin'] as const
 const TAB_KEY = 'aegis.settings.activeTab'
 
 export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false }: SettingsPageProps) {
@@ -111,6 +112,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
         {activeTab === 'Usage' && <UsageTab />}
+        {activeTab === 'Credits' && <CreditsTab />}
         {activeTab === 'Connections' && (
           <ConnectionsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} isAdmin={isAdmin} />
         )}

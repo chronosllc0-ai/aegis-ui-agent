@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
+import { useSettingsContext } from '../context/useSettingsContext'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -137,9 +138,15 @@ interface ModalProps {
 }
 
 function AutomationModal({ initial, onSave, onClose }: ModalProps) {
+  const { settings } = useSettingsContext()
+  const workflows = settings.workflowTemplates ?? []
+
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [prompt, setPrompt] = useState(initial?.prompt ?? '')
+  // triggerType: 'prompt' = describe task manually; 'workflow' = pick a saved workflow
+  const [triggerType, setTriggerType] = useState<'prompt' | 'workflow'>('prompt')
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('')
   const [preset, setPreset] = useState(() => {
     if (!initial?.cron_expr) return PRESETS[1].value
     const found = PRESETS.find((p) => p.value === initial.cron_expr)
@@ -151,6 +158,16 @@ function AutomationModal({ initial, onSave, onClose }: ModalProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // When a workflow is selected, auto-fill the name and prompt
+  const handleWorkflowSelect = (workflowId: string) => {
+    setSelectedWorkflowId(workflowId)
+    const wf = workflows.find((w) => w.id === workflowId)
+    if (wf) {
+      if (!name || name === '') setName(wf.name)
+      setPrompt(wf.instruction)
+    }
+  }
+
   const cronExpr = preset === '__custom__' ? customCron : preset
 
   const filteredTz = COMMON_TIMEZONES.filter((tz) =>
@@ -160,12 +177,19 @@ function AutomationModal({ initial, onSave, onClose }: ModalProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    // Resolve final prompt
+    let resolvedPrompt = prompt.trim()
+    if (triggerType === 'workflow') {
+      const wf = workflows.find((w) => w.id === selectedWorkflowId)
+      if (!wf) { setError('Please select a workflow'); return }
+      resolvedPrompt = wf.instruction
+    }
     if (!name.trim()) { setError('Name is required'); return }
-    if (!prompt.trim()) { setError('Prompt is required'); return }
+    if (!resolvedPrompt) { setError('Prompt is required'); return }
     if (!cronExpr.trim()) { setError('Schedule is required'); return }
     setSaving(true)
     try {
-      await onSave({ name: name.trim(), description: description.trim(), prompt: prompt.trim(), cron_expr: cronExpr.trim(), timezone })
+      await onSave({ name: name.trim(), description: description.trim(), prompt: resolvedPrompt, cron_expr: cronExpr.trim(), timezone })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -217,17 +241,72 @@ function AutomationModal({ initial, onSave, onClose }: ModalProps) {
             />
           </div>
 
-          {/* Prompt */}
+          {/* Trigger type toggle */}
           <div>
-            <label className='mb-1 block text-xs text-zinc-400'>What should Aegis do? *</label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder='Open Gmail, find all unread emails from today, and summarize them in a list.'
-              rows={4}
-              className='w-full resize-none rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
-            />
+            <label className='mb-1.5 block text-xs text-zinc-400'>Trigger type *</label>
+            <div className='flex gap-1 rounded-lg border border-[#2a2a2a] bg-[#111] p-1'>
+              <button
+                type='button'
+                onClick={() => setTriggerType('prompt')}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  triggerType === 'prompt' ? 'bg-[#2a2a2a] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Describe task
+              </button>
+              <button
+                type='button'
+                onClick={() => setTriggerType('workflow')}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  triggerType === 'workflow' ? 'bg-[#2a2a2a] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Run workflow
+              </button>
+            </div>
           </div>
+
+          {/* Conditional: prompt text OR workflow selector */}
+          {triggerType === 'workflow' ? (
+            <div>
+              <label className='mb-1 block text-xs text-zinc-400'>Select workflow *</label>
+              {workflows.length === 0 ? (
+                <p className='rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-3 text-xs text-zinc-500'>
+                  No saved workflows yet. Run a task from the dashboard and save it as a Workflow first.
+                </p>
+              ) : (
+                <select
+                  value={selectedWorkflowId}
+                  onChange={(e) => handleWorkflowSelect(e.target.value)}
+                  className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+                >
+                  <option value=''>— choose a workflow —</option>
+                  {workflows.map((wf) => (
+                    <option key={wf.id} value={wf.id}>{wf.name}</option>
+                  ))}
+                </select>
+              )}
+              {selectedWorkflowId && (() => {
+                const wf = workflows.find((w) => w.id === selectedWorkflowId)
+                return wf ? (
+                  <p className='mt-1.5 rounded-lg border border-[#2a2a2a] bg-[#0a0a0a] px-3 py-2 text-[11px] text-zinc-400 line-clamp-2'>
+                    {wf.instruction}
+                  </p>
+                ) : null
+              })()}
+            </div>
+          ) : (
+            <div>
+              <label className='mb-1 block text-xs text-zinc-400'>What should Aegis do? *</label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder='Open Gmail, find all unread emails from today, and summarize them in a list.'
+                rows={4}
+                className='w-full resize-none rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+              />
+            </div>
+          )}
 
           {/* Schedule */}
           <div>

@@ -60,6 +60,32 @@ def _load_payment_settings() -> dict[str, bool]:
 # ── DB helper ─────────────────────────────────────────────────────────────
 
 
+async def _add_user_credits(user_id: str, credits: int) -> None:
+    """Add a one-time credit top-up to a user's balance."""
+    async for db in get_session():
+        result = await db.execute(
+            select(CreditBalance).where(CreditBalance.user_id == user_id)
+        )
+        balance = result.scalar_one_or_none()
+        if balance:
+            # Subtract from used (effectively adding credits back)
+            balance.credits_used = max(0, balance.credits_used - credits)
+        else:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            balance = CreditBalance(
+                user_id=user_id,
+                plan="free",
+                monthly_allowance=credits,
+                credits_used=0,
+                cycle_start=now,
+                cycle_end=now + timedelta(days=30),
+            )
+            db.add(balance)
+        await db.commit()
+        break
+
+
 async def _update_user_plan(user_id: str, plan: str) -> None:
     """Update a user's plan in the CreditBalance table."""
     async for db in get_session():
@@ -166,15 +192,24 @@ async def stripe_webhook(request: Request) -> dict:
     data_object = event.get("data", {}).get("object", {})
 
     if event_type == "checkout.session.completed":
+        metadata = data_object.get("metadata") or {}
+        payment_type = metadata.get("type", "plan")
+        client_ref = data_object.get("client_reference_id")
         customer_email = data_object.get("customer_email") or (
             data_object.get("customer_details") or {}
         ).get("email")
-        plan = (data_object.get("metadata") or {}).get("plan", "pro")
-        client_ref = data_object.get("client_reference_id")
-        user_id = client_ref or customer_email
-        if user_id:
-            await _update_user_plan(user_id, plan)
-            logger.info("Stripe: upgraded user %s to plan %s", user_id, plan)
+        user_id = client_ref or metadata.get("user_id") or customer_email
+
+        if payment_type == "credits":
+            credits = int(metadata.get("credits", 0))
+            if user_id and credits > 0:
+                await _add_user_credits(user_id, credits)
+                logger.info("Stripe: added %s credits to user %s", credits, user_id)
+        else:
+            plan = metadata.get("plan", "pro")
+            if user_id:
+                await _update_user_plan(user_id, plan)
+                logger.info("Stripe: upgraded user %s to plan %s", user_id, plan)
 
     elif event_type == "customer.subscription.deleted":
         customer_id = data_object.get("customer")
@@ -261,11 +296,18 @@ async def coinbase_webhook(request: Request) -> dict:
 
     if event_type == "charge:confirmed":
         metadata = data.get("metadata", {})
-        plan = metadata.get("plan", "pro")
+        payment_type = metadata.get("type", "plan")
         user_id = metadata.get("user_id")
-        if user_id:
-            await _update_user_plan(user_id, plan)
-            logger.info("Coinbase: upgraded user %s to plan %s", user_id, plan)
+        if payment_type == "credits":
+            credits = int(metadata.get("credits", 0))
+            if user_id and credits > 0:
+                await _add_user_credits(user_id, credits)
+                logger.info("Coinbase: added %s credits to user %s", credits, user_id)
+        else:
+            plan = metadata.get("plan", "pro")
+            if user_id:
+                await _update_user_plan(user_id, plan)
+                logger.info("Coinbase: upgraded user %s to plan %s", user_id, plan)
 
     return {"received": True}
 
@@ -285,3 +327,116 @@ async def get_payments_config() -> dict:
         "stripe_publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
         "active_methods": active_methods,
     }
+
+
+# ── Credit top-up endpoints ───────────────────────────────────────────────
+
+
+class StripeCreditsCheckoutRequest(BaseModel):
+    credits: int          # total credits to add (including bonus)
+    amount_usd: int       # what the user pays
+    success_url: str
+    cancel_url: str
+
+
+@payments_router.post("/stripe/create-credits-checkout")
+async def stripe_create_credits_checkout(body: StripeCreditsCheckoutRequest, request: Request) -> dict:
+    """Create a one-time Stripe checkout session to buy credits."""
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    # Pull the user id from session cookie if available
+    user_id: str | None = None
+    try:
+        from auth import get_current_user
+        user = await get_current_user(request)
+        user_id = user.get("uid") if user else None
+    except Exception:
+        pass
+
+    params = {
+        "mode": "payment",
+        "success_url": body.success_url,
+        "cancel_url": body.cancel_url,
+        "line_items[0][price_data][currency]": "usd",
+        "line_items[0][price_data][product_data][name]": f"Aegis Credits — {body.credits:,} credits",
+        "line_items[0][price_data][unit_amount]": str(body.amount_usd * 100),
+        "line_items[0][quantity]": "1",
+        "metadata[credits]": str(body.credits),
+        "metadata[type]": "credits",
+    }
+    if user_id:
+        params["client_reference_id"] = user_id
+        params["metadata[user_id]"] = user_id
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.stripe.com/v1/checkout/sessions",
+            data=params,
+            auth=(settings.STRIPE_SECRET_KEY, ""),
+            timeout=30,
+        )
+
+    if resp.status_code != 200:
+        logger.error("Stripe credits checkout error: %s", resp.text)
+        raise HTTPException(status_code=502, detail="Failed to create Stripe checkout session")
+
+    data = resp.json()
+    return {"checkout_url": data["url"], "session_id": data["id"]}
+
+
+class CoinbaseCreditsChargeRequest(BaseModel):
+    credits: int
+    amount_usd: int
+
+
+@payments_router.post("/coinbase/create-credits-charge")
+async def coinbase_create_credits_charge(body: CoinbaseCreditsChargeRequest, request: Request) -> dict:
+    """Create a Coinbase Commerce charge to buy credits with crypto."""
+    if not settings.COINBASE_COMMERCE_API_KEY:
+        raise HTTPException(status_code=503, detail="Coinbase Commerce is not configured")
+
+    user_id: str | None = None
+    try:
+        from auth import get_current_user
+        user = await get_current_user(request)
+        user_id = user.get("uid") if user else None
+    except Exception:
+        pass
+
+    charge_payload = {
+        "name": f"Aegis Credits — {body.credits:,} credits",
+        "description": f"Top up {body.credits:,} credits (${body.amount_usd})",
+        "pricing_type": "fixed_price",
+        "local_price": {"amount": str(body.amount_usd), "currency": "USD"},
+        "metadata": {
+            "type": "credits",
+            "credits": str(body.credits),
+            "user_id": user_id or "",
+        },
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.commerce.coinbase.com/charges",
+            json=charge_payload,
+            headers={
+                "X-CC-Api-Key": settings.COINBASE_COMMERCE_API_KEY,
+                "X-CC-Version": "2018-03-22",
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+
+    if resp.status_code not in (200, 201):
+        logger.error("Coinbase credits charge error: %s", resp.text)
+        raise HTTPException(status_code=502, detail="Failed to create Coinbase charge")
+
+    data = resp.json().get("data", {})
+    return {"hosted_url": data.get("hosted_url", ""), "charge_id": data.get("id", "")}
+
+
+@payments_router.get("/credit-blocks")
+async def get_credit_blocks(request: Request) -> dict:
+    """Return a user's credit purchase history (stub — extend with real DB records)."""
+    return {"blocks": []}
