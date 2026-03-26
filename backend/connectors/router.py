@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -99,6 +99,43 @@ async def list_all_connectors(
             entry["configured"] = True
 
     return {"ok": True, "connectors": catalogue}
+
+
+# ── Slack Events API webhook (challenge verification + event handling) ──
+
+
+@connector_router.post("/slack/events")
+async def slack_events(request: Request) -> JSONResponse:
+    """Slack Events API endpoint.
+
+    Handles:
+    1. URL verification challenge (type == 'url_verification') — must respond
+       with the challenge value so Slack can verify the endpoint.
+    2. Event callbacks — process incoming Slack events (future use).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid json"})
+
+    event_type = body.get("type", "")
+
+    # ── URL verification handshake ──────────────────────────────────────
+    if event_type == "url_verification":
+        challenge = body.get("challenge", "")
+        logger.info("Slack URL verification challenge received")
+        return JSONResponse(content={"challenge": challenge})
+
+    # ── Event callback ──────────────────────────────────────────────────
+    if event_type == "event_callback":
+        event = body.get("event", {})
+        logger.info("Slack event received: %s", event.get("type", "unknown"))
+        # Acknowledge immediately — process async if needed in future
+        return JSONResponse(content={"ok": True})
+
+    # Unknown type — still return 200 so Slack doesn't retry
+    logger.warning("Slack events: unknown type=%s", event_type)
+    return JSONResponse(content={"ok": True})
 
 
 # ── Slack Marketplace direct install (unauthenticated 302 → slack.com) ─

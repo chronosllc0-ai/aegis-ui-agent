@@ -650,8 +650,8 @@ export function AdminPanel() {
       </div>
 
       {/* Sub-tab nav — horizontally scrollable on mobile */}
-      <div className='overflow-x-auto scrollbar-none rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
-        <div className='flex min-w-max gap-1'>
+      <div className='w-full overflow-x-auto scrollbar-none rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
+        <div className='flex w-max gap-1'>
           {ADMIN_TABS.map((tab) => (
             <button
               key={tab}
