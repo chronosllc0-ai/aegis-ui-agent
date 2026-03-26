@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { LuLoader, LuZap, LuCalendar, LuChartBar } from 'react-icons/lu'
+import { LuLoader, LuZap, LuCalendar, LuChartBar, LuAtSign } from 'react-icons/lu'
 import { useToast } from '../../hooks/useToast'
 import { apiUrl } from '../../lib/api'
 
@@ -41,6 +41,10 @@ export function AdminEmailing() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UserResult | null>(null)
   const [showDropdown, setShowDropdown] = useState(false)
+
+  // From field state
+  const [fromName, setFromName] = useState('')
+  const [fromUsername, setFromUsername] = useState('')
 
   // Email state
   const [subject, setSubject] = useState('')
@@ -106,6 +110,14 @@ export function AdminEmailing() {
     setSendToAll(false)
   }
 
+  // Sanitize username — lowercase, alphanumeric + dots/hyphens/underscores
+  const safeUsername = fromUsername.toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const fromAddress = safeUsername
+    ? fromName.trim()
+      ? `${fromName.trim()} <${safeUsername}@mohex.org>`
+      : `${safeUsername}@mohex.org`
+    : ''
+
   const canSend = (sendToAll || selectedUser !== null) && subject.trim() && body.trim() && !sending
 
   const handleSend = async () => {
@@ -121,6 +133,7 @@ export function AdminEmailing() {
           user_ids: sendToAll ? 'all' : [selectedUser!.uid],
           subject: subject.trim(),
           body: body.trim(),
+          from_address: fromAddress || undefined,
         }),
       })
       if (!res.ok) {
@@ -171,6 +184,49 @@ export function AdminEmailing() {
           </p>
         </div>
       )}
+
+      {/* From */}
+      <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-5 space-y-4'>
+        <p className='text-xs font-semibold uppercase tracking-wider text-zinc-500'>From</p>
+
+        <div className='flex gap-3'>
+          {/* Display name */}
+          <div className='flex-1 space-y-1'>
+            <label className='text-xs text-zinc-400'>Display name</label>
+            <input
+              type='text'
+              value={fromName}
+              onChange={(e) => setFromName(e.target.value)}
+              placeholder='e.g. Jesse'
+              className='w-full rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition'
+            />
+          </div>
+
+          {/* Username prefix */}
+          <div className='flex-1 space-y-1'>
+            <label className='text-xs text-zinc-400'>Username</label>
+            <div className='flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2.5 focus-within:border-zinc-500 transition'>
+              <LuAtSign className='h-3.5 w-3.5 shrink-0 text-zinc-500' />
+              <input
+                type='text'
+                value={fromUsername}
+                onChange={(e) => setFromUsername(e.target.value)}
+                placeholder='hello'
+                className='min-w-0 flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-600 outline-none'
+              />
+              <span className='shrink-0 text-[11px] text-zinc-600'>@mohex.org</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Preview */}
+        <div className='flex items-center gap-2 rounded-lg bg-[#0f0f0f] border border-[#1a1a1a] px-3 py-2'>
+          <span className='text-[11px] text-zinc-500'>Sends as:</span>
+          <span className='text-[12px] text-zinc-300 font-mono'>
+            {fromAddress || <span className='text-zinc-600 italic'>fill in username above</span>}
+          </span>
+        </div>
+      </div>
 
       {/* Recipient */}
       <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-5 space-y-4'>
@@ -344,7 +400,7 @@ export function AdminEmailing() {
       </button>
 
       <p className='text-center text-[11px] text-zinc-600'>
-        Emails are sent via Resend using the Aegis branded template from noreply@mohex.org
+        Emails are sent via Resend using the Aegis branded template from your chosen @mohex.org address
       </p>
     </div>
   )

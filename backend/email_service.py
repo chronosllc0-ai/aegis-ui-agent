@@ -109,13 +109,24 @@ def _cta_button(label: str, url: str) -> str:
 # ── Resend HTTP call ──────────────────────────────────────────────────────────
 
 
-async def _send(*, to: str, subject: str, html: str) -> None:
+async def _send(*, to: str, subject: str, html: str, from_address: str | None = None) -> None:
     """Low-level send via Resend API.  Raises on failure so callers can handle errors."""
     if not settings.RESEND_API_KEY:
         raise RuntimeError("RESEND_API_KEY is not configured on this server")
 
+    # Validate custom from_address — must end in @mohex.org for safety
+    sender = _FROM_ADDRESS
+    if from_address:
+        import re
+        # Extract the email part from "Name <email>" or bare "email"
+        match = re.search(r"[\w._%+\-]+@mohex\.org", from_address, re.IGNORECASE)
+        if match:
+            sender = from_address
+        else:
+            logger.warning("Ignoring invalid from_address (not @mohex.org): %s", from_address)
+
     payload: dict[str, Any] = {
-        "from": _FROM_ADDRESS,
+        "from": sender,
         "to": [to],
         "subject": subject,
         "html": html,
@@ -322,7 +333,13 @@ async def send_credit_low_warning_email(
     )
 
 
-async def send_custom_email(email: str, subject: str, body_html: str) -> None:
+async def send_custom_email(
+    email: str,
+    subject: str,
+    body_html: str,
+    *,
+    from_address: str | None = None,
+) -> None:
     """Send a custom HTML email (used by the admin broadcast endpoint)."""
     # Wrap plain text body in a simple card if it looks like plain text
     if not body_html.strip().startswith("<"):
@@ -334,4 +351,4 @@ async def send_custom_email(email: str, subject: str, body_html: str) -> None:
             if line.strip()
         )
         body_html = paragraphs
-    await _send(to=email, subject=subject, html=_wrap_html(body_html))
+    await _send(to=email, subject=subject, html=_wrap_html(body_html), from_address=from_address)

@@ -29,6 +29,7 @@ class EmailBroadcastPayload(BaseModel):
     user_ids: Union[list[str], str]  # list of UIDs or "all"
     subject: str
     body: str
+    from_address: str | None = None  # e.g. "Jesse <jesse@mohex.org>"
 
 
 @router.post("/send")
@@ -39,6 +40,7 @@ async def send_admin_email(
     """Send an email to one or more users (or all active users)."""
     subject = payload.subject.strip()
     body = payload.body.strip()
+    from_address = (payload.from_address or "").strip() or None
 
     if not subject:
         from fastapi import HTTPException
@@ -72,7 +74,7 @@ async def send_admin_email(
     async def _send_one(user: User) -> None:
         nonlocal sent, failed, first_error
         try:
-            await send_custom_email(user.email, subject, body)  # type: ignore[arg-type]
+            await send_custom_email(user.email, subject, body, from_address=from_address)  # type: ignore[arg-type]
             sent += 1
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to send admin email to %s: %s", user.email, exc)
