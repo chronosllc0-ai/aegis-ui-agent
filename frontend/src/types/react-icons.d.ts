@@ -13,6 +13,7 @@ declare module 'react-icons/fa' {
 
   export const FaDiscord: IconType
   export const FaFolder: IconType
+  export const FaGithub: IconType
   export const FaGlobe: IconType
   export const FaLock: IconType
   export const FaPlus: IconType
@@ -27,6 +28,7 @@ declare module 'react-icons/si' {
 
   export const SiAnthropic: IconType
   export const SiDiscord: IconType
+  export const SiGithub: IconType
   export const SiGoogle: IconType
   export const SiMistralai: IconType
   export const SiOpenai: IconType
