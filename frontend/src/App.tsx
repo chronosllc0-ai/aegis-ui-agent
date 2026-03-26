@@ -73,9 +73,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string } | null>(null)
-  const [, setPendingCreditsUsd] = useState<number | null>(() => {
-    const v = sessionStorage.getItem('aegis.pendingCreditsUsd')
-    return v ? Number(v) : null
+  const [, setPendingPlan] = useState<string | null>(() => {
+    return sessionStorage.getItem('aegis.pendingPlan')
   })
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -380,9 +379,9 @@ function App() {
           onOpenDocsHome={openDocsHome}
           onOpenDoc={openDoc}
           docsPortalHref={getStandaloneDocUrl()}
-          onBuyCredits={(usd) => {
-            sessionStorage.setItem('aegis.pendingCreditsUsd', String(usd))
-            setPendingCreditsUsd(usd)
+          onBuyCredits={(plan) => {
+            sessionStorage.setItem('aegis.pendingPlan', plan)
+            setPendingPlan(plan)
             openAuth()
           }}
         />
@@ -393,10 +392,10 @@ function App() {
         onAuthenticated={(user) => {
           setAuthUser(user)
           setIsAuthenticated(true)
-          const pending = sessionStorage.getItem('aegis.pendingCreditsUsd')
+          const pending = sessionStorage.getItem('aegis.pendingPlan')
           if (pending) {
-            sessionStorage.removeItem('aegis.pendingCreditsUsd')
-            setPendingCreditsUsd(null)
+            sessionStorage.removeItem('aegis.pendingPlan')
+            setPendingPlan(null)
             navigateTo('/')
             setShowSettings(true)
             setSettingsInitialTab('Credits')

@@ -7,13 +7,15 @@ import { PublicHeader } from '../public/PublicHeader'
 import { Reveal } from './Reveal'
 
 
+export type PlanKey = 'pro' | 'team' | 'enterprise'
+
 type LandingPageProps = {
   onGetStarted: () => void
   onOpenDocsHome: () => void
   onOpenDoc: (slug: string) => void
   docsPortalHref: string
   /** Called when user clicks a paid plan — routes to auth then credits tab */
-  onBuyCredits?: (amountUsd: number) => void
+  onBuyCredits?: (plan: PlanKey) => void
 }
 
 const FEATURES = [
@@ -559,10 +561,10 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
                     } else if (plan.name === 'Free') {
                       onGetStarted()
                     } else {
-                      // Route to login; after auth, open Credits tab with this package pre-selected
-                      const usdAmount = plan.name === 'Pro' ? 10 : plan.name === 'Team' ? 20 : 100
+                      // Route to login; after auth, open Credits tab with the plan pre-selected
+                      const planKey = plan.name.toLowerCase() as PlanKey
                       if (onBuyCredits) {
-                        onBuyCredits(usdAmount)
+                        onBuyCredits(planKey)
                       } else {
                         onGetStarted()
                       }

@@ -440,3 +440,72 @@ async def coinbase_create_credits_charge(body: CoinbaseCreditsChargeRequest, req
 async def get_credit_blocks(request: Request) -> dict:
     """Return a user's credit purchase history (stub — extend with real DB records)."""
     return {"blocks": []}
+
+
+# ── Invoices ──────────────────────────────────────────────────────────────
+
+
+@payments_router.get("/invoices")
+async def get_invoices(request: Request) -> dict:
+    """Return a user's invoice / billing history.
+
+    Pulls from CreditTopUp records (top-ups) and the user's CreditBalance
+    for subscription payments.
+    """
+    user_id: str | None = None
+    try:
+        from auth import get_current_user
+        user = await get_current_user(request)
+        user_id = user.get("uid") if user else None
+    except Exception:
+        pass
+
+    if not user_id:
+        return {"invoices": []}
+
+    invoices: list[dict] = []
+
+    async for db in get_session():
+        # ── Subscription payment entry ────────────────────────────────────
+        result = await db.execute(
+            select(CreditBalance).where(CreditBalance.user_id == user_id)
+        )
+        balance = result.scalar_one_or_none()
+        if balance and balance.plan != "free":
+            price = PLAN_PRICES_USD.get(balance.plan, 0)
+            if price > 0:
+                invoices.append({
+                    "id": f"sub_{balance.id}",
+                    "date": balance.cycle_start.isoformat() if balance.cycle_start else "",
+                    "description": f"Aegis {balance.plan.capitalize()} Plan",
+                    "amount_usd": price,
+                    "status": "paid",
+                    "type": "subscription",
+                    "payment_method": "card",
+                    "invoice_url": None,
+                })
+
+        # ── Credit top-up payments ────────────────────────────────────────
+        topup_result = await db.execute(
+            select(CreditTopUp)
+            .where(CreditTopUp.user_id == user_id)
+            .order_by(CreditTopUp.created_at.desc())
+            .limit(50)
+        )
+        topups = topup_result.scalars().all()
+        for t in topups:
+            invoices.append({
+                "id": t.id,
+                "date": t.created_at.isoformat() if t.created_at else "",
+                "description": f"Credit Top-up — {t.credits:,} credits",
+                "amount_usd": t.amount_usd,
+                "status": "paid",
+                "type": "topup",
+                "payment_method": "card",
+                "invoice_url": None,
+            })
+        break
+
+    # Sort by date descending
+    invoices.sort(key=lambda x: x["date"], reverse=True)
+    return {"invoices": invoices}

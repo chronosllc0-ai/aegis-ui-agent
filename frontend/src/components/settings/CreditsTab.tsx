@@ -4,17 +4,6 @@ import { apiUrl } from '../../lib/api'
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-type CreditBlock = {
-  id: string
-  amount_credits: number
-  amount_usd: number
-  effective_date: string
-  expiry_date: string | null
-  original_balance: number
-  current_balance: number
-  source: string
-}
-
 type BalanceSummary = {
   plan: string
   used: number
@@ -31,15 +20,41 @@ type PaymentsConfig = {
   active_methods: string[]
 }
 
-// ── Credit packages ──────────────────────────────────────────────────────
+// ── Plans — mirrors PRICING in LandingPage.tsx ───────────────────────────
 
-const CREDIT_PACKAGES = [
-  { credits: 10_000, usd: 10, bonus: 3_000, label: 'Buy $10, get $13' },
-  { credits: 20_000, usd: 20, bonus: 8_000, label: 'Buy $20, get $28' },
-  { credits: 100_000, usd: 100, bonus: 20_000, label: 'Buy $100, get $120' },
+const PLANS = [
+  {
+    key: 'pro' as const,
+    name: 'Pro',
+    price: 29,
+    period: '/month',
+    credits: 50_000,
+    description: 'Serious throughput, saved workflows, and priority support.',
+    highlight: true,
+  },
+  {
+    key: 'team' as const,
+    name: 'Team',
+    price: 79,
+    period: '/seat/month',
+    credits: 200_000,
+    description: 'Shared credit pools, SSO, team workflows, and admin dashboard.',
+    highlight: false,
+  },
+  {
+    key: 'enterprise' as const,
+    name: 'Enterprise',
+    price: 299,
+    period: '/month',
+    credits: 1_000_000,
+    description: 'Dedicated support, custom limits, and advanced security.',
+    highlight: false,
+  },
 ] as const
 
-// ── Helper icons ─────────────────────────────────────────────────────────
+type PlanKey = (typeof PLANS)[number]['key']
+
+// ── Helper ───────────────────────────────────────────────────────────────
 
 function SpinnerIcon({ className }: { className?: string }) {
   return <LuLoader className={`animate-spin ${className ?? 'h-4 w-4'}`} />
@@ -48,18 +63,15 @@ function SpinnerIcon({ className }: { className?: string }) {
 // ── Main component ───────────────────────────────────────────────────────
 
 interface CreditsTabProps {
-  /** If set (e.g. from landing page redirect), pre-open checkout for a specific package */
-  initialCredits?: number
+  /** If set (from landing page redirect), pre-select matching plan */
+  initialPlan?: PlanKey
 }
 
-export function CreditsTab({ initialCredits }: CreditsTabProps) {
+export function CreditsTab({ initialPlan }: CreditsTabProps) {
   const [balance, setBalance] = useState<BalanceSummary | null>(null)
-  const [creditBlocks, setCreditBlocks] = useState<CreditBlock[]>([])
   const [paymentsConfig, setPaymentsConfig] = useState<PaymentsConfig | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedPackage, setSelectedPackage] = useState<(typeof CREDIT_PACKAGES)[number] | null>(
-    () => CREDIT_PACKAGES.find((p) => p.usd === initialCredits) ?? null,
-  )
+  const [selectedPlan, setSelectedPlan] = useState<PlanKey | null>(initialPlan ?? null)
   const [selectedMethod, setSelectedMethod] = useState<'stripe' | 'coinbase' | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,64 +84,52 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
         fetch(apiUrl('/api/usage/balance'), { credentials: 'include' }),
         fetch(apiUrl('/api/payments/config'), { credentials: 'include' }),
       ])
-      if (balanceRes.ok) {
-        const data = (await balanceRes.json()) as BalanceSummary
-        setBalance(data)
-      }
+      if (balanceRes.ok) setBalance((await balanceRes.json()) as BalanceSummary)
       if (configRes.ok) {
         const data = (await configRes.json()) as PaymentsConfig
         setPaymentsConfig(data)
-        if (data.active_methods[0]) {
+        if (!selectedMethod && data.active_methods[0]) {
           setSelectedMethod(data.active_methods[0] as 'stripe' | 'coinbase')
         }
-      }
-      // Try to load credit blocks history
-      const histRes = await fetch(apiUrl('/api/payments/credit-blocks'), { credentials: 'include' })
-      if (histRes.ok) {
-        const data = (await histRes.json()) as { blocks: CreditBlock[] }
-        setCreditBlocks(data.blocks ?? [])
       }
     } catch {
       // non-fatal
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void loadData()
   }, [loadData])
 
   const handleProceed = async () => {
-    if (!selectedPackage || !selectedMethod) return
+    if (!selectedPlan || !selectedMethod) return
     setCheckoutLoading(true)
     setError(null)
+    const plan = PLANS.find((p) => p.key === selectedPlan)!
     try {
       if (selectedMethod === 'stripe') {
         const origin = window.location.origin
-        const res = await fetch(apiUrl('/api/payments/stripe/create-credits-checkout'), {
+        const res = await fetch(apiUrl('/api/payments/stripe/create-checkout'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            credits: selectedPackage.credits + selectedPackage.bonus,
-            amount_usd: selectedPackage.usd,
-            success_url: `${origin}/?credits_success=1`,
-            cancel_url: `${origin}/?credits_cancelled=1`,
+            plan: plan.key,
+            success_url: `${origin}/?plan_success=1`,
+            cancel_url: `${origin}/?plan_cancelled=1`,
           }),
         })
         if (!res.ok) throw new Error('Failed to create checkout session')
         const data = (await res.json()) as { checkout_url: string }
         window.location.href = data.checkout_url
       } else {
-        const res = await fetch(apiUrl('/api/payments/coinbase/create-credits-charge'), {
+        const res = await fetch(apiUrl('/api/payments/coinbase/create-charge'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({
-            credits: selectedPackage.credits + selectedPackage.bonus,
-            amount_usd: selectedPackage.usd,
-          }),
+          body: JSON.stringify({ plan: plan.key }),
         })
         if (!res.ok) throw new Error('Failed to create crypto charge')
         const data = (await res.json()) as { hosted_url: string }
@@ -142,18 +142,19 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
     }
   }
 
-  const creditBalance = balance
-    ? ((balance.allowance - balance.used) + (balance.remaining ?? 0))
-    : 0
-  const balanceUsd = (creditBalance / 1000).toFixed(6)
+  const creditBalance = balance ? balance.allowance - balance.used + (balance.remaining ?? 0) : 0
+  const balanceUsd = (creditBalance / 1000).toFixed(2)
+  const currentPlanName = balance?.plan
+    ? balance.plan.charAt(0).toUpperCase() + balance.plan.slice(1)
+    : 'Free'
 
   return (
     <div className='space-y-6'>
 
       {/* Header */}
       <div>
-        <h2 className='text-base font-semibold text-white'>Credits</h2>
-        <p className='mt-0.5 text-xs text-zinc-500'>Buy credits to use Aegis with platform-managed AI keys.</p>
+        <h2 className='text-base font-semibold text-white'>Credits & Plan</h2>
+        <p className='mt-0.5 text-xs text-zinc-500'>Manage your Aegis subscription and credit balance.</p>
       </div>
 
       {/* Balance card */}
@@ -161,7 +162,7 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
         <div className='flex items-center justify-between'>
           <div className='flex items-center gap-2'>
             <LuZap className='h-4 w-4 text-cyan-400' />
-            <span className='text-sm font-medium text-zinc-300'>Credit balance</span>
+            <span className='text-sm font-medium text-zinc-300'>Current balance</span>
           </div>
           <button
             type='button'
@@ -175,7 +176,7 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
 
         {loading ? (
           <div className='mt-4 flex items-center gap-2 text-zinc-500'>
-            <SpinnerIcon /> <span className='text-sm'>Loading balance…</span>
+            <SpinnerIcon /> <span className='text-sm'>Loading…</span>
           </div>
         ) : (
           <>
@@ -183,75 +184,85 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
             {balance && (
               <div className='mt-3 grid grid-cols-2 gap-3'>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
-                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Effective date</p>
-                  <p className='mt-1 text-xs text-zinc-300'>—</p>
+                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Current plan</p>
+                  <p className='mt-1 text-xs font-medium text-cyan-300'>{currentPlanName}</p>
                 </div>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
-                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Expiry date</p>
+                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Cycle renews</p>
                   <p className='mt-1 text-xs text-zinc-300'>
                     {balance.cycle_end ? new Date(balance.cycle_end).toLocaleDateString() : '—'}
                   </p>
                 </div>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
-                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Current balance</p>
-                  <p className='mt-1 text-xs text-zinc-300'>${balanceUsd}</p>
+                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Credits used</p>
+                  <p className='mt-1 text-xs text-zinc-300'>{balance.used.toLocaleString()}</p>
                 </div>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
-                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Original balance</p>
-                  <p className='mt-1 text-xs text-zinc-300'>${(balance.allowance / 1000).toFixed(6)}</p>
+                  <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Monthly allowance</p>
+                  <p className='mt-1 text-xs text-zinc-300'>{balance.allowance.toLocaleString()}</p>
                 </div>
               </div>
-            )}
-            {creditBlocks.length === 0 && (
-              <p className='mt-3 text-center text-xs text-zinc-500'>No credit blocks found</p>
             )}
           </>
         )}
       </div>
 
-      {/* Buy Credits */}
+      {/* Upgrade / Subscribe */}
       <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-5'>
         <div className='flex items-center gap-2 mb-4'>
           <LuCreditCard className='h-4 w-4 text-cyan-400' />
-          <h3 className='text-sm font-semibold text-white'>Buy Credits</h3>
+          <h3 className='text-sm font-semibold text-white'>Upgrade Plan</h3>
         </div>
 
-        {/* First-time bonus banner */}
-        <div className='mb-4 rounded-lg border border-purple-500/30 bg-purple-500/10 px-4 py-3'>
-          <p className='text-xs font-semibold text-purple-300'>🎉 Get $20 Extra on Your First Top-Up</p>
-          <p className='mt-0.5 text-[11px] text-purple-400'>
-            Top up any amount of credits and we'll add $20 on top of it, instantly.
-          </p>
-          <p className='mt-0.5 text-[10px] text-purple-500'>Free promotional credits expire in 60 days.</p>
-        </div>
-
-        {/* Package selector */}
-        <div className='flex flex-wrap gap-2 mb-5'>
-          {CREDIT_PACKAGES.map((pkg) => (
-            <button
-              key={pkg.usd}
-              type='button'
-              onClick={() => setSelectedPackage(pkg)}
-              className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
-                selectedPackage?.usd === pkg.usd
-                  ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-300'
-                  : 'border-[#2a2a2a] text-zinc-300 hover:border-zinc-500'
-              }`}
-            >
-              {pkg.label}
-            </button>
-          ))}
-          <button
-            type='button'
-            onClick={() => setSelectedPackage(null)}
-            className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
-              selectedPackage === null
-                ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-300'
-                : 'border-[#2a2a2a] text-zinc-300 hover:border-zinc-500'
-            }`}
-          >
-            Custom
-          </button>
+        {/* Plan cards */}
+        <div className='space-y-3 mb-5'>
+          {PLANS.map((plan) => {
+            const isSelected = selectedPlan === plan.key
+            const isCurrent = balance?.plan === plan.key
+            return (
+              <button
+                key={plan.key}
+                type='button'
+                onClick={() => setSelectedPlan(plan.key)}
+                disabled={isCurrent}
+                className={`w-full rounded-xl border px-4 py-3.5 text-left transition ${
+                  isCurrent
+                    ? 'cursor-default border-zinc-700/50 bg-zinc-800/30 opacity-60'
+                    : isSelected
+                    ? plan.highlight
+                      ? 'border-cyan-500/60 bg-cyan-500/8'
+                      : 'border-zinc-500/60 bg-zinc-700/10'
+                    : 'border-[#2a2a2a] hover:border-zinc-600'
+                }`}
+              >
+                <div className='flex items-center justify-between'>
+                  <div className='flex items-center gap-2'>
+                    <span className='text-sm font-semibold text-white'>
+                      {plan.name}
+                      {plan.highlight && (
+                        <span className='ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] font-medium text-cyan-300'>
+                          Popular
+                        </span>
+                      )}
+                    </span>
+                    {isCurrent && (
+                      <span className='rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400'>
+                        Current
+                      </span>
+                    )}
+                  </div>
+                  <div className='text-right'>
+                    <span className='text-lg font-bold text-white'>${plan.price}</span>
+                    <span className='text-[11px] text-zinc-500'>{plan.period}</span>
+                  </div>
+                </div>
+                <p className='mt-1 text-[11px] text-zinc-500'>{plan.description}</p>
+                <p className='mt-1 text-[11px] text-cyan-400/70'>
+                  {plan.credits.toLocaleString()} credits/month
+                </p>
+              </button>
+            )
+          })}
         </div>
 
         {/* Payment method */}
@@ -314,7 +325,7 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
         <button
           type='button'
           onClick={() => void handleProceed()}
-          disabled={!selectedPackage || !selectedMethod || checkoutLoading}
+          disabled={!selectedPlan || !selectedMethod || checkoutLoading}
           className='flex w-full items-center justify-center gap-2 rounded-full bg-cyan-500 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50'
         >
           {checkoutLoading ? (
@@ -322,15 +333,19 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
               <SpinnerIcon className='h-4 w-4' />
               Redirecting…
             </>
-          ) : selectedPackage ? (
-            <>Continue to {selectedMethod === 'stripe' ? 'Stripe' : 'Coinbase'} — ${selectedPackage.usd}</>
+          ) : selectedPlan ? (
+            <>
+              Subscribe to {PLANS.find((p) => p.key === selectedPlan)?.name} —{' '}
+              ${PLANS.find((p) => p.key === selectedPlan)?.price}
+              {PLANS.find((p) => p.key === selectedPlan)?.period}
+            </>
           ) : (
-            'Select a package'
+            'Select a plan'
           )}
         </button>
 
         <p className='mt-3 text-center text-[11px] text-zinc-600'>
-          Payments processed securely. 1 credit = $0.001.
+          Recurring monthly subscription. Cancel any time.
         </p>
       </div>
 
@@ -341,7 +356,9 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
             <LuChartBar className='h-4 w-4 text-zinc-400' />
             <div>
               <p className='text-sm font-medium text-zinc-300'>Automatic Top Up</p>
-              <p className='text-[11px] text-zinc-500'>Automatically top up your balance when it drops below $5.</p>
+              <p className='text-[11px] text-zinc-500'>
+                Automatically purchase more credits when your balance runs out.
+              </p>
             </div>
           </div>
           <button
@@ -349,45 +366,43 @@ export function CreditsTab({ initialCredits }: CreditsTabProps) {
             onClick={() => setAutoTopUp((prev) => !prev)}
             className={`relative h-5 w-9 rounded-full transition-colors ${autoTopUp ? 'bg-cyan-600' : 'bg-zinc-700'}`}
           >
-            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${autoTopUp ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                autoTopUp ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
           </button>
         </div>
-        {autoTopUp && (
-          <p className='mt-3 text-xs text-zinc-500'>
-            When your balance drops below $5, we'll automatically charge your saved payment method for $10.
-          </p>
-        )}
       </div>
 
-      {/* Credit history */}
-      {creditBlocks.length > 0 && (
-        <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-5'>
-          <div className='flex items-center gap-2 mb-4'>
-            <LuCalendar className='h-4 w-4 text-zinc-400' />
-            <h3 className='text-sm font-semibold text-white'>Credit History</h3>
-          </div>
-          <table className='w-full text-xs'>
-            <thead>
-              <tr className='text-left text-[10px] uppercase tracking-wider text-zinc-500'>
-                <th className='pb-2'>Date</th>
-                <th className='pb-2'>Credits</th>
-                <th className='pb-2'>Source</th>
-                <th className='pb-2 text-right'>Balance</th>
-              </tr>
-            </thead>
-            <tbody className='divide-y divide-[#1a1a1a]'>
-              {creditBlocks.map((block) => (
-                <tr key={block.id} className='text-zinc-300'>
-                  <td className='py-2'>{new Date(block.effective_date).toLocaleDateString()}</td>
-                  <td className='py-2 text-emerald-400'>+{block.amount_credits.toLocaleString()}</td>
-                  <td className='py-2 capitalize text-zinc-500'>{block.source}</td>
-                  <td className='py-2 text-right'>{block.current_balance.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Credit history (plan-level activity) */}
+      <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-5'>
+        <div className='flex items-center gap-2 mb-4'>
+          <LuCalendar className='h-4 w-4 text-zinc-400' />
+          <h3 className='text-sm font-semibold text-white'>Billing History</h3>
+          <span className='ml-auto text-[11px] text-zinc-600'>See Invoice tab for full records</span>
         </div>
-      )}
+        {balance ? (
+          <div className='text-xs text-zinc-400 space-y-2'>
+            <div className='flex justify-between py-2 border-b border-[#1e1e1e]'>
+              <span>
+                {currentPlanName} plan — current cycle
+              </span>
+              <span className='text-zinc-300'>
+                {balance.used.toLocaleString()} / {balance.allowance.toLocaleString()} credits
+              </span>
+            </div>
+            {balance.cycle_end && (
+              <div className='flex justify-between py-1'>
+                <span className='text-zinc-500'>Next renewal</span>
+                <span className='text-zinc-400'>{new Date(balance.cycle_end).toLocaleDateString()}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className='text-xs text-zinc-600'>No billing data available.</p>
+        )}
+      </div>
     </div>
   )
 }
