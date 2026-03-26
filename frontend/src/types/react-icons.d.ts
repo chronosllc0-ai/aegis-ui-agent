@@ -49,6 +49,7 @@ declare module 'react-icons/lu' {
   export const LuCode: IconType
   export const LuCreditCard: IconType
   export const LuDownload: IconType
+  export const LuEye: IconType
   export const LuFilter: IconType
   export const LuFolder: IconType
   export const LuGlobe: IconType
@@ -56,6 +57,7 @@ declare module 'react-icons/lu' {
   export const LuLock: IconType
   export const LuPlus: IconType
   export const LuShield: IconType
+  export const LuSearch: IconType
   export const LuTrendingUp: IconType
   export const LuTriangleAlert: IconType
   export const LuWind: IconType
