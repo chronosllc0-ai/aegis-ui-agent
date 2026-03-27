@@ -1,3 +1,228 @@
+## Session 5.25 - March 27, 2026 (Phase 7 Task Planner Backend + TaskPlanView)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented Phase 7 planning persistence in `backend/database.py`:
+  - Added `TaskPlan` model.
+  - Added `TaskStep` model with dependency/status/provider fields.
+- Added new planner package:
+  - `backend/planner/__init__.py`
+  - `backend/planner/service.py` with:
+    - LLM decomposition prompt + provider/model mapping
+    - plan creation/listing/fetching
+    - plan approve/cancel
+    - step status update helper
+    - `decompose_prompt` wrapper
+  - `backend/planner/router.py` with API routes:
+    - `POST /api/plans/decompose`
+    - `GET /api/plans/`
+    - `GET /api/plans/{plan_id}`
+    - `POST /api/plans/{plan_id}/approve`
+    - `POST /api/plans/{plan_id}/cancel`
+- Registered planner API router in `main.py` via `app.include_router(planner_router)`.
+- Added frontend `frontend/src/components/TaskPlanView.tsx`:
+  - plan header with status badge + progress bar
+  - nested step/substep rendering
+  - status indicators, expand/collapse details, result/error sections
+  - approve/cancel actions with authenticated API calls
+  - polling while plan status is `running`
+
+### What's Working
+- Backend imports/compiles with planner package and new models.
+- Frontend production build compiles with the new `TaskPlanView` component.
+- Planner routes are mounted in the FastAPI app.
+
+### What's NOT Working Yet
+- No execution engine wiring yet from approved plans into runtime step execution (this phase added planning/decomposition CRUD only).
+- No dedicated automated tests were added for planner routes/service behavior in this pass.
+
+### Next Steps
+1. Add tests for planner decomposition route auth, plan lifecycle transitions, and step serialization.
+2. Wire approved plans into task execution loop (orchestrator integration) in a later phase when allowed.
+3. Mount `TaskPlanView` in the active UI flow where plans are created/selected.
+
+### Decisions Made
+- Kept decomposition on the existing multi-provider abstraction (`backend/providers`) per phase requirement.
+- Used cookie-session auth in planner router by verifying `aegis_session` from request cookies.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.24 - March 27, 2026 (Review Follow-up: AgentAction FK + Frontend Credentialed GitHub Requests)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Fixed `AgentAction.task_id` referential integrity in `backend/database.py`:
+  - Added `ForeignKey("agent_tasks.id")` to enforce valid task/action linkage and prevent orphaned action rows.
+- Fixed frontend authenticated integration calls in `frontend/src/components/settings/IntegrationsTab.tsx`:
+  - Added `credentials: 'include'` to the shared `postJson` helper so GitHub register/test endpoints receive session cookies.
+
+### What's Working
+- Agent action records are now constrained to valid parent tasks at the schema level.
+- Frontend integration POST calls now send auth cookies, so session-protected GitHub endpoints can authenticate properly.
+
+### What's NOT Working Yet
+- This pass did not add dedicated migration or API tests for FK enforcement and credentialed integration requests.
+
+### Next Steps
+1. Add tests for integration tab requests asserting cookie-authenticated 200 vs unauthenticated 401 behavior.
+2. Add DB-level test coverage for `AgentAction.task_id` FK constraints in local SQLite/Postgres test matrices.
+
+### Decisions Made
+- Applied the credential fix at the shared `postJson` layer to ensure consistency across all integration POST routes, not only GitHub.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.23 - March 26, 2026 (Phase 6 Critical Fixes: Cookie Auth Dependency + User-Scoped GitHub Registry)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Fixed critical auth dependency usage in `main.py` for newly added protected routes:
+  - Replaced `Depends(_verify_session)` with `Depends(_get_current_user)` on:
+    - GitHub register/test endpoints
+    - all `/api/agents/*` user task endpoints
+  - This ensures auth is resolved from the `aegis_session` cookie, matching the app’s session model.
+- Fixed GitHub registry isolation bug for multi-user environments:
+  - Refactored `GitHubRegistry` storage from global `integration_id -> config` to per-user scoped maps:
+    - `owner_user_id -> integration_id -> integration/config`
+  - Updated register/test handlers to read/write entries with user scoping.
+- Updated webhook resolution logic for scoped registry storage:
+  - Added candidate lookup by `integration_id` across users.
+  - For multiple matches, webhook selection now validates signature against candidates and rejects invalid signature cases.
+
+### What's Working
+- Protected endpoints now use cookie-aware auth dependency and no longer rely on query-param-style token injection.
+- GitHub integration registrations no longer overwrite each other across users when the same fixed integration id (e.g., `github`) is used.
+- `main.py` compiles cleanly after refactor.
+
+### What's NOT Working Yet
+- This pass did not add automated tests for:
+  - cookie-auth dependency behavior on GitHub/agent endpoints,
+  - multi-user GitHub registry collision prevention,
+  - webhook candidate selection behavior.
+
+### Next Steps
+1. Add focused tests for session-cookie auth on GitHub + `/api/agents/*` routes.
+2. Add regression test simulating two users registering `integration_id="github"` to verify scoping.
+3. Add webhook tests for signature-match selection when multiple candidate owners exist.
+
+### Decisions Made
+- Kept in-memory registry architecture but introduced owner scoping as the minimal safe fix without introducing persistent integration storage in this pass.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.22 - March 26, 2026 (Phase 6 Review Follow-ups: GitHub Auth Scoping + Pagination Guards)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short pass
+
+### What Was Done
+- Addressed GitHub integration route hardening review notes in `main.py`:
+  - Added session auth enforcement to `POST /api/integrations/github/register/{integration_id}` via `Depends(_verify_session)`.
+  - Persisted `owner_user_id` in GitHub registry config at registration time.
+  - Added session auth + owner scoping to `POST /api/integrations/github/{integration_id}/test`, returning 404 when the integration does not belong to the current user.
+- Addressed pagination guard review note:
+  - Added `Query(ge/le)` bounds to `/api/agents/tasks` (`limit` and `offset`) to prevent unbounded task-page fetches.
+- Addressed style nitpick:
+  - Moved inline JSON import in the GitHub webhook handler to module-level `import json`.
+
+### What's Working
+- The GitHub register/test flow now requires an authenticated session and enforces ownership checks before tool execution.
+- User task listing now has bounded pagination aligned with the admin endpoint guard style.
+- Updated Python entrypoint compiles successfully after these adjustments.
+
+### What's NOT Working Yet
+- This pass did not add new automated API tests for owner-scoping behavior on GitHub integration routes.
+- Browser screenshot tooling is still unavailable in this environment.
+
+### Next Steps
+1. Add route tests covering:
+   - unauthorized GitHub register/test access,
+   - cross-user `integration_id` test denial,
+   - `/api/agents/tasks` pagination bound validation.
+2. Optionally apply owner scoping consistency to any other integration test routes if needed by product policy.
+
+### Decisions Made
+- Chose `404` for owner-mismatch on GitHub test route to avoid disclosing integration existence across users.
+- Scoped changes strictly to review-requested hardening and pagination concerns without broad route refactors.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.21 - March 26, 2026 (Phase 6 Cloud Agents + GitHub Integration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented Phase 6 backend GitHub integration support:
+  - Added `integrations/github_connector.py` with token validation, webhook signature verification, and GitHub tool execution.
+  - Registered `GitHubIntegration` in `integrations/__init__.py`.
+  - Added in-memory `GitHubRegistry` and GitHub integration endpoints in `main.py`:
+    - `POST /api/integrations/github/register/{integration_id}`
+    - `POST /api/integrations/github/{integration_id}/test`
+    - `POST /api/integrations/github/{integration_id}/webhook`
+- Implemented cloud-agent task persistence and APIs:
+  - Added `AgentTask` and `AgentAction` models to `backend/database.py`.
+  - Added `backend/agent_spawn.py` service helpers for create/list/detail/status/action logs.
+  - Added user task API endpoints in `main.py`:
+    - `POST /api/agents/spawn`
+    - `GET /api/agents/tasks`
+    - `GET /api/agents/tasks/{task_id}`
+    - `POST /api/agents/tasks/{task_id}/cancel`
+- Implemented admin cloud-agent management:
+  - Added `backend/admin/agents.py` endpoints:
+    - `GET /api/admin/agents/tasks`
+    - `GET /api/admin/agents/tasks/{task_id}`
+    - `POST /api/admin/agents/tasks/{task_id}/cancel`
+    - `GET /api/admin/agents/stats`
+  - Mounted admin agents router in `backend/admin/router.py`.
+- Implemented frontend Phase 6 integration updates:
+  - Added GitHub icon/type/default config in `frontend/src/lib/mcp.ts`.
+  - Added GitHub icon rendering to `frontend/src/components/icons.tsx`.
+  - Added GitHub connect/test/configure UI flow in `frontend/src/components/settings/IntegrationsTab.tsx`.
+  - Removed `MODEL_ICON_URL` from `frontend/src/lib/models.ts`.
+  - Added `FaGithub` / `SiGithub` typings to `frontend/src/types/react-icons.d.ts`.
+
+### What's Working
+- Python modules compile for the new backend files and updated entrypoints.
+- Frontend production build succeeds with the new GitHub integration UI and icon map changes.
+- Phase 6 route surfaces and model symbols are present in the codebase for both user and admin cloud-agent APIs.
+
+### What's NOT Working Yet
+- This pass did not add dedicated automated API tests for the new GitHub and cloud-agent endpoints.
+- Browser screenshot tooling is still unavailable in this environment, so no visual artifact was captured.
+
+### Next Steps
+1. Add backend route tests for `/api/integrations/github/*`, `/api/agents/*`, and `/api/admin/agents/*`.
+2. Wire real task-execution workers to `AgentTask` status/action updates (running/completed/failed lifecycle).
+3. Add frontend admin pages for agent task browsing/cancellation (currently backend/admin APIs exist but UI pass is separate).
+
+### Decisions Made
+- Kept existing Telegram/Slack/Discord flows untouched and added GitHub in parallel using the existing in-memory registry pattern.
+- Preserved backward compatibility for integration icon normalization while adding first-class GitHub support.
+
+### Blockers
+- No functional blockers; only missing screenshot tooling in this execution environment.
+
+---
+
 ## Session 5.18 - March 20, 2026 (Phase 3 Conversation Persistence + Admin Audit)
 
 **Agent:** GPT-5.2-Codex  
@@ -1207,3 +1432,80 @@
 - None
 
 ---
+
+## Session 5.19 - March 26, 2026 (Phase 5 Impersonation UI Integration + Admin UX Polish)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added a dedicated `ImpersonationBanner` component for active impersonation sessions with an amber top bar and an `Exit Impersonation` action that calls `POST /api/admin/impersonate/stop` and returns to `/admin/users`.
+- Added a reusable `useImpersonation` frontend hook to encapsulate impersonation status checks and start/stop API calls.
+- Updated `App.tsx` to:
+  - track `authUser.impersonating`
+  - render the banner globally when impersonating
+  - offset the full app layout with top padding while the fixed banner is visible
+  - add an explicit sidebar `Admin Panel` button for users with `admin` or `superadmin` role.
+- Updated `AdminPanel` Users UI to support the requested “View as User” flow:
+  - confirmation prompt before impersonation
+  - impersonation from both user-detail and table-row quick action button
+  - redirect to `/app` after successful impersonation start.
+- Polished admin loading/empty states in dashboard/users/audit tabs using `react-icons/lu` spinner and search-empty visuals (no emoji icons).
+- Extended local `react-icons` type declarations for `LuEye` and `LuSearch`.
+
+### What's Working
+- Frontend production build passes with the impersonation/banner/admin-sidebar updates.
+- Impersonation banner now appears globally (including admin surfaces) when `authUser.impersonating === true`.
+- The app content offsets under banner mode (`pt-10`) so top content is not hidden.
+- Users tab now supports “View as User” from both detail panel and row-level quick action.
+
+### What's NOT Working Yet
+- `npm run lint` still fails because of pre-existing lint issues outside this pass (react-refresh and set-state-in-effect violations in unrelated files), plus one existing `any` cast in `App.tsx`.
+- I could not capture a browser screenshot artifact in this environment because no browser/screenshot tool is available in the current toolset.
+
+### Next Steps
+1. Exercise the impersonation path end-to-end in-browser: admin user detail/table action → `/app` client view with banner → exit back to `/admin/users`.
+2. Clean existing frontend lint violations in the unrelated files so `npm run lint` is fully green.
+3. If screenshot tooling is available in a follow-up session, capture Phase 5 UI evidence (impersonation banner + view-as-user action).
+
+### Decisions Made
+- Kept impersonation API calls centralized in `useImpersonation` so all admin surfaces can reuse consistent behavior.
+- Used full page navigation (`window.location.href`) after start/stop to guarantee cookie-backed session transitions are immediately reflected.
+
+### Blockers
+- Missing browser screenshot tooling in this environment.
+
+## Session 5.20 - March 26, 2026 (Phase 5 Review Follow-up: Impersonation Data Flow + Exit Routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Patched `App.tsx` auth session restore logic so `authUser.impersonating` is explicitly populated from the `/api/auth/me` response payload shape.
+- Added impersonation status hydration in `App.tsx` using `useImpersonation().checkStatus()` whenever an authenticated impersonating session is detected.
+- Updated banner email source in `App.tsx` to prefer `impersonationStatus.target_user.email` and only fall back to `authUser.email`.
+- Added admin-route handling in `App.tsx` so `/admin/*` paths open the settings shell directly on the Admin tab (`isAdminPath`), which makes `/admin/users` a handled route flow in this app shell.
+- Hardened `ImpersonationBanner` stop behavior to redirect only when `/api/admin/impersonate/stop` returns an OK response.
+
+### What's Working
+- Frontend build still passes after the review-follow-up fixes.
+- Banner data flow now has explicit impersonation status wiring and target-user email resolution.
+- `/admin/users` now resolves into the Admin settings panel path in this app architecture rather than dropping users into the default dashboard view.
+
+### What's NOT Working Yet
+- Frontend lint remains failing due existing unrelated lint violations in pre-existing files (`react-refresh/only-export-components` and `react-hooks/set-state-in-effect` in `SettingsPage`).
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. Run a browser E2E check for review cases:
+   - Start impersonation from Admin Users
+   - Verify banner shows target-user email
+   - Exit impersonation and confirm return path behavior.
+2. Clean the pre-existing frontend lint issues so `npm run lint` becomes green.
+
+### Decisions Made
+- Kept redirect target as `/admin/users`, and taught `App.tsx` to interpret `/admin/*` paths consistently.
+- Kept banner fallback to `authUser.email` for resilience if status fetch fails transiently.
+
+### Blockers
+- No browser screenshot tool available in this runtime.

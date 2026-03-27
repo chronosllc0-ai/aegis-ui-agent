@@ -166,8 +166,6 @@ export const MODEL_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
 
 export const MODEL_OPTIONS = allModelIds()
 
-export const MODEL_ICON_URL = 'https://i.postimg.cc/NMtZmLXT/download_4.png'
-
 /**
  * Render a provider icon that blends with dark backgrounds.
  * Icons are clipped to circles and darkened slightly so they sit
