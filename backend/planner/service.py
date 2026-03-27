@@ -54,7 +54,7 @@ Respond with ONLY valid JSON in this exact format:
 TASK_TYPE_TO_PROVIDER: dict[str, tuple[str, str]] = {
     "reasoning": ("anthropic", "claude-sonnet-4-20250514"),
     "coding": ("anthropic", "claude-sonnet-4-20250514"),
-    "fast": ("groq", "llama-3.3-70b-versatile"),
+    "fast": ("google", "gemini-2.5-flash"),
     "research": ("google", "gemini-2.5-pro"),
     "creative": ("openai", "gpt-5.2"),
 }
@@ -72,14 +72,14 @@ class PlannerService:
     ) -> dict:
         """Decompose a prompt into a structured task plan using an LLM."""
         provider = get_provider(provider_name, api_key)
-        model_name = model or (provider.available_models[0] if provider.available_models else None)
+        resolved_model = model or (provider.available_models[0] if provider.available_models else None)
 
         messages = [
             ChatMessage(role="system", content=DECOMPOSITION_SYSTEM_PROMPT),
             ChatMessage(role="user", content=prompt),
         ]
 
-        response = await provider.chat(messages, model=model_name, temperature=0.3, max_tokens=4096)
+        response = await provider.chat(messages, model=resolved_model, temperature=0.3, max_tokens=4096)
         content = response.content.strip()
 
         if content.startswith("```"):
@@ -101,6 +101,7 @@ class PlannerService:
     ) -> TaskPlan:
         """Persist a decomposed plan and its steps to the database."""
         plan_id = str(uuid4())
+
         plan = TaskPlan(
             id=plan_id,
             user_id=user_id,
@@ -119,12 +120,13 @@ class PlannerService:
         for task in tasks:
             task_type = task.get("task_type", "reasoning")
             rec_provider, rec_model = TASK_TYPE_TO_PROVIDER.get(task_type, ("google", "gemini-2.5-pro"))
+            task_id = task.get("id", str(uuid4()))
 
             step = TaskStep(
-                id=task.get("id", str(uuid4())),
+                id=task_id,
                 plan_id=plan_id,
                 step_index=step_index,
-                title=task["title"],
+                title=task.get("title", f"Step {step_index + 1}"),
                 description=task.get("description", ""),
                 assigned_provider=rec_provider,
                 assigned_model=rec_model,
@@ -135,18 +137,18 @@ class PlannerService:
 
             for subtask in task.get("subtasks", []):
                 sub_type = subtask.get("task_type", "fast")
-                sub_provider, sub_model = TASK_TYPE_TO_PROVIDER.get(sub_type, ("groq", "llama-3.3-70b-versatile"))
+                sub_provider, sub_model = TASK_TYPE_TO_PROVIDER.get(sub_type, ("google", "gemini-2.5-flash"))
 
                 sub_step = TaskStep(
                     id=subtask.get("id", str(uuid4())),
                     plan_id=plan_id,
-                    parent_step_id=task.get("id"),
+                    parent_step_id=task_id,
                     step_index=step_index,
-                    title=subtask["title"],
+                    title=subtask.get("title", f"Step {step_index + 1}"),
                     description=subtask.get("description", ""),
                     assigned_provider=sub_provider,
                     assigned_model=sub_model,
-                    depends_on=json.dumps(subtask.get("depends_on", [])),
+                    depends_on=json.dumps(subtask.get("depends_on", [task_id])),
                 )
                 session.add(sub_step)
                 step_index += 1
@@ -163,9 +165,7 @@ class PlannerService:
         if not plan:
             return None
 
-        steps_result = await session.execute(
-            select(TaskStep).where(TaskStep.plan_id == plan_id).order_by(TaskStep.step_index)
-        )
+        steps_result = await session.execute(select(TaskStep).where(TaskStep.plan_id == plan_id).order_by(TaskStep.step_index))
         steps = steps_result.scalars().all()
 
         return {
@@ -204,11 +204,7 @@ class PlannerService:
     async def list_plans(session: AsyncSession, user_id: str, limit: int = 20, offset: int = 0) -> list[dict]:
         """List plans for a user with basic info."""
         result = await session.execute(
-            select(TaskPlan)
-            .where(TaskPlan.user_id == user_id)
-            .order_by(TaskPlan.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            select(TaskPlan).where(TaskPlan.user_id == user_id).order_by(TaskPlan.created_at.desc()).limit(limit).offset(offset)
         )
         plans = result.scalars().all()
         return [
@@ -226,27 +222,21 @@ class PlannerService:
     async def approve_plan(session: AsyncSession, plan_id: str, user_id: str) -> bool:
         """Mark a draft plan as approved (ready for execution)."""
         result = await session.execute(
-            update(TaskPlan)
-            .where(TaskPlan.id == plan_id, TaskPlan.user_id == user_id, TaskPlan.status == "draft")
-            .values(status="approved")
+            update(TaskPlan).where(TaskPlan.id == plan_id, TaskPlan.user_id == user_id, TaskPlan.status == "draft").values(status="approved")
         )
         await session.commit()
-        return result.rowcount > 0
+        return bool(result.rowcount and result.rowcount > 0)
 
     @staticmethod
     async def cancel_plan(session: AsyncSession, plan_id: str, user_id: str) -> bool:
         """Cancel a plan."""
         result = await session.execute(
             update(TaskPlan)
-            .where(
-                TaskPlan.id == plan_id,
-                TaskPlan.user_id == user_id,
-                TaskPlan.status.in_(["draft", "approved", "running"]),
-            )
+            .where(TaskPlan.id == plan_id, TaskPlan.user_id == user_id, TaskPlan.status.in_(["draft", "approved", "running"]))
             .values(status="cancelled")
         )
         await session.commit()
-        return result.rowcount > 0
+        return bool(result.rowcount and result.rowcount > 0)
 
     @staticmethod
     async def update_step_status(
@@ -261,7 +251,7 @@ class PlannerService:
         """Update the status and result of a single step."""
         from datetime import datetime, timezone
 
-        values: dict = {"status": status}
+        values: dict[str, object] = {"status": status}
         if status == "running":
             values["started_at"] = datetime.now(timezone.utc)
         if status in ("completed", "failed"):
@@ -277,7 +267,7 @@ class PlannerService:
 
         result = await session.execute(update(TaskStep).where(TaskStep.id == step_id).values(**values))
         await session.commit()
-        return result.rowcount > 0
+        return bool(result.rowcount and result.rowcount > 0)
 
 
 async def decompose_prompt(

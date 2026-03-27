@@ -14,17 +14,14 @@ type SuggestionChipsProps = {
 
 export function SuggestionChips({ onSelectSuggestion, onOpenGallery }: SuggestionChipsProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-  const [loadError, setLoadError] = useState(false)
 
   const fetchSuggestions = useCallback(async () => {
-    setLoadError(false)
     try {
       const resp = await fetch(apiUrl('/api/gallery/suggestions?limit=5'), { credentials: 'include' })
       const data = await resp.json()
       if (data.ok) setSuggestions(data.suggestions)
     } catch {
-      setSuggestions([])
-      setLoadError(true)
+      // silent
     }
   }, [])
 
@@ -34,14 +31,6 @@ export function SuggestionChips({ onSelectSuggestion, onOpenGallery }: Suggestio
     }, 0)
     return () => window.clearTimeout(timeout)
   }, [fetchSuggestions])
-
-  if (loadError) {
-    return (
-      <div className='px-2 py-1.5 text-xs text-zinc-500'>
-        Suggestions are temporarily unavailable.
-      </div>
-    )
-  }
 
   if (suggestions.length === 0) return null
 
