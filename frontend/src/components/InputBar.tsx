@@ -19,6 +19,7 @@ type InputBarProps = {
   sending: boolean
   onModeChange: (mode: SteeringMode) => void
   onSend: (instruction: string, mode: SteeringMode) => void
+  onDecomposePlan?: (prompt: string) => void
   provider: string
   model: string
   onProviderChange: (provider: string) => void
@@ -101,6 +102,7 @@ export function InputBar({
   sending,
   onModeChange,
   onSend,
+  onDecomposePlan,
   provider,
   model,
   onProviderChange,
@@ -230,6 +232,16 @@ export function InputBar({
           placeholder='Type an instruction...'
           className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-2 py-1.5 text-xs text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2 sm:px-3 sm:py-2 sm:text-sm'
         />
+        {onDecomposePlan && (
+          <button
+            type='button'
+            onClick={() => { if (value.trim()) { onDecomposePlan(value); setValue('') } }}
+            title='Decompose into a multi-step plan'
+            className='rounded-lg border border-zinc-600 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 sm:px-4 sm:py-2 sm:text-sm'
+          >
+            Plan
+          </button>
+        )}
         <button type='button' onClick={() => submit()} className='rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-400 sm:px-4 sm:py-2 sm:text-sm'>
           {sending ? <span className='inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white' /> : 'Send'}
         </button>
