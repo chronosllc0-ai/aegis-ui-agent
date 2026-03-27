@@ -16,6 +16,7 @@ import { SpendingAlert } from './components/SpendingAlert'
 import { UsageDropdown } from './components/UsageDropdown'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
+import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
@@ -80,6 +81,7 @@ function App() {
   const [, setPendingPlan] = useState<string | null>(() => {
     return sessionStorage.getItem('aegis.pendingPlan')
   })
+  const [activePlanId, setActivePlanId] = useState<string | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
@@ -320,6 +322,25 @@ function App() {
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
     handleSend(normalized, 'steer')
+  }
+
+  const handleDecomposePlan = async (prompt: string) => {
+    const trimmed = prompt.trim()
+    if (!trimmed) return
+    try {
+      const resp = await fetch(apiUrl('/api/plans/decompose'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ prompt: trimmed, provider: settings.provider, model: settings.model }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (resp.ok && data?.ok && data?.plan?.id) {
+        setActivePlanId(data.plan.id as string)
+      }
+    } catch {
+      // silent — plan decompose errors are non-fatal
+    }
   }
 
   const newSession = () => {
@@ -585,6 +606,10 @@ function App() {
               />
             ) : showAutomations ? (
               <AutomationsPage />
+            ) : activePlanId ? (
+              <div className='h-full overflow-y-auto p-2'>
+                <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
+              </div>
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (
@@ -610,6 +635,7 @@ function App() {
                 sending={sending}
                 onModeChange={setMode}
                 onSend={handleSend}
+                onDecomposePlan={handleDecomposePlan}
                 provider={settings.provider}
                 model={settings.model}
                 onProviderChange={(nextProvider) => {
