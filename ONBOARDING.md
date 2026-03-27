@@ -1,3 +1,49 @@
+## Session 5.28 - March 27, 2026 (Phase 9 Crosscheck + AgentActivityFeed / usePlanExecution Wiring)
+
+**Agent:** Viktor  
+**Duration:** ~1 pass
+
+### What Was Done
+- Pulled 3 merged Phase 9 PRs (#59, #60, #62/#63):
+  - PR #59 (`b641939`): Added `tests/test_gallery.py` with 74-line gallery test suite.
+  - PR #60 (`63f3d49`): Added `frontend/src/components/settings/IntegrationsTab.tsx` `apiUrl()` fix for POST requests.
+  - PR #62 (`52ac341` → `0e176f2`): Large rewrite of `ONBOARDING.md`, minor tweaks to `SuggestionChips.tsx`, `TaskPlanView.tsx`, `ConnectionsTab.tsx`, `main.py`, planner/executor backend files.
+- Verified all routers are correctly mounted in `main.py`: `gallery_router` ✅, `planner_router` ✅, `executor_router` ✅.
+- Verified WebSocket URL is consistent: `AgentActivityFeed.tsx` uses `/api/plans/ws/plan/{planId}` ✅, `executor_routes.py` serves `/api/plans/ws/plan/{plan_id}` ✅.
+- Verified `SuggestionChips` + `PromptGallery` are wired into `InputBar.tsx` ✅.
+- Identified critical gap: `AgentActivityFeed` and `usePlanExecution` were still unwired (as noted in ONBOARDING 5.27 "NOT Working Yet").
+- Identified secondary gap: `TaskPlanView` itself was never imported or rendered in `App.tsx` — completely unreachable from the UI.
+- **Fixed `TaskPlanView.tsx`**: imported `AgentActivityFeed` and `usePlanExecution`; replaced the single "Approve & Execute" button with a proper state machine (Approve → Execute → Stop, each calling the correct endpoint); rendered `<AgentActivityFeed planId={planId} />` below the step tree when plan is in `running` status; surfaced execution errors via `usePlanExecution().error`.
+- **Fixed `App.tsx`**: imported `TaskPlanView`; added `activePlanId` state; added `handleDecomposePlan()` async function that calls `POST /api/plans/decompose` and sets `activePlanId` on success; wired a new `onDecomposePlan` prop through to `InputBar`; added conditional render branch that shows `<TaskPlanView>` when `activePlanId` is set (dismissible with ✕).
+- **Fixed `InputBar.tsx`**: added optional `onDecomposePlan` prop; rendered a "Plan" button next to "Send" when prop is provided — clicking it calls `onDecomposePlan(value)` and clears the input.
+
+### What's Working
+- Full plan lifecycle is now reachable from the UI: type prompt → click "Plan" → `TaskPlanView` appears → "Approve Plan" → "Execute Plan" → live `AgentActivityFeed` WebSocket feed → "Stop Execution" or auto-complete.
+- All Phase 9 backend routes mounted and correct.
+- WebSocket URL consistent end-to-end.
+- `SuggestionChips` and `PromptGallery` wired and functional.
+- `IntegrationsTab` POST requests use `apiUrl()`.
+
+### What's NOT Working Yet
+- No reconnection/backfill strategy in `AgentActivityFeed` for clients connecting after execution has already started.
+- Frontend lint has pre-existing violations in unrelated files (`react-refresh/only-export-components`).
+- No E2E browser tests for the plan decompose → approve → execute → live feed flow.
+
+### Next Steps
+1. Add WebSocket reconnect + event backfill to `AgentActivityFeed` for late-joining clients.
+2. Add E2E tests: decompose → approve → execute → WebSocket feed → complete/stop.
+3. Consider adding a plan history panel in the sidebar (list `GET /api/plans/` and reopen old plans).
+
+### Decisions Made
+- "Plan" button in `InputBar` is optional (prop-gated) so it doesn't break any existing InputBar usage without the prop.
+- `TaskPlanView` replaces the main content area (ScreenView + ActionLog) when active, using a simple `activePlanId` toggle — clean separation, no routing changes needed.
+- `AgentActivityFeed` is only mounted when `plan.status === 'running'` to avoid unnecessary WebSocket connections.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.27 - March 27, 2026 (Phase 8 Post-Merge Fix: executor_router + WebSocket URL)
 
 **Agent:** Viktor  
