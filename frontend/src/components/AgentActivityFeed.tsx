@@ -45,7 +45,7 @@ export function AgentActivityFeed({ planId, wsBaseUrl }: AgentActivityFeedProps)
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const base = wsBaseUrl || `${protocol}//${window.location.host}`
-    const ws = new WebSocket(`${base}/api/plans/ws/plan/${planId}`)
+    const ws = new WebSocket(`${base}/ws/plan/${planId}`)
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)

@@ -20,23 +20,23 @@ executor_router = APIRouter(prefix="/api/plans", tags=["plan-execution"])
 _active_runners: dict[str, AgentRunner] = {}
 
 
-def _get_current_user(request: Request) -> dict[str, Any]:
-    """Return authenticated user payload from aegis_session cookie."""
+def _get_user_uid(request: Request) -> str:
+    """Return authenticated user UID from aegis_session cookie."""
     token = request.cookies.get("aegis_session")
     payload = _verify_session(token)
     if not payload or "uid" not in payload:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return payload
+    return str(payload["uid"])
 
 
 @executor_router.post("/{plan_id}/execute")
 async def execute_plan(
     plan_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
+    request: Request,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Start executing an approved plan. Returns immediately."""
-    uid = str(user["uid"])
+    uid = _get_user_uid(request)
     plan = await PlannerService.get_plan(db, plan_id, uid)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -61,12 +61,9 @@ async def execute_plan(
 
 
 @executor_router.post("/{plan_id}/stop")
-async def stop_plan(
-    plan_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
-) -> dict[str, Any]:
+async def stop_plan(plan_id: str, request: Request) -> dict[str, Any]:
     """Cancel a running plan."""
-    uid = str(user["uid"])
+    uid = _get_user_uid(request)
     runner_key = f"{uid}:{plan_id}"
     runner = _active_runners.get(runner_key)
     if not runner:
