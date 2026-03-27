@@ -186,6 +186,46 @@ class ImpersonationSession(Base):
     reason = Column(Text)
 
 
+class AgentTask(Base):
+    """A cloud agent task spawned from any channel (web, telegram, slack, discord, github)."""
+
+    __tablename__ = "agent_tasks"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), nullable=False, index=True)
+    platform = Column(String(50), nullable=False)
+    platform_chat_id = Column(String(255), nullable=True)
+    platform_message_id = Column(String(255), nullable=True)
+    instruction = Column(Text, nullable=False)
+    status = Column(String(30), default="pending")
+    agent_type = Column(String(50), default="navigator")
+    provider = Column(String(50), nullable=True)
+    model = Column(String(255), nullable=True)
+    sandbox_id = Column(String(255), nullable=True)
+    result_summary = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    credits_used = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentAction(Base):
+    """Individual action performed by a cloud agent during task execution."""
+
+    __tablename__ = "agent_actions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    task_id = Column(String(255), ForeignKey("agent_tasks.id"), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    action_type = Column(String(50), nullable=False)
+    description = Column(Text, nullable=True)
+    input_data = Column(Text, nullable=True)
+    output_data = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── engine management ─────────────────────────────────────────────────
 
 _engine: AsyncEngine | None = None
@@ -325,6 +365,51 @@ class SupportMessage(Base):
     sender_id = Column(String(255), ForeignKey("users.uid"), nullable=False)
     sender_role = Column(String(20), nullable=False)  # user | admin | system
     content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TaskPlan(Base):
+    """A decomposed task plan from a user prompt."""
+
+    __tablename__ = "task_plans"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=True)
+    original_prompt = Column(Text, nullable=False)
+    title = Column(String(500), nullable=False)
+    status = Column(String(20), default="draft")
+    provider = Column(String(50))
+    model = Column(String(100))
+    plan_json = Column(Text, nullable=False)
+    result_summary = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+
+class TaskStep(Base):
+    """Individual step within a task plan."""
+
+    __tablename__ = "task_steps"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    plan_id = Column(String(255), ForeignKey("task_plans.id"), nullable=False, index=True)
+    parent_step_id = Column(String(255), ForeignKey("task_steps.id"), nullable=True)
+    step_index = Column(Integer, nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    status = Column(String(20), default="pending")
+    assigned_provider = Column(String(50))
+    assigned_model = Column(String(100))
+    depends_on = Column(Text)
+    result_text = Column(Text)
+    error_message = Column(Text)
+    tokens_used = Column(Integer, default=0)
+    credits_used = Column(Float, default=0.0)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

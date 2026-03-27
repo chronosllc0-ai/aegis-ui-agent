@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import {
   FaDiscord,
   FaFolder,
+  FaGithub,
   FaGlobe,
   FaLock,
   FaPlus,
@@ -12,7 +13,7 @@ import {
   FaTimes,
 } from 'react-icons/fa'
 import type { IconType } from 'react-icons'
-import { SiDiscord, SiSlack, SiTelegram } from 'react-icons/si'
+import { SiDiscord, SiGithub, SiSlack, SiTelegram } from 'react-icons/si'
 import { LuCode, LuFolder, LuGlobe, LuLock, LuPlus } from 'react-icons/lu'
 
 type IconProps = {
@@ -56,6 +57,7 @@ export const Icons = {
   slack: ({ className }: IconProps) => <FaSlack className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   discord: ({ className }: IconProps) => <FaDiscord className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   telegram: ({ className }: IconProps) => <FaTelegram className={className ?? 'h-4 w-4'} aria-hidden='true' />,
+  github: ({ className }: IconProps) => <FaGithub className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   plusCircle: ({ className }: IconProps) => <FaPlus className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   lock: ({ className }: IconProps) => <FaLock className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   close: ({ className }: IconProps) => <FaTimes className={className ?? 'h-4 w-4'} aria-hidden='true' />,
@@ -65,6 +67,7 @@ const BRAND_ICON_MAP: Record<string, { icon: IconType; className: string }> = {
   slack: { icon: SiSlack, className: 'text-[#E01E5A]' },
   discord: { icon: SiDiscord, className: 'text-[#5865F2]' },
   telegram: { icon: SiTelegram, className: 'text-[#24A1DE]' },
+  github: { icon: SiGithub, className: 'text-[#f0f0f0]' },
   'web-search': { icon: LuGlobe, className: 'text-blue-200' },
   filesystem: { icon: LuFolder, className: 'text-zinc-200' },
   'code-exec': { icon: LuCode, className: 'text-emerald-200' },
