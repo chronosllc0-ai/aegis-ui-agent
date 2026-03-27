@@ -31,11 +31,9 @@ export function PromptGallery({ onSelectTemplate, onClose }: PromptGalleryProps)
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true)
-    setError(null)
     try {
       const params = new URLSearchParams()
       if (activeCategory) params.set('category', activeCategory)
@@ -46,8 +44,7 @@ export function PromptGallery({ onSelectTemplate, onClose }: PromptGalleryProps)
       const data = await resp.json()
       if (data.ok) setTemplates(data.templates)
     } catch {
-      setTemplates([])
-      setError('Failed to load templates. Please try again.')
+      // silent
     } finally {
       setLoading(false)
     }
@@ -59,7 +56,7 @@ export function PromptGallery({ onSelectTemplate, onClose }: PromptGalleryProps)
       const data = await resp.json()
       if (data.ok) setCategories(data.categories)
     } catch {
-      setError('Failed to load gallery categories.')
+      // silent
     }
   }, [])
 
@@ -127,8 +124,6 @@ export function PromptGallery({ onSelectTemplate, onClose }: PromptGalleryProps)
           <div className='flex items-center justify-center py-12'>
             <div className='h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent' />
           </div>
-        ) : error ? (
-          <p className='py-12 text-center text-sm text-red-400'>{error}</p>
         ) : templates.length === 0 ? (
           <p className='py-12 text-center text-sm text-zinc-500'>No templates found</p>
         ) : (
