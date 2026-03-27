@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../lib/api'
+import { AgentActivityFeed } from './AgentActivityFeed'
+import { usePlanExecution } from '../hooks/usePlanExecution'
 
 type TaskStep = {
   id: string
@@ -61,6 +63,8 @@ export function TaskPlanView({ planId, onClose }: TaskPlanViewProps) {
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [actionBusy, setActionBusy] = useState(false)
 
+  const { executing, error: execError, executePlan, stopPlan } = usePlanExecution()
+
   const fetchPlan = useCallback(async () => {
     try {
       const resp = await fetch(apiUrl(`/api/plans/${planId}`), { credentials: 'include' })
@@ -82,6 +86,7 @@ export function TaskPlanView({ planId, onClose }: TaskPlanViewProps) {
     void fetchPlan()
   }, [fetchPlan])
 
+  // Poll for updates while running
   useEffect(() => {
     if (!plan || plan.status !== 'running') return
     const interval = window.setInterval(() => {
@@ -112,6 +117,18 @@ export function TaskPlanView({ planId, onClose }: TaskPlanViewProps) {
     } finally {
       setActionBusy(false)
     }
+  }
+
+  const handleExecute = async () => {
+    if (!plan) return
+    const ok = await executePlan(plan.id)
+    if (ok) void fetchPlan()
+  }
+
+  const handleStop = async () => {
+    if (!plan) return
+    const ok = await stopPlan(plan.id)
+    if (ok) void fetchPlan()
   }
 
   const handleCancel = async () => {
@@ -146,102 +163,131 @@ export function TaskPlanView({ planId, onClose }: TaskPlanViewProps) {
   }
 
   const childrenFor = (parentId: string) => plan.steps.filter((s) => s.parent_step_id === parentId)
+  const isLive = plan.status === 'running'
 
   return (
-    <div className='rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4'>
-      <div className='mb-4 flex items-start justify-between'>
-        <div className='min-w-0 flex-1'>
-          <div className='flex items-center gap-2'>
-            <h3 className='text-base font-semibold text-white'>{plan.title}</h3>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${PLAN_STATUS_COLORS[plan.status] || ''}`}>{plan.status}</span>
-          </div>
-          <p className='mt-1 text-xs text-zinc-500'>{plan.original_prompt}</p>
-          <div className='mt-2 flex items-center gap-2'>
-            <div className='h-1.5 flex-1 rounded-full bg-zinc-800'>
-              <div className='h-1.5 rounded-full bg-blue-500 transition-all' style={{ width: `${totalCount > 0 ? (completedCount / totalCount) * 100 : 0}%` }} />
+    <div className='space-y-3'>
+      <div className='rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4'>
+        <div className='mb-4 flex items-start justify-between'>
+          <div className='min-w-0 flex-1'>
+            <div className='flex items-center gap-2'>
+              <h3 className='text-base font-semibold text-white'>{plan.title}</h3>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${PLAN_STATUS_COLORS[plan.status] || ''}`}>{plan.status}</span>
             </div>
-            <span className='text-[11px] text-zinc-500'>
-              {completedCount}/{totalCount}
-            </span>
+            <p className='mt-1 text-xs text-zinc-500'>{plan.original_prompt}</p>
+            <div className='mt-2 flex items-center gap-2'>
+              <div className='h-1.5 flex-1 rounded-full bg-zinc-800'>
+                <div className='h-1.5 rounded-full bg-blue-500 transition-all' style={{ width: `${totalCount > 0 ? (completedCount / totalCount) * 100 : 0}%` }} />
+              </div>
+              <span className='text-[11px] text-zinc-500'>
+                {completedCount}/{totalCount}
+              </span>
+            </div>
           </div>
+          {onClose && (
+            <button type='button' onClick={onClose} className='ml-2 text-zinc-500 hover:text-zinc-300'>
+              ✕
+            </button>
+          )}
         </div>
-        {onClose && (
-          <button type='button' onClick={onClose} className='ml-2 text-zinc-500 hover:text-zinc-300'>
-            ✕
-          </button>
-        )}
-      </div>
 
-      <div className='space-y-1.5'>
-        {rootSteps.map((step) => {
-          const ss = STATUS_STYLES[step.status] || STATUS_STYLES.pending
-          const expanded = expandedSteps.has(step.id)
-          const children = childrenFor(step.id)
-          return (
-            <div key={step.id}>
-              <button
-                type='button'
-                onClick={() => toggleStep(step.id)}
-                className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors ${ss.bg} hover:bg-zinc-800`}
-              >
-                <span className={`mt-0.5 text-sm font-mono ${ss.color} ${step.status === 'running' ? 'animate-pulse' : ''}`}>{ss.icon}</span>
-                <div className='min-w-0 flex-1'>
-                  <span className='text-sm text-zinc-200'>{step.title}</span>
-                  <div className='mt-0.5 flex items-center gap-2'>
-                    <span className='rounded bg-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-400'>
-                      {step.assigned_provider}/{step.assigned_model}
-                    </span>
-                    {step.depends_on.length > 0 && <span className='text-[9px] text-zinc-600'>depends on: {step.depends_on.join(', ')}</span>}
+        <div className='space-y-1.5'>
+          {rootSteps.map((step) => {
+            const ss = STATUS_STYLES[step.status] || STATUS_STYLES.pending
+            const expanded = expandedSteps.has(step.id)
+            const children = childrenFor(step.id)
+            return (
+              <div key={step.id}>
+                <button
+                  type='button'
+                  onClick={() => toggleStep(step.id)}
+                  className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors ${ss.bg} hover:bg-zinc-800`}
+                >
+                  <span className={`mt-0.5 text-sm font-mono ${ss.color} ${step.status === 'running' ? 'animate-pulse' : ''}`}>{ss.icon}</span>
+                  <div className='min-w-0 flex-1'>
+                    <span className='text-sm text-zinc-200'>{step.title}</span>
+                    <div className='mt-0.5 flex items-center gap-2'>
+                      <span className='rounded bg-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-400'>
+                        {step.assigned_provider}/{step.assigned_model}
+                      </span>
+                      {step.depends_on.length > 0 && <span className='text-[9px] text-zinc-600'>depends on: {step.depends_on.join(', ')}</span>}
+                    </div>
                   </div>
-                </div>
-                <span className='text-[10px] text-zinc-600'>{expanded ? '▾' : '▸'}</span>
-              </button>
-              {expanded && (
-                <div className='ml-8 mt-1 space-y-1'>
-                  {step.description && <p className='text-xs text-zinc-400'>{step.description}</p>}
-                  {step.result_text && <div className='rounded-lg bg-zinc-800/50 p-2 text-xs text-zinc-300'>{step.result_text}</div>}
-                  {step.error_message && <div className='rounded-lg bg-red-900/20 p-2 text-xs text-red-300'>{step.error_message}</div>}
-                  {children.map((child) => {
-                    const cs = STATUS_STYLES[child.status] || STATUS_STYLES.pending
-                    return (
-                      <div key={child.id} className={`flex items-start gap-2 rounded-lg px-2 py-1.5 ${cs.bg}`}>
-                        <span className={`text-xs font-mono ${cs.color} ${child.status === 'running' ? 'animate-pulse' : ''}`}>{cs.icon}</span>
-                        <div className='min-w-0 flex-1'>
-                          <span className='text-xs text-zinc-300'>{child.title}</span>
-                          <span className='ml-2 rounded bg-zinc-700 px-1 py-0.5 text-[8px] text-zinc-500'>{child.assigned_provider}</span>
+                  <span className='text-[10px] text-zinc-600'>{expanded ? '▾' : '▸'}</span>
+                </button>
+                {expanded && (
+                  <div className='ml-8 mt-1 space-y-1'>
+                    {step.description && <p className='text-xs text-zinc-400'>{step.description}</p>}
+                    {step.result_text && <div className='rounded-lg bg-zinc-800/50 p-2 text-xs text-zinc-300'>{step.result_text}</div>}
+                    {step.error_message && <div className='rounded-lg bg-red-900/20 p-2 text-xs text-red-300'>{step.error_message}</div>}
+                    {children.map((child) => {
+                      const cs = STATUS_STYLES[child.status] || STATUS_STYLES.pending
+                      return (
+                        <div key={child.id} className={`flex items-start gap-2 rounded-lg px-2 py-1.5 ${cs.bg}`}>
+                          <span className={`text-xs font-mono ${cs.color} ${child.status === 'running' ? 'animate-pulse' : ''}`}>{cs.icon}</span>
+                          <div className='min-w-0 flex-1'>
+                            <span className='text-xs text-zinc-300'>{child.title}</span>
+                            <span className='ml-2 rounded bg-zinc-700 px-1 py-0.5 text-[8px] text-zinc-500'>{child.assigned_provider}</span>
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )
-        })}
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {(execError) && (
+          <div className='mt-3 rounded-lg border border-red-800/50 bg-red-900/20 p-2 text-xs text-red-300'>{execError}</div>
+        )}
+
+        <div className='mt-4 flex gap-2'>
+          {plan.status === 'draft' && (
+            <button
+              type='button'
+              onClick={handleApprove}
+              disabled={actionBusy}
+              className='rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50'
+            >
+              {actionBusy ? 'Approving...' : 'Approve Plan'}
+            </button>
+          )}
+          {plan.status === 'approved' && (
+            <button
+              type='button'
+              onClick={handleExecute}
+              disabled={executing}
+              className='rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50'
+            >
+              {executing ? 'Starting...' : 'Execute Plan'}
+            </button>
+          )}
+          {plan.status === 'running' && (
+            <button
+              type='button'
+              onClick={handleStop}
+              className='rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-500'
+            >
+              Stop Execution
+            </button>
+          )}
+          {['draft', 'approved', 'running'].includes(plan.status) && (
+            <button
+              type='button'
+              onClick={handleCancel}
+              disabled={actionBusy}
+              className='rounded-lg border border-zinc-700 px-4 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50'
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className='mt-4 flex gap-2'>
-        {plan.status === 'draft' && (
-          <button
-            type='button'
-            onClick={handleApprove}
-            disabled={actionBusy}
-            className='rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50'
-          >
-            {actionBusy ? 'Approving...' : 'Approve & Execute'}
-          </button>
-        )}
-        {['draft', 'approved', 'running'].includes(plan.status) && (
-          <button
-            type='button'
-            onClick={handleCancel}
-            disabled={actionBusy}
-            className='rounded-lg border border-zinc-700 px-4 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50'
-          >
-            Cancel
-          </button>
-        )}
-      </div>
+      {/* Live activity feed shown while plan is running */}
+      {isLive && <AgentActivityFeed planId={planId} />}
     </div>
   )
 }
