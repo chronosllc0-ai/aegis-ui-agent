@@ -44,6 +44,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   telegram: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
   discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
   slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+  github: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
 }
 
 // OAuth connector icons — override backend-provided icon to ensure correct logos always display
@@ -83,8 +84,8 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
   // — Global
   const [globalError, setGlobalError] = useState<string | null>(null)
 
-  // Filter: only bot-token integrations (Telegram, Discord, Slack-as-bot)
-  const botIntegrations = integrations.filter((i) => ['telegram', 'discord', 'slack'].includes(i.id))
+  // Filter: only bot-token integrations (Telegram, Discord, Slack-as-bot, GitHub)
+  const botIntegrations = integrations.filter((i) => ['telegram', 'discord', 'slack', 'github'].includes(i.id))
   // Filter: built-in tool integrations (web search, filesystem, code exec)
   const builtInIntegrations = integrations.filter((i) => i.builtIn)
 
@@ -244,6 +245,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
       if (!settings.bot_token) { setBotError(integration.id, 'Bot token is required.'); return }
       payload = { bot_token: settings.bot_token, guild_id: settings.guild_id ?? '' }
       endpoint = `/api/integrations/discord/register/${integration.id}`
+    } else if (integration.id === 'github') {
+      if (!settings.token) { setBotError(integration.id, 'Personal access token is required.'); return }
+      payload = { token: settings.token, webhook_secret: settings.webhook_secret ?? '', app_id: settings.app_id ?? '' }
+      endpoint = `/api/integrations/github/register/${integration.id}`
     }
 
     setBotBusyId(integration.id)
@@ -265,7 +270,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
     setBotBusyId(integration.id)
     setBotError(integration.id, null)
     try {
-      const data = await postJson(`/api/integrations/${integration.id}/${integration.id}/test`, {})
+      const endpoint = integration.id === 'github'
+        ? `/api/integrations/github/${integration.id}/test`
+        : `/api/integrations/${integration.id}/${integration.id}/test`
+      const data = await postJson(endpoint, {})
       const ok = Boolean(data?.ok)
       updateIntegration(integration.id, { status: ok ? 'connected' : 'error' })
       if (!ok) setBotError(integration.id, `${integration.name} test failed.`)
@@ -501,6 +509,9 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                   <div className="min-w-0 flex-1" style={{minWidth: '120px'}}>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-white">{integration.name}</span>
+                      {integration.id === 'github' && !isConn && (
+                        <span className="rounded-full bg-blue-600/20 px-2 py-0.5 text-[10px] font-semibold text-blue-400">New</span>
+                      )}
                       {isConn && <StatusDot color="emerald" label="Connected" />}
                       {integration.status === 'error' && <StatusDot color="red" label="Error" />}
                     </div>
@@ -538,6 +549,9 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                     )}
                     {integration.id === 'discord' && (
                       <DiscordForm integration={integration} busy={isBusy} onUpdate={(p) => updateIntegration(integration.id, p)} onConnect={() => connectBot(integration)} onTest={() => testBot(integration)} />
+                    )}
+                    {integration.id === 'github' && (
+                      <GitHubForm integration={integration} busy={isBusy} onUpdate={(p) => updateIntegration(integration.id, p)} onConnect={() => connectBot(integration)} onTest={() => testBot(integration)} />
                     )}
                   </div>
                 )}
@@ -710,6 +724,29 @@ function DiscordForm({ integration, busy, onUpdate, onConnect, onTest }: BotForm
       <p className="text-xs text-zinc-400">Create a bot at the <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Discord Developer Portal</a>, then paste the bot token.</p>
       <input placeholder="Bot token" value={s.bot_token ?? ''} onChange={(e) => set('bot_token', e.target.value)} className={inputCls} />
       <input placeholder="Guild ID (optional)" value={s.guild_id ?? ''} onChange={(e) => set('guild_id', e.target.value)} className={inputCls} />
+      <div className="flex gap-2">
+        <button type="button" onClick={onConnect} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
+          {busy ? 'Connecting...' : 'Save & Connect'}
+        </button>
+        <button type="button" onClick={onTest} disabled={busy} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+          Test
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function GitHubForm({ integration, busy, onUpdate, onConnect, onTest }: BotFormProps) {
+  const s = integration.settings ?? {}
+  const set = (key: string, val: string) => onUpdate({ settings: { ...s, [key]: val } })
+  return (
+    <div className="grid gap-2.5">
+      <p className="text-xs text-zinc-400">
+        Create a <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">personal access token</a> with <code className="rounded bg-zinc-800 px-1 text-zinc-300">repo</code> scope, or use a GitHub App installation token.
+      </p>
+      <input placeholder="Personal access token or installation token" value={s.token ?? ''} onChange={(e) => set('token', e.target.value)} className={inputCls} />
+      <input placeholder="Webhook secret (optional)" value={s.webhook_secret ?? ''} onChange={(e) => set('webhook_secret', e.target.value)} className={inputCls} />
+      <input placeholder="GitHub App ID (optional)" value={s.app_id ?? ''} onChange={(e) => set('app_id', e.target.value)} className={inputCls} />
       <div className="flex gap-2">
         <button type="button" onClick={onConnect} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
           {busy ? 'Connecting...' : 'Save & Connect'}
