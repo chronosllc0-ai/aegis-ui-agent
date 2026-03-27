@@ -186,6 +186,46 @@ class ImpersonationSession(Base):
     reason = Column(Text)
 
 
+class AgentTask(Base):
+    """A cloud agent task spawned from any channel (web, telegram, slack, discord, github)."""
+
+    __tablename__ = "agent_tasks"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), nullable=False, index=True)
+    platform = Column(String(50), nullable=False)
+    platform_chat_id = Column(String(255), nullable=True)
+    platform_message_id = Column(String(255), nullable=True)
+    instruction = Column(Text, nullable=False)
+    status = Column(String(30), default="pending")
+    agent_type = Column(String(50), default="navigator")
+    provider = Column(String(50), nullable=True)
+    model = Column(String(255), nullable=True)
+    sandbox_id = Column(String(255), nullable=True)
+    result_summary = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    credits_used = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentAction(Base):
+    """Individual action performed by a cloud agent during task execution."""
+
+    __tablename__ = "agent_actions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    task_id = Column(String(255), ForeignKey("agent_tasks.id"), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    action_type = Column(String(50), nullable=False)
+    description = Column(Text, nullable=True)
+    input_data = Column(Text, nullable=True)
+    output_data = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── engine management ─────────────────────────────────────────────────
 
 _engine: AsyncEngine | None = None

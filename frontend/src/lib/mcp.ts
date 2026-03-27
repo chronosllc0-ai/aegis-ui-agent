@@ -1,11 +1,11 @@
 import { createElement } from 'react'
 import type { IconType } from 'react-icons'
-import { FaDiscord, FaFolder, FaGlobe, FaLock, FaPlus, FaSlack, FaTelegram, FaTerminal } from 'react-icons/fa'
+import { FaDiscord, FaFolder, FaGithub, FaGlobe, FaLock, FaPlus, FaSlack, FaTelegram, FaTerminal } from 'react-icons/fa'
 
 export type AuthType = 'none' | 'api_key' | 'oauth'
 
 export type IntegrationStatus = 'connected' | 'error' | 'disabled'
-export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'custom'
+export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'github' | 'custom'
 
 
 export type IntegrationConfig = {
@@ -38,6 +38,7 @@ const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
   telegram: FaTelegram,
   slack: FaSlack,
   discord: FaDiscord,
+  github: FaGithub,
   custom: FaPlus,
 }
 
@@ -129,6 +130,20 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
     },
     tools: ['discord_get_messages', 'discord_send_message', 'discord_list_channels', 'discord_send_file'],
   },
+  {
+    id: 'github',
+    name: 'GitHub',
+    icon: 'github',
+    description: 'GitHub repos, issues, PRs, and webhook events.',
+    enabled: false,
+    status: 'disabled',
+    settings: {
+      token: '',
+      webhook_secret: '',
+      app_id: '',
+    },
+    tools: ['github_list_repos', 'github_get_issues', 'github_create_issue', 'github_get_pull_requests', 'github_create_comment', 'github_get_file', 'github_webhook_event'],
+  },
 ]
 
 function isIntegrationIcon(value: string): value is IntegrationIcon {
@@ -144,7 +159,18 @@ export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon
 export function normalizeIntegrationConfig(integration: IntegrationConfig): IntegrationConfig {
   return {
     ...integration,
-    icon: normalizeIntegrationIcon(integration.icon, integration.id === 'telegram' ? 'telegram' : integration.id === 'discord' ? 'discord' : integration.id === 'slack' ? 'slack' : 'custom'),
+    icon: normalizeIntegrationIcon(
+      integration.icon,
+      integration.id === 'telegram'
+        ? 'telegram'
+        : integration.id === 'discord'
+          ? 'discord'
+          : integration.id === 'slack'
+            ? 'slack'
+            : integration.id === 'github'
+              ? 'github'
+              : 'custom',
+    ),
   }
 }
 
