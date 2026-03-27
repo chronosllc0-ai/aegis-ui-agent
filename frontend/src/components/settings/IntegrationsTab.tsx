@@ -31,6 +31,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   const postJson = async (path: string, payload: Record<string, unknown>) => {
     const response = await fetch(path, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
