@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { apiUrl } from '../../lib/api'
 
 type IntegrationsTabProps = {
   integrations: IntegrationConfig[]
@@ -29,7 +30,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   }
 
   const postJson = async (path: string, payload: Record<string, unknown>) => {
-    const response = await fetch(path, {
+    const response = await fetch(apiUrl(path), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
