@@ -18,7 +18,10 @@ import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { Icons } from './components/icons'
 import { SettingsPage } from './components/settings/SettingsPage'
+import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
+import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
+import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
 import { useContextMeter } from './hooks/useContextMeter'
 import { useSettingsContext } from './context/useSettingsContext'
@@ -26,6 +29,7 @@ import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
+import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
@@ -60,7 +64,7 @@ function App() {
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
-  const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [showWorkflow, setShowWorkflow] = useState(false)
   const [urlInput, setUrlInput] = useState('about:blank')
   const [sending, setSending] = useState(false)
@@ -72,7 +76,7 @@ function App() {
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string } | null>(null)
+  const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
   const [, setPendingPlan] = useState<string | null>(() => {
     return sessionStorage.getItem('aegis.pendingPlan')
   })
@@ -90,6 +94,10 @@ function App() {
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
+  const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
+  const isImpersonating = authUser?.impersonating === true
+  const isAdminPath = isAdmin && pathname.startsWith('/admin')
+  const { status: impersonationStatus, checkStatus } = useImpersonation()
 
   const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -173,7 +181,10 @@ function App() {
         }
         const data = await response.json().catch(() => ({}))
         if (active && data?.user) {
-          setAuthUser(data.user)
+          setAuthUser({
+            ...data.user,
+            impersonating: data.user?.impersonating === true || data?.impersonating === true,
+          })
           setIsAuthenticated(true)
           // Redirect away from /auth after session restored (e.g. post-OAuth page reload)
           if (window.location.pathname === '/auth') navigateTo('/')
@@ -187,6 +198,11 @@ function App() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!isAuthenticated || !isImpersonating) return
+    void checkStatus()
+  }, [isAuthenticated, isImpersonating, checkStatus])
 
   useEffect(() => {
     if (isWorking && taskStartedAt === null) {
@@ -425,7 +441,9 @@ function App() {
   }
 
   return (
-    <main className='h-[100dvh] overflow-x-hidden bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3'>
+    <>
+      {isImpersonating && <ImpersonationBanner email={impersonationStatus?.target_user?.email ?? authUser?.email ?? ''} />}
+      <main className={`h-[100dvh] overflow-x-hidden bg-[#111] p-1.5 text-zinc-100 sm:p-2 lg:p-3 ${isImpersonating ? 'pt-10' : ''}`}>
       {showOnboarding && (
         <OnboardingWizard
           userName={authUser?.name ?? settings.displayName}
@@ -496,6 +514,16 @@ function App() {
               {Icons.settings({ className: 'h-3.5 w-3.5' })}
               <span>Settings</span>
             </button>
+            {isAdmin && (
+              <button
+                type='button'
+                onClick={() => { setSettingsInitialTab('Admin'); setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }}
+                className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800'
+              >
+                <LuShield className='h-3.5 w-3.5' />
+                <span>Admin Panel</span>
+              </button>
+            )}
             <UserMenu
               name={authUser?.name ?? settings.displayName}
               avatarUrl={authUser?.avatar_url ?? settings.avatarUrl}
@@ -548,8 +576,13 @@ function App() {
           )}
 
           <div className='min-h-0 flex-1'>
-            {showSettings ? (
-              <SettingsPage onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined) }} onRunWorkflow={(instruction) => handleSend(instruction, 'steer')} initialTab={settingsInitialTab as any} isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'} />
+            {showSettings || isAdminPath ? (
+              <SettingsPage
+                onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
+                onRunWorkflow={(instruction) => handleSend(instruction, 'steer')}
+                initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
+                isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+              />
             ) : showAutomations ? (
               <AutomationsPage />
             ) : (
@@ -599,7 +632,8 @@ function App() {
         </section>
       </div>
       {showChangelog && <ChangelogModal onClose={dismissChangelog} />}
-    </main>
+      </main>
+    </>
   )
 }
 
