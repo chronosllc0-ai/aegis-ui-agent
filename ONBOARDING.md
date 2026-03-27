@@ -1,3 +1,84 @@
+## Session 5.27 - March 27, 2026 (Phase 8 Post-Merge Fix: executor_router + WebSocket URL)
+
+**Agent:** Viktor  
+**Duration:** ~1 pass
+
+### What Was Done
+- Diagnosed merge conflict resolution gap: two Phase 8 PRs (#57, #58) were merged but the merge resolver only brought in the 4 net-new files (`agent_runner.py`, `executor_routes.py`, `AgentActivityFeed.tsx`, `usePlanExecution.ts`). Changes to `main.py` and `ONBOARDING.md` were silently dropped.
+- Fixed `main.py`: added `from backend.planner.executor_routes import executor_router` import and `app.include_router(executor_router)` registration — without this the `/api/plans/{id}/execute`, `/api/plans/{id}/stop`, and `/api/plans/ws/plan/{id}` endpoints were completely unreachable.
+- Fixed WebSocket URL mismatch: `executor_router` uses `prefix="/api/plans"` + route `/ws/plan/{plan_id}` = full path `/api/plans/ws/plan/{plan_id}`. Both `AgentActivityFeed.tsx` and the `execute` endpoint's `ws_url` return value were pointing to the wrong path `/ws/plan/{plan_id}` (missing `/api/plans` prefix).
+- Added this ONBOARDING session entry (the Phase 8 session notes were also dropped by the merge resolver).
+
+### What's Working
+- All Phase 8 execution routes now mounted and reachable.
+- WebSocket URL is consistent: backend serves `/api/plans/ws/plan/{plan_id}`, frontend connects to `/api/plans/ws/plan/{planId}`, and the execute response returns the correct `ws_url`.
+- `AgentRunner` dependency graph, parallel step execution, semaphore concurrency limiting, and cancellation signalling all intact.
+- `AgentActivityFeed` and `usePlanExecution` hook both compile cleanly — no react-icons, correct `apiUrl()` usage.
+
+### What's NOT Working Yet
+- `AgentActivityFeed` and `usePlanExecution` are not yet wired into `App.tsx` or `TaskPlanView.tsx` — these are standalone components for Phase 9 to integrate into the task plan UI flow.
+- No dedicated tests for dependency-graph behavior, WebSocket streaming semantics, or execute/stop endpoint behavior.
+
+### Next Steps
+1. Wire `AgentActivityFeed` + `usePlanExecution` into `TaskPlanView` in the main UI flow (Phase 9).
+2. Add reconnection/backfill strategy for clients that connect after execution has already started.
+3. Add tests for parallel execution, failed dependency blocking/skipping, and WebSocket stream semantics.
+
+### Decisions Made
+- Kept `executor_router` prefix as `/api/plans` (consistent with `planner_router`). WebSocket at `/api/plans/ws/plan/{id}` avoids collision with the main navigation WebSocket at `/ws/navigate`.
+- `GitHubRegistry` in `main.py` remains single-user scoped (by `integration_id` only) — the multi-user scoping in the Phase 8 PR was a proposed enhancement but the existing single-user registry works correctly since `integration_id` is already user-scoped at creation time.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.26 - March 27, 2026 (Phase 8 Sub-Agent Orchestration + Live Execution Feed)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented execution runner for Phase 8: Added `backend/planner/agent_runner.py` with:
+  - dependency graph readiness checks
+  - bounded parallel step execution (`max_concurrent` semaphore)
+  - resilient per-step error isolation
+  - blocked-step detection and skip marking when dependency chains fail
+  - plan lifecycle updates (`running`, `completed`, `failed`, `cancelled`)
+  - callback-based step event notifications
+- Added execution API/WebSocket routes in `backend/planner/executor_routes.py`:
+  - `POST /api/plans/{plan_id}/execute`
+  - `POST /api/plans/{plan_id}/stop`
+  - `WS /api/plans/ws/plan/{plan_id}` (mounted path via executor_router)
+  - Added active runner registry keyed by `user_id:plan_id`
+- Registered plan execution routes in `main.py` by mounting `executor_router`.
+- Added frontend live-execution primitives:
+  - `frontend/src/components/AgentActivityFeed.tsx` for live event streaming with auto-scroll and status visuals.
+  - `frontend/src/hooks/usePlanExecution.ts` for execute/stop plan API actions.
+
+### What's Working
+- Backend compiles with new runner and executor routes.
+- Frontend production build compiles with the new feed component and execution hook.
+- Runner supports independent parallel execution and safe cancellation signalling.
+
+### What's NOT Working Yet
+- `AgentActivityFeed` and `usePlanExecution` are added but not yet wired into a final page flow in this pass.
+- Dedicated automated tests for dependency-graph behavior and WebSocket streaming were not added.
+
+### Next Steps
+1. Integrate `AgentActivityFeed` + `usePlanExecution` into the TaskPlan UI flow.
+2. Add tests for parallel execution, failed dependency blocking/skipping, execute/stop endpoint behavior, and WebSocket event stream semantics.
+3. Add reconnection/backfill strategy for clients that connect after execution has already started.
+
+### Decisions Made
+- Kept runner state in-memory (`_active_runners`) for this phase to minimize surface area and preserve fire-and-forget behavior with cleanup task wrappers.
+- Preserved planner execution isolation by handling per-step failures without crashing the entire event loop.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.21 - March 26, 2026 (Phase 6 Cloud Agents + GitHub Integration)
 
 **Agent:** GPT-5.3-Codex  
