@@ -284,36 +284,18 @@ class GitHubRegistry:
     """In-memory github integration registry."""
 
     def __init__(self) -> None:
-        self._integrations: dict[str, dict[str, GitHubIntegration]] = {}
-        self._configs: dict[str, dict[str, dict[str, Any]]] = {}
+        self._integrations: dict[str, GitHubIntegration] = {}
+        self._configs: dict[str, dict[str, Any]] = {}
 
-    def get_github(self, owner_user_id: str, integration_id: str) -> GitHubIntegration | None:
-        return self._integrations.get(owner_user_id, {}).get(integration_id)
+    def get_github(self, integration_id: str) -> GitHubIntegration | None:
+        return self._integrations.get(integration_id)
 
-    def get_config(self, owner_user_id: str, integration_id: str) -> dict[str, Any]:
-        return self._configs.get(owner_user_id, {}).get(integration_id, {})
+    def get_config(self, integration_id: str) -> dict[str, Any]:
+        return self._configs.get(integration_id, {})
 
-    def list_candidates(self, integration_id: str) -> list[tuple[str, GitHubIntegration, dict[str, Any]]]:
-        candidates: list[tuple[str, GitHubIntegration, dict[str, Any]]] = []
-        for owner_user_id, owner_integrations in self._integrations.items():
-            integration = owner_integrations.get(integration_id)
-            if not integration:
-                continue
-            config = self._configs.get(owner_user_id, {}).get(integration_id, {})
-            candidates.append((owner_user_id, integration, config))
-        return candidates
-
-    def upsert(
-        self,
-        owner_user_id: str,
-        integration_id: str,
-        integration: GitHubIntegration,
-        config: dict[str, Any],
-    ) -> None:
-        owner_integrations = self._integrations.setdefault(owner_user_id, {})
-        owner_configs = self._configs.setdefault(owner_user_id, {})
-        owner_integrations[integration_id] = integration
-        owner_configs[integration_id] = config
+    def upsert(self, integration_id: str, integration: GitHubIntegration, config: dict[str, Any]) -> None:
+        self._integrations[integration_id] = integration
+        self._configs[integration_id] = config
 
 
 slack_registry = SlackRegistry()
@@ -1119,29 +1101,21 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
-async def register_github_integration(
-    integration_id: str,
-    payload: dict[str, Any],
-    user: dict[str, Any] = Depends(_get_current_user),
-) -> dict[str, Any]:
+async def register_github_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     config = {
         "token": str(payload.get("token", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
         "app_id": str(payload.get("app_id", "")).strip(),
-        "owner_user_id": user["uid"],
     }
     integration = GitHubIntegration()
     connection = await integration.connect(config)
-    github_registry.upsert(user["uid"], integration_id, integration, config)
+    github_registry.upsert(integration_id, integration, config)
     return {"connection": connection}
 
 
 @app.post("/api/integrations/github/{integration_id}/test")
-async def test_github_integration(
-    integration_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
-) -> dict[str, Any]:
-    integration = github_registry.get_github(user["uid"], integration_id)
+async def test_github_integration(integration_id: str) -> dict[str, Any]:
+    integration = github_registry.get_github(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="GitHub integration not found")
     return await integration.execute_tool("github_list_repos", {"per_page": 5})
@@ -1150,27 +1124,21 @@ async def test_github_integration(
 @app.post("/api/integrations/github/{integration_id}/webhook")
 async def github_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Receive GitHub webhook events (push, PR, issue, etc.)."""
-    candidates = github_registry.list_candidates(integration_id)
-    if not candidates:
+    integration = github_registry.get_github(integration_id)
+    if not integration:
         raise HTTPException(status_code=404, detail="GitHub integration not found")
 
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
-    selected_integration: GitHubIntegration | None = None
-    for _owner_user_id, integration, config in candidates:
-        webhook_secret = str(config.get("webhook_secret", "")).strip()
-        if not webhook_secret:
-            if selected_integration is None:
-                selected_integration = integration
-            continue
-        if signature and integration.verify_webhook_signature(body, signature):
-            selected_integration = integration
-            break
-    if selected_integration is None:
+    config = github_registry.get_config(integration_id)
+    webhook_secret = str(config.get("webhook_secret", "")).strip()
+    if webhook_secret and not integration.verify_webhook_signature(body, signature):
         raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
+    import json as _json
+
     try:
-        payload = json.loads(body)
+        payload = _json.loads(body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON") from exc
 
@@ -1184,7 +1152,7 @@ async def github_webhook(integration_id: str, request: Request) -> dict[str, Any
 @app.post("/api/agents/spawn")
 async def spawn_agent_task(
     payload: dict[str, Any],
-    user: dict[str, Any] = Depends(_get_current_user),
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Spawn a new cloud agent task."""
@@ -1214,9 +1182,9 @@ async def spawn_agent_task(
 async def list_agent_tasks(
     status: str | None = None,
     platform: str | None = None,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    user: dict[str, Any] = Depends(_get_current_user),
+    limit: int = 50,
+    offset: int = 0,
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """List agent tasks for the current user."""
@@ -1244,7 +1212,7 @@ async def list_agent_tasks(
 @app.get("/api/agents/tasks/{task_id}")
 async def get_agent_task(
     task_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Get a specific agent task with actions."""
@@ -1285,7 +1253,7 @@ async def get_agent_task(
 @app.post("/api/agents/tasks/{task_id}/cancel")
 async def cancel_agent_task(
     task_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Cancel a running or pending agent task."""
