@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
+import { LuEye, LuLoader, LuSearch } from 'react-icons/lu'
 import { Icons } from '../icons'
 import { useToast } from '../../hooks/useToast'
 import { apiUrl } from '../../lib/api'
 import { AdminMessaging } from './AdminMessaging'
 import { AdminEmailing } from './AdminEmailing'
 import { PaymentSettingsModal } from './PaymentSettingsModal'
+import { useImpersonation } from './useImpersonation'
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
@@ -91,7 +93,13 @@ function DashboardTab() {
     })()
   }, [toast])
 
-  if (loading) return <p className='text-xs text-zinc-500'>Loading...</p>
+  if (loading) {
+    return (
+      <div className='flex items-center justify-center py-12'>
+        <LuLoader className='h-6 w-6 animate-spin text-zinc-500' />
+      </div>
+    )
+  }
   if (!stats) return <p className='text-xs text-red-400'>Failed to load dashboard.</p>
 
   return (
@@ -185,6 +193,7 @@ function UsersTab() {
   const [creditNote, setCreditNote] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const toast = useToast()
+  const { startImpersonation } = useImpersonation()
 
   const PAGE_SIZE = 20
 
@@ -270,12 +279,16 @@ function UsersTab() {
     } catch (e) { toast.error(String(e)) }
   }
 
-  const impersonate = async (uid: string) => {
+  const impersonate = async (uid: string, email: string | null) => {
+    const confirmed = window.confirm(`You will switch to ${email ?? uid}'s account. All actions will be logged. Continue?`)
+    if (!confirmed) return
+
     try {
-      await doAction('/api/admin/impersonate/start', 'POST', { target: uid })
-      toast.success('Impersonation started — reload to see their session')
-      window.location.reload()
-    } catch (e) { toast.error(String(e)) }
+      const ok = await startImpersonation(uid)
+      if (!ok) throw new Error('Impersonation failed')
+      toast.success('Impersonation started')
+      window.location.href = '/app'
+    } catch (e) { toast.error((e as Error).message) }
   }
 
   /* ── User detail drawer ── */
@@ -381,11 +394,12 @@ function UsersTab() {
               </button>
               <button
                 type='button'
-                onClick={() => impersonate(selected.uid)}
+                onClick={() => impersonate(selected.uid, selected.email)}
                 disabled={actionLoading}
-                className='ml-auto rounded-lg border border-amber-500/30 px-3 py-1.5 text-xs text-amber-300 hover:bg-amber-500/10 disabled:opacity-40'
+                className='ml-auto flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300 hover:bg-amber-500/20 disabled:opacity-40'
               >
-                Impersonate
+                <LuEye className='h-3.5 w-3.5' />
+                View as User
               </button>
             </div>
           </div>
@@ -460,11 +474,16 @@ function UsersTab() {
         <span className='text-xs text-zinc-600'>{total} total</span>
       </div>
 
-      {loading && <p className='text-xs text-zinc-500'>Loading...</p>}
+      {loading && (
+        <div className='flex items-center justify-center py-12'>
+          <LuLoader className='h-6 w-6 animate-spin text-zinc-500' />
+        </div>
+      )}
 
       {!loading && users.length === 0 && (
-        <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-8 text-center'>
-          <p className='text-sm text-zinc-400'>No users found</p>
+        <div className='flex flex-col items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#111] p-8 text-center'>
+          <LuSearch className='mb-2 h-8 w-8 text-zinc-600' />
+          <p className='text-sm text-zinc-500'>No results found</p>
         </div>
       )}
 
@@ -477,6 +496,7 @@ function UsersTab() {
               <th className='px-3 py-2.5 font-medium'>Status</th>
               <th className='px-3 py-2.5 font-medium'>Joined</th>
               <th className='px-3 py-2.5 font-medium'>Last Login</th>
+              <th className='px-3 py-2.5 font-medium text-right'>Actions</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-[#1e1e1e]'>
@@ -516,6 +536,19 @@ function UsersTab() {
                 </td>
                 <td className='px-3 py-2.5 text-zinc-500'>
                   {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : '—'}
+                </td>
+                <td className='px-3 py-2.5 text-right'>
+                  <button
+                    type='button'
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void impersonate(u.uid, u.email)
+                    }}
+                    className='rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-amber-300'
+                    title='View as user'
+                  >
+                    <LuEye className='h-4 w-4' />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -588,11 +621,16 @@ function AuditLogTab() {
         <p className='text-xs text-zinc-500'>All admin actions recorded in order</p>
       </div>
 
-      {loading && <p className='text-xs text-zinc-500'>Loading...</p>}
+      {loading && (
+        <div className='flex items-center justify-center py-12'>
+          <LuLoader className='h-6 w-6 animate-spin text-zinc-500' />
+        </div>
+      )}
 
       {!loading && entries.length === 0 && (
-        <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-8 text-center'>
-          <p className='text-sm text-zinc-400'>No audit entries yet</p>
+        <div className='flex flex-col items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#111] p-8 text-center'>
+          <LuSearch className='mb-2 h-8 w-8 text-zinc-600' />
+          <p className='text-sm text-zinc-500'>No results found</p>
         </div>
       )}
 

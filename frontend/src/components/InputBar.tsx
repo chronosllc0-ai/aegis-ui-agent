@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
+import { apiUrl } from '../lib/api'
 import { PROVIDERS, modelInfo, providerById, renderProviderIcon } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
+import { PromptGallery } from './PromptGallery'
+import { SuggestionChips } from './SuggestionChips'
 import { SteeringControl } from './SteeringControl'
 
 type InputBarProps = {
@@ -110,6 +113,7 @@ export function InputBar({
 }: InputBarProps) {
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
+  const [galleryOpen, setGalleryOpen] = useState(false)
 
   const submit = (overrideValue?: string) => {
     const instruction = (overrideValue ?? value).trim()
@@ -150,6 +154,23 @@ export function InputBar({
         ? 'border-orange-500/50'
         : 'border-[#2a2a2a]'
 
+  const handleSuggestionSelect = async (templateId: string) => {
+    try {
+      const response = await fetch(apiUrl(`/api/gallery/${templateId}`), { credentials: 'include' })
+      const data = await response.json()
+      if (data?.ok && typeof data?.template?.prompt === 'string') {
+        setValue(data.template.prompt)
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  const handleTemplateSelect = (prompt: string) => {
+    setValue(prompt)
+    setGalleryOpen(false)
+  }
+
   return (
     <section className={`space-y-2 rounded-xl border bg-[#1a1a1a] p-2 transition sm:space-y-3 sm:rounded-2xl sm:p-3 ${modeStyling}`}>
       <div className='flex flex-wrap items-center justify-between gap-1.5 sm:gap-2'>
@@ -188,6 +209,7 @@ export function InputBar({
           onModelChange={onModelChange}
         />
       </div>
+      <SuggestionChips onSelectSuggestion={(templateId) => void handleSuggestionSelect(templateId)} onOpenGallery={() => setGalleryOpen(true)} />
       <div className='flex gap-1.5 sm:gap-2'>
         <textarea
           value={value}
@@ -242,6 +264,13 @@ export function InputBar({
       )}
       {queuedMessages.length > 0 && (
         <MessageQueue queuedMessages={queuedMessages} isOpen={queueOpen} onToggle={() => setQueueOpen((prev) => !prev)} onDelete={onDeleteQueueItem} />
+      )}
+      {galleryOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
+          <div className='h-[85vh] w-full max-w-6xl'>
+            <PromptGallery onSelectTemplate={handleTemplateSelect} onClose={() => setGalleryOpen(false)} />
+          </div>
+        </div>
       )}
     </section>
   )
