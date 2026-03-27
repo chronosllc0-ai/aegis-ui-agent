@@ -57,7 +57,7 @@ async def execute_plan(
             _active_runners.pop(runner_key, None)
 
     asyncio.create_task(run_and_cleanup())
-    return {"ok": True, "message": "Plan execution started", "ws_url": f"/ws/plan/{plan_id}"}
+    return {"ok": True, "message": "Plan execution started", "ws_url": f"/api/plans/ws/plan/{plan_id}"}
 
 
 @executor_router.post("/{plan_id}/stop")
