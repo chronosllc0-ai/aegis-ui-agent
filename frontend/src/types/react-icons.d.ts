@@ -13,6 +13,7 @@ declare module 'react-icons/fa' {
 
   export const FaDiscord: IconType
   export const FaFolder: IconType
+  export const FaGithub: IconType
   export const FaGlobe: IconType
   export const FaLock: IconType
   export const FaPlus: IconType
@@ -27,6 +28,7 @@ declare module 'react-icons/si' {
 
   export const SiAnthropic: IconType
   export const SiDiscord: IconType
+  export const SiGithub: IconType
   export const SiGoogle: IconType
   export const SiMistralai: IconType
   export const SiOpenai: IconType
@@ -49,6 +51,7 @@ declare module 'react-icons/lu' {
   export const LuCode: IconType
   export const LuCreditCard: IconType
   export const LuDownload: IconType
+  export const LuEye: IconType
   export const LuFilter: IconType
   export const LuFolder: IconType
   export const LuGlobe: IconType
@@ -56,6 +59,7 @@ declare module 'react-icons/lu' {
   export const LuLock: IconType
   export const LuPlus: IconType
   export const LuShield: IconType
+  export const LuSearch: IconType
   export const LuTrendingUp: IconType
   export const LuTriangleAlert: IconType
   export const LuWind: IconType
