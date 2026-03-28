@@ -6,8 +6,6 @@ import type { SteeringMode } from '../../hooks/useWebSocket'
 import { AgentTab } from './AgentTab'
 import { APIKeysTab } from './APIKeysTab'
 import { ConnectionsTab } from './ConnectionsTab'
-import { ConnectorsTab } from './ConnectorsTab'
-import { IntegrationsTab } from './IntegrationsTab'
 import { ProfileTab } from './ProfileTab'
 import { SupportTab } from './SupportTab'
 import { UsageTab } from './UsageTab'
@@ -23,7 +21,7 @@ type SettingsPageProps = {
   isAdmin?: boolean
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Connectors', 'Integrations', 'Workflows', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support', 'Admin'] as const
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
@@ -104,12 +102,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
                 activeTab === tab ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
               } ${tab === 'Admin' ? 'mt-2 border-t border-[#2a2a2a] pt-3 text-red-400 hover:bg-red-500/10' : ''}`}
             >
-              {tab === 'Admin' ? '⚙ Admin' : tab === 'Connectors' || tab === 'Integrations' ? (
-                <span className='flex items-center justify-between'>
-                  {tab}
-                  <span className='ml-1.5 rounded bg-blue-600 px-1 py-0.5 text-[10px] font-bold uppercase leading-none text-white'>NEW</span>
-                </span>
-              ) : tab}
+              {tab === 'Admin' ? '⚙ Admin' : tab}
             </button>
           ))}
         </div>
@@ -125,10 +118,6 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         {activeTab === 'Invoices' && <InvoiceTab />}
         {activeTab === 'Connections' && (
           <ConnectionsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} isAdmin={isAdmin} />
-        )}
-        {activeTab === 'Connectors' && <ConnectorsTab />}
-        {activeTab === 'Integrations' && (
-          <IntegrationsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} />
         )}
         {activeTab === 'Workflows' && (
           <WorkflowsTab
