@@ -36,7 +36,7 @@ from backend.planner.router import planner_router
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
-from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
+from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
 from backend.key_management import KeyManager
 from backend.providers import get_provider, list_providers
 from config import settings
@@ -703,6 +703,33 @@ async def _run_navigation_task(
             user_uid=runtime.user_uid,
         )
         result_status = result.get("status") if isinstance(result, dict) else "completed"
+
+        # ── Chronos Gateway credit recording ──────────────────────────
+        if (
+            isinstance(result, dict)
+            and runtime.settings.get("provider") == "chronos"
+            and runtime.user_uid
+        ):
+            input_tokens = result.get("input_tokens", 0)
+            output_tokens = result.get("output_tokens", 0)
+            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super:free")
+            if input_tokens or output_tokens:
+                try:
+                    async for _db_session in get_session():
+                        await record_usage(
+                            _db_session,
+                            runtime.user_uid,
+                            "chronos",
+                            model_id,
+                            input_tokens,
+                            output_tokens,
+                            session_id=session_id,
+                        )
+                        await _db_session.commit()
+                        break
+                except Exception:  # noqa: BLE001
+                    logger.warning("Failed to record Chronos Gateway usage for user %s", runtime.user_uid)
+
         # If execute_task returned a failure (e.g. unsupported provider), surface it as an error
         if result_status == "failed":
             error_msg = (result.get("error") or "Task failed") if isinstance(result, dict) else "Task failed"
