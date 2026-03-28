@@ -126,24 +126,36 @@ function App() {
     prevConnectionStatus.current = connectionStatus
   }, [connectionStatus, addNotification])
 
-  // Detect credit / quota errors in WebSocket log messages
+  // Detect and surface agent errors from WebSocket log messages
   useEffect(() => {
     if (!logs.length) return
     const last = logs[logs.length - 1]
     if (last.type !== 'error') return
     const msg = last.message?.toLowerCase() ?? ''
+
+    // Categorise the error for a clearer title
     const isCreditError =
       msg.includes('insufficient') || msg.includes('quota') || msg.includes('credits') ||
       msg.includes('rate limit') || msg.includes('402') || msg.includes('429') ||
       msg.includes('billing') || msg.includes('out of credits') || msg.includes('usage limit')
-    if (isCreditError) {
-      addNotification({
-        type: 'error',
-        title: 'API credit / quota error',
-        message: last.message,
-        source: 'credit',
-      })
-    }
+    const isAuthError =
+      msg.includes('401') || msg.includes('unauthorized') || msg.includes('invalid api key') ||
+      msg.includes('authentication') || msg.includes('api key')
+    const isProviderError =
+      msg.includes('no api key') || msg.includes('provider') || msg.includes('model')
+
+    let title = 'Agent error'
+    if (isCreditError) title = 'API credit / quota error'
+    else if (isAuthError) title = 'API key invalid or expired'
+    else if (isProviderError) title = 'Provider not configured'
+
+    // Always surface agent errors as a notification so they are impossible to miss
+    addNotification({
+      type: 'error',
+      title,
+      message: last.message || 'The agent encountered an unexpected error.',
+      source: 'credit',
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs])
 
