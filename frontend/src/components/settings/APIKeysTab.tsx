@@ -90,8 +90,14 @@ export function APIKeysTab() {
 
   const storedMap = Object.fromEntries(keys.map((k) => [k.provider, k]))
 
+  const byokProviders = PROVIDERS.filter((p) => !p.gatewayOnly)
+
   return (
     <div className='space-y-6'>
+      <div className='rounded-xl border border-violet-500/30 bg-violet-500/5 p-3 text-xs text-violet-200'>
+        <span className='font-semibold'>Chronos Gateway</span> uses platform API keys — no key needed. Select <em>Chronos Gateway</em> in the Agent tab and start immediately. Credits are deducted per request.
+      </div>
+
       <div>
         <h3 className='text-sm font-semibold'>Bring Your Own Key (BYOK)</h3>
         <p className='mt-1 text-xs text-zinc-400'>
@@ -111,7 +117,7 @@ export function APIKeysTab() {
       )}
 
       <div className='space-y-4'>
-        {PROVIDERS.map((provider) => {
+        {byokProviders.map((provider) => {
           const stored = storedMap[provider.id]
           const isBusy = saving === provider.id
           return (
