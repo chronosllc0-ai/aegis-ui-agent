@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
 import { apiUrl } from '../lib/api'
-import { PROVIDERS, modelInfo, providerById, renderProviderIcon } from '../lib/models'
+import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
 import { PromptGallery } from './PromptGallery'
@@ -32,15 +32,6 @@ type InputBarProps = {
 }
 
 const MODE_ORDER: SteeringMode[] = ['steer', 'interrupt', 'queue']
-
-/* ── Arrow-up send icon ─────────────────────────────────────────────── */
-function ArrowUpIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox='0 0 24 24' fill='currentColor' className={className ?? 'h-4 w-4'} aria-hidden='true'>
-      <path d='M12 4l-1.4 1.4 5.6 5.6H4v2h12.2l-5.6 5.6L12 20l8-8z' transform='rotate(-90 12 12)' />
-    </svg>
-  )
-}
 
 /* ── Provider + Model picker ────────────────────────────────────────── */
 function ModelPicker({
