@@ -53,7 +53,12 @@ class AgentOrchestrator:
         """Build an ADK agent instance for the requested model/instruction."""
         instruction = system_instruction or (
             "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
-            "If asked to search the web, go to a search engine, type query, and submit."
+            "If asked to search the web, go to a search engine, type query, and submit. "
+            "When the user's message starts with /plan, treat it as a planning request: "
+            "break the task into clear, numbered steps before executing. "
+            "List the plan steps first, then execute each step methodically, "
+            "reporting progress after each one. The /plan prefix should be stripped "
+            "before processing the actual task description."
         )
         return Agent(
             name="aegis_navigator",
