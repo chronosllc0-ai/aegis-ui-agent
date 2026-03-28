@@ -144,9 +144,13 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
   const [showTooltip, setShowTooltip] = useState(false)
 
   const copy = async () => {
-    await navigator.clipboard.writeText(code)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1800)
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err)
+    }
   }
 
   return (
@@ -478,6 +482,9 @@ export function ChatPanel({
           type: file.type,
           dataUrl: ev.target?.result as string,
         }])
+      }
+      reader.onerror = () => {
+        console.error('Failed to read file:', file.name)
       }
       reader.readAsDataURL(file)
     })
