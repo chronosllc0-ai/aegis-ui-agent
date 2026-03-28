@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
 import { apiUrl } from '../lib/api'
 import { PROVIDERS, modelInfo, providerById, renderProviderIcon } from '../lib/models'
@@ -116,19 +116,30 @@ export function InputBar({
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  // Track pending example prompt so Plan/Send can use it even before the setTimeout fires
+  const pendingExampleRef = useRef<string | null>(null)
+
+  // Returns the effective text: typed value, or pending example if value is still empty
+  const effectiveValue = () => value.trim() || pendingExampleRef.current?.trim() || ''
 
   const submit = (overrideValue?: string) => {
-    const instruction = (overrideValue ?? value).trim()
+    const instruction = overrideValue ?? effectiveValue()
     if (!instruction) return
     onSend(instruction, mode)
-    if (!overrideValue) setValue('')
+    if (!overrideValue) {
+      setValue('')
+      pendingExampleRef.current = null
+    }
   }
 
   useEffect(() => {
     if (!examplePrompt) return
     const instruction = examplePrompt.trim()
+    // Store immediately in ref so Plan/Send can use it before setTimeout fires
+    pendingExampleRef.current = instruction
     const timeout = window.setTimeout(() => {
       if (instruction) setValue(instruction)
+      pendingExampleRef.current = null
       onExampleHandled?.()
     }, 0)
     return () => window.clearTimeout(timeout)
@@ -235,9 +246,17 @@ export function InputBar({
         {onDecomposePlan && (
           <button
             type='button'
-            onClick={() => { if (value.trim()) { onDecomposePlan(value); setValue('') } }}
+            onClick={() => {
+              const prompt = effectiveValue()
+              if (prompt) {
+                onDecomposePlan(prompt)
+                setValue('')
+                pendingExampleRef.current = null
+              }
+            }}
             title='Decompose into a multi-step plan'
-            className='rounded-lg border border-zinc-600 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 sm:px-4 sm:py-2 sm:text-sm'
+            disabled={!effectiveValue()}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm ${effectiveValue() ? 'border-zinc-600 text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed border-zinc-800 text-zinc-600'}`}
           >
             Plan
           </button>

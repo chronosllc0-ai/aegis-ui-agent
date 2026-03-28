@@ -300,6 +300,7 @@ function App() {
   const handleSend = (instruction: string, selectedMode: SteeringMode) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
+
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
     send({ action: 'config', settings: wsConfig })

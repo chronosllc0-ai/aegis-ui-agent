@@ -700,16 +700,22 @@ async def _run_navigation_task(
             steering_context=runtime.steering_context,
             settings=runtime.settings,
             on_workflow_step=lambda step: _send_workflow_step(websocket, step),
+            user_uid=runtime.user_uid,
         )
+        result_status = result.get("status") if isinstance(result, dict) else "completed"
+        # If execute_task returned a failure (e.g. unsupported provider), surface it as an error
+        if result_status == "failed":
+            error_msg = (result.get("error") or "Task failed") if isinstance(result, dict) else "Task failed"
+            await websocket.send_json({"type": "error", "data": {"message": error_msg}})
         await _log_web_message(
             runtime,
             session_id,
             "assistant",
-            f"Task completed: {instruction}",
+            f"Task {result_status}: {instruction}",
             metadata={
                 "source": "websocket",
                 "action": "result",
-                "status": result.get("status") if isinstance(result, dict) else "completed",
+                "status": result_status,
                 "result": result if isinstance(result, dict) else str(result),
             },
         )
@@ -1339,6 +1345,7 @@ async def _run_navigation_task_from_bot(
             steering_context=runtime.steering_context,
             settings=runtime.settings,
             on_workflow_step=lambda _: None,
+            user_uid=owner_uid,
         )
         status = result.get("status", "completed")
         reply = f"✅ Task {status}: {instruction[:60]}"

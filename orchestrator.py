@@ -22,11 +22,21 @@ from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
-SUPPORTED_SESSION_MODELS = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-2.5-pro-preview-03-25"}
+
+# Models supported by the Gemini ADK navigator path
+SUPPORTED_GEMINI_MODELS = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-2.5-pro-preview-03-25"}
+# Providers that use the Gemini ADK path
+GEMINI_PROVIDERS = {"google", "gemini", ""}
 
 
 class AgentOrchestrator:
-    """Orchestrates the UI navigation pipeline using ADK."""
+    """Orchestrates the UI navigation pipeline.
+
+    Routing logic:
+    - Google / Gemini providers → Google ADK runner (existing path).
+    - All other providers (OpenAI, Anthropic, xAI, OpenRouter) →
+      UniversalNavigator vision+tool-calling loop.
+    """
 
     def __init__(self) -> None:
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -63,12 +73,12 @@ class AgentOrchestrator:
         )
 
     async def _apply_session_settings(self, session_settings: dict[str, Any] | None) -> None:
-        """Apply per-session settings before executing a task."""
+        """Apply per-session settings before executing a Gemini ADK task."""
         if not session_settings:
             return
 
         requested_model = str(session_settings.get("model", self.model_name)).strip() or self.model_name
-        if requested_model not in SUPPORTED_SESSION_MODELS:
+        if requested_model not in SUPPORTED_GEMINI_MODELS:
             requested_model = self.model_name
         system_instruction = session_settings.get("system_instruction")
 
@@ -86,7 +96,7 @@ class AgentOrchestrator:
             logger.info("Applied session settings", extra={"model": self.model_name, "has_system_instruction": bool(system_instruction)})
 
     async def _resolve_session_agent(self, session_settings: dict[str, Any] | None) -> tuple[Agent, str]:
-        """Return the agent instance to use for the current session."""
+        """Return the ADK agent instance to use for the current Gemini session."""
         if self.agent is None:
             await self.initialize()
         assert self.agent is not None
@@ -107,6 +117,54 @@ class AgentOrchestrator:
         screenshot = await self.executor.screenshot()
         return base64.b64encode(screenshot).decode("utf-8")
 
+    async def _resolve_provider_for_navigation(
+        self,
+        session_settings: dict[str, Any] | None,
+        user_uid: str | None,
+    ) -> tuple[str, Any, str] | None:
+        """Resolve provider name, instance, and model for non-Gemini navigation.
+
+        Returns (provider_name, provider_instance, model_id) or None if
+        the provider cannot be resolved (missing key → error handled by caller).
+        """
+        if not session_settings:
+            return None
+        provider_name = str(session_settings.get("provider", "")).strip().lower()
+        if not provider_name or provider_name in GEMINI_PROVIDERS:
+            return None
+
+        model_id = str(session_settings.get("model", "")).strip()
+
+        # Try to get the user's stored BYOK key first
+        api_key: str | None = None
+        if user_uid:
+            try:
+                from backend.database import get_session as _get_session
+                from backend.key_management import KeyManager
+                _km = KeyManager(settings.ENCRYPTION_SECRET)
+                async for db_session in _get_session():
+                    api_key = await _km.get_key(db_session, user_uid, provider_name)
+                    break
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not retrieve BYOK key for %s/%s", user_uid, provider_name)
+
+        # Fall back to server-side env key
+        if not api_key:
+            env_keys: dict[str, str] = {
+                "openai": settings.OPENAI_API_KEY,
+                "anthropic": settings.ANTHROPIC_API_KEY,
+                "xai": settings.XAI_API_KEY,
+                "openrouter": settings.OPENROUTER_API_KEY,
+            }
+            api_key = env_keys.get(provider_name, "").strip()
+
+        if not api_key:
+            return None  # caller will surface a missing-key error
+
+        from backend.providers import get_provider
+        provider_instance = get_provider(provider_name, api_key, default_model=model_id or None)
+        return provider_name, provider_instance, model_id
+
     async def execute_task(
         self,
         session_id: str,
@@ -117,8 +175,46 @@ class AgentOrchestrator:
         steering_context: list[str] | None = None,
         settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        user_uid: str | None = None,
     ) -> dict[str, Any]:
-        """Execute a UI navigation task from a natural language instruction."""
+        """Execute a UI navigation task from a natural language instruction.
+
+        Automatically routes to the Gemini ADK path or the universal
+        vision+tool-calling navigator depending on the requested provider.
+        """
+        provider_name = str((settings or {}).get("provider", "")).strip().lower()
+        is_gemini_path = not provider_name or provider_name in GEMINI_PROVIDERS
+
+        # ── Non-Gemini path ────────────────────────────────────────────
+        if not is_gemini_path:
+            resolved = await self._resolve_provider_for_navigation(settings, user_uid)
+            if resolved is None:
+                # No API key available — surface a clear error
+                missing_key_msg = (
+                    f"No API key found for provider '{provider_name}'. "
+                    "Please add your key in Settings → API Keys, or set a server-side environment variable."
+                )
+                if on_step:
+                    await on_step({"type": "error", "content": missing_key_msg, "steering": []})
+                return {"status": "failed", "instruction": instruction, "error": missing_key_msg}
+
+            _, provider_instance, model_id = resolved
+            logger.info("Using universal navigator for provider=%s model=%s", provider_name, model_id)
+
+            from universal_navigator import run_universal_navigation
+            return await run_universal_navigation(
+                provider=provider_instance,
+                model=model_id,
+                executor=self.executor,
+                instruction=instruction,
+                on_step=on_step,
+                on_frame=on_frame,
+                cancel_event=cancel_event,
+                steering_context=steering_context,
+                on_workflow_step=on_workflow_step,
+            )
+
+        # ── Gemini / ADK path (original) ───────────────────────────────
         if self.agent is None:
             await self.initialize()
         await self._apply_session_settings(settings)
