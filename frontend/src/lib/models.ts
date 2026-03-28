@@ -29,9 +29,32 @@ export type ProviderInfo = {
   models: ModelInfo[]
   iconUrl: string
   keyPrefix: string
+  gatewayOnly?: boolean
 }
 
 export const PROVIDERS: ProviderInfo[] = [
+  // ── Chronos Gateway ─────────────────────────────────────────────────
+  {
+    id: 'chronos',
+    displayName: 'Chronos Gateway',
+    iconUrl: CHRONOS_LOGO_URL,
+    keyPrefix: '',
+    gatewayOnly: true,
+    models: [
+      { id: 'nvidia/nemotron-3-super:free', label: 'Nemotron 3 Super (Free)', description: 'Free · NVIDIA 1M context · Best to start with', vision: false, contextLength: 1_000_000 },
+      { id: 'openai/gpt-5.4', label: 'GPT-5.4', description: "OpenAI's latest frontier model", vision: true, contextLength: 1_048_576 },
+      { id: 'openai/gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Fast, cost-efficient GPT-5.4', vision: true, contextLength: 400_000 },
+      { id: 'openai/gpt-5.4-nano', label: 'GPT-5.4 Nano', description: 'Lightest GPT-5.4 variant', vision: true, contextLength: 400_000 },
+      { id: 'openai/gpt-5.3-codex', label: 'GPT-5.3 Codex', description: 'Best agentic coding model', vision: false, contextLength: 400_000 },
+      { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', description: 'Most intelligent for long tasks', vision: true, contextLength: 1_000_000 },
+      { id: 'anthropic/claude-sonnet-4-20250514', label: 'Claude Sonnet 4', description: 'Balanced speed + intelligence', vision: true, contextLength: 200_000 },
+      { id: 'x-ai/grok-4.20-beta', label: 'Grok 4.20 Beta', description: 'xAI flagship with 2M context', vision: true, contextLength: 2_000_000 },
+      { id: 'google/gemini-3.1-pro-preview-custom-tools', label: 'Gemini 3.1 Pro', description: 'Best Gemini with tool accuracy', vision: true, contextLength: 1_048_576 },
+      { id: 'qwen/qwen3-max-thinking', label: 'Qwen3 Max Thinking', description: 'Flagship reasoning from Qwen3', vision: false, contextLength: 262_144 },
+      { id: 'mistralai/mistral-small-4', label: 'Mistral Small 4', description: 'Lean European model, 128K context', vision: false, contextLength: 128_000 },
+      { id: 'nvidia/nemotron-3-super', label: 'Nemotron 3 Super', description: 'NVIDIA 120B param, 1M context', vision: false, contextLength: 1_000_000 },
+    ],
+  },
   // ── Google ──────────────────────────────────────────────────────────
   {
     id: 'google',
