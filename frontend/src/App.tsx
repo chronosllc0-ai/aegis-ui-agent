@@ -322,7 +322,7 @@ function App() {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, 'steer')
+    handleSend(normalized, isWorking ? 'steer' : mode)
   }
 
   const handleDecomposePlan = async (prompt: string) => {
