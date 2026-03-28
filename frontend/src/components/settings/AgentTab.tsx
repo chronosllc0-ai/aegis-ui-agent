@@ -55,6 +55,13 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
       <section className='space-y-3'>
         <h3 className='text-sm font-semibold'>Provider & Model</h3>
 
+        {settings.provider === 'chronos' && (
+          <div className='inline-flex items-center gap-1.5 rounded-full border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-300'>
+            <span className='h-1.5 w-1.5 rounded-full bg-violet-400' />
+            Using Chronos Gateway · Credits deducted per request
+          </div>
+        )}
+
         <label htmlFor='agent-provider' className='text-xs font-medium text-zinc-400'>
           Provider
         </label>
