@@ -508,7 +508,7 @@ export function ChatPanel({
             className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-4 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/20 transition-colors shadow-md'
           >
             <LuGlobe className='h-3.5 w-3.5' />
-            🌐 Agent is browsing → Switch to Browser
+            Agent is browsing — Switch to Browser
           </button>
         </div>
       )}
