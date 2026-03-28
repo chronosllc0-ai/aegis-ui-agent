@@ -140,6 +140,16 @@ class AgentOrchestrator:
 
         model_id = str(session_settings.get("model", "")).strip()
 
+        # ── Chronos Gateway — route via platform OpenRouter key ───────
+        CHRONOS_GATEWAY = "chronos"
+        if provider_name == CHRONOS_GATEWAY:
+            api_key = settings.OPENROUTER_API_KEY.strip()
+            if not api_key:
+                return None  # no platform key configured
+            from backend.providers import get_provider
+            provider_instance = get_provider("openrouter", api_key, default_model=model_id or "nvidia/nemotron-3-super:free")
+            return "chronos", provider_instance, model_id
+
         # Try to get the user's stored BYOK key first
         api_key: str | None = None
         if user_uid:
