@@ -84,6 +84,8 @@ OVERAGE_RATES: dict[str, float] = {
 
 def get_rate(provider: str, model: str) -> dict:
     """Get credit rate for a provider/model combo.  Falls back to mid-tier defaults."""
+    if provider == "chronos":
+        provider = "openrouter"  # chronos uses openrouter rates
     provider_rates = CREDIT_RATES.get(provider, {})
     rate = provider_rates.get(model)
     if rate:
