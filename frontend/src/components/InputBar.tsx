@@ -116,6 +116,9 @@ export function InputBar({
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false)
+  const [planMode, setPlanMode] = useState(false)
+  const attachMenuRef = useRef<HTMLDivElement>(null)
   // Track pending example prompt so Plan/Send can use it even before the setTimeout fires
   const pendingExampleRef = useRef<string | null>(null)
 
@@ -125,10 +128,19 @@ export function InputBar({
   const submit = (overrideValue?: string) => {
     const instruction = overrideValue ?? effectiveValue()
     if (!instruction) return
-    onSend(instruction, mode)
-    if (!overrideValue) {
-      setValue('')
-      pendingExampleRef.current = null
+    if (planMode && onDecomposePlan) {
+      onDecomposePlan(instruction)
+      if (!overrideValue) {
+        setValue('')
+        pendingExampleRef.current = null
+      }
+      setPlanMode(false)
+    } else {
+      onSend(instruction, mode)
+      if (!overrideValue) {
+        setValue('')
+        pendingExampleRef.current = null
+      }
     }
   }
 
@@ -144,6 +156,18 @@ export function InputBar({
     }, 0)
     return () => window.clearTimeout(timeout)
   }, [examplePrompt, onExampleHandled])
+
+  // Close attach menu on outside click
+  useEffect(() => {
+    if (!attachMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+        setAttachMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [attachMenuOpen])
 
   const recentTranscripts = useMemo(() => transcripts.slice(-3).reverse(), [transcripts])
   const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -224,6 +248,42 @@ export function InputBar({
       </div>
       <SuggestionChips onSelectSuggestion={(templateId) => void handleSuggestionSelect(templateId)} onOpenGallery={() => setGalleryOpen(true)} />
       <div className='flex gap-1.5 sm:gap-2'>
+        {/* + button with dropdown menu (Plan / Upload) */}
+        {onDecomposePlan && (
+          <div className='relative' ref={attachMenuRef}>
+            <button
+              type='button'
+              onClick={() => setAttachMenuOpen((prev) => !prev)}
+              title='Plan or attach'
+              className={`flex h-full min-h-[34px] items-center justify-center rounded-lg border px-2.5 text-base font-medium transition sm:min-h-[38px] sm:px-3 ${planMode ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-300 hover:bg-zinc-800'}`}
+              aria-label='Open action menu'
+            >
+              {planMode ? <span className='text-xs font-semibold tracking-wide'>Plan</span> : '+'}
+            </button>
+            {attachMenuOpen && (
+              <div className='absolute bottom-full left-0 z-50 mb-2 min-w-[160px] overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] shadow-xl'>
+                <button
+                  type='button'
+                  onClick={() => { setPlanMode((p) => !p); setAttachMenuOpen(false) }}
+                  className='flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800'
+                >
+                  <span>Plan</span>
+                  <span className={`h-4 w-4 rounded border transition ${planMode ? 'border-cyan-400 bg-cyan-400' : 'border-zinc-600'}`} />
+                </button>
+                <div className='border-t border-[#2a2a2a]' />
+                <button
+                  type='button'
+                  onClick={() => setAttachMenuOpen(false)}
+                  className='flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-zinc-500 cursor-not-allowed'
+                  disabled
+                >
+                  <span>Upload attachment</span>
+                  <span className='ml-auto rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500'>soon</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -240,29 +300,11 @@ export function InputBar({
               onModeChange(MODE_ORDER[(idx + 1) % MODE_ORDER.length])
             }
           }}
-          placeholder='Type an instruction...'
+          placeholder={planMode ? 'Describe task to plan…' : 'Type an instruction...'}
           className='w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#111] px-2 py-1.5 text-xs text-zinc-100 outline-none ring-blue-500/60 placeholder:text-zinc-500 focus:ring-2 sm:px-3 sm:py-2 sm:text-sm'
         />
-        {onDecomposePlan && (
-          <button
-            type='button'
-            onClick={() => {
-              const prompt = effectiveValue()
-              if (prompt) {
-                onDecomposePlan(prompt)
-                setValue('')
-                pendingExampleRef.current = null
-              }
-            }}
-            title='Decompose into a multi-step plan'
-            disabled={!effectiveValue()}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm ${effectiveValue() ? 'border-zinc-600 text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed border-zinc-800 text-zinc-600'}`}
-          >
-            Plan
-          </button>
-        )}
-        <button type='button' onClick={() => submit()} className='rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-400 sm:px-4 sm:py-2 sm:text-sm'>
-          {sending ? <span className='inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white' /> : 'Send'}
+        <button type='button' onClick={() => submit()} className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white transition sm:px-4 sm:py-2 sm:text-sm ${planMode ? 'bg-cyan-600 hover:bg-cyan-500' : 'bg-blue-500 hover:bg-blue-400'}`}>
+          {sending ? <span className='inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white' /> : planMode ? 'Plan' : 'Send'}
         </button>
       </div>
       <p className='hidden text-xs text-zinc-500 sm:block'>Enter to send - Esc to clear - Tab to switch mode - Shift+Enter for newline</p>
