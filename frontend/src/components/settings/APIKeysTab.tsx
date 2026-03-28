@@ -116,27 +116,27 @@ export function APIKeysTab() {
           const isBusy = saving === provider.id
           return (
             <div key={provider.id} className='rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
-              <div className='flex items-center justify-between'>
-                <div className='flex items-center gap-2'>
-                  <span className='text-base text-zinc-100'>{renderProviderIcon(provider, 'h-5 w-5')}</span>
-                  <span className='text-sm font-medium'>{provider.displayName}</span>
+              <div className='flex min-w-0 items-center justify-between gap-2'>
+                <div className='flex min-w-0 items-center gap-2'>
+                  <span className='text-base text-zinc-100 shrink-0'>{renderProviderIcon(provider, 'h-5 w-5')}</span>
+                  <span className='text-sm font-medium truncate'>{provider.displayName}</span>
                 </div>
                 {stored ? (
-                  <span className='inline-flex items-center gap-1 text-xs text-emerald-300'>
+                  <span className='inline-flex shrink-0 items-center gap-1 text-xs text-emerald-300'>
                     <span className='h-2 w-2 rounded-full bg-emerald-400' />
-                    Connected / {stored.key_hint}
+                    <span className='truncate max-w-[120px]'>Connected / {stored.key_hint}</span>
                   </span>
                 ) : (
-                  <span className='text-xs text-zinc-500'>No key</span>
+                  <span className='shrink-0 text-xs text-zinc-500'>No key</span>
                 )}
               </div>
-              <div className='mt-3 flex gap-2'>
+              <div className='mt-3 flex min-w-0 gap-2'>
                 <input
                   type='password'
                   placeholder={`${provider.displayName} API key${provider.keyPrefix ? ` (${provider.keyPrefix}...)` : ''}`}
                   value={inputs[provider.id] ?? ''}
                   onChange={(e) => setInputs((prev) => ({ ...prev, [provider.id]: e.target.value }))}
-                  className='flex-1 rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2 text-sm'
+                  className='min-w-0 flex-1 rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2 text-sm'
                 />
                 <button
                   type='button'
@@ -171,7 +171,6 @@ export function APIKeysTab() {
           {Icons.lock({ className: 'h-3.5 w-3.5' })}
           <span>How BYOK works</span>
         </p>
-        <p className='inline-flex items-center gap-2 font-medium text-blue-200'>{Icons.lock({ className: 'h-4 w-4' })}<span>How BYOK works</span></p>
         <ul className='mt-2 list-inside list-disc space-y-1 text-zinc-400'>
           <li>Keys are encrypted with AES-256 before storage — we never see your plaintext key.</li>
           <li>Each request to an LLM uses <em>your</em> key, billed directly to your provider account.</li>
