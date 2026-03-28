@@ -592,9 +592,17 @@ async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
 
 
 async def _send_initial_frame(websocket: WebSocket) -> None:
-    """Capture and send an initial frame when the websocket connects."""
+    """Capture and send an initial frame when the websocket connects.
+
+    Skips sending if the browser is still at about:blank so the frontend can
+    display its "Tell me what to do" welcome screen instead of a white frame.
+    """
     try:
-        screenshot_bytes = await _get_orchestrator().executor.screenshot()
+        executor = _get_orchestrator().executor
+        current_url = executor.page.url if executor.page else "about:blank"
+        if current_url in ("about:blank", ""):
+            return  # Don't replace the welcome screen with a white blank frame
+        screenshot_bytes = await executor.screenshot()
         await _send_frame(websocket, base64.b64encode(screenshot_bytes).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Initial frame capture failed: %s", exc)
