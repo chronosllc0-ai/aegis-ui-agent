@@ -182,6 +182,8 @@ async def run_universal_navigation(
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []
     parent_step_id: str | None = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
     async def emit_step(content: str, step_type: str = "step") -> None:
         step_data = {"type": step_type, "content": content, "steering": []}
@@ -231,7 +233,12 @@ async def run_universal_navigation(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("LLM call failed at step %d", step_num)
-            return {"status": "failed", "instruction": instruction, "steps": steps, "error": str(exc)}
+            return {"status": "failed", "instruction": instruction, "steps": steps, "error": str(exc), "input_tokens": total_input_tokens, "output_tokens": total_output_tokens}
+
+        # Accumulate token usage
+        if response.usage:
+            total_input_tokens += response.usage.get("prompt_tokens", 0)
+            total_output_tokens += response.usage.get("completion_tokens", 0)
 
         reply = response.content.strip()
         messages.append(ChatMessage(role="assistant", content=reply))
@@ -250,12 +257,12 @@ async def run_universal_navigation(
         if tool_name == "done":
             summary = str(tool_call.get("summary", "Task completed."))
             await emit_step(summary, step_type="result")
-            return {"status": "completed", "instruction": instruction, "steps": steps, "summary": summary}
+            return {"status": "completed", "instruction": instruction, "steps": steps, "summary": summary, "input_tokens": total_input_tokens, "output_tokens": total_output_tokens}
 
         if tool_name == "error":
             error_msg = str(tool_call.get("message", "Unknown error."))
             await emit_step(f"Error: {error_msg}", step_type="error")
-            return {"status": "failed", "instruction": instruction, "steps": steps, "error": error_msg}
+            return {"status": "failed", "instruction": instruction, "steps": steps, "error": error_msg, "input_tokens": total_input_tokens, "output_tokens": total_output_tokens}
 
         # Emit step info
         await emit_step(f"[{tool_name}] {json.dumps({k: v for k, v in tool_call.items() if k != 'tool'})[:120]}")
@@ -284,4 +291,4 @@ async def run_universal_navigation(
 
     # Reached step limit
     await emit_step("Reached maximum step limit without completing task.", step_type="error")
-    return {"status": "failed", "instruction": instruction, "steps": steps, "error": "Max steps reached"}
+    return {"status": "failed", "instruction": instruction, "steps": steps, "error": "Max steps reached", "input_tokens": total_input_tokens, "output_tokens": total_output_tokens}
