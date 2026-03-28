@@ -1,0 +1,690 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
+import { Icons } from './icons'
+import {
+  LuGlobe,
+  LuMessageSquare,
+  LuPaperclip,
+  LuSend,
+  LuMic,
+  LuCopy,
+  LuCheck,
+  LuX,
+  LuChevronDown,
+  LuSearch,
+  LuGitBranch,
+  LuFile,
+  LuCode,
+  LuBrain,
+  LuListTodo,
+} from 'react-icons/lu'
+import { SiGithub, SiSlack, SiNotion, SiLinear } from 'react-icons/si'
+import { FaGoogleDrive } from 'react-icons/fa'
+
+export interface ChatPanelProps {
+  logs: LogEntry[]
+  isWorking: boolean
+  onSend: (instruction: string, mode: SteeringMode) => void
+  onDecomposePlan: (prompt: string) => void
+  connectionStatus: 'connecting' | 'connected' | 'disconnected'
+  transcripts: string[]
+  onSwitchToBrowser: () => void
+  latestFrame: string | null
+}
+
+// ─── Message shape ────────────────────────────────────────────────────────────
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent'
+
+interface ChatMessage {
+  id: string
+  role: ChatRole
+  text: string
+  timestamp: string
+  toolName?: string
+  toolArgs?: string
+  toolStatus?: 'in_progress' | 'completed' | 'failed'
+  approvalId?: string
+  planSteps?: string[]
+  attachments?: AttachedFile[]
+}
+
+interface AttachedFile {
+  name: string
+  type: string
+  dataUrl: string
+}
+
+// ─── Connectors & slash-commands ─────────────────────────────────────────────
+const CONNECTORS = [
+  { id: 'github',   label: 'GitHub',       icon: <SiGithub className='h-5 w-5 text-zinc-100' />,           prefix: '/github '   },
+  { id: 'slack',    label: 'Slack',        icon: <SiSlack className='h-5 w-5 text-[#E01E5A]' />,           prefix: '/slack '    },
+  { id: 'gdrive',   label: 'Google Drive', icon: <FaGoogleDrive className='h-5 w-5 text-[#34A853]' />,     prefix: '/gdrive '   },
+  { id: 'notion',   label: 'Notion',       icon: <SiNotion className='h-5 w-5 text-zinc-100' />,           prefix: '/notion '   },
+  { id: 'linear',   label: 'Linear',       icon: <SiLinear className='h-5 w-5 text-[#5E6AD2]' />,         prefix: '/linear '   },
+  { id: 'research', label: '/research',    icon: <LuSearch className='h-5 w-5 text-blue-400' />,           prefix: '/research ' },
+  { id: 'plan',     label: '/plan',        icon: <LuListTodo className='h-5 w-5 text-emerald-400' />,      prefix: '/plan '     },
+  { id: 'code',     label: '/code',        icon: <LuCode className='h-5 w-5 text-violet-400' />,           prefix: '/code '     },
+  { id: 'git',      label: 'Git',          icon: <LuGitBranch className='h-5 w-5 text-amber-400' />,       prefix: '/git '      },
+  { id: 'docs',     label: 'Docs',         icon: <LuFile className='h-5 w-5 text-zinc-300' />,             prefix: '/docs '     },
+]
+
+// ─── Parse logs → chat messages ──────────────────────────────────────────────
+function logsToMessages(logs: LogEntry[]): ChatMessage[] {
+  return logs.map((entry) => {
+    const isUser = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
+    const isTool = entry.type === 'step' && !isUser
+    const isError = entry.type === 'error'
+    const isResult = entry.type === 'result'
+
+    if (isUser) {
+      return {
+        id: entry.id,
+        role: 'user' as ChatRole,
+        text: entry.message,
+        timestamp: entry.timestamp,
+      }
+    }
+    if (isTool) {
+      return {
+        id: entry.id,
+        role: 'tool' as ChatRole,
+        text: entry.message,
+        toolName: entry.stepKind,
+        toolStatus: entry.status === 'failed' ? 'failed' : entry.status === 'completed' ? 'completed' : 'in_progress',
+        timestamp: entry.timestamp,
+      }
+    }
+    if (isError) {
+      return {
+        id: entry.id,
+        role: 'assistant' as ChatRole,
+        text: `⚠️ ${entry.message}`,
+        timestamp: entry.timestamp,
+      }
+    }
+    if (isResult) {
+      return {
+        id: entry.id,
+        role: 'assistant' as ChatRole,
+        text: entry.message,
+        timestamp: entry.timestamp,
+      }
+    }
+    return {
+      id: entry.id,
+      role: 'assistant' as ChatRole,
+      text: entry.message,
+      timestamp: entry.timestamp,
+    }
+  })
+}
+
+// ─── Code block parser ────────────────────────────────────────────────────────
+function parseCodeBlocks(text: string): Array<{ type: 'text' | 'code'; content: string; lang?: string }> {
+  const parts: Array<{ type: 'text' | 'code'; content: string; lang?: string }> = []
+  const regex = /```(\w*)\n?([\s\S]*?)```/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', content: text.slice(lastIndex, match.index) })
+    }
+    parts.push({ type: 'code', content: match[2].trim(), lang: match[1] || 'text' })
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', content: text.slice(lastIndex) })
+  }
+  return parts
+}
+
+// ─── Code card ────────────────────────────────────────────────────────────────
+function CodeCard({ code, lang }: { code: string; lang: string }) {
+  const [copied, setCopied] = useState(false)
+  const [showTooltip, setShowTooltip] = useState(false)
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(code)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  return (
+    <div className='my-2 rounded-xl border border-[#2a2a2a] bg-[#0d0d0d] overflow-hidden'>
+      <div className='flex items-center justify-between px-3 py-1.5 border-b border-[#2a2a2a]'>
+        <span className='text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider'>{lang}</span>
+        <div className='flex items-center gap-1.5'>
+          <button
+            type='button'
+            onClick={copy}
+            className='flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors'
+          >
+            {copied ? <LuCheck className='h-3 w-3' /> : <LuCopy className='h-3 w-3' />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <div className='relative'>
+            <button
+              type='button'
+              onMouseEnter={() => setShowTooltip(true)}
+              onMouseLeave={() => setShowTooltip(false)}
+              className='flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-600 cursor-not-allowed'
+              disabled
+            >
+              <LuCode className='h-3 w-3' />
+              Run
+            </button>
+            {showTooltip && (
+              <div className='absolute bottom-full right-0 mb-1.5 z-50 whitespace-nowrap rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2.5 py-1.5 text-[10px] text-zinc-400 shadow-xl'>
+                E2B Sandbox — coming soon
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      <pre className='overflow-x-auto p-3 text-xs leading-5 text-zinc-200 font-mono'>{code}</pre>
+    </div>
+  )
+}
+
+// ─── Tool step icon map ───────────────────────────────────────────────────────
+const TOOL_ICON: Record<string, React.ReactNode> = {
+  analyze:  <Icons.search className='h-3.5 w-3.5' />,
+  click:    <Icons.chevronRight className='h-3.5 w-3.5' />,
+  type:     <Icons.edit className='h-3.5 w-3.5' />,
+  scroll:   <Icons.chevronDown className='h-3.5 w-3.5' />,
+  navigate: <Icons.globe className='h-3.5 w-3.5' />,
+  other:    <Icons.workflows className='h-3.5 w-3.5' />,
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  in_progress: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+  completed:   'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  failed:      'bg-red-500/15 text-red-300 border-red-500/30',
+}
+
+// ─── Individual message renderers ────────────────────────────────────────────
+function UserBubble({ msg }: { msg: ChatMessage }) {
+  return (
+    <div className='flex justify-end mb-2'>
+      <div className='max-w-[75%]'>
+        {msg.attachments?.map((att) => (
+          <div key={att.name} className='mb-1.5'>
+            {att.type.startsWith('image/') ? (
+              <img src={att.dataUrl} alt={att.name} className='rounded-lg max-h-40 object-cover border border-[#2a2a2a]' />
+            ) : (
+              <div className='flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-zinc-300'>
+                <LuFile className='h-4 w-4 flex-shrink-0' />
+                {att.name}
+              </div>
+            )}
+          </div>
+        ))}
+        <div className='rounded-2xl rounded-tr-sm bg-blue-600 px-3.5 py-2.5 text-sm text-white shadow-md'>
+          {msg.text}
+        </div>
+        <p className='mt-0.5 text-right text-[10px] text-zinc-600'>{msg.timestamp}</p>
+      </div>
+    </div>
+  )
+}
+
+function AssistantCard({ msg }: { msg: ChatMessage }) {
+  const parts = useMemo(() => parseCodeBlocks(msg.text), [msg.text])
+  return (
+    <div className='flex gap-2.5 mb-2 max-w-[85%]'>
+      <div className='mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[#2a2a2a]'>
+        <LuBrain className='h-3.5 w-3.5 text-zinc-300' />
+      </div>
+      <div className='min-w-0 flex-1'>
+        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm text-zinc-200 shadow-md'>
+          {parts.map((part, i) =>
+            part.type === 'code' ? (
+              <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
+            ) : (
+              <span key={i} className='whitespace-pre-wrap'>{part.content}</span>
+            )
+          )}
+        </div>
+        <p className='mt-0.5 text-[10px] text-zinc-600'>{msg.timestamp}</p>
+      </div>
+    </div>
+  )
+}
+
+function ToolCard({ msg }: { msg: ChatMessage }) {
+  const [expanded, setExpanded] = useState(false)
+  const icon = TOOL_ICON[msg.toolName ?? 'other'] ?? TOOL_ICON.other
+  const badge = STATUS_BADGE[msg.toolStatus ?? 'in_progress']
+
+  return (
+    <div className='flex gap-2.5 mb-1.5'>
+      <div className='mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400'>
+        {icon}
+      </div>
+      <div className='min-w-0 flex-1'>
+        <button
+          type='button'
+          onClick={() => setExpanded((v) => !v)}
+          className='w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
+        >
+          <div className='flex items-center justify-between gap-2'>
+            <span className='truncate text-xs font-medium text-zinc-300'>{msg.text}</span>
+            <div className='flex items-center gap-1.5 flex-shrink-0'>
+              <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
+                {msg.toolStatus ?? 'running'}
+              </span>
+              <LuChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            </div>
+          </div>
+          {expanded && msg.toolArgs && (
+            <pre className='mt-2 overflow-x-auto rounded-lg bg-[#0d0d0d] p-2 text-[10px] text-zinc-400 font-mono'>
+              {msg.toolArgs}
+            </pre>
+          )}
+        </button>
+        <p className='mt-0.5 ml-1 text-[10px] text-zinc-600'>{msg.timestamp}</p>
+      </div>
+    </div>
+  )
+}
+
+function ApprovalCard({ msg, onApprove, onReject }: { msg: ChatMessage; onApprove: () => void; onReject: () => void }) {
+  return (
+    <div className='my-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4'>
+      <p className='mb-1 text-xs font-semibold text-amber-300 uppercase tracking-wide'>Approval Required</p>
+      <p className='mb-4 text-sm text-zinc-200'>{msg.text}</p>
+      <div className='flex gap-2'>
+        <button
+          type='button'
+          onClick={onApprove}
+          className='flex-1 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition-colors'
+        >
+          Approve
+        </button>
+        <button
+          type='button'
+          onClick={onReject}
+          className='flex-1 rounded-xl bg-red-600/20 border border-red-500/40 px-4 py-2 text-sm font-semibold text-red-300 hover:bg-red-600/30 transition-colors'
+        >
+          Reject
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function SubagentCard({ msg }: { msg: ChatMessage }) {
+  const [dismissed, setDismissed] = useState(false)
+  if (dismissed) return null
+  return (
+    <div className='my-3 rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4 relative'>
+      <button
+        type='button'
+        onClick={() => setDismissed(true)}
+        className='absolute right-3 top-3 rounded-md p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+      >
+        <LuX className='h-3.5 w-3.5' />
+      </button>
+      <div className='flex items-center gap-3 mb-3'>
+        <div className='relative h-8 w-8 flex-shrink-0'>
+          {/* Neural-network spinner */}
+          <div className='absolute inset-0 rounded-full border-2 border-violet-500/30 animate-spin' style={{ animationDuration: '3s' }} />
+          <div className='absolute inset-1 rounded-full border border-violet-400/50 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+          <LuBrain className='absolute inset-0 m-auto h-3.5 w-3.5 text-violet-300' />
+        </div>
+        <div>
+          <p className='text-sm font-semibold text-violet-300'>Aegis is orchestrating sub-agents…</p>
+          <p className='text-xs text-zinc-500'>{msg.text}</p>
+        </div>
+      </div>
+      {msg.planSteps && msg.planSteps.length > 0 && (
+        <div className='space-y-1'>
+          {msg.planSteps.map((step, i) => (
+            <div key={i} className='flex items-center gap-2 text-xs text-zinc-400'>
+              <div className='h-1.5 w-1.5 rounded-full bg-violet-500 animate-pulse' />
+              {step}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Connector picker modal ───────────────────────────────────────────────────
+function ConnectorModal({ onSelect, onClose }: { onSelect: (prefix: string) => void; onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const filtered = CONNECTORS.filter((c) =>
+    c.label.toLowerCase().includes(query.toLowerCase())
+  )
+
+  return (
+    <>
+      <div className='fixed inset-0 z-40 bg-black/60 backdrop-blur-sm' onClick={onClose} />
+      <div className='fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl border border-[#2a2a2a] bg-[#171717] p-4 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:mb-2 sm:rounded-2xl sm:w-80'>
+        <div className='mb-3 flex items-center justify-between'>
+          <span className='text-sm font-semibold text-zinc-200'>Connectors & Commands</span>
+          <button type='button' onClick={onClose} className='rounded-md p-1 text-zinc-500 hover:text-zinc-300'>
+            <LuX className='h-4 w-4' />
+          </button>
+        </div>
+        <div className='mb-3 flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2'>
+          <LuSearch className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder='Search connectors…'
+            className='flex-1 bg-transparent text-sm text-zinc-200 outline-none placeholder:text-zinc-600'
+          />
+        </div>
+        <div className='grid grid-cols-3 gap-2'>
+          {filtered.map((conn) => (
+            <button
+              key={conn.id}
+              type='button'
+              onClick={() => { onSelect(conn.prefix); onClose() }}
+              className='flex flex-col items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111] p-3 text-center text-xs text-zinc-300 hover:border-zinc-600 hover:bg-[#1a1a1a] transition-colors'
+            >
+              {conn.icon}
+              <span className='leading-tight'>{conn.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ─── Main ChatPanel ───────────────────────────────────────────────────────────
+export function ChatPanel({
+  logs,
+  isWorking,
+  onSend,
+  onDecomposePlan,
+  connectionStatus,
+  onSwitchToBrowser,
+  latestFrame,
+}: ChatPanelProps) {
+  const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<AttachedFile[]>([])
+  const [showConnectors, setShowConnectors] = useState(false)
+  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set())
+  const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set())
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Derive chat messages from logs
+  const baseMessages = useMemo(() => logsToMessages(logs), [logs])
+
+  // Show browsing-pill when agent is working but we're on chat side
+  const showBrowsePill = isWorking && latestFrame
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [baseMessages.length])
+
+  // Auto-resize textarea
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const maxHeight = 6 * 24 // ~6 lines
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+  }, [])
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    resizeTextarea()
+  }
+
+  const handleSend = () => {
+    const trimmed = input.trim()
+    if (!trimmed && attachments.length === 0) return
+    if (trimmed.startsWith('/plan ')) {
+      onDecomposePlan(trimmed.slice(6))
+    } else {
+      onSend(trimmed || '(attachment)', 'steer')
+    }
+    setInput('')
+    setAttachments([])
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  const handleConnectorSelect = (prefix: string) => {
+    setInput((prev) => prefix + prev)
+    window.setTimeout(() => textareaRef.current?.focus(), 50)
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    files.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        setAttachments((prev) => [...prev, {
+          name: file.name,
+          type: file.type,
+          dataUrl: ev.target?.result as string,
+        }])
+      }
+      reader.readAsDataURL(file)
+    })
+    e.target.value = ''
+  }
+
+  const handleApprove = (msgId: string) => {
+    setApprovedIds((prev) => new Set([...prev, msgId]))
+    onSend('approved', 'steer')
+  }
+
+  const handleReject = (msgId: string) => {
+    setRejectedIds((prev) => new Set([...prev, msgId]))
+    onSend('rejected', 'steer')
+  }
+
+  const isDisabled = connectionStatus !== 'connected'
+
+  return (
+    <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
+
+      {/* ── Browsing pill ── */}
+      {showBrowsePill && (
+        <div className='flex justify-center pt-2 px-4'>
+          <button
+            type='button'
+            onClick={onSwitchToBrowser}
+            className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-4 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/20 transition-colors shadow-md'
+          >
+            <LuGlobe className='h-3.5 w-3.5' />
+            🌐 Agent is browsing → Switch to Browser
+          </button>
+        </div>
+      )}
+
+      {/* ── Messages ── */}
+      <div className='flex-1 overflow-y-auto px-4 py-4 space-y-0.5'>
+        {baseMessages.length === 0 && (
+          <div className='flex h-full flex-col items-center justify-center gap-4 text-center'>
+            <div className='flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
+              <LuMessageSquare className='h-6 w-6 text-zinc-500' />
+            </div>
+            <div>
+              <p className='text-sm font-medium text-zinc-300'>Chat with Aegis</p>
+              <p className='mt-1 text-xs text-zinc-600'>Send an instruction, attach files, or use a connector</p>
+            </div>
+            {/* Quick-start chips */}
+            <div className='flex flex-wrap justify-center gap-2 max-w-xs'>
+              {['Research a topic', 'Write a plan', 'Summarize a URL'].map((chip) => (
+                <button
+                  key={chip}
+                  type='button'
+                  onClick={() => setInput(chip + ' ')}
+                  className='rounded-full border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 transition-colors'
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {baseMessages.map((msg) => {
+          if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
+          if (msg.role === 'tool') return <ToolCard key={msg.id} msg={msg} />
+          if (msg.role === 'approval') {
+            if (approvedIds.has(msg.id) || rejectedIds.has(msg.id)) {
+              return (
+                <div key={msg.id} className='my-2 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-xs text-zinc-500 flex items-center gap-2'>
+                  {approvedIds.has(msg.id) ? <LuCheck className='h-3 w-3 text-emerald-400' /> : <LuX className='h-3 w-3 text-red-400' />}
+                  {approvedIds.has(msg.id) ? 'Approved' : 'Rejected'} — {msg.text}
+                </div>
+              )
+            }
+            return (
+              <ApprovalCard
+                key={msg.id}
+                msg={msg}
+                onApprove={() => handleApprove(msg.id)}
+                onReject={() => handleReject(msg.id)}
+              />
+            )
+          }
+          if (msg.role === 'subagent') return <SubagentCard key={msg.id} msg={msg} />
+          return <AssistantCard key={msg.id} msg={msg} />
+        })}
+
+        {/* Working indicator */}
+        {isWorking && (
+          <div className='flex gap-2.5 mb-2'>
+            <div className='mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[#2a2a2a]'>
+              <LuBrain className='h-3.5 w-3.5 text-zinc-300 animate-pulse' />
+            </div>
+            <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5'>
+              <div className='flex gap-1'>
+                <span className='h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce' style={{ animationDelay: '0ms' }} />
+                <span className='h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce' style={{ animationDelay: '150ms' }} />
+                <span className='h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce' style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* ── Attachment previews ── */}
+      {attachments.length > 0 && (
+        <div className='flex gap-2 overflow-x-auto px-4 py-2 border-t border-[#2a2a2a]'>
+          {attachments.map((att, i) => (
+            <div key={i} className='relative flex-shrink-0'>
+              {att.type.startsWith('image/') ? (
+                <img src={att.dataUrl} alt={att.name} className='h-16 w-16 rounded-lg object-cover border border-[#2a2a2a]' />
+              ) : (
+                <div className='flex h-16 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-center p-1'>
+                  <LuFile className='h-5 w-5 text-zinc-400' />
+                  <span className='truncate w-full text-[9px] text-zinc-500 px-1'>{att.name}</span>
+                </div>
+              )}
+              <button
+                type='button'
+                onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                className='absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-zinc-700 text-white hover:bg-zinc-600'
+              >
+                <LuX className='h-2.5 w-2.5' />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Input bar ── */}
+      <div className='relative border-t border-[#2a2a2a] bg-[#141414] px-3 py-2.5'>
+        {showConnectors && (
+          <ConnectorModal
+            onSelect={handleConnectorSelect}
+            onClose={() => setShowConnectors(false)}
+          />
+        )}
+        <div className='flex items-end gap-2'>
+          {/* + (connector picker) */}
+          <button
+            type='button'
+            onClick={() => setShowConnectors((v) => !v)}
+            disabled={isDisabled}
+            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
+            aria-label='Open connectors'
+          >
+            <Icons.plus className='h-4 w-4' />
+          </button>
+          {/* Paperclip */}
+          <button
+            type='button'
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isDisabled}
+            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
+            aria-label='Attach file'
+          >
+            <LuPaperclip className='h-4 w-4' />
+          </button>
+          <input
+            ref={fileInputRef}
+            type='file'
+            multiple
+            accept='image/*,.pdf,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py'
+            className='hidden'
+            onChange={handleFileChange}
+          />
+          {/* Text input */}
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={isDisabled ? 'Connecting…' : 'Message Aegis…'}
+            disabled={isDisabled}
+            rows={1}
+            className='flex-1 resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
+            style={{ minHeight: '36px' }}
+          />
+          {/* Voice */}
+          <button
+            type='button'
+            disabled={isDisabled}
+            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
+            aria-label='Voice input'
+          >
+            <LuMic className='h-4 w-4' />
+          </button>
+          {/* Send */}
+          <button
+            type='button'
+            onClick={handleSend}
+            disabled={isDisabled || (!input.trim() && attachments.length === 0)}
+            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
+            aria-label='Send message'
+          >
+            <LuSend className='h-4 w-4' />
+          </button>
+        </div>
+        {/* Connection status indicator */}
+        {connectionStatus !== 'connected' && (
+          <p className='mt-1.5 text-center text-[10px] text-zinc-600'>
+            {connectionStatus === 'connecting' ? 'Reconnecting to agent…' : 'Disconnected — check your connection'}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}

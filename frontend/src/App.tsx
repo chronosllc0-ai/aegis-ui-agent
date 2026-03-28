@@ -18,6 +18,7 @@ import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
 import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
+import { ChatPanel } from './components/ChatPanel'
 import { SettingsPage } from './components/settings/SettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
@@ -30,11 +31,13 @@ import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
-import { LuShield } from 'react-icons/lu'
+import { LuShield, LuGlobe, LuMessageSquare } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
+
+type AppMode = 'browser' | 'chat'
 
 type TaskHistoryItem = {
   id: string
@@ -85,6 +88,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
+  const [appMode, setAppMode] = useState<AppMode>('browser')
   // draftInput reserved for future InputBar onChange wiring
   void useState
 
@@ -582,6 +586,27 @@ function App() {
                 </button>
                 <img src='/shield.svg' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
+                {/* ── Chat ↔ Browser mode switcher ── */}
+                {!showSettings && !showAutomations && (
+                  <div className='ml-1 flex items-center gap-0.5 rounded-full border border-[#2a2a2a] bg-[#111] p-0.5'>
+                    <button
+                      type='button'
+                      onClick={() => setAppMode('browser')}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'browser' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <LuGlobe className='h-3 w-3' />
+                      <span className='hidden xs:inline'>Browser</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => setAppMode('chat')}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'chat' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <LuMessageSquare className='h-3 w-3' />
+                      <span className='hidden xs:inline'>Chat</span>
+                    </button>
+                  </div>
+                )}
               </div>
               <div className='flex items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
                 <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-1.5 py-0.5 sm:px-2 sm:py-1'>
@@ -595,7 +620,7 @@ function App() {
             </div>
           </header>
 
-          {!showSettings && !showAutomations && (
+          {!showSettings && !showAutomations && appMode === 'browser' && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
               <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
@@ -623,6 +648,17 @@ function App() {
               <div className='h-full overflow-y-auto p-2'>
                 <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
               </div>
+            ) : appMode === 'chat' ? (
+              <ChatPanel
+                logs={enrichedLogs}
+                isWorking={isWorking}
+                onSend={handleSend}
+                onDecomposePlan={handleDecomposePlan}
+                connectionStatus={connectionStatus}
+                transcripts={transcripts.map((t) => t.text)}
+                onSwitchToBrowser={() => setAppMode('browser')}
+                latestFrame={latestFrame}
+              />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (
@@ -635,7 +671,7 @@ function App() {
             )}
           </div>
 
-          {!showSettings && !showAutomations && (
+          {!showSettings && !showAutomations && appMode === 'browser' && (
             <div data-tour='input-bar'>
               <InputBar
                 mode={mode}
