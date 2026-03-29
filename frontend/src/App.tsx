@@ -31,7 +31,7 @@ import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { apiUrl } from './lib/api'
-import { LuShield, LuGlobe, LuMessageSquare } from 'react-icons/lu'
+import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
@@ -594,7 +594,7 @@ function App() {
                       onClick={() => setAppMode('browser')}
                       className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'browser' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
                     >
-                      <LuGlobe className='h-3 w-3' />
+                      {Icons.globe({ className: 'h-3 w-3' })}
                       <span className='hidden xs:inline'>Browser</span>
                     </button>
                     <button
@@ -602,7 +602,7 @@ function App() {
                       onClick={() => setAppMode('chat')}
                       className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'chat' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
                     >
-                      <LuMessageSquare className='h-3 w-3' />
+                      {Icons.chat({ className: 'h-3 w-3' })}
                       <span className='hidden xs:inline'>Chat</span>
                     </button>
                   </div>

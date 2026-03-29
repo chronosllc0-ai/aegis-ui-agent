@@ -1,25 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import { Icons } from './icons'
-import {
-  LuGlobe,
-  LuMessageSquare,
-  LuPaperclip,
-  LuSend,
-  LuMic,
-  LuCopy,
-  LuCheck,
-  LuX,
-  LuChevronDown,
-  LuSearch,
-  LuGitBranch,
-  LuFile,
-  LuCode,
-  LuBrain,
-  LuListTodo,
-} from 'react-icons/lu'
-import { SiGithub, SiSlack, SiNotion, SiLinear } from 'react-icons/si'
-import { FaGoogleDrive } from 'react-icons/fa'
+
+// Inline SVG primitives — avoids react-icons subpath d.ts resolution issues with tsc bundler mode
+type SvgProps = { className?: string }
+function Svg({ className, children }: SvgProps & { children: ReactNode }) {
+  return (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8'
+      strokeLinecap='round' strokeLinejoin='round'
+      className={className ?? 'h-4 w-4'} aria-hidden='true'>
+      {children}
+    </svg>
+  )
+}
+const IcoGlobe        = (p: SvgProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18' /></Svg>
+const IcoMessage      = (p: SvgProps) => <Svg {...p}><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' /></Svg>
+const IcoPaperclip    = (p: SvgProps) => <Svg {...p}><path d='m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48' /></Svg>
+const IcoSend         = (p: SvgProps) => <Svg {...p}><path d='m22 2-7 20-4-9-9-4z' /><path d='M22 2 11 13' /></Svg>
+const IcoMic          = (p: SvgProps) => <Svg {...p}><rect x='9' y='3' width='6' height='11' rx='3' /><path d='M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6' /></Svg>
+const IcoCopy         = (p: SvgProps) => <Svg {...p}><rect x='9' y='9' width='11' height='11' rx='2' /><rect x='4' y='4' width='11' height='11' rx='2' /></Svg>
+const IcoCheck        = (p: SvgProps) => <Svg {...p}><path d='m5 12 4 4 10-10' /></Svg>
+const IcoX            = (p: SvgProps) => <Svg {...p}><path d='M18 6 6 18M6 6l12 12' /></Svg>
+const IcoChevronDown  = (p: SvgProps) => <Svg {...p}><path d='m6 9 6 6 6-6' /></Svg>
+const IcoSearch       = (p: SvgProps) => <Svg {...p}><circle cx='11' cy='11' r='6' /><path d='m20 20-3.5-3.5' /></Svg>
+const IcoGitBranch    = (p: SvgProps) => <Svg {...p}><circle cx='6' cy='6' r='2' /><circle cx='6' cy='18' r='2' /><circle cx='18' cy='6' r='2' /><path d='M6 8v8M6 8a6 6 0 0 0 6 6h2' /></Svg>
+const IcoFile         = (p: SvgProps) => <Svg {...p}><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' /><path d='M14 2v6h6' /></Svg>
+const IcoCode         = (p: SvgProps) => <Svg {...p}><path d='m16 18 6-6-6-6M8 6l-6 6 6 6' /></Svg>
+const IcoBrain        = (p: SvgProps) => <Svg {...p}><path d='M9 3a3 3 0 0 0-3 3 3 3 0 0 0-3 3 4 4 0 0 0 4 4v3a3 3 0 0 0 6 0v-3a4 4 0 0 0 4-4 3 3 0 0 0-3-3 3 3 0 0 0-5 0Z' /></Svg>
+const IcoListTodo     = (p: SvgProps) => <Svg {...p}><rect x='3' y='5' width='3' height='3' rx='.5' /><path d='M9 6h12M9 12h12M9 18h12' /><rect x='3' y='11' width='3' height='3' rx='.5' /><rect x='3' y='17' width='3' height='3' rx='.5' /></Svg>
+// Brand icons — simple geometric approximations to avoid Si/Fa imports
+const IcoGitHub       = (p: SvgProps) => <Svg {...p}><path d='M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.49.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.15-1.1-1.46-1.1-1.46-.9-.62.07-.6.07-.6 1 .07 1.53 1.02 1.53 1.02.89 1.52 2.34 1.08 2.91.83.09-.64.35-1.08.63-1.33-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 6.8c.85 0 1.71.11 2.51.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 22 12c0-5.52-4.48-10-10-10Z' /></Svg>
+const IcoSlack        = (p: SvgProps) => <Svg {...p}><rect x='9' y='2' width='4' height='10' rx='2' /><rect x='14' y='9' width='10' height='4' rx='2' /><rect x='9' y='14' width='4' height='10' rx='2' /><rect x='2' y='9' width='10' height='4' rx='2' /></Svg>
+const IcoDrive        = (p: SvgProps) => <Svg {...p}><path d='m8 17 4-7 4 7H8Z' /><path d='M4 17 8 10l4 7' /><path d='m12 10 4 7' /></Svg>
+const IcoNotion       = (p: SvgProps) => <Svg {...p}><rect x='3' y='3' width='18' height='18' rx='2' /><path d='M8 8h8M8 12h5M8 16h4' /></Svg>
+const IcoLinear       = (p: SvgProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='m7 17 10-10M7 12h5M12 7v5' /></Svg>
 
 export interface ChatPanelProps {
   logs: LogEntry[]
@@ -56,16 +71,16 @@ interface AttachedFile {
 
 // ─── Connectors & slash-commands ─────────────────────────────────────────────
 const CONNECTORS = [
-  { id: 'github',   label: 'GitHub',       icon: <SiGithub className='h-5 w-5 text-zinc-100' />,           prefix: '/github '   },
-  { id: 'slack',    label: 'Slack',        icon: <SiSlack className='h-5 w-5 text-[#E01E5A]' />,           prefix: '/slack '    },
-  { id: 'gdrive',   label: 'Google Drive', icon: <FaGoogleDrive className='h-5 w-5 text-[#34A853]' />,     prefix: '/gdrive '   },
-  { id: 'notion',   label: 'Notion',       icon: <SiNotion className='h-5 w-5 text-zinc-100' />,           prefix: '/notion '   },
-  { id: 'linear',   label: 'Linear',       icon: <SiLinear className='h-5 w-5 text-[#5E6AD2]' />,         prefix: '/linear '   },
-  { id: 'research', label: '/research',    icon: <LuSearch className='h-5 w-5 text-blue-400' />,           prefix: '/research ' },
-  { id: 'plan',     label: '/plan',        icon: <LuListTodo className='h-5 w-5 text-emerald-400' />,      prefix: '/plan '     },
-  { id: 'code',     label: '/code',        icon: <LuCode className='h-5 w-5 text-violet-400' />,           prefix: '/code '     },
-  { id: 'git',      label: 'Git',          icon: <LuGitBranch className='h-5 w-5 text-amber-400' />,       prefix: '/git '      },
-  { id: 'docs',     label: 'Docs',         icon: <LuFile className='h-5 w-5 text-zinc-300' />,             prefix: '/docs '     },
+  { id: 'github',   label: 'GitHub',       icon: <IcoGitHub className='h-5 w-5 text-zinc-100' />,           prefix: '/github '   },
+  { id: 'slack',    label: 'Slack',        icon: <IcoSlack className='h-5 w-5 text-[#E01E5A]' />,           prefix: '/slack '    },
+  { id: 'gdrive',   label: 'Google Drive', icon: <IcoDrive className='h-5 w-5 text-[#34A853]' />,     prefix: '/gdrive '   },
+  { id: 'notion',   label: 'Notion',       icon: <IcoNotion className='h-5 w-5 text-zinc-100' />,           prefix: '/notion '   },
+  { id: 'linear',   label: 'Linear',       icon: <IcoLinear className='h-5 w-5 text-[#5E6AD2]' />,         prefix: '/linear '   },
+  { id: 'research', label: '/research',    icon: <IcoSearch className='h-5 w-5 text-blue-400' />,           prefix: '/research ' },
+  { id: 'plan',     label: '/plan',        icon: <IcoListTodo className='h-5 w-5 text-emerald-400' />,      prefix: '/plan '     },
+  { id: 'code',     label: '/code',        icon: <IcoCode className='h-5 w-5 text-violet-400' />,           prefix: '/code '     },
+  { id: 'git',      label: 'Git',          icon: <IcoGitBranch className='h-5 w-5 text-amber-400' />,       prefix: '/git '      },
+  { id: 'docs',     label: 'Docs',         icon: <IcoFile className='h-5 w-5 text-zinc-300' />,             prefix: '/docs '     },
 ]
 
 // ─── Parse logs → chat messages ──────────────────────────────────────────────
@@ -163,7 +178,7 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
             onClick={copy}
             className='flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors'
           >
-            {copied ? <LuCheck className='h-3 w-3' /> : <LuCopy className='h-3 w-3' />}
+            {copied ? <IcoCheck className='h-3 w-3' /> : <IcoCopy className='h-3 w-3' />}
             {copied ? 'Copied' : 'Copy'}
           </button>
           <div className='relative'>
@@ -174,7 +189,7 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
               className='flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-600 cursor-not-allowed'
               disabled
             >
-              <LuCode className='h-3 w-3' />
+              <IcoCode className='h-3 w-3' />
               Run
             </button>
             {showTooltip && (
@@ -217,7 +232,7 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
               <img src={att.dataUrl} alt={att.name} className='rounded-lg max-h-40 object-cover border border-[#2a2a2a]' />
             ) : (
               <div className='flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-zinc-300'>
-                <LuFile className='h-4 w-4 flex-shrink-0' />
+                <IcoFile className='h-4 w-4 flex-shrink-0' />
                 {att.name}
               </div>
             )}
@@ -237,7 +252,7 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
   return (
     <div className='flex gap-2.5 mb-2 max-w-[85%]'>
       <div className='mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[#2a2a2a]'>
-        <LuBrain className='h-3.5 w-3.5 text-zinc-300' />
+        <IcoBrain className='h-3.5 w-3.5 text-zinc-300' />
       </div>
       <div className='min-w-0 flex-1'>
         <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm text-zinc-200 shadow-md'>
@@ -277,7 +292,7 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
                 {msg.toolStatus ?? 'running'}
               </span>
-              <LuChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              <IcoChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             </div>
           </div>
           {expanded && msg.toolArgs && (
@@ -327,14 +342,14 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
         onClick={() => setDismissed(true)}
         className='absolute right-3 top-3 rounded-md p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
       >
-        <LuX className='h-3.5 w-3.5' />
+        <IcoX className='h-3.5 w-3.5' />
       </button>
       <div className='flex items-center gap-3 mb-3'>
         <div className='relative h-8 w-8 flex-shrink-0'>
           {/* Neural-network spinner */}
           <div className='absolute inset-0 rounded-full border-2 border-violet-500/30 animate-spin' style={{ animationDuration: '3s' }} />
           <div className='absolute inset-1 rounded-full border border-violet-400/50 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-          <LuBrain className='absolute inset-0 m-auto h-3.5 w-3.5 text-violet-300' />
+          <IcoBrain className='absolute inset-0 m-auto h-3.5 w-3.5 text-violet-300' />
         </div>
         <div>
           <p className='text-sm font-semibold text-violet-300'>Aegis is orchestrating sub-agents…</p>
@@ -369,11 +384,11 @@ function ConnectorModal({ onSelect, onClose }: { onSelect: (prefix: string) => v
         <div className='mb-3 flex items-center justify-between'>
           <span className='text-sm font-semibold text-zinc-200'>Connectors & Commands</span>
           <button type='button' onClick={onClose} className='rounded-md p-1 text-zinc-500 hover:text-zinc-300'>
-            <LuX className='h-4 w-4' />
+            <IcoX className='h-4 w-4' />
           </button>
         </div>
         <div className='mb-3 flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2'>
-          <LuSearch className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
+          <IcoSearch className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
           <input
             autoFocus
             value={query}
@@ -514,7 +529,7 @@ export function ChatPanel({
             onClick={onSwitchToBrowser}
             className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-4 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/20 transition-colors shadow-md'
           >
-            <LuGlobe className='h-3.5 w-3.5' />
+            <IcoGlobe className='h-3.5 w-3.5' />
             Agent is browsing — Switch to Browser
           </button>
         </div>
@@ -525,7 +540,7 @@ export function ChatPanel({
         {baseMessages.length === 0 && (
           <div className='flex h-full flex-col items-center justify-center gap-4 text-center'>
             <div className='flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
-              <LuMessageSquare className='h-6 w-6 text-zinc-500' />
+              <IcoMessage className='h-6 w-6 text-zinc-500' />
             </div>
             <div>
               <p className='text-sm font-medium text-zinc-300'>Chat with Aegis</p>
@@ -554,7 +569,7 @@ export function ChatPanel({
             if (approvedIds.has(msg.id) || rejectedIds.has(msg.id)) {
               return (
                 <div key={msg.id} className='my-2 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-xs text-zinc-500 flex items-center gap-2'>
-                  {approvedIds.has(msg.id) ? <LuCheck className='h-3 w-3 text-emerald-400' /> : <LuX className='h-3 w-3 text-red-400' />}
+                  {approvedIds.has(msg.id) ? <IcoCheck className='h-3 w-3 text-emerald-400' /> : <IcoX className='h-3 w-3 text-red-400' />}
                   {approvedIds.has(msg.id) ? 'Approved' : 'Rejected'} — {msg.text}
                 </div>
               )
@@ -576,7 +591,7 @@ export function ChatPanel({
         {isWorking && (
           <div className='flex gap-2.5 mb-2'>
             <div className='mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[#2a2a2a]'>
-              <LuBrain className='h-3.5 w-3.5 text-zinc-300 animate-pulse' />
+              <IcoBrain className='h-3.5 w-3.5 text-zinc-300 animate-pulse' />
             </div>
             <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5'>
               <div className='flex gap-1'>
@@ -600,7 +615,7 @@ export function ChatPanel({
                 <img src={att.dataUrl} alt={att.name} className='h-16 w-16 rounded-lg object-cover border border-[#2a2a2a]' />
               ) : (
                 <div className='flex h-16 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-center p-1'>
-                  <LuFile className='h-5 w-5 text-zinc-400' />
+                  <IcoFile className='h-5 w-5 text-zinc-400' />
                   <span className='truncate w-full text-[9px] text-zinc-500 px-1'>{att.name}</span>
                 </div>
               )}
@@ -609,7 +624,7 @@ export function ChatPanel({
                 onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
                 className='absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-zinc-700 text-white hover:bg-zinc-600'
               >
-                <LuX className='h-2.5 w-2.5' />
+                <IcoX className='h-2.5 w-2.5' />
               </button>
             </div>
           ))}
@@ -643,7 +658,7 @@ export function ChatPanel({
             className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
             aria-label='Attach file'
           >
-            <LuPaperclip className='h-4 w-4' />
+            <IcoPaperclip className='h-4 w-4' />
           </button>
           <input
             ref={fileInputRef}
@@ -672,7 +687,7 @@ export function ChatPanel({
             className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
             aria-label='Voice input'
           >
-            <LuMic className='h-4 w-4' />
+            <IcoMic className='h-4 w-4' />
           </button>
           {/* Send */}
           <button
@@ -682,7 +697,7 @@ export function ChatPanel({
             className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
             aria-label='Send message'
           >
-            <LuSend className='h-4 w-4' />
+            <IcoSend className='h-4 w-4' />
           </button>
         </div>
         {/* Connection status indicator */}
