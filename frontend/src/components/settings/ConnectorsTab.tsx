@@ -51,9 +51,16 @@ export function ConnectorsTab() {
       window.history.replaceState({}, '', url.toString())
     }
     if (connError) {
-      setError(`Connection failed: ${connError}`)
+      const detail = params.get('connector_error_detail')
+      const label = connError === 'credentials_not_configured'
+        ? 'Connector credentials not configured — add Client ID & Secret in Settings → Connections.'
+        : detail
+          ? `Connection failed: ${connError} — ${decodeURIComponent(detail)}`
+          : `Connection failed: ${connError}`
+      setError(label)
       const url = new URL(window.location.href)
       url.searchParams.delete('connector_error')
+      url.searchParams.delete('connector_error_detail')
       url.searchParams.delete('settings')
       window.history.replaceState({}, '', url.toString())
     }

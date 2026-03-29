@@ -355,20 +355,22 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const sent = send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
+    send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
 
-    // Save to task history immediately after send() so we capture the real user
-    // instruction as the title. Only save when send() returned true (WebSocket was
-    // open) — if it returned false the taskId ref is still 'idle' and we'd write
-    // a phantom entry. For new tasks, send() synchronously assigns a new taskId
-    // into activeTaskIdRef before returning, so it's safe to read here.
-    if (isNewTask && sent) {
-      const taskId = activeTaskIdRef.current
+    // Save to task history optimistically at send-time so the title always reflects
+    // the real user instruction. We generate a stable taskId from a UUID that the
+    // WebSocket hook will also assign synchronously for 'navigate' (it calls
+    // crypto.randomUUID() internally). We capture it immediately after send().
+    // We save regardless of WS state so the history entry is never lost — if the
+    // WS was closed the agent won't respond but the user still sees their input.
+    if (isNewTask) {
+      const taskId = activeTaskIdRef.current !== 'idle'
+        ? activeTaskIdRef.current
+        : `pending-${crypto.randomUUID()}`
       const now = new Date()
       const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
       const newEntry = { id: taskId, title: trimmed, dateLabel, instruction: trimmed }
       setTaskHistory((prev) => {
-        // Avoid duplicates if send fires twice
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
         try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
@@ -722,6 +724,10 @@ function App() {
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => setAppMode('browser')}
                 latestFrame={latestFrame}
+                voiceActive={voiceActive}
+                onToggleVoice={toggleVoice}
+                voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
+                activeTaskId={selectedTaskId}
               />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>

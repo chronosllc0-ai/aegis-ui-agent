@@ -38,6 +38,14 @@ export interface ChatPanelProps {
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
+  /** Whether the Gemini Live mic stream is active (passed from App) */
+  voiceActive?: boolean
+  /** Toggle Gemini Live mic (passed from App) */
+  onToggleVoice?: () => void
+  /** True when mic hardware isn't available / not HTTPS */
+  voiceDisabled?: boolean
+  /** Currently selected task ID — used to persist/restore conversation */
+  activeTaskId?: string | null
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
@@ -523,15 +531,114 @@ export function ChatPanel({
   connectionStatus,
   onSwitchToBrowser,
   latestFrame,
+  transcripts = [],
+  voiceActive = false,
+  onToggleVoice,
+  voiceDisabled = false,
+  activeTaskId,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
-  // Local record of user-sent messages (preserves attachments that are never in logs)
-  const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
+
+  // ── Conversation persistence ─────────────────────────────────────────────────
+  // sentMessages are keyed by taskId in localStorage so they survive page reloads.
+  // Key format: aegis.chat.<taskId>  (array of ChatMessage, capped at 200 items)
+  const CHAT_KEY = (id: string) => `aegis.chat.${id}`
+  const loadSaved = (id: string | null | undefined): ChatMessage[] => {
+    if (!id) return []
+    try {
+      const raw = localStorage.getItem(CHAT_KEY(id))
+      return raw ? (JSON.parse(raw) as ChatMessage[]) : []
+    } catch { return [] }
+  }
+  const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
+    if (!id) return
+    try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
+  }
+
+  // Local record of user-sent messages — initialised from storage for the current task
+  const [sentMessages, setSentMessages] = useState<ChatMessage[]>(() => loadSaved(activeTaskId))
+
+  // When the selected task changes, swap in its persisted conversation
+  const prevTaskIdRef = useRef(activeTaskId)
+  useEffect(() => {
+    if (prevTaskIdRef.current === activeTaskId) return
+    prevTaskIdRef.current = activeTaskId
+    setSentMessages(loadSaved(activeTaskId))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTaskId])
+
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set())
+
+  // ── Browser SpeechRecognition fallback ──────────────────────────────────────
+  // Web Speech API types aren't in our tsconfig lib, so we use unknown casts.
+  type AnySR = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
+  const srRef = useRef<AnySR | null>(null)
+  const [srActive, setSrActive] = useState(false)
+
+  const geminiLiveAvailable = connectionStatus === 'connected' && !voiceDisabled
+
+  // Inject latest Gemini Live transcript into input when it arrives
+  const prevTranscriptLen = useRef(transcripts.length)
+  useEffect(() => {
+    if (transcripts.length > prevTranscriptLen.current) {
+      const latest = transcripts[transcripts.length - 1]
+      if (latest) setInput((prev) => (prev ? `${prev} ${latest}` : latest))
+    }
+    prevTranscriptLen.current = transcripts.length
+  }, [transcripts])
+
+  const getSRCtor = (): (new () => AnySR) | null => {
+    if (typeof window === 'undefined') return null
+    const w = window as unknown as Record<string, unknown>
+    return (w['SpeechRecognition'] ?? w['webkitSpeechRecognition'] ?? null) as (new () => AnySR) | null
+  }
+
+  const handleMicClick = useCallback(() => {
+    if (geminiLiveAvailable && onToggleVoice) {
+      // Primary: Gemini Live via WebSocket
+      onToggleVoice()
+      return
+    }
+    // Fallback: browser SpeechRecognition
+    const SR = getSRCtor()
+    if (!SR) return
+    if (srActive && srRef.current) {
+      srRef.current.stop()
+      return
+    }
+    const sr = new SR()
+    sr.continuous = false
+    sr.interimResults = false
+    sr.lang = 'en-US'
+    sr.onresult = (e) => {
+      const text = (e.results[0]?.[0]?.transcript as string | undefined) ?? ''
+      if (text) setInput((prev) => (prev ? `${prev} ${text}` : text))
+    }
+    sr.onend = () => setSrActive(false)
+    sr.onerror = () => setSrActive(false)
+    srRef.current = sr
+    setSrActive(true)
+    sr.start()
+  }, [geminiLiveAvailable, onToggleVoice, srActive])
+
+  // Determine which mic state is visually "active"
+  const micIsActive = voiceActive || srActive
+  // Mic is available if Gemini Live path works OR browser SR exists
+  const micAvailable = !voiceDisabled && (
+    geminiLiveAvailable || !!getSRCtor()
+  )
+
+  const micTitle = micIsActive
+    ? (voiceActive ? 'Stop Gemini Live voice input' : 'Stop recording')
+    : voiceDisabled
+      ? 'Microphone requires HTTPS or localhost'
+      : geminiLiveAvailable
+        ? 'Start Gemini 2.0 Flash Live voice input'
+        : 'Start voice input (browser fallback)'
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -557,6 +664,12 @@ export function ChatPanel({
   const allMessages = useMemo(() => {
     return [...sentMessages, ...baseMessages]
   }, [sentMessages, baseMessages])
+
+  // Persist the full conversation (sent + agent responses) whenever it grows
+  useEffect(() => {
+    if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allMessages.length, activeTaskId])
 
   // Show browsing-pill when agent is working but we're on chat side
   const showBrowsePill = isWorking && latestFrame
@@ -594,7 +707,11 @@ export function ChatPanel({
       timestamp: now,
       attachments: attachments.length > 0 ? [...attachments] : undefined,
     }
-    setSentMessages((prev) => [...prev, localMsg])
+    setSentMessages((prev) => {
+      const next = [...prev, localMsg]
+      saveMsgs(activeTaskId, next)
+      return next
+    })
     if (withContext.startsWith('/plan ')) {
       onDecomposePlan(withContext.slice(6))
     } else {
@@ -843,11 +960,18 @@ export function ChatPanel({
             />
           </div>
 
-          {/* Voice */}
+          {/* Voice — Gemini Live primary, browser SpeechRecognition fallback */}
           <button
             type='button'
-            disabled={isDisabled}
-            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
+            onClick={handleMicClick}
+            disabled={!micAvailable}
+            title={micTitle}
+            aria-pressed={micIsActive}
+            className={`mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border transition-colors ${
+              micIsActive
+                ? 'animate-pulse border-blue-500/80 bg-blue-500/10 text-blue-300'
+                : 'border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+            } disabled:cursor-not-allowed disabled:opacity-40`}
             aria-label='Voice input'
           >
             <IcoMic className='h-4 w-4' />

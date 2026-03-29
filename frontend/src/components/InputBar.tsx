@@ -209,18 +209,8 @@ export function InputBar({
 
       <SuggestionChips onSelectSuggestion={(id) => void handleSuggestionSelect(id)} onOpenGallery={() => setGalleryOpen(true)} />
 
-      {/* Main input row — matches Codex layout: [+] [Plan] [textarea] [↑] */}
+      {/* Main input row — [Plan] [textarea] [↑] */}
       <div className='flex items-end gap-1.5 sm:gap-2'>
-        {/* + button (future: attachment) */}
-        <button
-          type='button'
-          title='Attach file (coming soon)'
-          disabled
-          className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#2a2a2a] text-zinc-500 cursor-not-allowed opacity-50 sm:h-10 sm:w-10'
-        >
-          <span className='text-lg font-light leading-none'>+</span>
-        </button>
-
         {/* Plan toggle — inline, no popup */}
         {onDecomposePlan && (
           <button
