@@ -53,8 +53,8 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
   return (
     <section data-tour={dataTour} className='h-full min-h-0 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-2 sm:rounded-2xl sm:p-3'>
       <div className='mb-2 flex items-center justify-between sm:mb-3'>
-        <h2 className='text-sm font-semibold text-zinc-200 sm:text-sm md:text-base'>Action Log</h2>
-        <div className='flex items-center gap-1 text-xs sm:gap-2 sm:text-xs md:text-sm'>
+        <h2 className='text-xs font-semibold text-zinc-200 sm:text-sm md:text-base'>Action Log</h2>
+        <div className='flex items-center gap-1 text-[10px] sm:gap-2 sm:text-xs md:text-sm'>
           <button type='button' onClick={copyLog} className='rounded-md border border-[#2a2a2a] px-1.5 py-0.5 hover:bg-zinc-800 sm:px-2 sm:py-1'>Copy</button>
           <button type='button' onClick={onToggleWorkflow} className='rounded-md border border-[#2a2a2a] px-1.5 py-0.5 hover:bg-zinc-800 sm:px-2 sm:py-1'>{showWorkflow ? 'List' : 'Workflow'}</button>
           <button type='button' onClick={onSaveWorkflow} className='rounded-md border border-[#2a2a2a] px-1.5 py-0.5 hover:bg-zinc-800 sm:px-2 sm:py-1'>Save</button>

@@ -321,7 +321,7 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
           className='w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
         >
           <div className='flex items-center justify-between gap-2'>
-            <span className='truncate text-xs font-medium text-zinc-300'>{msg.text}</span>
+            <span className='truncate text-xs md:text-sm font-medium text-zinc-300'>{msg.text}</span>
             <div className='flex items-center gap-1.5 flex-shrink-0'>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
                 {msg.toolStatus ?? 'running'}
