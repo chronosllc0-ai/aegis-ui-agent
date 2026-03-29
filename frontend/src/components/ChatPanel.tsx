@@ -41,7 +41,7 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating'
 
 interface ChatMessage {
   id: string
@@ -71,6 +71,28 @@ interface ConnectorMeta {
   status: string
 }
 
+// ─── Generation canvas: animated placeholder while media is being created ────
+function GeneratingCanvas({ label }: { label: string }) {
+  return (
+    <div className='my-2 overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#0d0d0d]'>
+      <div className='relative h-48 w-full overflow-hidden'>
+        {/* Animated gradient blobs mimicking ChatGPT image generation shimmer */}
+        <div className='absolute inset-0 animate-pulse bg-gradient-to-br from-[#1a1020] via-[#1e1530] to-[#0d1020]' />
+        <div className='absolute left-1/4 top-1/4 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-900/30 blur-3xl animate-[pulse_2s_ease-in-out_infinite]' />
+        <div className='absolute right-1/4 bottom-1/4 h-24 w-24 translate-x-1/2 translate-y-1/2 rounded-full bg-blue-900/20 blur-3xl animate-[pulse_2.5s_ease-in-out_infinite_0.5s]' />
+        <div className='absolute inset-0 flex flex-col items-center justify-center gap-2'>
+          <div className='flex gap-1'>
+            <span className='h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce' style={{ animationDelay: '0ms' }} />
+            <span className='h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce' style={{ animationDelay: '150ms' }} />
+            <span className='h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce' style={{ animationDelay: '300ms' }} />
+          </div>
+          <p className='text-xs text-zinc-500'>{label}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Parse logs → chat messages ──────────────────────────────────────────────
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   return logs.map((entry) => {
@@ -78,7 +100,20 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     const isTool = entry.type === 'step' && !isUser
     const isError = entry.type === 'error'
     const isResult = entry.type === 'result'
+    const isGenerating = (
+      entry.type === 'step' &&
+      typeof entry.message === 'string' &&
+      /\b(generating|creating image|creating video|rendering|synthesizing)\b/i.test(entry.message)
+    )
 
+    if (isGenerating) {
+      return {
+        id: entry.id,
+        role: 'generating' as ChatRole,
+        text: entry.message,
+        timestamp: entry.timestamp,
+      }
+    }
     if (isUser) {
       return {
         id: entry.id,
@@ -491,6 +526,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
+  // Local record of user-sent messages (preserves attachments that are never in logs)
+  const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set())
@@ -500,8 +537,26 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Derive chat messages from logs
-  const baseMessages = useMemo(() => logsToMessages(logs), [logs])
+  // Derive non-user messages from logs.
+  // User messages are intentionally excluded here: they live in sentMessages so that
+  // attachment data (never present in logs) is preserved. Logs *could* theoretically
+  // produce a user-role entry (isUser heuristic) but that's filtered out to avoid
+  // showing a duplicate plain-text bubble alongside the local bubble with attachments.
+  const baseMessages = useMemo(() => logsToMessages(logs).filter((m) => m.role !== 'user'), [logs])
+
+  // Prune sentMessages when logs grow to avoid unbounded memory: keep only the last
+  // 500 sent messages (roughly one long session). Called in effect below.
+  useEffect(() => {
+    if (sentMessages.length > 500) {
+      setSentMessages((prev) => prev.slice(-500))
+    }
+  }, [sentMessages.length])
+
+  // Merge local sent messages + log-derived messages (agent responses).
+  // sentMessages are prepended: they were sent before the agent responded.
+  const allMessages = useMemo(() => {
+    return [...sentMessages, ...baseMessages]
+  }, [sentMessages, baseMessages])
 
   // Show browsing-pill when agent is working but we're on chat side
   const showBrowsePill = isWorking && latestFrame
@@ -509,7 +564,7 @@ export function ChatPanel({
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [baseMessages.length])
+  }, [allMessages.length])
 
   // Auto-resize textarea
   const resizeTextarea = useCallback(() => {
@@ -530,6 +585,16 @@ export function ChatPanel({
     if (!trimmed && attachments.length === 0) return
     // Prepend connector context if active
     const withContext = activeConnector ? `[${activeConnector.name}] ${trimmed}` : trimmed
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    // Save locally so attachments appear in chat immediately (logs never carry file data)
+    const localMsg: ChatMessage = {
+      id: `local-${crypto.randomUUID()}`,
+      role: 'user',
+      text: withContext || '(attachment)',
+      timestamp: now,
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
+    }
+    setSentMessages((prev) => [...prev, localMsg])
     if (withContext.startsWith('/plan ')) {
       onDecomposePlan(withContext.slice(6))
     } else {
@@ -616,7 +681,7 @@ export function ChatPanel({
 
       {/* ── Messages ── */}
       <div className='flex-1 overflow-y-auto px-4 py-4 space-y-0.5'>
-        {baseMessages.length === 0 && (
+        {allMessages.length === 0 && (
           <div className='flex h-full flex-col items-center justify-center gap-4 text-center'>
             <div className='flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
               <IcoMessage className='h-6 w-6 text-zinc-500' />
@@ -641,8 +706,11 @@ export function ChatPanel({
           </div>
         )}
 
-        {baseMessages.map((msg) => {
+        {allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
+          if (msg.role === 'generating') return (
+            <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
+          )
           if (msg.role === 'tool') return <ToolCard key={msg.id} msg={msg} />
           if (msg.role === 'approval') {
             if (approvedIds.has(msg.id) || rejectedIds.has(msg.id)) {
