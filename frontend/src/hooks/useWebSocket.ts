@@ -32,7 +32,7 @@ export type WorkflowStep = {
 }
 
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update'
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -55,6 +55,8 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
   const [currentUrl, setCurrentUrl] = useState('about:blank')
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
+  // Server-assigned conversation ID for the active session — used to load history from DB
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
@@ -143,6 +145,11 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       const payload = JSON.parse(event.data) as WebSocketPayload
       const taskId = activeTaskIdRef.current
 
+      if (payload.type === 'conversation_id') {
+        const convId = String(payload.data?.conversation_id ?? '')
+        if (convId) setActiveConversationId(convId)
+        return
+      }
       if (payload.type === 'step') {
         const stepType = String(payload.data?.type ?? '').toLowerCase()
         const nonExecutionStepTypes = new Set(['queue', 'steer', 'config'])
@@ -300,5 +307,5 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     activeTaskIdRef.current = 'idle'
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId }
 }

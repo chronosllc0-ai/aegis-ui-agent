@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
+import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
 
@@ -46,6 +47,8 @@ export interface ChatPanelProps {
   voiceDisabled?: boolean
   /** Currently selected task ID — used to persist/restore conversation */
   activeTaskId?: string | null
+  /** Messages loaded from the server DB for the selected conversation */
+  serverMessages?: ServerMessage[]
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
@@ -536,37 +539,48 @@ export function ChatPanel({
   onToggleVoice,
   voiceDisabled = false,
   activeTaskId,
+  serverMessages = [],
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
 
   // ── Conversation persistence ─────────────────────────────────────────────────
-  // sentMessages are keyed by taskId in localStorage so they survive page reloads.
-  // Key format: aegis.chat.<taskId>  (array of ChatMessage, capped at 200 items)
+  // Source of truth is the server DB (conversations / conversation_messages tables).
+  // serverMessages prop is fetched by App.tsx via useConversations and passed here.
+  // localStorage is kept only as a write-through display cache for the current session.
   const CHAT_KEY = (id: string) => `aegis.chat.${id}`
-  const loadSaved = (id: string | null | undefined): ChatMessage[] => {
-    if (!id) return []
-    try {
-      const raw = localStorage.getItem(CHAT_KEY(id))
-      return raw ? (JSON.parse(raw) as ChatMessage[]) : []
-    } catch { return [] }
-  }
   const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
     if (!id) return
     try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
   }
 
-  // Local record of user-sent messages — initialised from storage for the current task
-  const [sentMessages, setSentMessages] = useState<ChatMessage[]>(() => loadSaved(activeTaskId))
+  // sentMessages = messages shown in the UI (seeded from serverMessages on load,
+  // extended optimistically as user sends).
+  const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
 
-  // When the selected task changes, swap in its persisted conversation
+  // When task changes or server messages arrive, rebuild from server data
   const prevTaskIdRef = useRef(activeTaskId)
+  const prevServerLenRef = useRef(0)
   useEffect(() => {
-    if (prevTaskIdRef.current === activeTaskId) return
+    const taskChanged = prevTaskIdRef.current !== activeTaskId
+    const serverArrived = prevServerLenRef.current === 0 && serverMessages.length > 0
     prevTaskIdRef.current = activeTaskId
-    setSentMessages(loadSaved(activeTaskId))
+    prevServerLenRef.current = serverMessages.length
+    if (!taskChanged && !serverArrived) return
+    if (serverMessages.length > 0) {
+      setSentMessages(
+        serverMessages.map((m) => ({
+          id: m.id,
+          role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
+          text: m.content,
+          timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+        }))
+      )
+    } else if (taskChanged) {
+      setSentMessages([])
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId])
+  }, [activeTaskId, serverMessages.length])
 
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)

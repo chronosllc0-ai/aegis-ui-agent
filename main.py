@@ -590,6 +590,104 @@ async def health() -> dict[str, str]:
     }
 
 
+# ── Conversation persistence API ─────────────────────────────────────
+
+@app.get("/api/conversations")
+async def list_conversations(
+    request: Request,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return all conversations for the authenticated user (most recent first)."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    from sqlalchemy import select as sa_select, desc as sa_desc
+    from backend.database import Conversation as ConvModel
+    stmt = (
+        sa_select(ConvModel)
+        .where(ConvModel.user_id == uid, ConvModel.platform == "web")
+        .order_by(sa_desc(ConvModel.updated_at))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "ok": True,
+        "conversations": [
+            {
+                "id": c.id,
+                "title": c.title,
+                "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            }
+            for c in rows
+        ],
+    }
+
+
+@app.get("/api/conversations/{conversation_id}/messages")
+async def get_conversation_messages(
+    conversation_id: str,
+    request: Request,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return all messages for a conversation, oldest first. Only accessible by owner."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    import json as _json
+    from sqlalchemy import select as sa_select
+    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    # Ownership check
+    conv = (await db.execute(sa_select(ConvModel).where(ConvModel.id == conversation_id))).scalar_one_or_none()
+    if not conv or conv.user_id != uid:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    stmt = (
+        sa_select(MsgModel)
+        .where(MsgModel.conversation_id == conversation_id)
+        .order_by(MsgModel.created_at)
+        .limit(limit)
+    )
+    msgs = (await db.execute(stmt)).scalars().all()
+    return {
+        "ok": True,
+        "conversation": {
+            "id": conv.id,
+            "title": conv.title,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        },
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "metadata": _json.loads(m.metadata_json) if m.metadata_json else None,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in msgs
+        ],
+    }
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Soft-delete a conversation (sets status=archived)."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    from sqlalchemy import select as sa_select
+    from backend.database import Conversation as ConvModel
+    conv = (await db.execute(sa_select(ConvModel).where(ConvModel.id == conversation_id))).scalar_one_or_none()
+    if not conv or conv.user_id != uid:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv.status = "archived"
+    await db.commit()
+    return {"ok": True}
+
+
 # ── WebSocket helpers ─────────────────────────────────────────────────
 
 
@@ -638,6 +736,34 @@ async def _send_context_update(websocket: WebSocket, tokens_used: int, context_l
         "context_limit": context_limit,
         "compacting": compacting,
     })
+
+
+async def _log_web_message(
+    runtime: "SessionRuntime",
+    session_id: str,
+    role: str,
+    content: str,
+    *,
+    title: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Persist a websocket message to the conversations DB and emit conversation_id to client."""
+    if not runtime.user_uid:
+        return
+    try:
+        async for db in get_session():
+            conv = await get_or_create_conversation(
+                db,
+                user_id=runtime.user_uid,
+                platform="web",
+                platform_chat_id=session_id,
+                title=title,
+            )
+            runtime.conversation_id = conv.id
+            await append_message(db, conv.id, role, content, metadata=metadata)
+            break
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to persist web message to DB for session %s", session_id)
 
 
 async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str | None) -> None:
@@ -826,6 +952,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     title=instruction[:200],
                     metadata={"source": "websocket", "action": "navigate"},
                 )
+                if runtime.conversation_id:
+                    await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "steer":
                 runtime.steering_context.append(instruction)
