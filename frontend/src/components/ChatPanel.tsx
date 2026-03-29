@@ -272,7 +272,7 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
             )}
           </div>
         ))}
-        <div className='rounded-2xl rounded-tr-sm bg-blue-600 px-3.5 py-2.5 text-sm md:text-base text-white shadow-md'>
+        <div className='rounded-2xl rounded-tr-sm bg-blue-600 px-3.5 py-2.5 text-sm md:text-xl text-white shadow-md'>
           {msg.text}
         </div>
         <p className='mt-0.5 text-right text-[10px] text-zinc-600'>{msg.timestamp}</p>
@@ -289,7 +289,7 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
         <IcoBrain className='h-3.5 w-3.5 text-zinc-300' />
       </div>
       <div className='min-w-0 flex-1'>
-        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-base text-zinc-200 shadow-md'>
+        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-xl text-zinc-200 shadow-md'>
           {parts.map((part, i) =>
             part.type === 'code' ? (
               <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
@@ -321,7 +321,7 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
           className='w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
         >
           <div className='flex items-center justify-between gap-2'>
-            <span className='truncate text-xs md:text-sm font-medium text-zinc-300'>{msg.text}</span>
+            <span className='truncate text-xs md:text-lg font-medium text-zinc-300'>{msg.text}</span>
             <div className='flex items-center gap-1.5 flex-shrink-0'>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
                 {msg.toolStatus ?? 'running'}
@@ -969,7 +969,7 @@ export function ChatPanel({
               }
               disabled={isDisabled}
               rows={1}
-              className='w-full resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm md:text-base text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
+              className='w-full resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm md:text-xl text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
               style={{ minHeight: '36px' }}
             />
           </div>
