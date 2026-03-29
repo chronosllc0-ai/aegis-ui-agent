@@ -186,6 +186,46 @@ class ImpersonationSession(Base):
     reason = Column(Text)
 
 
+class AgentTask(Base):
+    """A cloud agent task spawned from any channel (web, telegram, slack, discord, github)."""
+
+    __tablename__ = "agent_tasks"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), nullable=False, index=True)
+    platform = Column(String(50), nullable=False)
+    platform_chat_id = Column(String(255), nullable=True)
+    platform_message_id = Column(String(255), nullable=True)
+    instruction = Column(Text, nullable=False)
+    status = Column(String(30), default="pending")
+    agent_type = Column(String(50), default="navigator")
+    provider = Column(String(50), nullable=True)
+    model = Column(String(255), nullable=True)
+    sandbox_id = Column(String(255), nullable=True)
+    result_summary = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    credits_used = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentAction(Base):
+    """Individual action performed by a cloud agent during task execution."""
+
+    __tablename__ = "agent_actions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    task_id = Column(String(255), ForeignKey("agent_tasks.id"), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    action_type = Column(String(50), nullable=False)
+    description = Column(Text, nullable=True)
+    input_data = Column(Text, nullable=True)
+    output_data = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── engine management ─────────────────────────────────────────────────
 
 _engine: AsyncEngine | None = None
@@ -328,6 +368,51 @@ class SupportMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class TaskPlan(Base):
+    """A decomposed task plan from a user prompt."""
+
+    __tablename__ = "task_plans"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=True)
+    original_prompt = Column(Text, nullable=False)
+    title = Column(String(500), nullable=False)
+    status = Column(String(20), default="draft")
+    provider = Column(String(50))
+    model = Column(String(100))
+    plan_json = Column(Text, nullable=False)
+    result_summary = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+
+class TaskStep(Base):
+    """Individual step within a task plan."""
+
+    __tablename__ = "task_steps"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    plan_id = Column(String(255), ForeignKey("task_plans.id"), nullable=False, index=True)
+    parent_step_id = Column(String(255), ForeignKey("task_steps.id"), nullable=True)
+    step_index = Column(Integer, nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    status = Column(String(20), default="pending")
+    assigned_provider = Column(String(50))
+    assigned_model = Column(String(100))
+    depends_on = Column(Text)
+    result_text = Column(Text)
+    error_message = Column(Text)
+    tokens_used = Column(Integer, default=0)
+    credits_used = Column(Float, default=0.0)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class OAuthAppCredential(Base):
     """Global OAuth app credential (client_id/secret) stored by an admin."""
 
@@ -360,6 +445,104 @@ class ScheduledTask(Base):
     run_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class MemoryEntry(Base):
+    """A persistent memory fragment for a user."""
+
+    __tablename__ = "memory_entries"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    category = Column(String(50), default="general")
+    source = Column(String(50), default="conversation")
+    source_conversation_id = Column(String(255), nullable=True)
+    embedding = Column(Text, nullable=True)
+    embedding_model = Column(String(100), nullable=True)
+    importance = Column(Float, default=0.5)
+    access_count = Column(Integer, default=0)
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    is_pinned = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class Artifact(Base):
+    """A generated artifact from task execution."""
+
+    __tablename__ = "artifacts"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=True)
+    plan_id = Column(String(255), nullable=True)
+    step_id = Column(String(255), nullable=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    artifact_type = Column(String(50), nullable=False)
+    mime_type = Column(String(200), nullable=False)
+    filename = Column(String(500), nullable=False)
+    file_size = Column(Integer, default=0)
+    storage_path = Column(Text, nullable=False)
+    content_preview = Column(Text)
+    metadata_json = Column(Text)
+    is_pinned = Column(Boolean, default=False)
+    download_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResearchSession(Base):
+    """A deep research session with iterative search and synthesis."""
+
+    __tablename__ = "research_sessions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=True)
+    topic = Column(Text, nullable=False)
+    status = Column(String(20), default="planning")
+    research_plan = Column(Text)
+    sources_json = Column(Text)
+    findings_json = Column(Text)
+    report_artifact_id = Column(String(255), nullable=True)
+    total_sources = Column(Integer, default=0)
+    total_queries = Column(Integer, default=0)
+    queries_completed = Column(Integer, default=0)
+    tokens_used = Column(Integer, default=0)
+    credits_used = Column(Float, default=0.0)
+    error_message = Column(Text)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class BackgroundTask(Base):
+    """A queued or running background task."""
+
+    __tablename__ = "background_tasks"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    task_type = Column(String(50), nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    status = Column(String(20), default="queued", index=True)
+    priority = Column(Integer, default=5)
+    payload_json = Column(Text, nullable=False)
+    result_json = Column(Text)
+    error_message = Column(Text)
+    progress_pct = Column(Integer, default=0)
+    progress_message = Column(String(500))
+    max_retries = Column(Integer, default=3)
+    retry_count = Column(Integer, default=0)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    notification_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 def _ensure_scheduled_tasks_table(sync_conn) -> None:
