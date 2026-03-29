@@ -89,6 +89,7 @@ key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 db_init_task: asyncio.Task[None] | None = None
 db_init_error: str | None = None
 db_ready = False
+background_worker = BackgroundWorker(max_concurrent=3, poll_interval=5.0)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -182,6 +183,7 @@ async def startup_event() -> None:
         db_init_task = asyncio.create_task(_initialize_database())
 
     start_scheduler()
+    await background_worker.start()
 
 
 @app.on_event("shutdown")
@@ -195,6 +197,7 @@ async def shutdown_event() -> None:
             await db_init_task
         except asyncio.CancelledError:
             logger.info("Database initialization task cancelled during shutdown")
+    await background_worker.stop()
 
 
 # ── Auth helper ───────────────────────────────────────────────────────

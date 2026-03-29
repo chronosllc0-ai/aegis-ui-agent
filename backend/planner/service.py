@@ -55,7 +55,7 @@ TASK_TYPE_TO_PROVIDER: dict[str, tuple[str, str]] = {
     "reasoning": ("anthropic", "claude-sonnet-4-20250514"),
     "coding": ("anthropic", "claude-sonnet-4-20250514"),
     "fast": ("google", "gemini-2.5-flash"),
-    "research": ("google", "gemini-2.5-pro"),
+    "research": ("google", "gemini-3.1-pro (Preview)"),
     "creative": ("openai", "gpt-5.2"),
 }
 

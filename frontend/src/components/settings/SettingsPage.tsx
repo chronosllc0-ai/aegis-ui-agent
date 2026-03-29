@@ -12,6 +12,7 @@ import { UsageTab } from './UsageTab'
 import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
+import { MemoryTab } from './MemoryTab'
 import { AdminPanel } from '../admin/AdminPanel'
 
 type SettingsPageProps = {
@@ -126,6 +127,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
             onRun={(instruction) => onRunWorkflow(instruction, 'steer')}
           />
         )}
+        {activeTab === 'Memory' && <MemoryTab />}
         {activeTab === 'Support' && <SupportTab />}
         {activeTab === 'Admin' && isAdmin && <AdminPanel />}
       </div>
