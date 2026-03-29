@@ -858,7 +858,7 @@ async def _run_navigation_task(
         ):
             input_tokens = result.get("input_tokens", 0)
             output_tokens = result.get("output_tokens", 0)
-            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super:free")
+            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b:free")
             if input_tokens or output_tokens:
                 try:
                     async for _db_session in get_session():
