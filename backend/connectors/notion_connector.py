@@ -37,13 +37,27 @@ class NotionConnector(BaseConnector):
         }
         return f"{self.oauth_authorize_url}?{urlencode(params)}"
 
-    async def exchange_code(self, code: str, redirect_uri: str) -> OAuthTokens:
+    async def exchange_code(
+        self,
+        code: str,
+        redirect_uri: str,
+        workspace_id: str | None = None,
+        workspace_name: str | None = None,
+    ) -> OAuthTokens:
         import base64
         credentials = base64.b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
+        body: dict = {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri}
+        # Notion public integrations require external_account in the token exchange.
+        # The workspace_id and workspace_name come back as query params in the OAuth callback.
+        if workspace_id:
+            body["external_account"] = {
+                "key": workspace_id,
+                "name": workspace_name or workspace_id,
+            }
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 self.oauth_token_url,
-                json={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+                json=body,
                 headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/json"},
             )
             resp.raise_for_status()
