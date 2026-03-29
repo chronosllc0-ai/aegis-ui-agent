@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   personalityPreset: 'Professional',
   temperature: 0.7,
   provider: 'chronos',
-  model: 'nvidia/llama-3.3-nemotron-super-49b-v1:free',
+  model: 'nvidia/nemotron-3-super-120b-a12b:free',
   autoScreenshot: true,
   verboseLogging: false,
   confirmDestructiveActions: true,
