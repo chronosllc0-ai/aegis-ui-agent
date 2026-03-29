@@ -56,7 +56,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState } = useWebSocket(handleUsageMessage)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef } = useWebSocket(handleUsageMessage)
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -253,24 +253,8 @@ function App() {
     return () => window.clearInterval(timer)
   }, [isWorking, taskStartedAt])
 
-  useEffect(() => {
-    setTaskHistory((prev) => {
-      const existingTaskIds = new Set(prev.map((item) => item.id))
-      const fromLogs = logs
-        .map((entry) => entry.taskId)
-        .filter((taskId) => taskId !== 'idle' && !existingTaskIds.has(taskId))
-        .map((taskId) => ({
-          id: taskId,
-          title: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
-          dateLabel: 'Today',
-          instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
-        }))
-      if (!fromLogs.length) return prev
-      const next = [...fromLogs, ...prev]
-      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
-      return next
-    })
-  }, [logs])
+  // Task history is saved at send-time (see handleSend) so titles always reflect
+  // the actual user instruction, not a backend log message.
 
   // ── Context tracking: feed log tokens into the context meter ──
   useEffect(() => {
@@ -312,8 +296,26 @@ function App() {
 
   const visibleLogs: LogEntry[] = useMemo(() => {
     if (!selectedTaskId) return logs
-    return logs.filter((entry) => entry.taskId === selectedTaskId)
-  }, [logs, selectedTaskId])
+    const filtered = logs.filter((entry) => entry.taskId === selectedTaskId)
+    // If the task was from a previous session, logs are empty (in-memory only).
+    // Inject a synthetic entry so the panel isn't blank — shows the original instruction.
+    if (filtered.length === 0) {
+      const saved = taskHistory.find((t) => t.id === selectedTaskId)
+      if (saved) {
+        return [{
+          id: `restored-${selectedTaskId}`,
+          taskId: selectedTaskId,
+          message: saved.instruction,
+          timestamp: saved.dateLabel,
+          type: 'step' as const,
+          status: 'completed' as const,
+          stepKind: 'navigate' as const,
+          elapsedSeconds: 0,
+        }]
+      }
+    }
+    return filtered
+  }, [logs, selectedTaskId, taskHistory])
 
   // ── Inject compaction entries into visible logs ──
   const enrichedLogs: LogEntry[] = useMemo(() => {
@@ -351,7 +353,29 @@ function App() {
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
-    send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
+
+    const isNewTask = !isWorking
+    const sent = send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
+
+    // Save to task history immediately after send() so we capture the real user
+    // instruction as the title. Only save when send() returned true (WebSocket was
+    // open) — if it returned false the taskId ref is still 'idle' and we'd write
+    // a phantom entry. For new tasks, send() synchronously assigns a new taskId
+    // into activeTaskIdRef before returning, so it's safe to read here.
+    if (isNewTask && sent) {
+      const taskId = activeTaskIdRef.current
+      const now = new Date()
+      const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      const newEntry = { id: taskId, title: trimmed, dateLabel, instruction: trimmed }
+      setTaskHistory((prev) => {
+        // Avoid duplicates if send fires twice
+        if (prev.some((t) => t.id === taskId)) return prev
+        const next = [newEntry, ...prev]
+        try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
+        return next
+      })
+      setSelectedTaskId(taskId)
+    }
   }
 
   const submitUrl = () => {

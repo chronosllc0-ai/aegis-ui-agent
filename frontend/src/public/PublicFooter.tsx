@@ -1,5 +1,5 @@
 import { CHRONOS_LOGO_URL } from '../lib/models'
-import { navigateTo, PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
+import { PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
 
 type PublicFooterProps = {
   onGoHome: () => void
@@ -103,20 +103,18 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
         <div className='mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs text-zinc-600'>
           <span>© {new Date().getFullYear()} Chronos AI. All rights reserved.</span>
           <div className='flex gap-5'>
-            <button
-              type='button'
-              onClick={() => navigateTo(PRIVACY_PATH)}
+            <a
+              href={PRIVACY_PATH}
               className='transition hover:text-zinc-300'
             >
               Privacy Policy
-            </button>
-            <button
-              type='button'
-              onClick={() => navigateTo(TERMS_PATH)}
+            </a>
+            <a
+              href={TERMS_PATH}
               className='transition hover:text-zinc-300'
             >
               Terms of Service
-            </button>
+            </a>
           </div>
         </div>
       </div>
