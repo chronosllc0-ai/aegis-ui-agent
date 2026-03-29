@@ -355,12 +355,14 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
+    const sent = send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
 
     // Save to task history immediately after send() so we capture the real user
-    // instruction as the title. For new tasks, send() synchronously assigns a new
-    // taskId into activeTaskIdRef before returning, so it's safe to read here.
-    if (isNewTask) {
+    // instruction as the title. Only save when send() returned true (WebSocket was
+    // open) — if it returned false the taskId ref is still 'idle' and we'd write
+    // a phantom entry. For new tasks, send() synchronously assigns a new taskId
+    // into activeTaskIdRef before returning, so it's safe to read here.
+    if (isNewTask && sent) {
       const taskId = activeTaskIdRef.current
       const now = new Date()
       const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
