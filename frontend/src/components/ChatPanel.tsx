@@ -265,14 +265,14 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
             {att.type.startsWith('image/') ? (
               <img src={att.dataUrl} alt={att.name} className='rounded-lg max-h-40 object-cover border border-[#2a2a2a]' />
             ) : (
-              <div className='flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-zinc-300'>
+              <div className='flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs md:text-sm text-zinc-300'>
                 <IcoFile className='h-4 w-4 flex-shrink-0' />
                 {att.name}
               </div>
             )}
           </div>
         ))}
-        <div className='rounded-2xl rounded-tr-sm bg-blue-600 px-3.5 py-2.5 text-sm text-white shadow-md'>
+        <div className='rounded-2xl rounded-tr-sm bg-blue-600 px-3.5 py-2.5 text-sm md:text-base text-white shadow-md'>
           {msg.text}
         </div>
         <p className='mt-0.5 text-right text-[10px] text-zinc-600'>{msg.timestamp}</p>
@@ -289,7 +289,7 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
         <IcoBrain className='h-3.5 w-3.5 text-zinc-300' />
       </div>
       <div className='min-w-0 flex-1'>
-        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm text-zinc-200 shadow-md'>
+        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-base text-zinc-200 shadow-md'>
           {parts.map((part, i) =>
             part.type === 'code' ? (
               <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
@@ -969,7 +969,7 @@ export function ChatPanel({
               }
               disabled={isDisabled}
               rows={1}
-              className='w-full resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
+              className='w-full resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm md:text-base text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
               style={{ minHeight: '36px' }}
             />
           </div>
