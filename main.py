@@ -36,7 +36,7 @@ from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
 from backend.research.router import research_router
-from backend.tasks.router import tasks_router
+from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
