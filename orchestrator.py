@@ -147,8 +147,11 @@ class AgentOrchestrator:
             if not api_key:
                 return None  # no platform key configured
             from backend.providers import get_provider
-            provider_instance = get_provider("openrouter", api_key, default_model=model_id or "nvidia/nemotron-3-super:free")
-            return "chronos", provider_instance, model_id
+            # Strip display-only ":free" suffix — OpenRouter's free tier is controlled by
+            # the API key; the real model ID never includes ":free" in the slug.
+            api_model_id = model_id.split(":")[0] if model_id and ":" in model_id else model_id
+            provider_instance = get_provider("openrouter", api_key, default_model=api_model_id or "nvidia/nemotron-3-super-120b-a12b")
+            return "chronos", provider_instance, api_model_id
 
         # Try to get the user's stored BYOK key first
         api_key: str | None = None
