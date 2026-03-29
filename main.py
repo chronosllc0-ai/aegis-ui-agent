@@ -30,18 +30,13 @@ from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
-from backend.artifacts.router import artifact_router
-from backend.memory.router import memory_router
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
-from backend.research.router import research_router
-from backend.tasks.router import task_router
-from backend.tasks.worker import BackgroundWorker
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
-from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary
+from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
 from backend.key_management import KeyManager
 from backend.providers import get_provider, list_providers
 from config import settings
@@ -84,10 +79,6 @@ app.include_router(admin_router)
 app.include_router(automation_router)
 app.include_router(connector_router)
 app.include_router(gallery_router)
-app.include_router(memory_router)
-app.include_router(artifact_router)
-app.include_router(research_router)
-app.include_router(task_router)
 app.include_router(payments_router)
 app.include_router(planner_router)
 app.include_router(executor_router)
@@ -300,36 +291,18 @@ class GitHubRegistry:
     """In-memory github integration registry."""
 
     def __init__(self) -> None:
-        self._integrations: dict[str, dict[str, GitHubIntegration]] = {}
-        self._configs: dict[str, dict[str, dict[str, Any]]] = {}
+        self._integrations: dict[str, GitHubIntegration] = {}
+        self._configs: dict[str, dict[str, Any]] = {}
 
-    def get_github(self, owner_user_id: str, integration_id: str) -> GitHubIntegration | None:
-        return self._integrations.get(owner_user_id, {}).get(integration_id)
+    def get_github(self, integration_id: str) -> GitHubIntegration | None:
+        return self._integrations.get(integration_id)
 
-    def get_config(self, owner_user_id: str, integration_id: str) -> dict[str, Any]:
-        return self._configs.get(owner_user_id, {}).get(integration_id, {})
+    def get_config(self, integration_id: str) -> dict[str, Any]:
+        return self._configs.get(integration_id, {})
 
-    def list_candidates(self, integration_id: str) -> list[tuple[str, GitHubIntegration, dict[str, Any]]]:
-        candidates: list[tuple[str, GitHubIntegration, dict[str, Any]]] = []
-        for owner_user_id, owner_integrations in self._integrations.items():
-            integration = owner_integrations.get(integration_id)
-            if not integration:
-                continue
-            config = self._configs.get(owner_user_id, {}).get(integration_id, {})
-            candidates.append((owner_user_id, integration, config))
-        return candidates
-
-    def upsert(
-        self,
-        owner_user_id: str,
-        integration_id: str,
-        integration: GitHubIntegration,
-        config: dict[str, Any],
-    ) -> None:
-        owner_integrations = self._integrations.setdefault(owner_user_id, {})
-        owner_configs = self._configs.setdefault(owner_user_id, {})
-        owner_integrations[integration_id] = integration
-        owner_configs[integration_id] = config
+    def upsert(self, integration_id: str, integration: GitHubIntegration, config: dict[str, Any]) -> None:
+        self._integrations[integration_id] = integration
+        self._configs[integration_id] = config
 
 
 slack_registry = SlackRegistry()
@@ -622,9 +595,17 @@ async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
 
 
 async def _send_initial_frame(websocket: WebSocket) -> None:
-    """Capture and send an initial frame when the websocket connects."""
+    """Capture and send an initial frame when the websocket connects.
+
+    Skips sending if the browser is still at about:blank so the frontend can
+    display its "Tell me what to do" welcome screen instead of a white frame.
+    """
     try:
-        screenshot_bytes = await _get_orchestrator().executor.screenshot()
+        executor = _get_orchestrator().executor
+        current_url = executor.page.url if executor.page else "about:blank"
+        if current_url in ("about:blank", ""):
+            return  # Don't replace the welcome screen with a white blank frame
+        screenshot_bytes = await executor.screenshot()
         await _send_frame(websocket, base64.b64encode(screenshot_bytes).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Initial frame capture failed: %s", exc)
@@ -730,16 +711,49 @@ async def _run_navigation_task(
             steering_context=runtime.steering_context,
             settings=runtime.settings,
             on_workflow_step=lambda step: _send_workflow_step(websocket, step),
+            user_uid=runtime.user_uid,
         )
+        result_status = result.get("status") if isinstance(result, dict) else "completed"
+
+        # ── Chronos Gateway credit recording ──────────────────────────
+        if (
+            isinstance(result, dict)
+            and runtime.settings.get("provider") == "chronos"
+            and runtime.user_uid
+        ):
+            input_tokens = result.get("input_tokens", 0)
+            output_tokens = result.get("output_tokens", 0)
+            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super:free")
+            if input_tokens or output_tokens:
+                try:
+                    async for _db_session in get_session():
+                        await record_usage(
+                            _db_session,
+                            runtime.user_uid,
+                            "chronos",
+                            model_id,
+                            input_tokens,
+                            output_tokens,
+                            session_id=session_id,
+                        )
+                        await _db_session.commit()
+                        break
+                except Exception:  # noqa: BLE001
+                    logger.warning("Failed to record Chronos Gateway usage for user %s", runtime.user_uid)
+
+        # If execute_task returned a failure (e.g. unsupported provider), surface it as an error
+        if result_status == "failed":
+            error_msg = (result.get("error") or "Task failed") if isinstance(result, dict) else "Task failed"
+            await websocket.send_json({"type": "error", "data": {"message": error_msg}})
         await _log_web_message(
             runtime,
             session_id,
             "assistant",
-            f"Task completed: {instruction}",
+            f"Task {result_status}: {instruction}",
             metadata={
                 "source": "websocket",
                 "action": "result",
-                "status": result.get("status") if isinstance(result, dict) else "completed",
+                "status": result_status,
                 "result": result if isinstance(result, dict) else str(result),
             },
         )
@@ -1135,29 +1149,21 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
-async def register_github_integration(
-    integration_id: str,
-    payload: dict[str, Any],
-    user: dict[str, Any] = Depends(_get_current_user),
-) -> dict[str, Any]:
+async def register_github_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     config = {
         "token": str(payload.get("token", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
         "app_id": str(payload.get("app_id", "")).strip(),
-        "owner_user_id": user["uid"],
     }
     integration = GitHubIntegration()
     connection = await integration.connect(config)
-    github_registry.upsert(user["uid"], integration_id, integration, config)
+    github_registry.upsert(integration_id, integration, config)
     return {"connection": connection}
 
 
 @app.post("/api/integrations/github/{integration_id}/test")
-async def test_github_integration(
-    integration_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
-) -> dict[str, Any]:
-    integration = github_registry.get_github(user["uid"], integration_id)
+async def test_github_integration(integration_id: str) -> dict[str, Any]:
+    integration = github_registry.get_github(integration_id)
     if not integration:
         raise HTTPException(status_code=404, detail="GitHub integration not found")
     return await integration.execute_tool("github_list_repos", {"per_page": 5})
@@ -1166,27 +1172,21 @@ async def test_github_integration(
 @app.post("/api/integrations/github/{integration_id}/webhook")
 async def github_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Receive GitHub webhook events (push, PR, issue, etc.)."""
-    candidates = github_registry.list_candidates(integration_id)
-    if not candidates:
+    integration = github_registry.get_github(integration_id)
+    if not integration:
         raise HTTPException(status_code=404, detail="GitHub integration not found")
 
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
-    selected_integration: GitHubIntegration | None = None
-    for _owner_user_id, integration, config in candidates:
-        webhook_secret = str(config.get("webhook_secret", "")).strip()
-        if not webhook_secret:
-            if selected_integration is None:
-                selected_integration = integration
-            continue
-        if signature and integration.verify_webhook_signature(body, signature):
-            selected_integration = integration
-            break
-    if selected_integration is None:
+    config = github_registry.get_config(integration_id)
+    webhook_secret = str(config.get("webhook_secret", "")).strip()
+    if webhook_secret and not integration.verify_webhook_signature(body, signature):
         raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
+    import json as _json
+
     try:
-        payload = json.loads(body)
+        payload = _json.loads(body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON") from exc
 
@@ -1200,7 +1200,7 @@ async def github_webhook(integration_id: str, request: Request) -> dict[str, Any
 @app.post("/api/agents/spawn")
 async def spawn_agent_task(
     payload: dict[str, Any],
-    user: dict[str, Any] = Depends(_get_current_user),
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Spawn a new cloud agent task."""
@@ -1230,9 +1230,9 @@ async def spawn_agent_task(
 async def list_agent_tasks(
     status: str | None = None,
     platform: str | None = None,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    user: dict[str, Any] = Depends(_get_current_user),
+    limit: int = 50,
+    offset: int = 0,
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """List agent tasks for the current user."""
@@ -1260,7 +1260,7 @@ async def list_agent_tasks(
 @app.get("/api/agents/tasks/{task_id}")
 async def get_agent_task(
     task_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Get a specific agent task with actions."""
@@ -1301,7 +1301,7 @@ async def get_agent_task(
 @app.post("/api/agents/tasks/{task_id}/cancel")
 async def cancel_agent_task(
     task_id: str,
-    user: dict[str, Any] = Depends(_get_current_user),
+    user: dict[str, Any] = Depends(_verify_session),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Cancel a running or pending agent task."""
@@ -1383,6 +1383,7 @@ async def _run_navigation_task_from_bot(
             steering_context=runtime.steering_context,
             settings=runtime.settings,
             on_workflow_step=lambda _: None,
+            user_uid=owner_uid,
         )
         status = result.get("status", "completed")
         reply = f"✅ Task {status}: {instruction[:60]}"

@@ -16,13 +16,12 @@ import { SpendingAlert } from './components/SpendingAlert'
 import { UsageDropdown } from './components/UsageDropdown'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowView } from './components/WorkflowView'
+import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
+import { ChatPanel } from './components/ChatPanel'
 import { SettingsPage } from './components/settings/SettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
-import { ArtifactPanel } from './components/ArtifactPanel'
-import { DeepResearch } from './components/DeepResearch'
-import { TaskManager } from './components/TaskManager'
 import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
 import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
@@ -37,6 +36,8 @@ import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
+
+type AppMode = 'browser' | 'chat'
 
 type TaskHistoryItem = {
   id: string
@@ -76,16 +77,25 @@ function App() {
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
+  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('aegis.taskHistory')
+      return saved ? (JSON.parse(saved) as TaskHistoryItem[]) : []
+    } catch {
+      return []
+    }
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
   const [, setPendingPlan] = useState<string | null>(() => {
     return sessionStorage.getItem('aegis.pendingPlan')
   })
+  const [activePlanId, setActivePlanId] = useState<string | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
+  const [appMode, setAppMode] = useState<AppMode>('browser')
   // draftInput reserved for future InputBar onChange wiring
   void useState
 
@@ -127,24 +137,36 @@ function App() {
     prevConnectionStatus.current = connectionStatus
   }, [connectionStatus, addNotification])
 
-  // Detect credit / quota errors in WebSocket log messages
+  // Detect and surface agent errors from WebSocket log messages
   useEffect(() => {
     if (!logs.length) return
     const last = logs[logs.length - 1]
     if (last.type !== 'error') return
     const msg = last.message?.toLowerCase() ?? ''
+
+    // Categorise the error for a clearer title
     const isCreditError =
       msg.includes('insufficient') || msg.includes('quota') || msg.includes('credits') ||
       msg.includes('rate limit') || msg.includes('402') || msg.includes('429') ||
       msg.includes('billing') || msg.includes('out of credits') || msg.includes('usage limit')
-    if (isCreditError) {
-      addNotification({
-        type: 'error',
-        title: 'API credit / quota error',
-        message: last.message,
-        source: 'credit',
-      })
-    }
+    const isAuthError =
+      msg.includes('401') || msg.includes('unauthorized') || msg.includes('invalid api key') ||
+      msg.includes('authentication') || msg.includes('api key')
+    const isProviderError =
+      msg.includes('no api key') || msg.includes('provider') || msg.includes('model')
+
+    let title = 'Agent error'
+    if (isCreditError) title = 'API credit / quota error'
+    else if (isAuthError) title = 'API key invalid or expired'
+    else if (isProviderError) title = 'Provider not configured'
+
+    // Always surface agent errors as a notification so they are impossible to miss
+    addNotification({
+      type: 'error',
+      title,
+      message: last.message || 'The agent encountered an unexpected error.',
+      source: 'credit',
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs])
 
@@ -191,6 +213,17 @@ function App() {
           setIsAuthenticated(true)
           // Redirect away from /auth after session restored (e.g. post-OAuth page reload)
           if (window.location.pathname === '/auth') navigateTo('/')
+          // Handle ?settings=<Tab> deep-link (e.g. after OAuth callback redirect)
+          const params = new URLSearchParams(window.location.search)
+          const settingsTab = params.get('settings') as SettingsTab | null
+          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support'].includes(settingsTab)) {
+            setSettingsInitialTab(settingsTab)
+            setShowSettings(true)
+            // Strip the ?settings= param from the URL without a page reload
+            const cleanUrl = new URL(window.location.href)
+            cleanUrl.searchParams.delete('settings')
+            window.history.replaceState({}, '', cleanUrl.toString())
+          }
         }
       } finally {
         if (active) setAuthLoading(false)
@@ -233,7 +266,9 @@ function App() {
           instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
         }))
       if (!fromLogs.length) return prev
-      return [...fromLogs, ...prev]
+      const next = [...fromLogs, ...prev]
+      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
+      return next
     })
   }, [logs])
 
@@ -301,6 +336,7 @@ function App() {
   const handleSend = (instruction: string, selectedMode: SteeringMode) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
+
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
     send({ action: 'config', settings: wsConfig })
@@ -322,7 +358,35 @@ function App() {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, 'steer')
+    handleSend(normalized, isWorking ? 'steer' : mode)
+  }
+
+  const handleDecomposePlan = async (prompt: string) => {
+    const trimmed = prompt.trim()
+    if (!trimmed) return
+    try {
+      const resp = await fetch(apiUrl('/api/plans/decompose'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ prompt: trimmed, provider: settings.provider, model: settings.model }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (resp.ok && data?.ok && data?.plan?.id) {
+        setActivePlanId(data.plan.id as string)
+      }
+    } catch {
+      // silent — plan decompose errors are non-fatal
+    }
+  }
+
+  const onDeleteTask = (id: string) => {
+    setTaskHistory((prev) => {
+      const next = prev.filter((t) => t.id !== id)
+      localStorage.setItem('aegis.taskHistory', JSON.stringify(next))
+      return next
+    })
+    if (selectedTaskId === id) setSelectedTaskId(null)
   }
 
   const newSession = () => {
@@ -482,10 +546,21 @@ function App() {
                   <p className='mb-1 text-[11px] uppercase tracking-wide text-zinc-500'>{group}</p>
                   <div className='space-y-1'>
                     {items.map((item) => (
-                      <button key={item.id} type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 text-left text-xs ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
-                        <p className='truncate text-zinc-200'>{item.title}</p>
-                        <p className='truncate text-zinc-500'>{item.instruction}</p>
-                      </button>
+                      <div key={item.id} className='group relative'>
+                        <button type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 pr-7 text-left text-xs ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
+                          <p className='truncate text-zinc-200'>{item.title}</p>
+                          <p className='truncate text-zinc-500'>{item.instruction}</p>
+                        </button>
+                        <button
+                          type='button'
+                          onClick={(e) => { e.stopPropagation(); onDeleteTask(item.id) }}
+                          className='absolute right-1.5 top-1/2 -translate-y-1/2 hidden rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200 group-hover:flex'
+                          aria-label='Delete task'
+                          title='Delete task'
+                        >
+                          {Icons.trash({ className: 'h-3.5 w-3.5' })}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -542,7 +617,7 @@ function App() {
         </aside>
 
         {/* ───────────── Main content ───────────── */}
-        <section className='flex min-h-0 flex-1 flex-col gap-1.5 sm:gap-2 lg:gap-3'>
+        <section className='flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-x-hidden sm:gap-2 lg:gap-3'>
           <header className='space-y-1.5 sm:space-y-2'>
             <div className='flex items-center justify-between gap-2 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:rounded-2xl sm:px-4 sm:py-2'>
               <div className='flex items-center gap-1.5 sm:gap-2'>
@@ -551,6 +626,27 @@ function App() {
                 </button>
                 <img src='/shield.svg' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
+                {/* ── Chat ↔ Browser mode switcher ── */}
+                {!showSettings && !showAutomations && (
+                  <div className='ml-1 flex items-center gap-0.5 rounded-full border border-[#2a2a2a] bg-[#111] p-0.5'>
+                    <button
+                      type='button'
+                      onClick={() => setAppMode('browser')}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'browser' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      {Icons.globe({ className: 'h-3 w-3' })}
+                      <span className='hidden xs:inline'>Browser</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => setAppMode('chat')}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'chat' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      {Icons.chat({ className: 'h-3 w-3' })}
+                      <span className='hidden xs:inline'>Chat</span>
+                    </button>
+                  </div>
+                )}
               </div>
               <div className='flex items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
                 <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-1.5 py-0.5 sm:px-2 sm:py-1'>
@@ -564,7 +660,7 @@ function App() {
             </div>
           </header>
 
-          {!showSettings && !showAutomations && (
+          {!showSettings && !showAutomations && appMode === 'browser' && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
               <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
@@ -588,6 +684,21 @@ function App() {
               />
             ) : showAutomations ? (
               <AutomationsPage />
+            ) : activePlanId ? (
+              <div className='h-full overflow-y-auto p-2'>
+                <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
+              </div>
+            ) : appMode === 'chat' ? (
+              <ChatPanel
+                logs={enrichedLogs}
+                isWorking={isWorking}
+                onSend={handleSend}
+                onDecomposePlan={handleDecomposePlan}
+                connectionStatus={connectionStatus}
+                transcripts={transcripts.map((t) => t.text)}
+                onSwitchToBrowser={() => setAppMode('browser')}
+                latestFrame={latestFrame}
+              />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
                 {showWorkflow ? (
@@ -600,15 +711,7 @@ function App() {
             )}
           </div>
 
-          {!showSettings && !showAutomations && (
-            <div className='grid grid-cols-1 gap-2 lg:grid-cols-3'>
-              <DeepResearch />
-              <ArtifactPanel />
-              <TaskManager />
-            </div>
-          )}
-
-          {!showSettings && !showAutomations && (
+          {!showSettings && !showAutomations && appMode === 'browser' && (
             <div data-tour='input-bar'>
               <InputBar
                 mode={mode}
@@ -621,6 +724,7 @@ function App() {
                 sending={sending}
                 onModeChange={setMode}
                 onSend={handleSend}
+                onDecomposePlan={handleDecomposePlan}
                 provider={settings.provider}
                 model={settings.model}
                 onProviderChange={(nextProvider) => {

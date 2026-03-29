@@ -217,10 +217,10 @@ async def oauth_callback(
 
     if error:
         logger.warning("OAuth callback error: %s", error)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error={error}")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error={error}")
 
     if not code:
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=no_code")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=no_code")
 
     # Verify state (CSRF protection)
     expected_state = request.session.get("oauth_state", "")
@@ -228,10 +228,10 @@ async def oauth_callback(
 
     if not expected_state or state != expected_state:
         logger.warning("OAuth state mismatch: expected=%s got=%s", expected_state, state)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=state_mismatch")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=state_mismatch")
 
     if connector_id not in CONNECTOR_CATALOGUE:
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=unknown_connector")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=unknown_connector")
 
     # Get authenticated user
     user = _get_current_user(request)
@@ -297,11 +297,11 @@ async def oauth_callback(
         request.session.pop("oauth_connector", None)
 
         logger.info("Connected %s for user %s", connector_id, uid)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_connected={connector_id}")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_connected={connector_id}")
 
     except Exception as exc:
         logger.exception("OAuth exchange failed for %s", connector_id)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=exchange_failed")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=exchange_failed")
 
 
 # ── Disconnect ────────────────────────────────────────────────────────

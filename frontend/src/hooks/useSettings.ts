@@ -38,8 +38,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   systemInstruction: 'You are Aegis. Be helpful, concise, and safe when taking actions.',
   personalityPreset: 'Professional',
   temperature: 0.7,
-  provider: 'google',
-  model: 'gemini-2.5-pro',
+  provider: 'chronos',
+  model: 'nvidia/nemotron-3-super:free',
   autoScreenshot: true,
   verboseLogging: false,
   confirmDestructiveActions: true,
@@ -47,12 +47,26 @@ const DEFAULT_SETTINGS: AppSettings = {
   workflowTemplates: [],
 }
 
+// Providers that require a user-supplied BYOK key to work
+const BYOK_PROVIDERS = new Set(['openai', 'anthropic', 'google', 'xai', 'openrouter'])
+
 function loadInitialSettings(): AppSettings {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return DEFAULT_SETTINGS
   try {
     const parsed = JSON.parse(raw) as Partial<AppSettings>
     const merged = { ...DEFAULT_SETTINGS, ...parsed }
+
+    // Migration: if the stored provider is a BYOK provider but no key is stored for it,
+    // reset to Chronos Gateway so the agent actually works out of the box.
+    if (merged.provider && BYOK_PROVIDERS.has(merged.provider)) {
+      const byokKey = localStorage.getItem(`aegis.byok.${merged.provider}`)
+      if (!byokKey) {
+        merged.provider = DEFAULT_SETTINGS.provider
+        merged.model = DEFAULT_SETTINGS.model
+      }
+    }
+
     return {
       ...merged,
       integrations: Array.isArray(merged.integrations)

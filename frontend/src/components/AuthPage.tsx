@@ -215,7 +215,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
     mode === 'signup' && (!allCriteriaMet || !confirmPassword || password !== confirmPassword || emailExists === true)
 
   return (
-    <main className='min-h-screen bg-[#070b12] text-zinc-100'>
+    <main className='min-h-screen overflow-x-hidden bg-[#070b12] text-zinc-100'>
       <PublicHeader
         onGoHome={onBack}
         onGoAuth={() => undefined}

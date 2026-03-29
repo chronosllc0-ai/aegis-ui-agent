@@ -269,7 +269,13 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       const now = performance.now()
       if (now - lastNotConnectedAtRef.current > 2500) {
         lastNotConnectedAtRef.current = now
-        appendLog({ message: 'WebSocket not connected', taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
+        const statusMsg =
+          wsRef.current === null
+            ? 'WebSocket not connected — check your network and try refreshing.'
+            : wsRef.current.readyState === WebSocket.CONNECTING
+              ? 'WebSocket still connecting — please wait a moment and try again.'
+              : 'WebSocket disconnected — reconnecting automatically…'
+        appendLog({ message: statusMsg, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
       }
       return false
     },

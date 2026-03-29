@@ -216,7 +216,7 @@ class AgentAction(Base):
     __tablename__ = "agent_actions"
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
-    task_id = Column(String(255), ForeignKey("agent_tasks.id"), nullable=False, index=True)
+    task_id = Column(String(255), nullable=False, index=True)
     sequence = Column(Integer, nullable=False)
     action_type = Column(String(50), nullable=False)
     description = Column(Text, nullable=True)

@@ -40,8 +40,9 @@ async def decompose_prompt_endpoint(
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
 
-    provider_name = str(payload.get("provider", "google"))
-    model = payload.get("model")
+    provider_name = str(payload.get("provider", "google")).strip() or "google"
+    model = str(payload.get("model", "")).strip() or None
+    conversation_id = str(payload.get("conversation_id", "")).strip() or None
 
     api_key = await key_manager.get_key(db, uid, provider_name)
     if not api_key:
@@ -49,6 +50,8 @@ async def decompose_prompt_endpoint(
             "google": settings.GEMINI_API_KEY,
             "openai": getattr(settings, "OPENAI_API_KEY", ""),
             "anthropic": getattr(settings, "ANTHROPIC_API_KEY", ""),
+            "xai": getattr(settings, "XAI_API_KEY", ""),
+            "openrouter": getattr(settings, "OPENROUTER_API_KEY", ""),
         }
         api_key = fallback_keys.get(provider_name, "")
     if not api_key:
@@ -66,7 +69,8 @@ async def decompose_prompt_endpoint(
         prompt,
         plan_data,
         provider_name,
-        str(model or "default"),
+        model or "default",
+        conversation_id=conversation_id,
     )
     full_plan = await PlannerService.get_plan(db, plan.id, uid)
     return {"ok": True, "plan": full_plan}

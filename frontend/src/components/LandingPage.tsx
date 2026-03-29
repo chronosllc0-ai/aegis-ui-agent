@@ -252,7 +252,7 @@ export function LandingPage({ onGetStarted, onOpenDocsHome, onOpenDoc, docsPorta
   const docsPortalBase = docsPortalHref.replace(/\/$/, '')
 
   return (
-    <main className='min-h-screen bg-[#070b12] text-zinc-100'>
+    <main className='min-h-screen overflow-x-hidden bg-[#070b12] text-zinc-100'>
       <PublicHeader
         onGoHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
         onGoAuth={onGetStarted}
