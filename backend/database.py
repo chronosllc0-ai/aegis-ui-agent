@@ -425,6 +425,24 @@ class OAuthAppCredential(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class OAuthPendingState(Base):
+    """Short-lived CSRF state token for OAuth flows.
+
+    Stored in the DB instead of (or in addition to) the session cookie so that
+    the state survives cross-site redirects where SameSite=Lax blocks cookie
+    transmission (e.g. Notion's OAuth server redirects through api.notion.com).
+    Expires after 10 minutes.
+    """
+
+    __tablename__ = "oauth_pending_states"
+
+    state_token = Column(String(64), primary_key=True)
+    connector_id = Column(String(50), nullable=False)
+    user_id = Column(String(255), nullable=True)          # None for unauthenticated installs
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ScheduledTask(Base):
     """A user-defined cron job that runs an agent prompt on a schedule."""
 
