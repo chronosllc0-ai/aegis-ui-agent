@@ -213,6 +213,17 @@ function App() {
           setIsAuthenticated(true)
           // Redirect away from /auth after session restored (e.g. post-OAuth page reload)
           if (window.location.pathname === '/auth') navigateTo('/')
+          // Handle ?settings=<Tab> deep-link (e.g. after OAuth callback redirect)
+          const params = new URLSearchParams(window.location.search)
+          const settingsTab = params.get('settings') as SettingsTab | null
+          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support'].includes(settingsTab)) {
+            setSettingsInitialTab(settingsTab)
+            setShowSettings(true)
+            // Strip the ?settings= param from the URL without a page reload
+            const cleanUrl = new URL(window.location.href)
+            cleanUrl.searchParams.delete('settings')
+            window.history.replaceState({}, '', cleanUrl.toString())
+          }
         }
       } finally {
         if (active) setAuthLoading(false)
@@ -255,7 +266,7 @@ function App() {
           instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
         }))
       if (!fromLogs.length) return prev
-      const next = [...fromLogs, ...prev].slice(0, 100) // cap at 100
+      const next = [...fromLogs, ...prev]
       try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
       return next
     })
@@ -367,6 +378,15 @@ function App() {
     } catch {
       // silent — plan decompose errors are non-fatal
     }
+  }
+
+  const onDeleteTask = (id: string) => {
+    setTaskHistory((prev) => {
+      const next = prev.filter((t) => t.id !== id)
+      localStorage.setItem('aegis.taskHistory', JSON.stringify(next))
+      return next
+    })
+    if (selectedTaskId === id) setSelectedTaskId(null)
   }
 
   const newSession = () => {
@@ -526,10 +546,21 @@ function App() {
                   <p className='mb-1 text-[11px] uppercase tracking-wide text-zinc-500'>{group}</p>
                   <div className='space-y-1'>
                     {items.map((item) => (
-                      <button key={item.id} type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 text-left text-xs ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
-                        <p className='truncate text-zinc-200'>{item.title}</p>
-                        <p className='truncate text-zinc-500'>{item.instruction}</p>
-                      </button>
+                      <div key={item.id} className='group relative'>
+                        <button type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 pr-7 text-left text-xs ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
+                          <p className='truncate text-zinc-200'>{item.title}</p>
+                          <p className='truncate text-zinc-500'>{item.instruction}</p>
+                        </button>
+                        <button
+                          type='button'
+                          onClick={(e) => { e.stopPropagation(); onDeleteTask(item.id) }}
+                          className='absolute right-1.5 top-1/2 -translate-y-1/2 hidden rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200 group-hover:flex'
+                          aria-label='Delete task'
+                          title='Delete task'
+                        >
+                          {Icons.trash({ className: 'h-3.5 w-3.5' })}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
