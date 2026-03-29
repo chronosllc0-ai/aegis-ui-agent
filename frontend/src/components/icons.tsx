@@ -50,6 +50,7 @@ export const Icons = {
   mic: (p: IconProps) => <Svg {...p}><rect x='9' y='3' width='6' height='11' rx='3' /><path d='M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6' /></Svg>,
   clock: (p: IconProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M12 7v6l4 2' /></Svg>,
   check: (p: IconProps) => <Svg {...p}><path d='m5 12 4 4 10-10' /></Svg>,
+  chat: (p: IconProps) => <Svg {...p}><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' /></Svg>,
   alert: (p: IconProps) => <Svg {...p}><path d='M12 8v5M12 17h.01' /><path d='M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z' /></Svg>,
   globeAlt: ({ className }: IconProps) => <FaGlobe className={className ?? 'h-4 w-4'} aria-hidden='true' />,
   folder: ({ className }: IconProps) => <FaFolder className={className ?? 'h-4 w-4'} aria-hidden='true' />,
