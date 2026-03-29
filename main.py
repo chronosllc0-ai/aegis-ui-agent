@@ -28,11 +28,16 @@ from backend.admin import admin_router
 from backend import database
 from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
+from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
+from backend.memory.router import memory_router
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
+from backend.research.router import research_router
+from backend.tasks.router import tasks_router
+from backend.tasks.worker import BackgroundWorker
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -76,12 +81,16 @@ else:
 
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(artifact_router)
 app.include_router(automation_router)
 app.include_router(connector_router)
 app.include_router(gallery_router)
+app.include_router(memory_router)
 app.include_router(payments_router)
 app.include_router(planner_router)
 app.include_router(executor_router)
+app.include_router(research_router)
+app.include_router(tasks_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
