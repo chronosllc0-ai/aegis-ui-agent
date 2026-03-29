@@ -192,15 +192,22 @@ async def authorize_connector(
     request.session["oauth_state"] = state
     request.session["oauth_connector"] = connector_id
 
-    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
-    pending = OAuthPendingState(
-        state_token=state,
-        connector_id=connector_id,
-        user_id=user.get("uid"),
-        expires_at=expires,
-    )
-    session.add(pending)
-    await session.commit()
+    # Best-effort DB write: if the DB is unavailable, the session cookie is still the
+    # primary path and most providers will work fine. Notion (and similar cross-domain
+    # redirecters) will fall back to the error flow in that case — preferable to a 500.
+    try:
+        expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+        pending = OAuthPendingState(
+            state_token=state,
+            connector_id=connector_id,
+            user_id=user.get("uid"),
+            expires_at=expires,
+        )
+        session.add(pending)
+        await session.commit()
+    except Exception as exc:
+        logger.warning("Could not persist OAuth pending state to DB (session-only fallback): %s", exc)
+        await session.rollback()
 
     url = connector.get_authorize_url(
         redirect_uri=_callback_uri(),

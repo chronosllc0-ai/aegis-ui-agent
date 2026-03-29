@@ -537,11 +537,23 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Derive chat messages from logs (non-user entries only — user msgs come from sentMessages)
+  // Derive non-user messages from logs.
+  // User messages are intentionally excluded here: they live in sentMessages so that
+  // attachment data (never present in logs) is preserved. Logs *could* theoretically
+  // produce a user-role entry (isUser heuristic) but that's filtered out to avoid
+  // showing a duplicate plain-text bubble alongside the local bubble with attachments.
   const baseMessages = useMemo(() => logsToMessages(logs).filter((m) => m.role !== 'user'), [logs])
 
-  // Merge local sent messages + log-derived messages, sorted by insertion order
-  // sentMessages are prepended so they appear first (they came in before the agent responded)
+  // Prune sentMessages when logs grow to avoid unbounded memory: keep only the last
+  // 500 sent messages (roughly one long session). Called in effect below.
+  useEffect(() => {
+    if (sentMessages.length > 500) {
+      setSentMessages((prev) => prev.slice(-500))
+    }
+  }, [sentMessages.length])
+
+  // Merge local sent messages + log-derived messages (agent responses).
+  // sentMessages are prepended: they were sent before the agent responded.
   const allMessages = useMemo(() => {
     return [...sentMessages, ...baseMessages]
   }, [sentMessages, baseMessages])
@@ -576,7 +588,7 @@ export function ChatPanel({
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     // Save locally so attachments appear in chat immediately (logs never carry file data)
     const localMsg: ChatMessage = {
-      id: `local-${Date.now()}`,
+      id: `local-${crypto.randomUUID()}`,
       role: 'user',
       text: withContext || '(attachment)',
       timestamp: now,
