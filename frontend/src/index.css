@@ -4,6 +4,13 @@
 @custom-media --xs (width >= 480px);
 @variant xs (@media (--xs));
 
+/* Steering flash: slides in from top-left then fades out */
+@keyframes fade-slide {
+  0%   { opacity: 1; transform: translateY(0); }
+  70%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+
 /* Chronos "C" logo spin — slow elegant rotation */
 @keyframes chronos-spin {
   from { transform: rotate(0deg); }
