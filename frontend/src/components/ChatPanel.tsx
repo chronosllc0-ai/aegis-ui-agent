@@ -49,6 +49,8 @@ export interface ChatPanelProps {
   activeTaskId?: string | null
   /** Messages loaded from the server DB for the selected conversation */
   serverMessages?: ServerMessage[]
+  /** Called when user clicks Stop to kill the running task */
+  onStop?: () => void
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
@@ -540,6 +542,7 @@ export function ChatPanel({
   voiceDisabled = false,
   activeTaskId,
   serverMessages = [],
+  onStop,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -990,16 +993,32 @@ export function ChatPanel({
           >
             <IcoMic className='h-4 w-4' />
           </button>
-          {/* Send */}
-          <button
-            type='button'
-            onClick={handleSend}
-            disabled={isDisabled || (!input.trim() && attachments.length === 0 && !activeConnector)}
-            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
-            aria-label='Send message'
-          >
-            <IcoSend className='h-4 w-4' />
-          </button>
+          {/* Send / Stop — stop shown while agent is working and no text typed */}
+          {isWorking && !input.trim() && attachments.length === 0 ? (
+            <button
+              type='button'
+              onClick={() => onStop?.()}
+              className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 transition-colors hover:bg-red-500/20'
+              aria-label='Stop task'
+              title='Stop current task'
+            >
+              {/* Spinning ring + stop square */}
+              <span className='relative flex h-4 w-4 items-center justify-center'>
+                <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/60 border-t-transparent' />
+                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+              </span>
+            </button>
+          ) : (
+            <button
+              type='button'
+              onClick={handleSend}
+              disabled={isDisabled || (!input.trim() && attachments.length === 0 && !activeConnector)}
+              className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
+              aria-label='Send message'
+            >
+              <IcoSend className='h-4 w-4' />
+            </button>
+          )}
         </div>
 
         {/* Hidden file input */}

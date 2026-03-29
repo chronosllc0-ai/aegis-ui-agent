@@ -93,6 +93,13 @@ function App() {
       return []
     }
   })
+  // ── Action log panel resize (drag handle) ─────────────────────────
+  const [logPanelWidthPct, setLogPanelWidthPct] = useState<number | null>(null)
+  const isDraggingRef = useRef(false)
+  const dragStartXRef = useRef(0)
+  const dragStartWidthRef = useRef(0)
+  const browserGridRef = useRef<HTMLDivElement>(null)
+
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
@@ -188,9 +195,17 @@ function App() {
     setUrlInput(currentUrl)
   }, [currentUrl])
 
+  // ── Browser tab title: Working… / Steering… / Aegis ──────────────
+  const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
   useEffect(() => {
-    document.title = isWorking ? 'Aegis - Working...' : 'Aegis'
+    if (!isWorking) { setTitleMode('idle'); return }
+    setTitleMode((prev) => prev === 'steering' ? 'steering' : 'working')
   }, [isWorking])
+  useEffect(() => {
+    if (titleMode === 'working') document.title = '⚙ Aegis — Working…'
+    else if (titleMode === 'steering') document.title = '↩ Aegis — Steering…'
+    else document.title = 'Aegis'
+  }, [titleMode])
 
   useEffect(() => {
     document.body.style.overflow = isAuthenticated && !isDocsRoute && !isPrivacyRoute && !isTermsRoute ? 'hidden' : 'auto'
@@ -307,6 +322,33 @@ function App() {
   }, [activeConversationId, activeTaskIdRef, onNewConversationId])
 
   // When the selected task changes, load messages from server for that conversation
+  // ── Seed taskHistory from server conversations so history survives refresh ──
+  // When the server returns a conversation list (cross-device / post-refresh),
+  // merge any server conversations that aren't already in the local history.
+  useEffect(() => {
+    if (!conversations.length) return
+    setTaskHistory((prev) => {
+      const existingIds = new Set(prev.map((t) => t.id))
+      const toAdd: TaskHistoryItem[] = []
+      for (const conv of conversations) {
+        if (!existingIds.has(conv.id)) {
+          const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
+          const today = new Date()
+          const yesterday = new Date(today)
+          yesterday.setDate(today.getDate() - 1)
+          let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
+          if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
+          else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
+          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '' })
+        }
+      }
+      if (!toAdd.length) return prev
+      const merged = [...toAdd, ...prev].slice(0, 200) // keep max 200
+      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(merged)) } catch { /* quota */ }
+      return merged
+    })
+  }, [conversations])
+
   useEffect(() => {
     if (!selectedTaskId) { setServerMessages([]); return }
     const convId = taskToConvRef.current.get(selectedTaskId)
@@ -390,7 +432,15 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
+    const action = isWorking ? 'steer' : 'navigate'
+    send({ action, instruction: trimmed })
+
+    // ── Update browser tab title for steering state ────────────────
+    if (action === 'steer') {
+      setTitleMode('steering')
+      // Flash "Steering…" for 3 s then revert to "Working…"
+      window.setTimeout(() => setTitleMode('working'), 3000)
+    }
 
     // Save to task history optimistically at send-time so the title always reflects
     // the real user instruction. We generate a stable taskId from a UUID that the
@@ -767,18 +817,82 @@ function App() {
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 activeTaskId={selectedTaskId}
                 serverMessages={serverMessages}
+                onStop={() => send({ action: 'stop' })}
               />
             ) : (
-              <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
-                {showWorkflow ? (
-                  <WorkflowView steps={workflowSteps} />
-                ) : (
-                  <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' />
-                )}
-                <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+              /* Browser split — flex row on md+, flex col on mobile. Drag handle resizes the log panel. */
+              <div
+                ref={browserGridRef}
+                className='flex h-full min-h-0 flex-col gap-1.5 sm:gap-2 md:flex-row lg:gap-3'
+              >
+                {/* Main content (screen / workflow) — grows to fill remaining space */}
+                <div className='min-h-0 min-w-0 flex-1'>
+                  {showWorkflow ? (
+                    <WorkflowView steps={workflowSteps} />
+                  ) : (
+                    <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' />
+                  )}
+                </div>
+
+                {/* ── Drag handle (desktop only) ── */}
+                <div
+                  className='hidden md:flex md:w-1.5 md:cursor-col-resize md:flex-col md:items-center md:justify-center md:rounded-full md:bg-[#2a2a2a] md:hover:bg-zinc-500 md:active:bg-blue-500/60 md:transition-colors md:select-none'
+                  title='Drag to resize action log'
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    isDraggingRef.current = true
+                    dragStartXRef.current = e.clientX
+                    const grid = browserGridRef.current
+                    const logPct = logPanelWidthPct ?? 31 // default ~31%
+                    dragStartWidthRef.current = grid ? grid.getBoundingClientRect().width * (logPct / 100) : 320
+
+                    const onMove = (ev: MouseEvent) => {
+                      if (!isDraggingRef.current || !browserGridRef.current) return
+                      const totalW = browserGridRef.current.getBoundingClientRect().width
+                      const delta = ev.clientX - dragStartXRef.current
+                      const newW = Math.max(200, Math.min(totalW * 0.6, dragStartWidthRef.current - delta))
+                      setLogPanelWidthPct((newW / totalW) * 100)
+                    }
+                    const onUp = () => {
+                      isDraggingRef.current = false
+                      window.removeEventListener('mousemove', onMove)
+                      window.removeEventListener('mouseup', onUp)
+                    }
+                    window.addEventListener('mousemove', onMove)
+                    window.addEventListener('mouseup', onUp)
+                  }}
+                >
+                  {/* grip dots */}
+                  <span className='flex flex-col gap-0.5'>
+                    {[0,1,2].map((i) => <span key={i} className='h-1 w-1 rounded-full bg-zinc-600' />)}
+                  </span>
+                </div>
+
+                {/* Action log — fixed width on desktop (user-resizable), full width on mobile */}
+                <div
+                  className='min-h-[8rem] md:min-h-0 md:shrink-0'
+                  style={{ width: logPanelWidthPct != null ? `${logPanelWidthPct}%` : undefined }}
+                >
+                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+                </div>
               </div>
             )}
           </div>
+
+          {/* ── Stop button — overlays the send area while agent is working ── */}
+          {!showSettings && !showAutomations && appMode === 'browser' && isWorking && (
+            <div className='flex justify-end pb-1 pr-1'>
+              <button
+                type='button'
+                onClick={() => { send({ action: 'stop' }) }}
+                className='flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-500/20 hover:border-red-400/60'
+                title='Stop current task'
+              >
+                <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-red-300 border-t-transparent' />
+                Stop
+              </button>
+            </div>
+          )}
 
           {!showSettings && !showAutomations && appMode === 'browser' && (
             <div data-tour='input-bar'>
