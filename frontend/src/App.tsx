@@ -722,6 +722,9 @@ function App() {
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => setAppMode('browser')}
                 latestFrame={latestFrame}
+                voiceActive={voiceActive}
+                onToggleVoice={toggleVoice}
+                voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
               />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
