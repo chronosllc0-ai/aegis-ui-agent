@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import { Icons } from './icons'
+import { apiUrl } from '../lib/api'
 
 // Inline SVG primitives — avoids react-icons subpath d.ts resolution issues with tsc bundler mode
 type SvgProps = { className?: string }
@@ -24,17 +25,9 @@ const IcoCheck        = (p: SvgProps) => <Svg {...p}><path d='m5 12 4 4 10-10' /
 const IcoX            = (p: SvgProps) => <Svg {...p}><path d='M18 6 6 18M6 6l12 12' /></Svg>
 const IcoChevronDown  = (p: SvgProps) => <Svg {...p}><path d='m6 9 6 6 6-6' /></Svg>
 const IcoSearch       = (p: SvgProps) => <Svg {...p}><circle cx='11' cy='11' r='6' /><path d='m20 20-3.5-3.5' /></Svg>
-const IcoGitBranch    = (p: SvgProps) => <Svg {...p}><circle cx='6' cy='6' r='2' /><circle cx='6' cy='18' r='2' /><circle cx='18' cy='6' r='2' /><path d='M6 8v8M6 8a6 6 0 0 0 6 6h2' /></Svg>
 const IcoFile         = (p: SvgProps) => <Svg {...p}><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' /><path d='M14 2v6h6' /></Svg>
 const IcoCode         = (p: SvgProps) => <Svg {...p}><path d='m16 18 6-6-6-6M8 6l-6 6 6 6' /></Svg>
 const IcoBrain        = (p: SvgProps) => <Svg {...p}><path d='M9 3a3 3 0 0 0-3 3 3 3 0 0 0-3 3 4 4 0 0 0 4 4v3a3 3 0 0 0 6 0v-3a4 4 0 0 0 4-4 3 3 0 0 0-3-3 3 3 0 0 0-5 0Z' /></Svg>
-const IcoListTodo     = (p: SvgProps) => <Svg {...p}><rect x='3' y='5' width='3' height='3' rx='.5' /><path d='M9 6h12M9 12h12M9 18h12' /><rect x='3' y='11' width='3' height='3' rx='.5' /><rect x='3' y='17' width='3' height='3' rx='.5' /></Svg>
-// Brand icons — simple geometric approximations to avoid Si/Fa imports
-const IcoGitHub       = (p: SvgProps) => <Svg {...p}><path d='M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.49.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.15-1.1-1.46-1.1-1.46-.9-.62.07-.6.07-.6 1 .07 1.53 1.02 1.53 1.02.89 1.52 2.34 1.08 2.91.83.09-.64.35-1.08.63-1.33-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 6.8c.85 0 1.71.11 2.51.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 22 12c0-5.52-4.48-10-10-10Z' /></Svg>
-const IcoSlack        = (p: SvgProps) => <Svg {...p}><rect x='9' y='2' width='4' height='10' rx='2' /><rect x='14' y='9' width='10' height='4' rx='2' /><rect x='9' y='14' width='4' height='10' rx='2' /><rect x='2' y='9' width='10' height='4' rx='2' /></Svg>
-const IcoDrive        = (p: SvgProps) => <Svg {...p}><path d='m8 17 4-7 4 7H8Z' /><path d='M4 17 8 10l4 7' /><path d='m12 10 4 7' /></Svg>
-const IcoNotion       = (p: SvgProps) => <Svg {...p}><rect x='3' y='3' width='18' height='18' rx='2' /><path d='M8 8h8M8 12h5M8 16h4' /></Svg>
-const IcoLinear       = (p: SvgProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='m7 17 10-10M7 12h5M12 7v5' /></Svg>
 
 export interface ChatPanelProps {
   logs: LogEntry[]
@@ -69,19 +62,14 @@ interface AttachedFile {
   dataUrl: string
 }
 
-// ─── Connectors & slash-commands ─────────────────────────────────────────────
-const CONNECTORS = [
-  { id: 'github',   label: 'GitHub',       icon: <IcoGitHub className='h-5 w-5 text-zinc-100' />,           prefix: '/github '   },
-  { id: 'slack',    label: 'Slack',        icon: <IcoSlack className='h-5 w-5 text-[#E01E5A]' />,           prefix: '/slack '    },
-  { id: 'gdrive',   label: 'Google Drive', icon: <IcoDrive className='h-5 w-5 text-[#34A853]' />,     prefix: '/gdrive '   },
-  { id: 'notion',   label: 'Notion',       icon: <IcoNotion className='h-5 w-5 text-zinc-100' />,           prefix: '/notion '   },
-  { id: 'linear',   label: 'Linear',       icon: <IcoLinear className='h-5 w-5 text-[#5E6AD2]' />,         prefix: '/linear '   },
-  { id: 'research', label: '/research',    icon: <IcoSearch className='h-5 w-5 text-blue-400' />,           prefix: '/research ' },
-  { id: 'plan',     label: '/plan',        icon: <IcoListTodo className='h-5 w-5 text-emerald-400' />,      prefix: '/plan '     },
-  { id: 'code',     label: '/code',        icon: <IcoCode className='h-5 w-5 text-violet-400' />,           prefix: '/code '     },
-  { id: 'git',      label: 'Git',          icon: <IcoGitBranch className='h-5 w-5 text-amber-400' />,       prefix: '/git '      },
-  { id: 'docs',     label: 'Docs',         icon: <IcoFile className='h-5 w-5 text-zinc-300' />,             prefix: '/docs '     },
-]
+// ─── Live connector type (mirrors ConnectorsTab.tsx) ─────────────────────────
+interface ConnectorMeta {
+  id: string
+  name: string
+  icon: string   // URL
+  connected: boolean
+  status: string
+}
 
 // ─── Parse logs → chat messages ──────────────────────────────────────────────
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
@@ -370,46 +358,122 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
-// ─── Connector picker modal ───────────────────────────────────────────────────
-function ConnectorModal({ onSelect, onClose }: { onSelect: (prefix: string) => void; onClose: () => void }) {
+// ─── Plus-menu modal (ChatGPT-style bottom sheet) ────────────────────────────
+interface PlusMenuProps {
+  onAttach: (accept: string, capture?: string) => void
+  onConnector: (connector: ConnectorMeta) => void
+  onClose: () => void
+}
+
+function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
+  const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [query, setQuery] = useState('')
-  const filtered = CONNECTORS.filter((c) =>
-    c.label.toLowerCase().includes(query.toLowerCase())
+
+  // Fetch live connectors from settings API
+  useEffect(() => {
+    let cancelled = false
+    fetch(apiUrl('/api/connectors'), { credentials: 'include' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled && data.ok) setConnectors(data.connectors as ConnectorMeta[])
+      })
+      .catch(() => { /* silently ignore if not authed */ })
+    return () => { cancelled = true }
+  }, [])
+
+  const filteredConnectors = connectors.filter((c) =>
+    c.name.toLowerCase().includes(query.toLowerCase())
   )
+
+  // Attachment rows (top section)
+  const attachRows = [
+    { id: 'camera',  label: 'Camera',  accept: 'image/*', capture: 'environment', icon: (
+      <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
+        <Svg className='h-5 w-5 text-zinc-200'><path d='M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z'/><circle cx='12' cy='13' r='4'/></Svg>
+      </div>
+    )},
+    { id: 'photos',  label: 'Photos',  accept: 'image/*', capture: undefined, icon: (
+      <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
+        <Svg className='h-5 w-5 text-zinc-200'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><path d='M21 15l-5-5L5 21'/></Svg>
+      </div>
+    )},
+    { id: 'files',   label: 'Files',   accept: '*/*', capture: undefined, icon: (
+      <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
+        <IcoPaperclip className='h-5 w-5 text-zinc-200' />
+      </div>
+    )},
+    { id: 'videos',  label: 'Videos',  accept: 'video/*', capture: undefined, icon: (
+      <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
+        <Svg className='h-5 w-5 text-zinc-200'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2'/></Svg>
+      </div>
+    )},
+  ]
 
   return (
     <>
-      <div className='fixed inset-0 z-40 bg-black/60 backdrop-blur-sm' onClick={onClose} />
-      <div className='fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl border border-[#2a2a2a] bg-[#171717] p-4 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:mb-2 sm:rounded-2xl sm:w-80'>
-        <div className='mb-3 flex items-center justify-between'>
-          <span className='text-sm font-semibold text-zinc-200'>Connectors & Commands</span>
-          <button type='button' onClick={onClose} className='rounded-md p-1 text-zinc-500 hover:text-zinc-300'>
-            <IcoX className='h-4 w-4' />
-          </button>
+      {/* Backdrop */}
+      <div className='fixed inset-0 z-40 bg-black/60' onClick={onClose} />
+
+      {/* Bottom sheet on mobile, floating panel on desktop */}
+      <div className='fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl bg-[#1c1c1c] pb-safe shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:mb-2 sm:rounded-2xl sm:w-72 sm:pb-0'>
+        {/* Drag handle (mobile) */}
+        <div className='flex justify-center pt-2 pb-1 sm:hidden'>
+          <div className='h-1 w-10 rounded-full bg-zinc-700' />
         </div>
-        <div className='mb-3 flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2'>
-          <IcoSearch className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder='Search connectors…'
-            className='flex-1 bg-transparent text-sm text-zinc-200 outline-none placeholder:text-zinc-600'
-          />
-        </div>
-        <div className='grid grid-cols-3 gap-2'>
-          {filtered.map((conn) => (
+
+        {/* Attachment section */}
+        <div className='px-1 pt-2'>
+          {attachRows.map((row) => (
             <button
-              key={conn.id}
+              key={row.id}
               type='button'
-              onClick={() => { onSelect(conn.prefix); onClose() }}
-              className='flex flex-col items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111] p-3 text-center text-xs text-zinc-300 hover:border-zinc-600 hover:bg-[#1a1a1a] transition-colors'
+              onClick={() => { onAttach(row.accept, row.capture); onClose() }}
+              className='flex w-full items-center gap-4 rounded-xl px-3 py-2.5 text-left hover:bg-[#2a2a2a] transition-colors'
             >
-              {conn.icon}
-              <span className='leading-tight'>{conn.label}</span>
+              {row.icon}
+              <span className='text-sm font-medium text-zinc-200'>{row.label}</span>
             </button>
           ))}
         </div>
+
+        {/* Divider + connectors section */}
+        {connectors.length > 0 && (
+          <>
+            <div className='mx-4 my-2 border-t border-[#2a2a2a]' />
+            <div className='px-3 pb-1'>
+              <div className='mb-2 flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-1.5'>
+                <IcoSearch className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder='Search connectors…'
+                  className='flex-1 bg-transparent text-xs text-zinc-300 outline-none placeholder:text-zinc-600'
+                />
+              </div>
+              <div className='max-h-40 overflow-y-auto'>
+                {filteredConnectors.map((conn) => (
+                  <button
+                    key={conn.id}
+                    type='button'
+                    onClick={() => { onConnector(conn); onClose() }}
+                    className='flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-[#2a2a2a] transition-colors'
+                  >
+                    <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[#2a2a2a]'>
+                      <img src={conn.icon} alt={conn.name} className='h-5 w-5 rounded object-contain' onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    </div>
+                    <div className='min-w-0 flex-1'>
+                      <span className='block truncate text-sm font-medium text-zinc-200'>{conn.name}</span>
+                    </div>
+                    {conn.connected && conn.status === 'active' && (
+                      <span className='h-1.5 w-1.5 rounded-full bg-emerald-400 flex-shrink-0' />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+        <div className='h-3 sm:h-2' />
       </div>
     </>
   )
@@ -427,7 +491,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
-  const [showConnectors, setShowConnectors] = useState(false)
+  const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
+  const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set())
 
@@ -463,13 +528,16 @@ export function ChatPanel({
   const handleSend = () => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
-    if (trimmed.startsWith('/plan ')) {
-      onDecomposePlan(trimmed.slice(6))
+    // Prepend connector context if active
+    const withContext = activeConnector ? `[${activeConnector.name}] ${trimmed}` : trimmed
+    if (withContext.startsWith('/plan ')) {
+      onDecomposePlan(withContext.slice(6))
     } else {
-      onSend(trimmed || '(attachment)', 'steer')
+      onSend(withContext || '(attachment)', 'steer')
     }
     setInput('')
     setAttachments([])
+    setActiveConnector(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
@@ -482,9 +550,20 @@ export function ChatPanel({
     }
   }
 
-  const handleConnectorSelect = (prefix: string) => {
-    setInput((prev) => prefix + prev)
+  const handleConnectorSelect = (connector: ConnectorMeta) => {
+    setActiveConnector(connector)
     window.setTimeout(() => textareaRef.current?.focus(), 50)
+  }
+
+  const handleAttach = (accept: string, capture?: string) => {
+    if (!fileInputRef.current) return
+    fileInputRef.current.accept = accept
+    if (capture) {
+      fileInputRef.current.setAttribute('capture', capture)
+    } else {
+      fileInputRef.current.removeAttribute('capture')
+    }
+    fileInputRef.current.click()
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -633,53 +712,69 @@ export function ChatPanel({
 
       {/* ── Input bar ── */}
       <div className='relative border-t border-[#2a2a2a] bg-[#141414] px-3 py-2.5'>
-        {showConnectors && (
-          <ConnectorModal
-            onSelect={handleConnectorSelect}
-            onClose={() => setShowConnectors(false)}
+        {/* Plus menu */}
+        {showPlusMenu && (
+          <PlusMenu
+            onAttach={handleAttach}
+            onConnector={handleConnectorSelect}
+            onClose={() => setShowPlusMenu(false)}
           />
         )}
+
+        {/* Connector chip + textarea wrapper */}
         <div className='flex items-end gap-2'>
-          {/* + (connector picker) */}
+          {/* + button */}
           <button
             type='button'
-            onClick={() => setShowConnectors((v) => !v)}
+            onClick={() => setShowPlusMenu((v) => !v)}
             disabled={isDisabled}
             className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
-            aria-label='Open connectors'
+            aria-label='Open menu'
           >
             <Icons.plus className='h-4 w-4' />
           </button>
-          {/* Paperclip */}
-          <button
-            type='button'
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isDisabled}
-            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40 transition-colors'
-            aria-label='Attach file'
-          >
-            <IcoPaperclip className='h-4 w-4' />
-          </button>
-          <input
-            ref={fileInputRef}
-            type='file'
-            multiple
-            accept='image/*,.pdf,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py'
-            className='hidden'
-            onChange={handleFileChange}
-          />
-          {/* Text input */}
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={isDisabled ? 'Connecting…' : 'Message Aegis…'}
-            disabled={isDisabled}
-            rows={1}
-            className='flex-1 resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
-            style={{ minHeight: '36px' }}
-          />
+
+          {/* Input column: connector chip stacked above textarea */}
+          <div className='flex-1 min-w-0'>
+            {/* Connector chip (shown when a connector is active) */}
+            {activeConnector && (
+              <div className='mb-1.5 flex items-center gap-1.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1.5'>
+                <img
+                  src={activeConnector.icon}
+                  alt={activeConnector.name}
+                  className='h-4 w-4 rounded object-contain flex-shrink-0'
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+                <span className='flex-1 text-sm font-medium text-blue-300 truncate'>{activeConnector.name}</span>
+                <button
+                  type='button'
+                  onClick={() => setActiveConnector(null)}
+                  className='flex-shrink-0 rounded p-0.5 text-zinc-500 hover:text-zinc-200 transition-colors'
+                  aria-label='Remove connector'
+                >
+                  <IcoX className='h-3.5 w-3.5' />
+                </button>
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                activeConnector
+                  ? `Ask about ${activeConnector.name}…`
+                  : isDisabled
+                  ? 'Connecting…'
+                  : 'Message Aegis…'
+              }
+              disabled={isDisabled}
+              rows={1}
+              className='w-full resize-none overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-blue-500/60 disabled:opacity-40 transition-colors leading-6'
+              style={{ minHeight: '36px' }}
+            />
+          </div>
+
           {/* Voice */}
           <button
             type='button'
@@ -693,13 +788,23 @@ export function ChatPanel({
           <button
             type='button'
             onClick={handleSend}
-            disabled={isDisabled || (!input.trim() && attachments.length === 0)}
+            disabled={isDisabled || (!input.trim() && attachments.length === 0 && !activeConnector)}
             className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
             aria-label='Send message'
           >
             <IcoSend className='h-4 w-4' />
           </button>
         </div>
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type='file'
+          multiple
+          className='hidden'
+          onChange={handleFileChange}
+        />
+
         {/* Connection status indicator */}
         {connectionStatus !== 'connected' && (
           <p className='mt-1.5 text-center text-[10px] text-zinc-600'>
