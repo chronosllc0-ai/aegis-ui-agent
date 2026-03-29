@@ -283,6 +283,18 @@ async def oauth_callback(
 
     try:
         connector = get_connector(connector_id)
+        # Guard: if credentials aren't configured the exchange will fail with an
+        # unhelpful HTTP 401. Surface a clearer error immediately.
+        if not connector._client_id or not connector._client_secret:
+            logger.error(
+                "OAuth exchange aborted for %s: client_id or client_secret not configured. "
+                "Set %s_CONNECTOR_CLIENT_ID / %s_CONNECTOR_CLIENT_SECRET env vars or add "
+                "credentials via Settings → Connections.",
+                connector_id, connector_id.upper(), connector_id.upper(),
+            )
+            return RedirectResponse(
+                f"{frontend_url}/?settings=Connections&connector_error=credentials_not_configured"
+            )
         tokens = await connector.exchange_code(code, _callback_uri())
 
         # Get user info from the connected account
@@ -355,8 +367,19 @@ async def oauth_callback(
         return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_connected={connector_id}")
 
     except Exception as exc:
-        logger.exception("OAuth exchange failed for %s", connector_id)
-        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=exchange_failed")
+        # Log the real HTTP body if it's an httpx error so Railway logs show why
+        detail = str(exc)
+        if hasattr(exc, "response") and exc.response is not None:  # type: ignore[union-attr]
+            try:
+                detail = f"HTTP {exc.response.status_code}: {exc.response.text[:400]}"  # type: ignore[union-attr]
+            except Exception:
+                pass
+        logger.error("OAuth exchange failed for %s: %s", connector_id, detail, exc_info=True)
+        from urllib.parse import quote
+        safe_detail = quote(detail[:120], safe="")
+        return RedirectResponse(
+            f"{frontend_url}/?settings=Connections&connector_error=exchange_failed&connector_error_detail={safe_detail}"
+        )
 
 
 # ── Disconnect ────────────────────────────────────────────────────────

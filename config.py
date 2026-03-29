@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # ── Gemini-specific (kept for backwards compatibility) ───────────
     GEMINI_MODEL: str = "gemini-2.5-pro"
-    GEMINI_LIVE_MODEL: str = "gemini-2.5-flash-native-audio-preview"
+    GEMINI_LIVE_MODEL: str = "gemini-3.1-flash-live-preview"
 
     # ── Auth / Sessions ──────────────────────────────────────────────
     SESSION_SECRET: str = ""
