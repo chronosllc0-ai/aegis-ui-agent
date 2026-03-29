@@ -77,7 +77,14 @@ function App() {
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
+  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('aegis.taskHistory')
+      return saved ? (JSON.parse(saved) as TaskHistoryItem[]) : []
+    } catch {
+      return []
+    }
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
@@ -248,7 +255,9 @@ function App() {
           instruction: logs.find((entry) => entry.taskId === taskId)?.message ?? 'Task',
         }))
       if (!fromLogs.length) return prev
-      return [...fromLogs, ...prev]
+      const next = [...fromLogs, ...prev].slice(0, 100) // cap at 100
+      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
+      return next
     })
   }, [logs])
 
