@@ -107,66 +107,78 @@ function GeneratingCanvas({ label }: { label: string }) {
 }
 
 // ─── Parse logs → chat messages ──────────────────────────────────────────────
+// ── Heuristics for classifying LogEntry messages ─────────────────────────────
+// A "model response" is any step message that starts with "Model response" — these
+// are raw LLM text turns (not a tool call) and must render as AssistantCard, not
+// as a ToolCard dropdown. The backend currently surfaces them prefixed with
+// "Model response (no tool call):" but may also emit bare text.
+const RE_MODEL_RESPONSE = /^Model response/i
+// Real tool calls are identified by bracket-prefixed messages like [screenshot], [go_to_url], etc.
+const RE_TOOL_CALL = /^\[[\w_]+\]/
+// Only trigger the full-screen generating animation for explicit image/video creation tools.
+// Do NOT match free-text messages that happen to contain the word "generating".
+const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
+
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   return logs.map((entry) => {
+    const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+
+    // ── User navigation (first event of a new task) ───────────────────────
     const isUser = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
-    const isTool = entry.type === 'step' && !isUser
-    const isError = entry.type === 'error'
-    const isResult = entry.type === 'result'
-    const isGenerating = (
-      entry.type === 'step' &&
-      typeof entry.message === 'string' &&
-      /\b(generating|creating image|creating video|rendering|synthesizing)\b/i.test(entry.message)
-    )
+
+    // ── Image/video generation spinner — ONLY for dedicated generation tools ─
+    const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
+
+    // ── Model text response — show as AssistantCard, never as ToolCard ──────
+    // Catches: "Model response (no tool call): ..." and bare model output steps
+    const isModelResponse = entry.type === 'step' && RE_MODEL_RESPONSE.test(msg)
+
+    // ── Real tool call — bracket-prefixed step messages ─────────────────────
+    const isToolCall = entry.type === 'step' && !isUser && !isModelResponse && RE_TOOL_CALL.test(msg)
+
+    // ── Anything else that's a step but not tool-shaped → assistant text ─────
+    const isStepText = entry.type === 'step' && !isUser && !isGenerating && !isModelResponse && !isToolCall
+
+    // Strip the "Model response (no tool call):" prefix for cleaner display
+    const displayText = isModelResponse
+      ? msg.replace(/^Model response\s*\([^)]*\)\s*:\s*/i, '').trim() || msg
+      : msg
 
     if (isGenerating) {
-      return {
-        id: entry.id,
-        role: 'generating' as ChatRole,
-        text: entry.message,
-        timestamp: entry.timestamp,
-      }
+      return { id: entry.id, role: 'generating' as ChatRole, text: msg, timestamp: entry.timestamp }
     }
     if (isUser) {
-      return {
-        id: entry.id,
-        role: 'user' as ChatRole,
-        text: entry.message,
-        timestamp: entry.timestamp,
-      }
+      return { id: entry.id, role: 'user' as ChatRole, text: msg, timestamp: entry.timestamp }
     }
-    if (isTool) {
+    if (isModelResponse || isStepText) {
+      // These are assistant-side text messages — render as full readable AssistantCard
+      return { id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp }
+    }
+    if (isToolCall) {
+      // Extract tool name from bracket prefix e.g. "[go_to_url] {...}" → "go_to_url"
+      const toolMatch = msg.match(/^\[([\w_]+)\]/)
+      const toolName = toolMatch?.[1] ?? entry.stepKind
+      // Args are everything after the bracket prefix (the JSON args object)
+      const argsRaw = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
+      let argsFormatted = argsRaw
+      try {
+        argsFormatted = JSON.stringify(JSON.parse(argsRaw), null, 2)
+      } catch { /* keep raw */ }
       return {
         id: entry.id,
         role: 'tool' as ChatRole,
-        text: entry.message,
-        toolName: entry.stepKind,
+        text: `[${toolName}]`,
+        toolName,
+        toolArgs: argsFormatted || undefined,
         toolStatus: entry.status === 'failed' ? 'failed' : entry.status === 'completed' ? 'completed' : 'in_progress',
         timestamp: entry.timestamp,
       }
     }
-    if (isError) {
-      return {
-        id: entry.id,
-        role: 'assistant' as ChatRole,
-        text: `⚠️ ${entry.message}`,
-        timestamp: entry.timestamp,
-      }
+    if (entry.type === 'error') {
+      return { id: entry.id, role: 'assistant' as ChatRole, text: `⚠️ ${msg}`, timestamp: entry.timestamp }
     }
-    if (isResult) {
-      return {
-        id: entry.id,
-        role: 'assistant' as ChatRole,
-        text: entry.message,
-        timestamp: entry.timestamp,
-      }
-    }
-    return {
-      id: entry.id,
-      role: 'assistant' as ChatRole,
-      text: entry.message,
-      timestamp: entry.timestamp,
-    }
+    // result / interrupt / fallback → assistant text
+    return { id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp }
   })
 }
 
@@ -308,8 +320,13 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
 
 function ToolCard({ msg }: { msg: ChatMessage }) {
   const [expanded, setExpanded] = useState(false)
-  const icon = TOOL_ICON[msg.toolName ?? 'other'] ?? TOOL_ICON.other
+  const toolName = msg.toolName ?? 'other'
+  const icon = TOOL_ICON[toolName] ?? TOOL_ICON.other
   const badge = STATUS_BADGE[msg.toolStatus ?? 'in_progress']
+  // Human-readable label: convert snake_case to Title Case e.g. "go_to_url" → "Go To URL"
+  const toolLabel = toolName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  // When there are no args to show, clicking does nothing useful — still allow expand for consistency
+  const hasArgs = Boolean(msg.toolArgs)
 
   return (
     <div className='flex gap-2.5 mb-1.5'>
@@ -319,20 +336,30 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
       <div className='min-w-0 flex-1'>
         <button
           type='button'
-          onClick={() => setExpanded((v) => !v)}
-          className='w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
+          onClick={() => hasArgs && setExpanded((v) => !v)}
+          className={`w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left transition-colors ${hasArgs ? 'cursor-pointer hover:bg-[#1a1a1a]' : 'cursor-default'}`}
         >
           <div className='flex items-center justify-between gap-2'>
-            <span className='truncate text-xs md:text-lg font-medium text-zinc-300'>{msg.text}</span>
+            {/* Tool name in mono, args preview as dim secondary text */}
+            <div className='min-w-0 flex-1'>
+              <span className='font-mono text-xs font-medium text-zinc-300'>{toolLabel}</span>
+              {!expanded && msg.toolArgs && (
+                <span className='ml-2 text-[10px] text-zinc-600 truncate inline-block max-w-[180px] align-middle'>
+                  {msg.toolArgs.slice(0, 80)}
+                </span>
+              )}
+            </div>
             <div className='flex items-center gap-1.5 flex-shrink-0'>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
                 {msg.toolStatus ?? 'running'}
               </span>
-              <IcoChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {hasArgs && (
+                <IcoChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              )}
             </div>
           </div>
           {expanded && msg.toolArgs && (
-            <pre className='mt-2 overflow-x-auto rounded-lg bg-[#0d0d0d] p-2 text-[10px] text-zinc-400 font-mono'>
+            <pre className='mt-2 overflow-x-auto rounded-lg bg-[#0d0d0d] p-2 text-[10px] text-zinc-400 font-mono whitespace-pre-wrap break-words'>
               {msg.toolArgs}
             </pre>
           )}

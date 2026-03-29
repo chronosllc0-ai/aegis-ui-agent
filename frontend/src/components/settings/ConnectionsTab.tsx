@@ -8,6 +8,8 @@ type ConnectionsTabProps = {
   integrations: IntegrationConfig[]
   onChange: (integrations: IntegrationConfig[]) => void
   isAdmin?: boolean
+  /** Called when user clicks "Manage Permissions" — navigates to Tools & Permissions tab */
+  onManagePermissions?: (connectionId: string) => void
 }
 
 // ── OAuth connector types (from backend) ─────────────────────────────
@@ -58,7 +60,7 @@ const CONNECTOR_ICONS: Record<string, string> = {
 
 // ── Main Component ───────────────────────────────────────────────────
 
-export function ConnectionsTab({ integrations, onChange, isAdmin = false }: ConnectionsTabProps) {
+export function ConnectionsTab({ integrations, onChange, isAdmin = false, onManagePermissions }: ConnectionsTabProps) {
   // — OAuth state
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [oauthLoading, setOauthLoading] = useState(true)
@@ -387,6 +389,16 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                           {expanded ? 'Hide' : 'Actions'}
                         </button>
                       )}
+                      {isConn && onManagePermissions && (
+                        <button
+                          type="button"
+                          onClick={() => onManagePermissions(c.id)}
+                          className="rounded-lg border border-blue-700/50 bg-blue-900/20 px-3 py-1.5 text-xs text-blue-300 hover:bg-blue-900/40"
+                          title="Manage tool permissions for this connection"
+                        >
+                          Permissions
+                        </button>
+                      )}
                       {isConn ? (
                         <button type="button" onClick={() => handleOAuthDisconnect(c.id)} disabled={busy} className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40 disabled:opacity-50">
                           {busy ? 'Working…' : 'Disconnect'}
@@ -535,6 +547,16 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                     >
                       {expanded ? 'Close' : 'Configure'}
                     </button>
+                    {isConn && onManagePermissions && (
+                      <button
+                        type="button"
+                        onClick={() => onManagePermissions(integration.id)}
+                        className="rounded-lg border border-blue-700/50 bg-blue-900/20 px-3 py-1.5 text-xs text-blue-300 hover:bg-blue-900/40"
+                        title="Manage tool permissions for this integration"
+                      >
+                        Permissions
+                      </button>
+                    )}
                     {isConn ? (
                       <button type="button" onClick={() => disconnectBot(integration.id)} className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40">
                         Disconnect

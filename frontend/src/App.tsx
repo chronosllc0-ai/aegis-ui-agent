@@ -196,6 +196,7 @@ function App() {
   }, [currentUrl])
 
   // ── Browser tab title: Working… / Steering… / Aegis ──────────────
+  const titleTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
   useEffect(() => {
     if (!isWorking) { setTitleMode('idle'); return }
@@ -437,9 +438,14 @@ function App() {
 
     // ── Update browser tab title for steering state ────────────────
     if (action === 'steer') {
+      // Clear any pending timer to avoid stacked timeouts from rapid steers
+      if (titleTimeoutRef.current !== null) window.clearTimeout(titleTimeoutRef.current)
       setTitleMode('steering')
       // Flash "Steering…" for 3 s then revert to "Working…"
-      window.setTimeout(() => setTitleMode('working'), 3000)
+      titleTimeoutRef.current = window.setTimeout(() => {
+        setTitleMode('working')
+        titleTimeoutRef.current = null
+      }, 3000)
     }
 
     // Save to task history optimistically at send-time so the title always reflects
@@ -857,9 +863,11 @@ function App() {
                       isDraggingRef.current = false
                       window.removeEventListener('mousemove', onMove)
                       window.removeEventListener('mouseup', onUp)
+                      window.removeEventListener('blur', onUp) // released outside browser tab
                     }
                     window.addEventListener('mousemove', onMove)
                     window.addEventListener('mouseup', onUp)
+                    window.addEventListener('blur', onUp)
                   }}
                 >
                   {/* grip dots */}

@@ -11,6 +11,11 @@ export type WorkflowTemplate = {
   lastRunAt: string
 }
 
+/** Per-tool permission mode.
+ *  'auto'    — agent runs this tool without asking (default)
+ *  'confirm' — agent sends an approval card before using this tool */
+export type ToolPermission = 'auto' | 'confirm'
+
 export type AppSettings = {
   displayName: string
   avatarUrl: string
@@ -26,6 +31,10 @@ export type AppSettings = {
   confirmDestructiveActions: boolean
   integrations: IntegrationConfig[]
   workflowTemplates: WorkflowTemplate[]
+  /** Map of toolId → permission mode. Missing key = 'auto'. */
+  toolPermissions: Record<string, ToolPermission>
+  /** Set of toolIds the user has explicitly disabled (agent will not call them). */
+  disabledTools: string[]
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -45,6 +54,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   confirmDestructiveActions: true,
   integrations: DEFAULT_INTEGRATIONS,
   workflowTemplates: [],
+  toolPermissions: {},
+  disabledTools: [],
 }
 
 // Providers that require a user-supplied BYOK key to work
@@ -119,6 +130,8 @@ export function useSettings() {
         confirm_destructive_actions: settings.confirmDestructiveActions,
       },
       integrations: settings.integrations.filter((integration) => integration.enabled),
+      tool_permissions: settings.toolPermissions,
+      disabled_tools: settings.disabledTools,
     }),
     [settings],
   )
