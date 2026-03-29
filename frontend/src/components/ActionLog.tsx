@@ -74,7 +74,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
                 <div className='space-y-1 px-2 pb-2'>
                   {taskEntries.map((entry) => (
                     <div key={entry.id} className={`rounded border px-2 py-1 ${STATUS_CLASS[entry.status]}`}>
-                      <div className='mb-1 flex items-center justify-between text-[10px] text-zinc-500'>
+                      <div className='mb-1 flex items-center justify-between text-xs text-zinc-500'>
                         <span>{entry.timestamp}</span>
                         <span>{entry.elapsedSeconds.toFixed(1)}s</span>
                       </div>

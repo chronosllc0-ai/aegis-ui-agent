@@ -265,7 +265,7 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
             {att.type.startsWith('image/') ? (
               <img src={att.dataUrl} alt={att.name} className='rounded-lg max-h-40 object-cover border border-[#2a2a2a]' />
             ) : (
-              <div className='flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-zinc-300'>
+              <div className='flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs md:text-sm text-zinc-300'>
                 <IcoFile className='h-4 w-4 flex-shrink-0' />
                 {att.name}
               </div>
