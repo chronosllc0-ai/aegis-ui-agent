@@ -53,14 +53,14 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
   return (
     <section data-tour={dataTour} className='h-full min-h-0 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-2 sm:rounded-2xl sm:p-3'>
       <div className='mb-2 flex items-center justify-between sm:mb-3'>
-        <h2 className='text-xs font-semibold text-zinc-200 sm:text-sm'>Action Log</h2>
-        <div className='flex items-center gap-1 text-[10px] sm:gap-2 sm:text-xs'>
+        <h2 className='text-xs font-semibold text-zinc-200 sm:text-sm md:text-base'>Action Log</h2>
+        <div className='flex items-center gap-1 text-[10px] sm:gap-2 sm:text-xs md:text-sm'>
           <button type='button' onClick={copyLog} className='rounded-md border border-[#2a2a2a] px-1.5 py-0.5 hover:bg-zinc-800 sm:px-2 sm:py-1'>Copy</button>
           <button type='button' onClick={onToggleWorkflow} className='rounded-md border border-[#2a2a2a] px-1.5 py-0.5 hover:bg-zinc-800 sm:px-2 sm:py-1'>{showWorkflow ? 'List' : 'Workflow'}</button>
           <button type='button' onClick={onSaveWorkflow} className='rounded-md border border-[#2a2a2a] px-1.5 py-0.5 hover:bg-zinc-800 sm:px-2 sm:py-1'>Save</button>
         </div>
       </div>
-      <div ref={containerRef} className='h-[calc(100%-2.4rem)] overflow-y-auto font-mono text-xs'>
+      <div ref={containerRef} className='h-[calc(100%-2.4rem)] overflow-y-auto font-mono text-xs md:text-sm'>
         {grouped.map(([taskId, taskEntries], idx) => {
           const title = taskEntries[0]?.message ?? `Task ${idx + 1}`
           const isTaskCollapsed = collapsedTasks[taskId] ?? false
