@@ -300,5 +300,5 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     activeTaskIdRef.current = 'idle'
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef }
 }
