@@ -295,17 +295,7 @@ async def oauth_callback(
             return RedirectResponse(
                 f"{frontend_url}/?settings=Connections&connector_error=credentials_not_configured"
             )
-        # Notion public integrations send workspace_id / workspace_name as extra
-        # callback query params and require them in the token exchange body as
-        # external_account.  Pass them through when present.
-        exchange_kwargs: dict = {}
-        if connector_id == "notion":
-            ws_id = request.query_params.get("workspace_id", "")
-            ws_name = request.query_params.get("workspace_name", "")
-            if ws_id:
-                exchange_kwargs["workspace_id"] = ws_id
-                exchange_kwargs["workspace_name"] = ws_name
-        tokens = await connector.exchange_code(code, _callback_uri(), **exchange_kwargs)
+        tokens = await connector.exchange_code(code, _callback_uri())
 
         # Get user info from the connected account
         account_info = await connector.get_user_info(tokens.access_token)
