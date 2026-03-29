@@ -44,6 +44,8 @@ export interface ChatPanelProps {
   onToggleVoice?: () => void
   /** True when mic hardware isn't available / not HTTPS */
   voiceDisabled?: boolean
+  /** Currently selected task ID — used to persist/restore conversation */
+  activeTaskId?: string | null
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
@@ -533,11 +535,39 @@ export function ChatPanel({
   voiceActive = false,
   onToggleVoice,
   voiceDisabled = false,
+  activeTaskId,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
-  // Local record of user-sent messages (preserves attachments that are never in logs)
-  const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
+
+  // ── Conversation persistence ─────────────────────────────────────────────────
+  // sentMessages are keyed by taskId in localStorage so they survive page reloads.
+  // Key format: aegis.chat.<taskId>  (array of ChatMessage, capped at 200 items)
+  const CHAT_KEY = (id: string) => `aegis.chat.${id}`
+  const loadSaved = (id: string | null | undefined): ChatMessage[] => {
+    if (!id) return []
+    try {
+      const raw = localStorage.getItem(CHAT_KEY(id))
+      return raw ? (JSON.parse(raw) as ChatMessage[]) : []
+    } catch { return [] }
+  }
+  const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
+    if (!id) return
+    try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
+  }
+
+  // Local record of user-sent messages — initialised from storage for the current task
+  const [sentMessages, setSentMessages] = useState<ChatMessage[]>(() => loadSaved(activeTaskId))
+
+  // When the selected task changes, swap in its persisted conversation
+  const prevTaskIdRef = useRef(activeTaskId)
+  useEffect(() => {
+    if (prevTaskIdRef.current === activeTaskId) return
+    prevTaskIdRef.current = activeTaskId
+    setSentMessages(loadSaved(activeTaskId))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTaskId])
+
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set())
@@ -635,6 +665,12 @@ export function ChatPanel({
     return [...sentMessages, ...baseMessages]
   }, [sentMessages, baseMessages])
 
+  // Persist the full conversation (sent + agent responses) whenever it grows
+  useEffect(() => {
+    if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allMessages.length, activeTaskId])
+
   // Show browsing-pill when agent is working but we're on chat side
   const showBrowsePill = isWorking && latestFrame
 
@@ -671,7 +707,11 @@ export function ChatPanel({
       timestamp: now,
       attachments: attachments.length > 0 ? [...attachments] : undefined,
     }
-    setSentMessages((prev) => [...prev, localMsg])
+    setSentMessages((prev) => {
+      const next = [...prev, localMsg]
+      saveMsgs(activeTaskId, next)
+      return next
+    })
     if (withContext.startsWith('/plan ')) {
       onDecomposePlan(withContext.slice(6))
     } else {

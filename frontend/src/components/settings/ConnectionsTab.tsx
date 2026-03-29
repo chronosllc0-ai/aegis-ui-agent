@@ -95,10 +95,19 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
     const connected = params.get('connector_connected')
     const connError = params.get('connector_error')
     if (connected || connError) {
-      if (connError) setGlobalError(`Connection failed: ${connError}`)
+      if (connError) {
+        const detail = params.get('connector_error_detail')
+        const label = connError === 'credentials_not_configured'
+          ? 'Connector credentials not configured — add Client ID & Secret in Settings → Connections.'
+          : detail
+            ? `Connection failed: ${connError} — ${decodeURIComponent(detail)}`
+            : `Connection failed: ${connError}`
+        setGlobalError(label)
+      }
       const url = new URL(window.location.href)
       url.searchParams.delete('connector_connected')
       url.searchParams.delete('connector_error')
+      url.searchParams.delete('connector_error_detail')
       url.searchParams.delete('settings')
       window.history.replaceState({}, '', url.toString())
     }
