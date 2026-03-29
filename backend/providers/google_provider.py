@@ -18,6 +18,11 @@ GOOGLE_MODELS = [
     "gemini-2.5-flash",
 ]
 
+GOOGLE_THINKING_MODELS = {
+    "gemini-3.1-pro-preview", "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"
+}
+
 
 class GoogleProvider(BaseProvider):
     """Adapter for the Google Gemini / GenAI API."""
@@ -42,6 +47,7 @@ class GoogleProvider(BaseProvider):
             streaming=True,
             vision=True,
             function_calling=True,
+            reasoning=True,
             max_context_tokens=1_000_000,
         )
 
@@ -110,6 +116,8 @@ class GoogleProvider(BaseProvider):
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        enable_reasoning: bool = False,
+        reasoning_budget: int = 8000,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
@@ -118,14 +126,33 @@ class GoogleProvider(BaseProvider):
         config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
         if system:
             config["system_instruction"] = system
+
+        if enable_reasoning and model_name in GOOGLE_THINKING_MODELS:
+            config["thinking_config"] = {"thinking_budget": reasoning_budget}
+
         async for chunk in client.aio.models.generate_content_stream(
             model=model_name,
             contents=contents,
             config=config,
         ):
-            text = chunk.text or ""
-            if text:
-                yield StreamChunk(delta=text)
+            try:
+                candidates = getattr(chunk, "candidates", None) or []
+                for candidate in candidates:
+                    content = getattr(candidate, "content", None)
+                    parts = getattr(content, "parts", None) or []
+                    for part in parts:
+                        is_thought = getattr(part, "thought", False)
+                        text = getattr(part, "text", "") or ""
+                        if text:
+                            if is_thought:
+                                yield StreamChunk(delta="", reasoning_delta=text)
+                            else:
+                                yield StreamChunk(delta=text)
+            except Exception:  # noqa: BLE001
+                # Fallback to simple text extraction
+                text = getattr(chunk, "text", "") or ""
+                if text:
+                    yield StreamChunk(delta=text)
 
     def validate_api_key(self, api_key: str) -> bool:
         return bool(api_key and len(api_key) > 10)

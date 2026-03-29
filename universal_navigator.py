@@ -374,6 +374,9 @@ async def run_universal_navigation(
     on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
     user_uid: str | None = None,
+    enable_reasoning: bool = False,
+    reasoning_effort: str = "medium",
+    on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider.
 
@@ -424,24 +427,54 @@ async def run_universal_navigation(
             messages.append(ChatMessage(role="user", content=steer_text))
             await emit_step(steer_text, step_type="steer")
 
-        # Call the LLM
+        # Call the LLM via streaming to capture reasoning deltas
         try:
-            response = await provider.chat(
+            reply_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            thinking_step_id = str(uuid4())
+
+            # Emit a reasoning_start step so the client can show a "thinking" indicator
+            if enable_reasoning and on_step:
+                await on_step({
+                    "type": "reasoning_start",
+                    "step_id": thinking_step_id,
+                    "content": "[thinking]",
+                    "steering": [],
+                })
+
+            async for chunk in provider.stream(
                 messages,
                 model=model,
                 temperature=0.2,
                 max_tokens=1024,
-            )
+                enable_reasoning=enable_reasoning,
+                reasoning_effort=reasoning_effort,
+            ):
+                if cancel_event and cancel_event.is_set():
+                    break
+                if chunk.reasoning_delta:
+                    reasoning_parts.append(chunk.reasoning_delta)
+                    if on_reasoning_delta:
+                        await on_reasoning_delta(thinking_step_id, chunk.reasoning_delta)
+                if chunk.delta:
+                    reply_parts.append(chunk.delta)
+
+            reply = "".join(reply_parts).strip()
+
+            # Emit full reasoning as a collapsible step after streaming completes
+            if reasoning_parts and on_step:
+                full_reasoning = "".join(reasoning_parts)
+                await on_step({
+                    "type": "reasoning",
+                    "step_id": thinking_step_id,
+                    "content": f"[reasoning] {full_reasoning}",
+                    "steering": [],
+                })
+
         except Exception as exc:  # noqa: BLE001
-            logger.exception("LLM call failed at step %d", step_num)
+            logger.exception("LLM stream failed at step %d", step_num)
             return {"status": "failed", "instruction": instruction, "steps": steps, "error": str(exc), "input_tokens": total_input_tokens, "output_tokens": total_output_tokens}
 
-        # Accumulate token usage
-        if response.usage:
-            total_input_tokens += response.usage.get("prompt_tokens", 0)
-            total_output_tokens += response.usage.get("completion_tokens", 0)
-
-        reply = response.content.strip()
         messages.append(ChatMessage(role="assistant", content=reply))
 
         # Parse tool call

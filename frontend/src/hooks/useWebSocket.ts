@@ -7,10 +7,11 @@ export type LogEntry = {
   taskId: string
   message: string
   timestamp: string
-  type: 'step' | 'result' | 'error' | 'interrupt'
+  type: 'step' | 'result' | 'error' | 'interrupt' | 'reasoning_start' | 'reasoning'
   status: 'in_progress' | 'completed' | 'failed' | 'steered'
   stepKind: 'analyze' | 'click' | 'type' | 'scroll' | 'navigate' | 'other'
   elapsedSeconds: number
+  stepId?: string           // links reasoning to its step
 }
 
 export type TranscriptEntry = {
@@ -32,7 +33,7 @@ export type WorkflowStep = {
 }
 
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id'
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -57,6 +58,8 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
   // Server-assigned conversation ID for the active session — used to load history from DB
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  // Maps step_id → accumulated reasoning text
+  const [reasoningMap, setReasoningMap] = useState<Record<string, string>>({})
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
@@ -219,6 +222,46 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         onUsageMessage?.(payload as unknown as Record<string, unknown>)
         return
       }
+      if (payload.type === 'reasoning_start') {
+        const stepId = String(payload.data?.step_id ?? '')
+        if (stepId) {
+          setReasoningMap((prev) => ({ ...prev, [stepId]: '' }))
+          appendLog({
+            message: '[thinking]',
+            taskId,
+            type: 'reasoning_start',
+            status: 'in_progress',
+            stepId,
+          })
+        }
+        return
+      }
+      if (payload.type === 'reasoning_delta') {
+        const stepId = String(payload.data?.step_id ?? '')
+        const delta = String(payload.data?.delta ?? '')
+        if (stepId && delta) {
+          setReasoningMap((prev) => ({
+            ...prev,
+            [stepId]: (prev[stepId] ?? '') + delta,
+          }))
+        }
+        return
+      }
+      if (payload.type === 'reasoning') {
+        // Full reasoning result — update log entry status
+        const stepId = String(payload.data?.step_id ?? '')
+        const content = String(payload.data?.content ?? '')
+        if (stepId) {
+          setLogs((prev) =>
+            prev.map((e) =>
+              e.stepId === stepId
+                ? { ...e, type: 'reasoning', status: 'completed', message: content }
+                : e,
+            ),
+          )
+        }
+        return
+      }
       if (payload.type === 'error') {
         setIsWorking(false)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
@@ -304,8 +347,9 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     setIsWorking(false)
     setWorkflowSteps([])
     setTranscripts([])
+    setReasoningMap({})
     activeTaskIdRef.current = 'idle'
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap }
 }

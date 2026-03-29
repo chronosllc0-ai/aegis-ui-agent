@@ -3,6 +3,8 @@ import { DEFAULT_INTEGRATIONS, normalizeIntegrationConfig, type IntegrationConfi
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
+export type ReasoningEffort = 'low' | 'medium' | 'high'
+
 export type WorkflowTemplate = {
   id: string
   name: string
@@ -35,6 +37,10 @@ export type AppSettings = {
   toolPermissions: Record<string, ToolPermission>
   /** Set of toolIds the user has explicitly disabled (agent will not call them). */
   disabledTools: string[]
+  /** Whether to enable reasoning/thinking tokens for models that support it. */
+  enableReasoning: boolean
+  /** Reasoning effort level for models that support it (e.g. o3, grok-3-mini). */
+  reasoningEffort: ReasoningEffort
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -56,6 +62,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   workflowTemplates: [],
   toolPermissions: {},
   disabledTools: [],
+  enableReasoning: false,
+  reasoningEffort: 'medium',
 }
 
 // Providers that require a user-supplied BYOK key to work
@@ -132,6 +140,8 @@ export function useSettings() {
       integrations: settings.integrations.filter((integration) => integration.enabled),
       tool_permissions: settings.toolPermissions,
       disabled_tools: settings.disabledTools,
+      enable_reasoning: settings.enableReasoning,
+      reasoning_effort: settings.reasoningEffort,
     }),
     [settings],
   )

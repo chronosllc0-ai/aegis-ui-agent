@@ -57,10 +57,22 @@ export interface ChatPanelProps {
   onPlanConfirm?: (requestId: string) => void
   /** Called when user rejects a plan_confirm card */
   onPlanReject?: (requestId: string) => void
+  /** Map of step_id → accumulated reasoning text */
+  reasoningMap?: Record<string, string>
+  /** Whether reasoning/thinking mode is enabled */
+  enableReasoning?: boolean
+  /** Toggle reasoning on/off */
+  onToggleReasoning?: (enabled: boolean) => void
+  /** Current reasoning effort level */
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  /** Change reasoning effort level */
+  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  /** Whether the currently selected model supports reasoning */
+  currentModelSupportsReasoning?: boolean
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'thinking'
 
 interface ChatMessage {
   id: string
@@ -77,6 +89,8 @@ interface ChatMessage {
   question?: string
   options?: string[]
   requestId?: string
+  // reasoning/thinking card fields
+  stepId?: string
 }
 
 interface AttachedFile {
@@ -130,15 +144,31 @@ const RE_TOOL_CALL = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
 
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
-  return logs.map((entry) => {
+  const msgs: ChatMessage[] = []
+  for (const entry of logs) {
     const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+
+    // ── Reasoning entries → thinking role cards ─────────────────────────────
+    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
+      const stepId = entry.stepId
+      if (stepId) {
+        msgs.push({
+          id: entry.id,
+          role: 'thinking',
+          text: entry.message,
+          timestamp: entry.timestamp,
+          stepId,
+        })
+      }
+      continue
+    }
 
     // ── Special card types ─────────────────────────────────────────────────
     if (msg.startsWith('[ask_user_input]')) {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
         const parsed = JSON.parse(jsonStr)
-        return {
+        msgs.push({
           id: entry.id,
           role: 'user_input' as ChatRole,
           text: msg,
@@ -146,28 +176,31 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
           question: parsed.question as string,
           options: parsed.options as string[],
           requestId: parsed.request_id as string,
-        }
+        })
+        continue
       } catch { /* fall through */ }
     }
     if (msg.startsWith('[summarize_task]')) {
       const summary = msg.replace('[summarize_task]', '').trim()
-      return { id: entry.id, role: 'task_summary' as ChatRole, text: summary, timestamp: entry.timestamp }
+      msgs.push({ id: entry.id, role: 'task_summary' as ChatRole, text: summary, timestamp: entry.timestamp })
+      continue
     }
     if (msg.startsWith('[confirm_plan]')) {
       try {
         const jsonStr = msg.replace('[confirm_plan]', '').trim()
         const parsed = JSON.parse(jsonStr)
-        return {
+        msgs.push({
           id: entry.id,
           role: 'plan_confirm' as ChatRole,
           text: parsed.plan as string ?? jsonStr,
           timestamp: entry.timestamp,
           requestId: parsed.request_id as string,
-        }
+        })
       } catch {
         const plan = msg.replace('[confirm_plan]', '').trim()
-        return { id: entry.id, role: 'plan_confirm' as ChatRole, text: plan, timestamp: entry.timestamp }
+        msgs.push({ id: entry.id, role: 'plan_confirm' as ChatRole, text: plan, timestamp: entry.timestamp })
       }
+      continue
     }
 
     // ── User navigation (first event of a new task) ───────────────────────
@@ -192,14 +225,17 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       : msg
 
     if (isGenerating) {
-      return { id: entry.id, role: 'generating' as ChatRole, text: msg, timestamp: entry.timestamp }
+      msgs.push({ id: entry.id, role: 'generating' as ChatRole, text: msg, timestamp: entry.timestamp })
+      continue
     }
     if (isUser) {
-      return { id: entry.id, role: 'user' as ChatRole, text: msg, timestamp: entry.timestamp }
+      msgs.push({ id: entry.id, role: 'user' as ChatRole, text: msg, timestamp: entry.timestamp })
+      continue
     }
     if (isModelResponse || isStepText) {
       // These are assistant-side text messages — render as full readable AssistantCard
-      return { id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp }
+      msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp })
+      continue
     }
     if (isToolCall) {
       // Extract tool name from bracket prefix e.g. "[go_to_url] {...}" → "go_to_url"
@@ -211,7 +247,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       try {
         argsFormatted = JSON.stringify(JSON.parse(argsRaw), null, 2)
       } catch { /* keep raw */ }
-      return {
+      msgs.push({
         id: entry.id,
         role: 'tool' as ChatRole,
         text: `[${toolName}]`,
@@ -219,14 +255,17 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
         toolArgs: argsFormatted || undefined,
         toolStatus: entry.status === 'failed' ? 'failed' : entry.status === 'completed' ? 'completed' : 'in_progress',
         timestamp: entry.timestamp,
-      }
+      })
+      continue
     }
     if (entry.type === 'error') {
-      return { id: entry.id, role: 'assistant' as ChatRole, text: `⚠️ ${msg}`, timestamp: entry.timestamp }
+      msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: `⚠️ ${msg}`, timestamp: entry.timestamp })
+      continue
     }
     // result / interrupt / fallback → assistant text
-    return { id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp }
-  })
+    msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp })
+  }
+  return msgs
 }
 
 // ─── Code block parser ────────────────────────────────────────────────────────
@@ -640,14 +679,87 @@ function PlanConfirmCard({
   )
 }
 
+// ─── ThinkingCard (ChatGPT-style streaming reasoning dropdown) ────────────────
+interface ThinkingCardProps {
+  stepId: string
+  reasoningText: string
+  isStreaming: boolean
+}
+
+function ThinkingCard({ stepId: _stepId, reasoningText, isStreaming }: ThinkingCardProps) {
+  const [userCollapsed, setUserCollapsed] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const shouldExpand = isStreaming ? !userCollapsed : false
+  const [manualExpand, setManualExpand] = useState(false)
+
+  // Auto-scroll while streaming
+  useEffect(() => {
+    if ((shouldExpand || manualExpand) && contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight
+    }
+  })
+
+  const displayTitle = reasoningText.split('\n')[0]?.slice(0, 60) || 'Thinking…'
+  const isOpen = shouldExpand || manualExpand
+
+  return (
+    <div className='mb-1.5 overflow-hidden rounded-xl border border-violet-500/20 bg-[#1a1a1a]'>
+      <button
+        type='button'
+        onClick={() => {
+          if (isStreaming) {
+            setUserCollapsed((v) => !v)
+          } else {
+            setManualExpand((v) => !v)
+          }
+        }}
+        className='flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#2a2a2a] transition-colors'
+      >
+        {isStreaming ? (
+          <span className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
+            <span className='h-3 w-3 animate-spin rounded-full border-2 border-violet-400 border-t-transparent' />
+          </span>
+        ) : (
+          <svg className='h-4 w-4 flex-shrink-0 text-violet-400' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/>
+            <path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/>
+          </svg>
+        )}
+        <span className='flex-1 truncate text-xs font-medium text-violet-300'>
+          {isStreaming ? displayTitle : `Reasoned: ${displayTitle}`}
+        </span>
+        <svg
+          className={`h-3.5 w-3.5 flex-shrink-0 text-zinc-500 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'
+        >
+          <path d='M6 9l6 6 6-6' />
+        </svg>
+      </button>
+      {isOpen && (
+        <div
+          ref={contentRef}
+          className='max-h-48 overflow-y-auto px-3 pb-3 pt-1 font-mono text-xs leading-relaxed text-zinc-400 whitespace-pre-wrap'
+        >
+          {reasoningText || <span className='animate-pulse text-zinc-600'>…</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Plus-menu modal (ChatGPT-style bottom sheet) ────────────────────────────
 interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
   onConnector: (connector: ConnectorMeta) => void
   onClose: () => void
+  enableReasoning?: boolean
+  onToggleReasoning?: (enabled: boolean) => void
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  modelSupportsReasoning?: boolean
 }
 
-function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
+function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleReasoning, reasoningEffort, onChangeReasoningEffort, modelSupportsReasoning }: PlusMenuProps) {
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [query, setQuery] = useState('')
 
@@ -718,6 +830,61 @@ function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
           ))}
         </div>
 
+        {/* Reasoning toggle — shown above connector search bar, only for capable models */}
+        {modelSupportsReasoning && (
+          <>
+            <div className='mx-4 my-2 border-t border-[#2a2a2a]' />
+            <div className='px-3 pb-1'>
+              <div className='mb-2 flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <svg className='h-4 w-4 text-violet-400' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                    <path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/>
+                    <path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/>
+                  </svg>
+                  <span className='text-sm font-medium text-zinc-200'>Reasoning</span>
+                  {enableReasoning && (
+                    <span className='rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-300'>ON</span>
+                  )}
+                </div>
+                <button
+                  type='button'
+                  onClick={() => onToggleReasoning?.(!enableReasoning)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+                    enableReasoning ? 'bg-violet-600' : 'bg-[#2a2a2a]'
+                  }`}
+                  role='switch'
+                  aria-checked={enableReasoning}
+                  aria-label='Toggle reasoning'
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                      enableReasoning ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+              {enableReasoning && (
+                <div className='flex gap-1.5'>
+                  {(['low', 'medium', 'high'] as const).map((effort) => (
+                    <button
+                      key={effort}
+                      type='button'
+                      onClick={() => onChangeReasoningEffort?.(effort)}
+                      className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
+                        reasoningEffort === effort
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {effort}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {/* Divider + connectors section */}
         {connectors.length > 0 && (
           <>
@@ -780,6 +947,12 @@ export function ChatPanel({
   onUserInputResponse,
   onPlanConfirm,
   onPlanReject,
+  reasoningMap,
+  enableReasoning,
+  onToggleReasoning,
+  reasoningEffort,
+  onChangeReasoningEffort,
+  currentModelSupportsReasoning,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1134,6 +1307,22 @@ export function ChatPanel({
               />
             )
           }
+          if (msg.role === 'thinking') {
+            const stepId = msg.stepId ?? ''
+            const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
+            const isStreaming = isWorking && reasoningText.length < 3
+            return (
+              <div key={msg.id} className='flex justify-start px-2 py-0.5'>
+                <div className='w-full max-w-[85%]'>
+                  <ThinkingCard
+                    stepId={stepId}
+                    reasoningText={reasoningText}
+                    isStreaming={isStreaming}
+                  />
+                </div>
+              </div>
+            )
+          }
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 
@@ -1189,6 +1378,11 @@ export function ChatPanel({
             onAttach={handleAttach}
             onConnector={handleConnectorSelect}
             onClose={() => setShowPlusMenu(false)}
+            enableReasoning={enableReasoning}
+            onToggleReasoning={onToggleReasoning}
+            reasoningEffort={reasoningEffort}
+            onChangeReasoningEffort={onChangeReasoningEffort}
+            modelSupportsReasoning={currentModelSupportsReasoning}
           />
         )}
 

@@ -195,6 +195,7 @@ class AgentOrchestrator:
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         user_uid: str | None = None,
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+        on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction.
 
@@ -220,6 +221,9 @@ class AgentOrchestrator:
             _, provider_instance, model_id = resolved
             logger.info("Using universal navigator for provider=%s model=%s", provider_name, model_id)
 
+            enable_reasoning = bool((settings or {}).get("enable_reasoning", False))
+            reasoning_effort = str((settings or {}).get("reasoning_effort", "medium"))
+
             from universal_navigator import run_universal_navigation
             return await run_universal_navigation(
                 provider=provider_instance,
@@ -233,6 +237,9 @@ class AgentOrchestrator:
                 on_workflow_step=on_workflow_step,
                 on_user_input=on_user_input,
                 user_uid=user_uid,
+                enable_reasoning=enable_reasoning,
+                reasoning_effort=reasoning_effort,
+                on_reasoning_delta=on_reasoning_delta,
             )
 
         # ── Gemini / ADK path (original) ───────────────────────────────

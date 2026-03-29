@@ -57,7 +57,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId } = useWebSocket(handleUsageMessage)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap } = useWebSocket(handleUsageMessage)
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -833,6 +833,12 @@ function App() {
                 activeTaskId={selectedTaskId}
                 serverMessages={serverMessages}
                 onStop={() => send({ action: 'stop' })}
+                reasoningMap={reasoningMap}
+                enableReasoning={settings.enableReasoning}
+                onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}
+                reasoningEffort={settings.reasoningEffort}
+                onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
+                currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
               />
             ) : (
               /* Browser layout — ScreenView full height, ActionLog as floating overlay on desktop */
@@ -851,10 +857,10 @@ function App() {
 
                 {/* Action log — full width on mobile, floating overlay on desktop */}
                 <div className='min-h-[8rem] md:hidden'>
-                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
                 <div className='hidden md:block md:absolute md:bottom-3 md:right-3 md:w-[320px] md:max-h-[55%] md:z-10'>
-                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
               </div>
             )}
