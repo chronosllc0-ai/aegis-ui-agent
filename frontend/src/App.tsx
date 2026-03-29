@@ -598,7 +598,7 @@ function App() {
           <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
             New Task
           </button>
-          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-base' />
+          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
           {/* ── Task list with independent scroll ── */}
           <div className='min-h-0 flex-1 overflow-y-auto space-y-3 scrollbar-thin'>
@@ -611,7 +611,7 @@ function App() {
                   <div className='space-y-1'>
                     {items.map((item) => (
                       <div key={item.id} className='group relative'>
-                        <button type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 pr-7 text-left text-xs md:text-sm ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
+                        <button type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 pr-7 text-left text-xs md:text-lg ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
                           <p className='truncate text-zinc-200'>{item.title}</p>
                           <p className='truncate text-zinc-500'>{item.instruction}</p>
                         </button>
@@ -733,7 +733,7 @@ function App() {
                 {Icons.chevronRight({ className: 'h-4 w-4' })}
               </button>
               <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>
-              <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm md:text-base' />
+              <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm md:text-xl' />
               <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 sm:px-3'>Go</button>
             </section>
           )}

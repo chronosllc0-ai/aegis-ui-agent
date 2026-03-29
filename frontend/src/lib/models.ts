@@ -41,7 +41,7 @@ export const PROVIDERS: ProviderInfo[] = [
     keyPrefix: '',
     gatewayOnly: true,
     models: [
-      { id: 'nvidia/nemotron-3-super:free', label: 'Nemotron 3 Super (Free)', description: 'Free · NVIDIA 1M context · Best to start with', vision: false, contextLength: 1_000_000 },
+      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1:free', label: 'Nemotron 3 Super (Free)', description: 'Free · NVIDIA 1M context · Best to start with', vision: false, contextLength: 1_000_000 },
       { id: 'openai/gpt-5.4', label: 'GPT-5.4', description: "OpenAI's latest frontier model", vision: true, contextLength: 1_048_576 },
       { id: 'openai/gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Fast, cost-efficient GPT-5.4', vision: true, contextLength: 400_000 },
       { id: 'openai/gpt-5.4-nano', label: 'GPT-5.4 Nano', description: 'Lightest GPT-5.4 variant', vision: true, contextLength: 400_000 },
@@ -52,7 +52,7 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'google/gemini-3.1-pro-preview-custom-tools', label: 'Gemini 3.1 Pro', description: 'Best Gemini with tool accuracy', vision: true, contextLength: 1_048_576 },
       { id: 'qwen/qwen3-max-thinking', label: 'Qwen3 Max Thinking', description: 'Flagship reasoning from Qwen3', vision: false, contextLength: 262_144 },
       { id: 'mistralai/mistral-small-4', label: 'Mistral Small 4', description: 'Lean European model, 128K context', vision: false, contextLength: 128_000 },
-      { id: 'nvidia/nemotron-3-super', label: 'Nemotron 3 Super', description: 'NVIDIA 120B param, 1M context', vision: false, contextLength: 1_000_000 },
+      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1', label: 'Nemotron 3 Super', description: 'NVIDIA 120B param, 1M context', vision: false, contextLength: 1_000_000 },
     ],
   },
   // ── Google ──────────────────────────────────────────────────────────
@@ -140,8 +140,8 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'google/gemini-3.1-pro-preview-custom-tools', label: 'Gemini 3.1 Pro Custom Tools', description: 'Gemini 3.1 Pro variant that improves tool-use accuracy.', vision: true, contextLength: 1_048_576 },
       { id: 'minimax/minimax-m2.7', label: 'MiniMax M2.7', description: 'Next-gen LLM for autonomous tasks, 204K context.', vision: false, contextLength: 204_800 },
       { id: 'minimax/minimax-m2.5', label: 'MiniMax M2.5', description: 'SOTA LLM for real-world productivity.', vision: false, contextLength: 197_000 },
-      { id: 'nvidia/nemotron-3-super', label: 'Nemotron 3 Super', description: 'NVIDIA 120B-param open hybrid Mamba-Transformer MoE model.', vision: false, contextLength: 1_000_000 },
-      { id: 'nvidia/nemotron-3-super:free', label: 'Nemotron 3 Super (free)', description: 'Free tier of NVIDIA Nemotron 3 Super — 1M context.', vision: false, contextLength: 1_000_000 },
+      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1', label: 'Nemotron 3 Super', description: 'NVIDIA 120B-param open hybrid Mamba-Transformer MoE model.', vision: false, contextLength: 1_000_000 },
+      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1:free', label: 'Nemotron 3 Super (free)', description: 'Free tier of NVIDIA Nemotron 3 Super — 1M context.', vision: false, contextLength: 1_000_000 },
       { id: 'z-ai/glm-5-turbo', label: 'GLM 5 Turbo', description: 'Fast inference and strong performance by Z.ai.', vision: false, contextLength: 200_000 },
       { id: 'z-ai/glm-5', label: 'GLM 5', description: "Z.ai's flagship open-source foundation model.", vision: false, contextLength: 200_000 },
       { id: 'bytedance-seed/seed-2.0-lite', label: 'Seed-2.0-Lite', description: 'Versatile, cost-efficient enterprise workhorse by ByteDance.', vision: false, contextLength: 262_144 },
