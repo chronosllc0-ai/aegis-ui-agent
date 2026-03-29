@@ -348,6 +348,8 @@ class SessionRuntime:
         self.settings: dict[str, Any] = {}
         self.conversation_id: str | None = None
         self.user_uid: str | None = None
+        # Pending user-input futures keyed by request_id
+        self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -836,6 +838,29 @@ async def _run_navigation_task(
     runtime.task_running = True
     runtime.cancel_event.clear()
 
+    async def _on_user_input(question: str, options: list[str]) -> str:
+        """Send a user_input_request WS message and await the user's response."""
+        import uuid as _uuid
+        request_id = str(_uuid.uuid4())
+        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        runtime.pending_user_inputs[request_id] = fut
+        try:
+            await websocket.send_json({
+                "type": "step",
+                "data": {
+                    "type": "user_input_request",
+                    "content": f"[ask_user_input] {question}",
+                    "question": question,
+                    "options": options,
+                    "request_id": request_id,
+                },
+            })
+            return await asyncio.wait_for(fut, timeout=300.0)
+        except asyncio.TimeoutError:
+            return "No response (timed out)."
+        finally:
+            runtime.pending_user_inputs.pop(request_id, None)
+
     try:
         result = await _get_orchestrator().execute_task(
             session_id=session_id,
@@ -847,6 +872,7 @@ async def _run_navigation_task(
             settings=runtime.settings,
             on_workflow_step=lambda step: _send_workflow_step(websocket, step),
             user_uid=runtime.user_uid,
+            on_user_input=_on_user_input,
         )
         result_status = result.get("status") if isinstance(result, dict) else "completed"
 
@@ -1030,6 +1056,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                             metadata={"source": "voice", "action": "navigate"},
                         )
                         _start_navigation_task(websocket, runtime, session_id, transcript)
+            elif action == "user_input_response":
+                request_id = str(data.get("request_id", ""))
+                response_text = str(data.get("response", ""))
+                fut = runtime.pending_user_inputs.get(request_id)
+                if fut and not fut.done():
+                    fut.set_result(response_text)
+                else:
+                    logger.debug("user_input_response for unknown/expired request_id=%s", request_id)
             elif action == "ping":
                 # Client keepalive ping — just ignore silently (server already handles ws-level pings)
                 pass

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useMemo, useRef, useState, type ReactElement } from 'react'
 import type { LogEntry } from '../hooks/useWebSocket'
 import { Icons } from './icons'
 
@@ -39,12 +39,6 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
     return Array.from(map.entries()).reverse()
   }, [entries])
 
-  useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-  }, [entries])
-
   const copyLog = async () => {
     const blob = entries.map((entry) => `[${entry.timestamp}] (${entry.taskId}) ${entry.message} (${entry.elapsedSeconds.toFixed(1)}s)`).join('\n')
     await navigator.clipboard.writeText(blob)
@@ -72,7 +66,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
               </button>
               {!isTaskCollapsed && (
                 <div className='space-y-1 px-2 pb-2'>
-                  {taskEntries.map((entry) => (
+                  {[...taskEntries].reverse().map((entry) => (
                     <div key={entry.id} className={`rounded border px-2 py-1 ${STATUS_CLASS[entry.status]}`}>
                       <div className='mb-1 flex items-center justify-between text-xs text-zinc-500'>
                         <span>{entry.timestamp}</span>

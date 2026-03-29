@@ -13,7 +13,7 @@
  * In Slack/Telegram/Discord bot channels the confirmation is sent there instead.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { AppSettings, ToolPermission } from '../../hooks/useSettings'
 import { apiUrl } from '../../lib/api'
 
@@ -95,6 +95,25 @@ const GITHUB_BOT_TOOLS: ToolDef[] = [
   { id: 'github_webhook_event',     name: 'Webhook Event',    description: 'Receive incoming webhook events', risk: 'low',    defaultPermission: 'auto' },
 ]
 
+const MEMORY_TOOLS: ToolDef[] = [
+  { id: 'memory_search', name: 'Memory Search',  description: 'Semantic search through stored memories',           risk: 'low',    defaultPermission: 'auto' },
+  { id: 'memory_write',  name: 'Memory Write',   description: 'Store a new memory entry',                         risk: 'medium', defaultPermission: 'auto' },
+  { id: 'memory_read',   name: 'Memory Read',    description: 'Read a specific memory entry by ID',               risk: 'low',    defaultPermission: 'auto' },
+  { id: 'memory_patch',  name: 'Memory Patch',   description: 'Update an existing memory entry',                  risk: 'medium', defaultPermission: 'auto' },
+]
+
+const AGENT_INTERACTION_TOOLS: ToolDef[] = [
+  { id: 'ask_user_input',  name: 'Ask User Input',  description: 'Pause and ask the user a question mid-task',       risk: 'low',    defaultPermission: 'auto' },
+  { id: 'summarize_task',  name: 'Summarize Task',  description: 'Generate a structured summary of completed work',  risk: 'low',    defaultPermission: 'auto' },
+  { id: 'confirm_plan',    name: 'Confirm Plan',    description: 'Present a plan for user approval before executing', risk: 'low',    defaultPermission: 'auto' },
+]
+
+const CRON_TOOLS: ToolDef[] = [
+  { id: 'cron_write',  name: 'Create Automation', description: 'Create a new scheduled automation task',           risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'cron_patch',  name: 'Edit Automation',   description: 'Modify an existing scheduled automation',          risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'cron_delete', name: 'Delete Automation', description: 'Permanently delete a scheduled automation',        risk: 'high',   defaultPermission: 'confirm' },
+]
+
 // OAuth connector tools come from the backend /api/connectors/:id/actions endpoint.
 // We define the well-known ones here so they display immediately; dynamic ones
 // fetched from the server are merged in at runtime.
@@ -107,6 +126,30 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     description: 'Core browser automation — navigate, click, type, screenshot. Always available.',
     canDisable: true,
     tools: BROWSER_TOOLS,
+  },
+  {
+    id: 'agent-interaction',
+    label: 'Agent Interaction',
+    icon: '🤝',
+    description: 'Tools for agent–human collaboration: asking questions, confirming plans, and summarizing work.',
+    canDisable: true,
+    tools: AGENT_INTERACTION_TOOLS,
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    icon: '🧠',
+    description: 'Read, write, search, and update the agent\'s persistent memory store.',
+    canDisable: true,
+    tools: MEMORY_TOOLS,
+  },
+  {
+    id: 'cron',
+    label: 'Automations (Cron)',
+    icon: '⏰',
+    description: 'Create, edit, and delete scheduled automation tasks programmatically.',
+    canDisable: true,
+    tools: CRON_TOOLS,
   },
   {
     id: 'web-search',
@@ -386,18 +429,16 @@ type ConnectorMeta = {
 type ToolsTabProps = {
   settings: AppSettings
   onPatch: (next: Partial<AppSettings>) => void
-  /** If set, jump directly to this category on mount */
-  focusCategory?: string
 }
 
-export function ToolsTab({ settings, onPatch, focusCategory: _focusCategory }: ToolsTabProps) {
+export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
   const [search, setSearch] = useState('')
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [connectorActions, setConnectorActions] = useState<Record<string, ConnectorAction[]>>({})
   const [loadingConnectors, setLoadingConnectors] = useState(true)
 
   // Fetch connected OAuth connectors + their actions
-  useState(() => {
+  useEffect(() => {
     void (async () => {
       try {
         const r = await fetch(apiUrl('/api/connectors'), { credentials: 'include' })
@@ -423,7 +464,7 @@ export function ToolsTab({ settings, onPatch, focusCategory: _focusCategory }: T
       } catch { /* silent */ }
       finally { setLoadingConnectors(false) }
     })()
-  })
+  }, [])
 
   const toolPermissions = settings.toolPermissions ?? {}
   const disabledTools   = settings.disabledTools   ?? []

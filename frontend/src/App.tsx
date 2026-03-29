@@ -93,12 +93,8 @@ function App() {
       return []
     }
   })
-  // ── Action log panel resize (drag handle) ─────────────────────────
-  const [logPanelWidthPct, setLogPanelWidthPct] = useState<number | null>(null)
-  const isDraggingRef = useRef(false)
-  const dragStartXRef = useRef(0)
-  const dragStartWidthRef = useRef(0)
   const browserGridRef = useRef<HTMLDivElement>(null)
+  const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -279,6 +275,19 @@ function App() {
 
   // Task history is saved at send-time (see handleSend) so titles always reflect
   // the actual user instruction, not a backend log message.
+
+  // ── Click coordinate extraction for ScreenView pulse overlay ──
+  useEffect(() => {
+    const lastClick = [...logs].reverse().find(l =>
+      l.message?.startsWith('[click]') || l.stepKind === 'click'
+    )
+    if (lastClick) {
+      const match = lastClick.message?.match(/"x":\s*(\d+).*?"y":\s*(\d+)/)
+      if (match) {
+        setLastClickCoords({ x: parseInt(match[1]), y: parseInt(match[2]) })
+      }
+    }
+  }, [logs])
 
   // ── Context tracking: feed log tokens into the context meter ──
   useEffect(() => {
@@ -826,61 +835,25 @@ function App() {
                 onStop={() => send({ action: 'stop' })}
               />
             ) : (
-              /* Browser split — flex row on md+, flex col on mobile. Drag handle resizes the log panel. */
+              /* Browser layout — ScreenView full height, ActionLog as floating overlay on desktop */
               <div
                 ref={browserGridRef}
-                className='flex h-full min-h-0 flex-col gap-1.5 sm:gap-2 md:flex-row lg:gap-3'
+                className='relative flex h-full min-h-0 flex-col gap-1.5 sm:gap-2 lg:gap-3'
               >
-                {/* Main content (screen / workflow) — grows to fill remaining space */}
+                {/* Main content (screen / workflow) — full width */}
                 <div className='min-h-0 min-w-0 flex-1'>
                   {showWorkflow ? (
                     <WorkflowView steps={workflowSteps} />
                   ) : (
-                    <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' />
+                    <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' lastClickCoords={lastClickCoords} />
                   )}
                 </div>
 
-                {/* ── Drag handle (desktop only) ── */}
-                <div
-                  className='hidden md:flex md:w-1.5 md:cursor-col-resize md:flex-col md:items-center md:justify-center md:rounded-full md:bg-[#2a2a2a] md:hover:bg-zinc-500 md:active:bg-blue-500/60 md:transition-colors md:select-none'
-                  title='Drag to resize action log'
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    isDraggingRef.current = true
-                    dragStartXRef.current = e.clientX
-                    const grid = browserGridRef.current
-                    const logPct = logPanelWidthPct ?? 31 // default ~31%
-                    dragStartWidthRef.current = grid ? grid.getBoundingClientRect().width * (logPct / 100) : 320
-
-                    const onMove = (ev: MouseEvent) => {
-                      if (!isDraggingRef.current || !browserGridRef.current) return
-                      const totalW = browserGridRef.current.getBoundingClientRect().width
-                      const delta = ev.clientX - dragStartXRef.current
-                      const newW = Math.max(200, Math.min(totalW * 0.6, dragStartWidthRef.current - delta))
-                      setLogPanelWidthPct((newW / totalW) * 100)
-                    }
-                    const onUp = () => {
-                      isDraggingRef.current = false
-                      window.removeEventListener('mousemove', onMove)
-                      window.removeEventListener('mouseup', onUp)
-                      window.removeEventListener('blur', onUp) // released outside browser tab
-                    }
-                    window.addEventListener('mousemove', onMove)
-                    window.addEventListener('mouseup', onUp)
-                    window.addEventListener('blur', onUp)
-                  }}
-                >
-                  {/* grip dots */}
-                  <span className='flex flex-col gap-0.5'>
-                    {[0,1,2].map((i) => <span key={i} className='h-1 w-1 rounded-full bg-zinc-600' />)}
-                  </span>
+                {/* Action log — full width on mobile, floating overlay on desktop */}
+                <div className='min-h-[8rem] md:hidden'>
+                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
                 </div>
-
-                {/* Action log — fixed width on desktop (user-resizable), full width on mobile */}
-                <div
-                  className='min-h-[8rem] md:min-h-0 md:shrink-0'
-                  style={{ width: logPanelWidthPct != null ? `${logPanelWidthPct}%` : undefined }}
-                >
+                <div className='hidden md:block md:absolute md:bottom-3 md:right-3 md:w-[320px] md:max-h-[55%] md:z-10'>
                   <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
                 </div>
               </div>

@@ -51,10 +51,16 @@ export interface ChatPanelProps {
   serverMessages?: ServerMessage[]
   /** Called when user clicks Stop to kill the running task */
   onStop?: () => void
+  /** Called when user responds to an ask_user_input card */
+  onUserInputResponse?: (answer: string, requestId: string) => void
+  /** Called when user confirms a plan_confirm card */
+  onPlanConfirm?: (requestId: string) => void
+  /** Called when user rejects a plan_confirm card */
+  onPlanReject?: (requestId: string) => void
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm'
 
 interface ChatMessage {
   id: string
@@ -67,6 +73,10 @@ interface ChatMessage {
   approvalId?: string
   planSteps?: string[]
   attachments?: AttachedFile[]
+  // user_input card fields
+  question?: string
+  options?: string[]
+  requestId?: string
 }
 
 interface AttachedFile {
@@ -122,6 +132,43 @@ const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generat
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   return logs.map((entry) => {
     const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+
+    // ── Special card types ─────────────────────────────────────────────────
+    if (msg.startsWith('[ask_user_input]')) {
+      try {
+        const jsonStr = msg.replace('[ask_user_input]', '').trim()
+        const parsed = JSON.parse(jsonStr)
+        return {
+          id: entry.id,
+          role: 'user_input' as ChatRole,
+          text: msg,
+          timestamp: entry.timestamp,
+          question: parsed.question as string,
+          options: parsed.options as string[],
+          requestId: parsed.request_id as string,
+        }
+      } catch { /* fall through */ }
+    }
+    if (msg.startsWith('[summarize_task]')) {
+      const summary = msg.replace('[summarize_task]', '').trim()
+      return { id: entry.id, role: 'task_summary' as ChatRole, text: summary, timestamp: entry.timestamp }
+    }
+    if (msg.startsWith('[confirm_plan]')) {
+      try {
+        const jsonStr = msg.replace('[confirm_plan]', '').trim()
+        const parsed = JSON.parse(jsonStr)
+        return {
+          id: entry.id,
+          role: 'plan_confirm' as ChatRole,
+          text: parsed.plan as string ?? jsonStr,
+          timestamp: entry.timestamp,
+          requestId: parsed.request_id as string,
+        }
+      } catch {
+        const plan = msg.replace('[confirm_plan]', '').trim()
+        return { id: entry.id, role: 'plan_confirm' as ChatRole, text: plan, timestamp: entry.timestamp }
+      }
+    }
 
     // ── User navigation (first event of a new task) ───────────────────────
     const isUser = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
@@ -433,6 +480,166 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
+// ─── User input request card ─────────────────────────────────────────────────
+function UserInputCard({
+  question,
+  options,
+  requestId,
+  onRespond,
+}: {
+  question: string
+  options: string[]
+  requestId: string
+  onRespond: (answer: string, requestId: string) => void
+}) {
+  const [customMode, setCustomMode] = useState(false)
+  const [customText, setCustomText] = useState('')
+  const [answered, setAnswered] = useState<string | null>(null)
+
+  const handleOption = (opt: string) => {
+    if (opt === 'Let me tell you') {
+      setCustomMode(true)
+      return
+    }
+    setAnswered(opt)
+    onRespond(opt, requestId)
+  }
+
+  if (answered) {
+    return (
+      <div className='rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3'>
+        <p className='text-xs text-zinc-400 mb-1'>You answered:</p>
+        <p className='text-sm text-emerald-300'>{answered}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className='rounded-xl border border-blue-500/20 bg-[#0f1628] p-4 space-y-3'>
+      <div className='flex items-start gap-2'>
+        <span className='text-lg'>❓</span>
+        <div>
+          <p className='text-xs font-medium text-blue-300 mb-1'>Aegis needs your input</p>
+          <p className='text-sm text-zinc-200'>{question}</p>
+        </div>
+      </div>
+      {!customMode ? (
+        <div className='flex flex-wrap gap-2'>
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type='button'
+              onClick={() => handleOption(opt)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                opt === 'Let me tell you'
+                  ? 'border-zinc-600 bg-[#1a1a1a] text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+                  : 'border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:border-blue-400'
+              }`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className='flex gap-2'>
+          <input
+            autoFocus
+            type='text'
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && customText.trim()) {
+                setAnswered(customText.trim())
+                onRespond(customText.trim(), requestId)
+              }
+            }}
+            placeholder='Type your answer...'
+            className='flex-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-500/60'
+          />
+          <button
+            type='button'
+            onClick={() => {
+              if (customText.trim()) {
+                setAnswered(customText.trim())
+                onRespond(customText.trim(), requestId)
+              }
+            }}
+            className='rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500 transition-colors'
+          >
+            Send
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Task summary card ────────────────────────────────────────────────────────
+function TaskSummaryCard({ summary }: { summary: string }) {
+  return (
+    <div className='rounded-xl border border-[#2a2a2a] bg-[#141414] p-4 space-y-2'>
+      <div className='flex items-center gap-2 mb-2'>
+        <span className='text-lg'>✅</span>
+        <p className='text-xs font-semibold text-emerald-300 uppercase tracking-wide'>Task Complete</p>
+      </div>
+      <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{summary}</div>
+    </div>
+  )
+}
+
+// ─── Plan confirm card ────────────────────────────────────────────────────────
+function PlanConfirmCard({
+  plan,
+  requestId,
+  onConfirm,
+  onReject,
+}: {
+  plan: string
+  requestId: string
+  onConfirm: (requestId: string) => void
+  onReject: (requestId: string) => void
+}) {
+  const [status, setStatus] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
+
+  if (status !== 'pending') {
+    return (
+      <div className={`rounded-xl border p-3 text-xs font-medium ${
+        status === 'confirmed'
+          ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
+          : 'border-red-500/20 bg-red-500/5 text-red-300'
+      }`}>
+        Plan {status === 'confirmed' ? 'confirmed ✓' : 'rejected ✗'}
+      </div>
+    )
+  }
+
+  return (
+    <div className='rounded-xl border border-amber-500/20 bg-[#1a1500] p-4 space-y-3'>
+      <div className='flex items-center gap-2'>
+        <span className='text-lg'>📋</span>
+        <p className='text-xs font-semibold text-amber-300 uppercase tracking-wide'>Plan ready — confirm to proceed</p>
+      </div>
+      <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{plan}</div>
+      <div className='flex gap-2 pt-1'>
+        <button
+          type='button'
+          onClick={() => { setStatus('confirmed'); onConfirm(requestId) }}
+          className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors'
+        >
+          ✓ Confirm Plan
+        </button>
+        <button
+          type='button'
+          onClick={() => { setStatus('rejected'); onReject(requestId) }}
+          className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors'
+        >
+          ✗ Reject
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Plus-menu modal (ChatGPT-style bottom sheet) ────────────────────────────
 interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
@@ -570,6 +777,9 @@ export function ChatPanel({
   activeTaskId,
   serverMessages = [],
   onStop,
+  onUserInputResponse,
+  onPlanConfirm,
+  onPlanReject,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -892,6 +1102,38 @@ export function ChatPanel({
             )
           }
           if (msg.role === 'subagent') return <SubagentCard key={msg.id} msg={msg} />
+          if (msg.role === 'user_input') {
+            return (
+              <UserInputCard
+                key={msg.id}
+                question={msg.question ?? msg.text}
+                options={msg.options ?? []}
+                requestId={msg.requestId ?? msg.id}
+                onRespond={(answer, reqId) => {
+                  onUserInputResponse?.(answer, reqId)
+                  onSend(answer, 'steer')
+                }}
+              />
+            )
+          }
+          if (msg.role === 'task_summary') return <TaskSummaryCard key={msg.id} summary={msg.text} />
+          if (msg.role === 'plan_confirm') {
+            return (
+              <PlanConfirmCard
+                key={msg.id}
+                plan={msg.text}
+                requestId={msg.requestId ?? msg.id}
+                onConfirm={(reqId) => {
+                  onPlanConfirm?.(reqId)
+                  onSend('confirmed', 'steer')
+                }}
+                onReject={(reqId) => {
+                  onPlanReject?.(reqId)
+                  onSend('rejected', 'steer')
+                }}
+              />
+            )
+          }
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 

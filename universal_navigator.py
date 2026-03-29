@@ -51,6 +51,32 @@ You have access to these tools — call them by returning JSON in your response:
 {"tool": "wait", "seconds": 1.5}
   → Waits for the page to load or an animation to complete.
 
+{"tool": "ask_user_input", "question": "What color scheme do you prefer?", "options": ["Blue", "Green", "Let me tell you"]}
+  → Pauses the task and asks the user a question. Provide 2-4 short options.
+    Always include an option like "Let me tell you" for free-form input.
+    Returns the user's choice as a string.
+
+{"tool": "memory_search", "query": "user's preferred writing style"}
+  → Semantic search through stored memories. Returns up to 5 relevant entries.
+
+{"tool": "memory_write", "content": "User prefers concise bullet-point summaries", "category": "preferences"}
+  → Store a new memory. category: "preferences" | "facts" | "tasks" | "general"
+
+{"tool": "memory_read", "memory_id": "uuid"}
+  → Read a specific memory entry by ID.
+
+{"tool": "memory_patch", "memory_id": "uuid", "content": "Updated content here"}
+  → Update an existing memory entry.
+
+{"tool": "cron_write", "name": "Daily report", "prompt": "Generate and send daily summary", "cron_expr": "0 9 * * *", "timezone": "UTC"}
+  → Create a new scheduled automation. cron_expr is standard 5-field cron format.
+
+{"tool": "cron_patch", "task_id": "uuid", "name": "Updated name", "cron_expr": "0 10 * * *"}
+  → Update an existing scheduled task. Only include fields to change.
+
+{"tool": "cron_delete", "task_id": "uuid"}
+  → Delete a scheduled task permanently.
+
 {"tool": "done", "summary": "Task completed: ..."}
   → Signals that the task is complete. Always call this when finished.
 
@@ -70,10 +96,17 @@ RULES:
 class UniversalToolExecutor:
     """Executes tool calls issued by the LLM and returns text results."""
 
-    def __init__(self, executor: Any) -> None:
+    def __init__(
+        self,
+        executor: Any,
+        user_uid: str | None = None,
+        on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+    ) -> None:
         """executor: ActionExecutor instance from executor.py"""
         self._exe = executor
         self._last_screenshot: bytes | None = None
+        self._user_uid = user_uid
+        self._on_user_input = on_user_input
 
     async def run(self, tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
         """Execute a tool and return (text_result, optional_screenshot_bytes)."""
@@ -122,6 +155,172 @@ class UniversalToolExecutor:
                 seconds = float(tool_call.get("seconds", 1.5))
                 await asyncio.sleep(min(seconds, 10.0))
                 return f"Waited {seconds:.1f}s.", None
+
+            elif tool == "ask_user_input":
+                question = str(tool_call.get("question", ""))
+                options: list[str] = list(tool_call.get("options", []))
+                if self._on_user_input:
+                    answer = await self._on_user_input(question, options)
+                    return f"User answered: {answer}", None
+                return "No user input handler available — continuing without user input.", None
+
+            elif tool == "memory_search":
+                query = str(tool_call.get("query", ""))
+                if not self._user_uid:
+                    return "Memory tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory
+                    from backend.memory.service import MemoryService
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    async with _session_factory() as session:
+                        results = await MemoryService.recall(session, self._user_uid, query, limit=5)
+                    if not results:
+                        return "No relevant memories found.", None
+                    lines = [f"[{r['id']}] ({r['category']}) {r['content']}" for r in results]
+                    return "Found memories:\n" + "\n".join(lines), None
+                except Exception as exc:  # noqa: BLE001
+                    return f"memory_search error: {exc}", None
+
+            elif tool == "memory_write":
+                content = str(tool_call.get("content", ""))
+                category = str(tool_call.get("category", "general"))
+                if not self._user_uid:
+                    return "Memory tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory
+                    from backend.memory.service import MemoryService
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    async with _session_factory() as session:
+                        entry = await MemoryService.store(session, self._user_uid, content, category=category)
+                    return f"Memory stored with id={entry['id']}.", None
+                except Exception as exc:  # noqa: BLE001
+                    return f"memory_write error: {exc}", None
+
+            elif tool == "memory_read":
+                memory_id = str(tool_call.get("memory_id", ""))
+                if not self._user_uid:
+                    return "Memory tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory
+                    from backend.memory.service import MemoryService
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    async with _session_factory() as session:
+                        entry = await MemoryService.get_memory(session, memory_id, self._user_uid)
+                    if not entry:
+                        return f"Memory {memory_id} not found.", None
+                    return f"Memory [{entry['id']}] ({entry['category']}): {entry['content']}", None
+                except Exception as exc:  # noqa: BLE001
+                    return f"memory_read error: {exc}", None
+
+            elif tool == "memory_patch":
+                memory_id = str(tool_call.get("memory_id", ""))
+                content = tool_call.get("content")
+                category = tool_call.get("category")
+                if not self._user_uid:
+                    return "Memory tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory
+                    from backend.memory.service import MemoryService
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    async with _session_factory() as session:
+                        updated = await MemoryService.update_memory(
+                            session,
+                            memory_id,
+                            self._user_uid,
+                            content=content,
+                            category=category,
+                        )
+                    if not updated:
+                        return f"Memory {memory_id} not found or not updated.", None
+                    return f"Memory {memory_id} updated.", None
+                except Exception as exc:  # noqa: BLE001
+                    return f"memory_patch error: {exc}", None
+
+            elif tool == "cron_write":
+                name = str(tool_call.get("name", "Scheduled task"))
+                prompt = str(tool_call.get("prompt", ""))
+                cron_expr = str(tool_call.get("cron_expr", ""))
+                timezone = str(tool_call.get("timezone", "UTC"))
+                if not self._user_uid:
+                    return "Cron tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory, ScheduledTask
+                    from backend.automation import _compute_next_run, _validate_cron
+                    from uuid import uuid4 as _uuid4
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    cron_expr = _validate_cron(cron_expr)
+                    next_run = _compute_next_run(cron_expr, timezone)
+                    async with _session_factory() as session:
+                        task = ScheduledTask(
+                            user_id=self._user_uid,
+                            name=name,
+                            prompt=prompt,
+                            cron_expr=cron_expr,
+                            timezone=timezone,
+                            enabled=True,
+                            next_run_at=next_run,
+                            last_status="pending",
+                            run_count=0,
+                        )
+                        session.add(task)
+                        await session.commit()
+                        await session.refresh(task)
+                        task_id = task.id
+                    return f"Cron task created with id={task_id}.", None
+                except Exception as exc:  # noqa: BLE001
+                    return f"cron_write error: {exc}", None
+
+            elif tool == "cron_patch":
+                task_id = str(tool_call.get("task_id", ""))
+                if not self._user_uid:
+                    return "Cron tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory, ScheduledTask
+                    from backend.automation import _compute_next_run, _validate_cron
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    async with _session_factory() as session:
+                        task = await session.get(ScheduledTask, task_id)
+                        if not task or task.user_id != self._user_uid:
+                            return f"Cron task {task_id} not found.", None
+                        if "name" in tool_call:
+                            task.name = str(tool_call["name"])
+                        if "prompt" in tool_call:
+                            task.prompt = str(tool_call["prompt"])
+                        if "enabled" in tool_call:
+                            task.enabled = bool(tool_call["enabled"])
+                        if "timezone" in tool_call:
+                            task.timezone = str(tool_call["timezone"])
+                        if "cron_expr" in tool_call:
+                            task.cron_expr = _validate_cron(str(tool_call["cron_expr"]))
+                        task.next_run_at = _compute_next_run(task.cron_expr, task.timezone)
+                        await session.commit()
+                    return f"Cron task {task_id} updated.", None
+                except Exception as exc:  # noqa: BLE001
+                    return f"cron_patch error: {exc}", None
+
+            elif tool == "cron_delete":
+                task_id = str(tool_call.get("task_id", ""))
+                if not self._user_uid:
+                    return "Cron tools require an authenticated user.", None
+                try:
+                    from backend.database import _session_factory, ScheduledTask
+                    if _session_factory is None:
+                        return "Database not ready.", None
+                    async with _session_factory() as session:
+                        task = await session.get(ScheduledTask, task_id)
+                        if not task or task.user_id != self._user_uid:
+                            return f"Cron task {task_id} not found.", None
+                        await session.delete(task)
+                        await session.commit()
+                    return f"Cron task {task_id} deleted.", None
+                except Exception as exc:  # noqa: BLE001
+                    return f"cron_delete error: {exc}", None
 
             elif tool in ("done", "error"):
                 # Terminal tools — caller handles them
@@ -173,12 +372,14 @@ async def run_universal_navigation(
     cancel_event: asyncio.Event | None = None,
     steering_context: list[str] | None = None,
     on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+    user_uid: str | None = None,
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider.
 
     Returns a result dict compatible with the Gemini ADK path.
     """
-    tool_executor = UniversalToolExecutor(executor)
+    tool_executor = UniversalToolExecutor(executor, user_uid=user_uid, on_user_input=on_user_input)
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []
     parent_step_id: str | None = None
@@ -264,8 +465,25 @@ async def run_universal_navigation(
             await emit_step(f"Error: {error_msg}", step_type="error")
             return {"status": "failed", "instruction": instruction, "steps": steps, "error": error_msg, "input_tokens": total_input_tokens, "output_tokens": total_output_tokens}
 
-        # Emit step info
-        await emit_step(f"[{tool_name}] {json.dumps({k: v for k, v in tool_call.items() if k != 'tool'})[:120]}")
+        # Emit step info — user_input_request gets a special enriched step
+        if tool_name == "ask_user_input":
+            question = str(tool_call.get("question", ""))
+            options: list[str] = list(tool_call.get("options", []))
+            request_id = str(uuid4())
+            tool_call["_request_id"] = request_id  # pass through to executor
+            special_step: dict[str, Any] = {
+                "type": "user_input_request",
+                "content": f"[ask_user_input] {question}",
+                "question": question,
+                "options": options,
+                "request_id": request_id,
+                "steering": [],
+            }
+            steps.append(special_step)
+            if on_step:
+                await on_step(special_step)
+        else:
+            await emit_step(f"[{tool_name}] {json.dumps({k: v for k, v in tool_call.items() if k != 'tool'})[:120]}")
 
         # Execute tool
         result_text, screenshot_bytes = await tool_executor.run(tool_call)

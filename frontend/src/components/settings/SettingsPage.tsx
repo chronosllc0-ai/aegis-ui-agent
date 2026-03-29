@@ -13,7 +13,6 @@ import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
 import { MemoryTab } from './MemoryTab'
-import { ToolsTab } from './ToolsTab'
 import { AdminPanel } from '../admin/AdminPanel'
 
 type SettingsPageProps = {
@@ -23,7 +22,7 @@ type SettingsPageProps = {
   isAdmin?: boolean
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'Tools & Permissions', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Support', 'Admin'] as const
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
@@ -114,7 +113,6 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
       <div className={`${sidebarOpen ? 'hidden md:block' : 'block'} min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4`}>
         {activeTab === 'Profile' && <ProfileTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
-        {activeTab === 'Tools & Permissions' && <ToolsTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
         {activeTab === 'Usage' && <UsageTab />}
         {activeTab === 'Credits' && <CreditsTab />}
@@ -124,7 +122,6 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
             integrations={settings.integrations}
             onChange={(integrations) => onPatch({ integrations })}
             isAdmin={isAdmin}
-            onManagePermissions={() => selectTab('Tools & Permissions')}
           />
         )}
         {activeTab === 'Workflows' && (

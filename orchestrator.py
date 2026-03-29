@@ -194,6 +194,7 @@ class AgentOrchestrator:
         settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         user_uid: str | None = None,
+        on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction.
 
@@ -230,6 +231,8 @@ class AgentOrchestrator:
                 cancel_event=cancel_event,
                 steering_context=steering_context,
                 on_workflow_step=on_workflow_step,
+                on_user_input=on_user_input,
+                user_uid=user_uid,
             )
 
         # ── Gemini / ADK path (original) ───────────────────────────────
