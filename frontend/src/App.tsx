@@ -30,6 +30,7 @@ import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
+import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
@@ -56,7 +57,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef } = useWebSocket(handleUsageMessage)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId } = useWebSocket(handleUsageMessage)
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -77,6 +78,12 @@ function App() {
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  // Server-side conversation persistence — replaces localStorage for history + messages
+  const { conversations, fetchMessages, deleteConversation, onNewConversationId } = useConversations()
+  // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
+  const taskToConvRef = useRef<Map<string, string>>(new Map())
+  // Server messages loaded for the selected conversation
+  const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem('aegis.taskHistory')
@@ -289,6 +296,33 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTaskId])
 
+  // When the server assigns a conversationId for the current navigate action,
+  // map the client-side taskId to it and update the conversation list.
+  useEffect(() => {
+    if (!activeConversationId) return
+    const taskId = activeTaskIdRef.current
+    taskToConvRef.current.set(taskId, activeConversationId)
+    onNewConversationId(activeConversationId, undefined)
+  }, [activeConversationId, activeTaskIdRef, onNewConversationId])
+
+  // When the selected task changes, load messages from server for that conversation
+  useEffect(() => {
+    if (!selectedTaskId) { setServerMessages([]); return }
+    const convId = taskToConvRef.current.get(selectedTaskId)
+    if (convId) {
+      void fetchMessages(convId).then(setServerMessages)
+    } else {
+      // Try matching by conversation list (for tasks loaded from history on another device)
+      const matchedConv = conversations.find(c => c.id === selectedTaskId)
+      if (matchedConv) {
+        void fetchMessages(matchedConv.id).then(setServerMessages)
+      } else {
+        setServerMessages([])
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTaskId])
+
   const filteredHistory = useMemo(
     () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
     [historySearch, taskHistory],
@@ -409,9 +443,12 @@ function App() {
   const onDeleteTask = (id: string) => {
     setTaskHistory((prev) => {
       const next = prev.filter((t) => t.id !== id)
-      localStorage.setItem('aegis.taskHistory', JSON.stringify(next))
+      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* ok */ }
       return next
     })
+    // Also delete server-side conversation if we have a mapping
+    const convId = taskToConvRef.current.get(id)
+    if (convId) { void deleteConversation(convId); taskToConvRef.current.delete(id) }
     if (selectedTaskId === id) setSelectedTaskId(null)
   }
 
@@ -728,6 +765,7 @@ function App() {
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 activeTaskId={selectedTaskId}
+                serverMessages={serverMessages}
               />
             ) : (
               <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
