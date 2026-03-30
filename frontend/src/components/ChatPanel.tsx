@@ -830,58 +830,50 @@ function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleRea
           ))}
         </div>
 
-        {/* Reasoning toggle — shown above connector search bar, only for capable models */}
+        {/* Think harder — flat list row, only for capable models. Hidden for non-reasoning models. */}
         {modelSupportsReasoning && (
           <>
-            <div className='mx-4 my-2 border-t border-[#2a2a2a]' />
-            <div className='px-3 pb-1'>
-              <div className='mb-2 flex items-center justify-between'>
-                <div className='flex items-center gap-2'>
-                  <svg className='h-4 w-4 text-violet-400' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-                    <path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/>
-                    <path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/>
-                  </svg>
-                  <span className='text-sm font-medium text-zinc-200'>Reasoning</span>
-                  {enableReasoning && (
-                    <span className='rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-300'>ON</span>
-                  )}
-                </div>
-                <button
-                  type='button'
-                  onClick={() => onToggleReasoning?.(!enableReasoning)}
-                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-                    enableReasoning ? 'bg-violet-600' : 'bg-[#2a2a2a]'
-                  }`}
-                  role='switch'
-                  aria-checked={enableReasoning}
-                  aria-label='Toggle reasoning'
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                      enableReasoning ? 'translate-x-4' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
+            <div className='mx-4 my-1 border-t border-[#2a2a2a]' />
+            {/* Primary row — lightbulb icon + label + checkmark, tapping toggles */}
+            <button
+              type='button'
+              onClick={() => onToggleReasoning?.(!enableReasoning)}
+              className='flex w-full items-center gap-4 rounded-xl px-3 py-2.5 text-left hover:bg-[#2a2a2a] transition-colors'
+            >
+              <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
+                {/* Lightbulb icon — provider-neutral "think harder" signal */}
+                <svg className='h-5 w-5 text-zinc-200' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                  <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/>
+                  <path d='M9 18h6'/><path d='M10 22h4'/>
+                </svg>
               </div>
+              <span className='flex-1 text-sm font-medium text-zinc-200'>Think harder</span>
+              {/* Checkmark when active */}
               {enableReasoning && (
-                <div className='flex gap-1.5'>
-                  {(['low', 'medium', 'high'] as const).map((effort) => (
-                    <button
-                      key={effort}
-                      type='button'
-                      onClick={() => onChangeReasoningEffort?.(effort)}
-                      className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
-                        reasoningEffort === effort
-                          ? 'bg-violet-600 text-white'
-                          : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      {effort}
-                    </button>
-                  ))}
-                </div>
+                <svg className='h-5 w-5 text-zinc-200 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round'>
+                  <path d='M20 6 9 17l-5-5'/>
+                </svg>
               )}
-            </div>
+            </button>
+            {/* Effort sub-row — only shown when active */}
+            {enableReasoning && (
+              <div className='flex gap-1.5 px-3 pb-2'>
+                {(['low', 'medium', 'high'] as const).map((effort) => (
+                  <button
+                    key={effort}
+                    type='button'
+                    onClick={(e) => { e.stopPropagation(); onChangeReasoningEffort?.(effort) }}
+                    className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
+                      reasoningEffort === effort
+                        ? 'bg-violet-600 text-white'
+                        : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {effort}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
 

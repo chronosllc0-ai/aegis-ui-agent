@@ -13,7 +13,7 @@
  * In Slack/Telegram/Discord bot channels the confirmation is sent there instead.
  */
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, type ReactElement } from 'react'
 import type { AppSettings, ToolPermission } from '../../hooks/useSettings'
 import { apiUrl } from '../../lib/api'
 
@@ -118,11 +118,85 @@ const CRON_TOOLS: ToolDef[] = [
 // We define the well-known ones here so they display immediately; dynamic ones
 // fetched from the server are merged in at runtime.
 
+// ── Category icon SVGs — no emoji ─────────────────────────────────────────────
+// Each returns a small inline SVG element sized to fit the 20×20 slot in CategorySection header.
+export const CATEGORY_ICONS: Record<string, ReactElement> = {
+  browser: (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <circle cx='12' cy='12' r='10'/><path d='M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/>
+    </svg>
+  ),
+  'agent-interaction': (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/>
+    </svg>
+  ),
+  memory: (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/>
+      <path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/>
+    </svg>
+  ),
+  cron: (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <circle cx='12' cy='12' r='10'/><path d='M12 6v6l4 2'/>
+    </svg>
+  ),
+  'web-search': (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/>
+    </svg>
+  ),
+  filesystem: (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/>
+    </svg>
+  ),
+  'code-exec': (
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <polyline points='16 18 22 12 16 6'/><polyline points='8 6 2 12 8 18'/>
+    </svg>
+  ),
+  telegram: (
+    // Telegram paper-plane icon
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <path d='M22 2 11 13'/><path d='M22 2 15 22 11 13 2 9l20-7z'/>
+    </svg>
+  ),
+  'slack-bot': (
+    // Slack hash icon (closest neutral SVG without brand color)
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <line x1='4' y1='9' x2='20' y2='9'/><line x1='4' y1='15' x2='20' y2='15'/>
+      <line x1='10' y1='3' x2='8' y2='21'/><line x1='16' y1='3' x2='14' y2='21'/>
+    </svg>
+  ),
+  discord: (
+    // Game controller / headset icon for Discord
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <path d='M9 10h.01M15 10h.01M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14c-2.67 0-8-1.34-8-4v-1.26C5.23 9.3 7 8 9 8c1.35 0 2.55.5 3 1h0c.45-.5 1.65-1 3-1 2 0 3.77 1.3 5 2.74V12c0 2.66-5.33 4-8 4z'/>
+    </svg>
+  ),
+  'github-bot': (
+    // Git branch icon for GitHub
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <line x1='6' y1='3' x2='6' y2='15'/><circle cx='18' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><path d='M18 9a9 9 0 0 1-9 9'/>
+    </svg>
+  ),
+}
+
+// Fallback SVG for unknown category IDs (OAuth connectors etc.)
+const FallbackCategoryIcon = () => (
+  <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+    <path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/>
+    <path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/>
+  </svg>
+)
+
 export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'browser',
     label: 'Browser Control',
-    icon: '🌐',
+    icon: 'browser',
     description: 'Core browser automation — navigate, click, type, screenshot. Always available.',
     canDisable: true,
     tools: BROWSER_TOOLS,
@@ -130,7 +204,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'agent-interaction',
     label: 'Agent Interaction',
-    icon: '🤝',
+    icon: 'agent-interaction',
     description: 'Tools for agent–human collaboration: asking questions, confirming plans, and summarizing work.',
     canDisable: true,
     tools: AGENT_INTERACTION_TOOLS,
@@ -138,7 +212,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'memory',
     label: 'Memory',
-    icon: '🧠',
+    icon: 'memory',
     description: 'Read, write, search, and update the agent\'s persistent memory store.',
     canDisable: true,
     tools: MEMORY_TOOLS,
@@ -146,7 +220,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'cron',
     label: 'Automations (Cron)',
-    icon: '⏰',
+    icon: 'cron',
     description: 'Create, edit, and delete scheduled automation tasks programmatically.',
     canDisable: true,
     tools: CRON_TOOLS,
@@ -154,7 +228,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'web-search',
     label: 'Web Search',
-    icon: '🔍',
+    icon: 'web-search',
     description: 'Search the internet and extract page content.',
     canDisable: true,
     tools: WEB_TOOLS,
@@ -162,7 +236,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'filesystem',
     label: 'File System',
-    icon: '📁',
+    icon: 'filesystem',
     description: 'Read and write local files.',
     canDisable: true,
     tools: FILESYSTEM_TOOLS,
@@ -170,7 +244,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'code-exec',
     label: 'Code Execution',
-    icon: '💻',
+    icon: 'code-exec',
     description: 'Run Python and JavaScript in a sandbox.',
     canDisable: true,
     tools: CODE_TOOLS,
@@ -178,7 +252,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'telegram',
     label: 'Telegram Bot',
-    icon: '✈️',
+    icon: 'telegram',
     description: 'Send and receive messages via your Telegram bot.',
     canDisable: true,
     tools: TELEGRAM_TOOLS,
@@ -186,7 +260,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'slack-bot',
     label: 'Slack Bot',
-    icon: '💬',
+    icon: 'slack-bot',
     description: 'Interact with Slack workspaces via your bot token.',
     canDisable: true,
     tools: SLACK_BOT_TOOLS,
@@ -194,7 +268,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'discord',
     label: 'Discord Bot',
-    icon: '🎮',
+    icon: 'discord',
     description: 'Interact with Discord servers via your bot.',
     canDisable: true,
     tools: DISCORD_TOOLS,
@@ -202,7 +276,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'github-bot',
     label: 'GitHub (Bot Token)',
-    icon: '🐙',
+    icon: 'github-bot',
     description: 'Manage repos, issues, and PRs via a personal access token.',
     canDisable: true,
     tools: GITHUB_BOT_TOOLS,
@@ -362,7 +436,14 @@ function CategorySection({
         onClick={() => setExpanded((v) => !v)}
         className='w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#1a1a1a] transition-colors'
       >
-        <span className='text-xl leading-none'>{category.icon}</span>
+        <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#2a2a2a]'>
+          {/* icon is either a CATEGORY_ICONS key (SVG) or a URL string for OAuth connectors */}
+          {category.icon.startsWith('http') ? (
+            <img src={category.icon} alt={category.label} className='h-5 w-5 rounded object-contain' onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            CATEGORY_ICONS[category.icon] ?? <FallbackCategoryIcon />
+          )}
+        </span>
         <div className='min-w-0 flex-1'>
           <div className='flex items-center gap-2'>
             <span className='text-sm font-semibold text-zinc-100'>{category.label}</span>
@@ -485,7 +566,7 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
     return connectors.map((c) => ({
       id: `connector-${c.id}`,
       label: c.name,
-      icon: '🔗',
+      icon: c.icon || 'connector',
       description: c.description,
       canDisable: true,
       tools: [], // populated dynamically from connectorActions[c.id]

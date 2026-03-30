@@ -855,11 +855,8 @@ function App() {
                   )}
                 </div>
 
-                {/* Action log — full width on mobile, floating overlay on desktop */}
-                <div className='min-h-[8rem] md:hidden'>
-                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
-                </div>
-                <div className='hidden md:block md:absolute md:bottom-3 md:right-3 md:w-[320px] md:max-h-[55%] md:z-10'>
+                {/* Action log — stacked below the browser, full width on all screen sizes */}
+                <div className='h-48 min-h-0 shrink-0'>
                   <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
               </div>
