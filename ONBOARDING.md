@@ -1,3 +1,26 @@
+## Session 4.3 — March 30, 2026 (Google OAuth callback hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Fixed Google OAuth callback token exchange to always include the exact callback `redirect_uri` value used during login initiation.
+- Hardened Google profile extraction by falling back to the Google `userinfo` endpoint when ID token parsing fails.
+- Added a guard that fails gracefully when Google user data is missing the `sub` claim.
+
+### What's Working
+- Google callback now supports environments where ID token parsing intermittently fails while access token retrieval succeeds.
+- Redirect URI consistency is enforced in callback exchange, reducing `invalid_grant` / mismatch risk.
+
+### What's NOT Working Yet
+- End-to-end verification against live Railway/Google credentials is still required in the deployment environment.
+
+### Next Steps
+1. Redeploy backend and retry Google sign-in from production.
+2. Inspect Railway logs for any remaining provider-side OAuth errors.
+
+---
+
 ## Session 5.28 - March 27, 2026 (Phase 9 Crosscheck + AgentActivityFeed / usePlanExecution Wiring)
 
 **Agent:** Viktor  

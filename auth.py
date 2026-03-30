@@ -283,16 +283,28 @@ async def google_login(request: Request) -> RedirectResponse:
 async def google_callback(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     """Handle Google OAuth callback."""
     try:
-        token = await oauth.google.authorize_access_token(request)
-        info = await oauth.google.parse_id_token(request, token)
+        token = await oauth.google.authorize_access_token(request, redirect_uri=_callback_url("google"))
     except OAuthError as exc:
-        logger.warning("Google OAuth error: %s", exc.error)
+        logger.warning("Google OAuth token exchange error: %s", exc.error)
         raise HTTPException(status_code=400, detail="Google OAuth failed") from exc
 
+    info: dict[str, Any]
+    try:
+        info = await oauth.google.parse_id_token(request, token)
+    except OAuthError as exc:
+        logger.warning("Google OAuth ID token parse error: %s", exc.error)
+        userinfo_resp = await oauth.google.get("userinfo", token=token)
+        info = userinfo_resp.json()
+
+    provider_id = info.get("sub")
+    if not provider_id:
+        logger.warning("Google OAuth userinfo missing sub claim")
+        raise HTTPException(status_code=400, detail="Google OAuth failed")
+
     profile = {
-        "uid": f"google:{info.get('sub')}",
+        "uid": f"google:{provider_id}",
         "provider": "google",
-        "provider_id": info.get("sub"),
+        "provider_id": provider_id,
         "email": info.get("email"),
         "name": info.get("name") or info.get("email"),
         "avatar_url": info.get("picture"),
