@@ -405,12 +405,12 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
         <IcoBrain className='h-3.5 w-3.5 text-zinc-300' />
       </div>
       <div className='min-w-0 flex-1'>
-        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-xl text-zinc-200 shadow-md break-words overflow-wrap-anywhere'>
+        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-xl text-zinc-200 shadow-md wrap-anywhere'>
           {parts.map((part, i) =>
             part.type === 'code' ? (
               <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
             ) : (
-              <span key={i} className='whitespace-pre-wrap break-words'>{part.content}</span>
+              <span key={i} className='whitespace-pre-wrap'>{part.content}</span>
             )
           )}
         </div>
