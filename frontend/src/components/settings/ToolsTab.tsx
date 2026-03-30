@@ -1,20 +1,30 @@
 /**
  * ToolsTab — unified tool permission centre.
  *
- * Every tool exposed by the agent (system browser tools, built-in integrations,
- * bot tokens, OAuth connectors, and future MCP servers) surfaces here. Each tool
- * can be:
- *   • Toggled on/off  (disabled_tools list)
- *   • Scoped to Auto-run  — agent calls it without asking (default)
- *   • Scoped to Confirm   — agent sends an approval card in Chat before running
+ * Tool visibility rules
+ * ─────────────────────
+ *  • System categories (Browser, Web Search, File System, Code Execution):
+ *      Always present. ON by default. User can disable the whole category or
+ *      individual tools — when disabled the tools are not sent to the agent.
  *
- * When a tool is set to "Confirm", the ChatPanel renders an ApprovalCard with
- * green Approve / red Reject buttons before the agent proceeds.
- * In Slack/Telegram/Discord bot channels the confirmation is sent there instead.
+ *  • Built-in categories (Memory, Cron, Agent Interaction):
+ *      Always present with no gating. Cannot be linked to a connection.
+ *
+ *  • Bot integration categories (Telegram, Slack Bot, Discord Bot, GitHub Bot):
+ *      LOCKED behind their integration. Tools only appear once the matching
+ *      integration has been saved and connected in the Integrations tab.
+ *      While locked, a banner is shown directing the user to connect first.
+ *
+ *  • OAuth connector categories (Google, Notion, Linear…):
+ *      Injected dynamically from the backend — only active connectors appear.
+ *      Already gated: the backend /api/connectors endpoint only returns
+ *      connectors that are connected & active.
  */
 
 import { useState, useMemo, useEffect, type ReactElement } from 'react'
 import type { AppSettings, ToolPermission } from '../../hooks/useSettings'
+import type { IntegrationConfig } from '../../lib/mcp'
+import { BrandIcon } from '../icons'
 import { apiUrl } from '../../lib/api'
 
 // ── Tool catalogue ────────────────────────────────────────────────────────────
@@ -22,11 +32,16 @@ import { apiUrl } from '../../lib/api'
 export type ToolCategory = {
   id: string
   label: string
+  /** Either a key from CATEGORY_ICONS or an https:// URL for OAuth connectors */
   icon: string
   description: string
   tools: ToolDef[]
-  /** When false the whole category cannot be disabled (always-on system tools). */
   canDisable?: boolean
+  /**
+   * If set, this category is gated behind the integration with this id.
+   * Tools are hidden until that integration is `status === 'connected'`.
+   */
+  requiresIntegrationId?: string
 }
 
 export type ToolDef = {
@@ -37,15 +52,16 @@ export type ToolDef = {
   defaultPermission: ToolPermission
 }
 
-// System browser-control tools — always present, no auth required
+// ── System / built-in tool definitions ───────────────────────────────────────
+
 const BROWSER_TOOLS: ToolDef[] = [
-  { id: 'screenshot',   name: 'Screenshot',      description: 'Capture the current browser viewport', risk: 'low',    defaultPermission: 'auto' },
-  { id: 'go_to_url',    name: 'Navigate',         description: 'Navigate to a URL',                    risk: 'low',    defaultPermission: 'auto' },
-  { id: 'click',        name: 'Click',            description: 'Click an element on the page',          risk: 'low',    defaultPermission: 'auto' },
-  { id: 'type_text',    name: 'Type Text',        description: 'Type text into a focused element',      risk: 'low',    defaultPermission: 'auto' },
-  { id: 'scroll',       name: 'Scroll',           description: 'Scroll the page',                       risk: 'low',    defaultPermission: 'auto' },
-  { id: 'wait',         name: 'Wait',             description: 'Pause execution briefly',               risk: 'low',    defaultPermission: 'auto' },
-  { id: 'extract_data', name: 'Extract Data',     description: 'Extract structured data from the page', risk: 'low',    defaultPermission: 'auto' },
+  { id: 'screenshot',   name: 'Screenshot',      description: 'Capture the current browser viewport',  risk: 'low',    defaultPermission: 'auto' },
+  { id: 'go_to_url',    name: 'Navigate',         description: 'Navigate to a URL',                     risk: 'low',    defaultPermission: 'auto' },
+  { id: 'click',        name: 'Click',            description: 'Click an element on the page',           risk: 'low',    defaultPermission: 'auto' },
+  { id: 'type_text',    name: 'Type Text',        description: 'Type text into a focused element',       risk: 'low',    defaultPermission: 'auto' },
+  { id: 'scroll',       name: 'Scroll',           description: 'Scroll the page',                        risk: 'low',    defaultPermission: 'auto' },
+  { id: 'wait',         name: 'Wait',             description: 'Pause execution briefly',                risk: 'low',    defaultPermission: 'auto' },
+  { id: 'extract_data', name: 'Extract Data',     description: 'Extract structured data from the page',  risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const WEB_TOOLS: ToolDef[] = [
@@ -65,10 +81,10 @@ const CODE_TOOLS: ToolDef[] = [
 ]
 
 const TELEGRAM_TOOLS: ToolDef[] = [
-  { id: 'telegram_get_messages',  name: 'Read Messages',  description: 'Read Telegram messages',          risk: 'low',    defaultPermission: 'auto' },
-  { id: 'telegram_send_message',  name: 'Send Message',   description: 'Send a Telegram message',         risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'telegram_send_image',    name: 'Send Image',     description: 'Send an image via Telegram',      risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'telegram_list_chats',    name: 'List Chats',     description: 'List Telegram chats/channels',    risk: 'low',    defaultPermission: 'auto' },
+  { id: 'telegram_get_messages',  name: 'Read Messages',  description: 'Read Telegram messages',         risk: 'low',    defaultPermission: 'auto' },
+  { id: 'telegram_send_message',  name: 'Send Message',   description: 'Send a Telegram message',        risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'telegram_send_image',    name: 'Send Image',     description: 'Send an image via Telegram',     risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'telegram_list_chats',    name: 'List Chats',     description: 'List Telegram chats/channels',   risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const SLACK_BOT_TOOLS: ToolDef[] = [
@@ -86,13 +102,13 @@ const DISCORD_TOOLS: ToolDef[] = [
 ]
 
 const GITHUB_BOT_TOOLS: ToolDef[] = [
-  { id: 'github_list_repos',        name: 'List Repos',       description: 'List repositories',              risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_get_issues',        name: 'Get Issues',       description: 'Fetch issues from a repo',       risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_create_issue',      name: 'Create Issue',     description: 'Open a new GitHub issue',        risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'github_get_pull_requests', name: 'Get PRs',          description: 'Fetch pull requests',            risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_create_comment',    name: 'Create Comment',   description: 'Post a comment on PR or issue',  risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'github_get_file',          name: 'Get File',         description: 'Read a file from a repo',        risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_webhook_event',     name: 'Webhook Event',    description: 'Receive incoming webhook events', risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_list_repos',        name: 'List Repos',       description: 'List repositories',               risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_get_issues',        name: 'Get Issues',       description: 'Fetch issues from a repo',        risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_create_issue',      name: 'Create Issue',     description: 'Open a new GitHub issue',         risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'github_get_pull_requests', name: 'Get PRs',          description: 'Fetch pull requests',             risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_create_comment',    name: 'Create Comment',   description: 'Post a comment on PR or issue',   risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'github_get_file',          name: 'Get File',         description: 'Read a file from a repo',         risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_webhook_event',     name: 'Webhook Event',    description: 'Receive incoming webhook events',  risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const MEMORY_TOOLS: ToolDef[] = [
@@ -103,23 +119,19 @@ const MEMORY_TOOLS: ToolDef[] = [
 ]
 
 const AGENT_INTERACTION_TOOLS: ToolDef[] = [
-  { id: 'ask_user_input',  name: 'Ask User Input',  description: 'Pause and ask the user a question mid-task',       risk: 'low',    defaultPermission: 'auto' },
-  { id: 'summarize_task',  name: 'Summarize Task',  description: 'Generate a structured summary of completed work',  risk: 'low',    defaultPermission: 'auto' },
-  { id: 'confirm_plan',    name: 'Confirm Plan',    description: 'Present a plan for user approval before executing', risk: 'low',    defaultPermission: 'auto' },
+  { id: 'ask_user_input',  name: 'Ask User Input',  description: 'Pause and ask the user a question mid-task',        risk: 'low',    defaultPermission: 'auto' },
+  { id: 'summarize_task',  name: 'Summarize Task',  description: 'Generate a structured summary of completed work',   risk: 'low',    defaultPermission: 'auto' },
+  { id: 'confirm_plan',    name: 'Confirm Plan',    description: 'Present a plan for user approval before executing',  risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const CRON_TOOLS: ToolDef[] = [
-  { id: 'cron_write',  name: 'Create Automation', description: 'Create a new scheduled automation task',           risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'cron_patch',  name: 'Edit Automation',   description: 'Modify an existing scheduled automation',          risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'cron_delete', name: 'Delete Automation', description: 'Permanently delete a scheduled automation',        risk: 'high',   defaultPermission: 'confirm' },
+  { id: 'cron_write',  name: 'Create Automation', description: 'Create a new scheduled automation task',            risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'cron_patch',  name: 'Edit Automation',   description: 'Modify an existing scheduled automation',           risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'cron_delete', name: 'Delete Automation', description: 'Permanently delete a scheduled automation',         risk: 'high',   defaultPermission: 'confirm' },
 ]
 
-// OAuth connector tools come from the backend /api/connectors/:id/actions endpoint.
-// We define the well-known ones here so they display immediately; dynamic ones
-// fetched from the server are merged in at runtime.
+// ── Category icon SVGs ────────────────────────────────────────────────────────
 
-// ── Category icon SVGs — no emoji ─────────────────────────────────────────────
-// Each returns a small inline SVG element sized to fit the 20×20 slot in CategorySection header.
 export const CATEGORY_ICONS: Record<string, ReactElement> = {
   browser: (
     <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
@@ -157,40 +169,19 @@ export const CATEGORY_ICONS: Record<string, ReactElement> = {
       <polyline points='16 18 22 12 16 6'/><polyline points='8 6 2 12 8 18'/>
     </svg>
   ),
-  telegram: (
-    // Telegram paper-plane icon
-    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
-      <path d='M22 2 11 13'/><path d='M22 2 15 22 11 13 2 9l20-7z'/>
-    </svg>
-  ),
-  'slack-bot': (
-    // Slack hash icon (closest neutral SVG without brand color)
-    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
-      <line x1='4' y1='9' x2='20' y2='9'/><line x1='4' y1='15' x2='20' y2='15'/>
-      <line x1='10' y1='3' x2='8' y2='21'/><line x1='16' y1='3' x2='14' y2='21'/>
-    </svg>
-  ),
-  discord: (
-    // Game controller / headset icon for Discord
-    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
-      <path d='M9 10h.01M15 10h.01M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14c-2.67 0-8-1.34-8-4v-1.26C5.23 9.3 7 8 9 8c1.35 0 2.55.5 3 1h0c.45-.5 1.65-1 3-1 2 0 3.77 1.3 5 2.74V12c0 2.66-5.33 4-8 4z'/>
-    </svg>
-  ),
-  'github-bot': (
-    // Git branch icon for GitHub
-    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
-      <line x1='6' y1='3' x2='6' y2='15'/><circle cx='18' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><path d='M18 9a9 9 0 0 1-9 9'/>
-    </svg>
-  ),
+  // Bot integrations — real brand icons via BrandIcon
+  telegram:    <BrandIcon id='telegram'  className='h-5 w-5' />,
+  'slack-bot': <BrandIcon id='slack'     className='h-5 w-5' />,
+  discord:     <BrandIcon id='discord'   className='h-5 w-5' />,
+  'github-bot':<BrandIcon id='github'    className='h-5 w-5' />,
   connector: (
-    // Plug icon — generic fallback for OAuth connectors with no icon URL
     <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
-      <path d='M12 22v-5'/><path d='M9 8V2'/><path d='M15 8V2'/><path d='M18 8H6a2 2 0 0 0-2 2v2a7 7 0 0 0 7 7h2a7 7 0 0 0 7-7v-2a2 2 0 0 0-2-2Z'/>
+      <path d='M12 22v-5'/><path d='M9 8V2'/><path d='M15 8V2'/>
+      <path d='M18 8H6a2 2 0 0 0-2 2v2a7 7 0 0 0 7 7h2a7 7 0 0 0 7-7v-2a2 2 0 0 0-2-2Z'/>
     </svg>
   ),
 }
 
-// Fallback SVG for unknown category IDs (OAuth connectors etc.)
 const FallbackCategoryIcon = () => (
   <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
     <path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/>
@@ -198,15 +189,43 @@ const FallbackCategoryIcon = () => (
   </svg>
 )
 
+// ── Static category list ──────────────────────────────────────────────────────
+
 export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
+  // ── System tools — always present, on by default ─────────────────────────
   {
     id: 'browser',
     label: 'Browser Control',
     icon: 'browser',
-    description: 'Core browser automation — navigate, click, type, screenshot. Always available.',
+    description: 'Core browser automation — navigate, click, type, screenshot. On by default.',
     canDisable: true,
     tools: BROWSER_TOOLS,
   },
+  {
+    id: 'web-search',
+    label: 'Web Search',
+    icon: 'web-search',
+    description: 'Search the internet and extract page content. On by default.',
+    canDisable: true,
+    tools: WEB_TOOLS,
+  },
+  {
+    id: 'filesystem',
+    label: 'File System',
+    icon: 'filesystem',
+    description: 'Read and write local files. On by default.',
+    canDisable: true,
+    tools: FILESYSTEM_TOOLS,
+  },
+  {
+    id: 'code-exec',
+    label: 'Code Execution',
+    icon: 'code-exec',
+    description: 'Run Python and JavaScript in a sandbox. On by default.',
+    canDisable: true,
+    tools: CODE_TOOLS,
+  },
+  // ── Built-in tools — always present, no gating ───────────────────────────
   {
     id: 'agent-interaction',
     label: 'Agent Interaction',
@@ -231,36 +250,14 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     canDisable: true,
     tools: CRON_TOOLS,
   },
-  {
-    id: 'web-search',
-    label: 'Web Search',
-    icon: 'web-search',
-    description: 'Search the internet and extract page content.',
-    canDisable: true,
-    tools: WEB_TOOLS,
-  },
-  {
-    id: 'filesystem',
-    label: 'File System',
-    icon: 'filesystem',
-    description: 'Read and write local files.',
-    canDisable: true,
-    tools: FILESYSTEM_TOOLS,
-  },
-  {
-    id: 'code-exec',
-    label: 'Code Execution',
-    icon: 'code-exec',
-    description: 'Run Python and JavaScript in a sandbox.',
-    canDisable: true,
-    tools: CODE_TOOLS,
-  },
+  // ── Bot integration tools — gated behind connected integration ────────────
   {
     id: 'telegram',
     label: 'Telegram Bot',
     icon: 'telegram',
     description: 'Send and receive messages via your Telegram bot.',
     canDisable: true,
+    requiresIntegrationId: 'telegram',
     tools: TELEGRAM_TOOLS,
   },
   {
@@ -269,6 +266,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     icon: 'slack-bot',
     description: 'Interact with Slack workspaces via your bot token.',
     canDisable: true,
+    requiresIntegrationId: 'slack',
     tools: SLACK_BOT_TOOLS,
   },
   {
@@ -277,14 +275,16 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     icon: 'discord',
     description: 'Interact with Discord servers via your bot.',
     canDisable: true,
+    requiresIntegrationId: 'discord',
     tools: DISCORD_TOOLS,
   },
   {
     id: 'github-bot',
-    label: 'GitHub (Bot Token)',
+    label: 'GitHub Bot',
     icon: 'github-bot',
     description: 'Manage repos, issues, and PRs via a personal access token.',
     canDisable: true,
+    requiresIntegrationId: 'github',
     tools: GITHUB_BOT_TOOLS,
   },
 ]
@@ -370,10 +370,7 @@ function ToolRow({
     <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
       enabled ? 'border-[#2a2a2a] bg-[#141414]' : 'border-[#1e1e1e] bg-[#0f0f0f] opacity-60'
     }`}>
-      {/* Toggle */}
       <Toggle checked={enabled} onToggle={onToggle} />
-
-      {/* Info */}
       <div className='min-w-0 flex-1'>
         <div className='flex items-center gap-1.5 flex-wrap'>
           <span className='text-xs font-medium text-zinc-200'>{tool.name}</span>
@@ -381,8 +378,6 @@ function ToolRow({
         </div>
         <p className='text-[10px] text-zinc-500 leading-snug mt-0.5'>{tool.description}</p>
       </div>
-
-      {/* Permission selector — only shown when tool is enabled */}
       {enabled && (
         <PermissionSelect value={permission} onChange={onPermissionChange} />
       )}
@@ -390,7 +385,39 @@ function ToolRow({
   )
 }
 
+// ── Lock banner — shown when a bot integration isn't connected yet ─────────────
+
+function IntegrationLockBanner({ label, integrationLabel }: { label: string; integrationLabel: string }) {
+  return (
+    <div className='border-t border-[#2a2a2a] px-4 py-5'>
+      <div className='flex flex-col items-center gap-3 rounded-xl border border-dashed border-[#3a3a3a] bg-[#0d0d0d] px-4 py-6 text-center'>
+        {/* lock icon */}
+        <span className='flex h-9 w-9 items-center justify-center rounded-full border border-[#3a3a3a] bg-[#1a1a1a]'>
+          <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-4 w-4 text-zinc-500'>
+            <rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/>
+          </svg>
+        </span>
+        <div>
+          <p className='text-xs font-medium text-zinc-300'>{label} tools are locked</p>
+          <p className='mt-1 text-[11px] text-zinc-500 leading-snug max-w-[260px]'>
+            Connect your <span className='text-zinc-300'>{integrationLabel}</span> integration in the{' '}
+            <span className='text-blue-400'>Integrations</span> tab to unlock these tools.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Category section ──────────────────────────────────────────────────────────
+
+type ConnectorAction = {
+  id: string
+  name: string
+  description: string
+  parameters: Record<string, string>
+  category: string
+}
 
 function CategorySection({
   category,
@@ -399,6 +426,7 @@ function CategorySection({
   onToolToggle,
   onPermissionChange,
   connectorActions,
+  locked,
 }: {
   category: ToolCategory
   toolPermissions: Record<string, ToolPermission>
@@ -406,30 +434,24 @@ function CategorySection({
   onToolToggle: (toolId: string) => void
   onPermissionChange: (toolId: string, p: ToolPermission) => void
   connectorActions?: ConnectorAction[]
+  locked?: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
 
-  // Merge static tool defs with any dynamic connector actions
   const allTools: ToolDef[] = useMemo(() => {
     const base = [...category.tools]
     if (connectorActions) {
       for (const a of connectorActions) {
         if (!base.find((t) => t.id === a.id)) {
-          base.push({
-            id: a.id,
-            name: a.name,
-            description: a.description,
-            risk: 'medium',
-            defaultPermission: 'auto',
-          })
+          base.push({ id: a.id, name: a.name, description: a.description, risk: 'medium', defaultPermission: 'auto' })
         }
       }
     }
     return base
   }, [category.tools, connectorActions])
 
-  const enabledCount = allTools.filter((t) => !disabledTools.includes(t.id)).length
-  const confirmCount = allTools.filter((t) => {
+  const enabledCount = locked ? 0 : allTools.filter((t) => !disabledTools.includes(t.id)).length
+  const confirmCount = locked ? 0 : allTools.filter((t) => {
     const perm = toolPermissions[t.id] ?? t.defaultPermission
     return perm === 'confirm' && !disabledTools.includes(t.id)
   }).length
@@ -443,9 +465,9 @@ function CategorySection({
         className='w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#1a1a1a] transition-colors'
       >
         <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#2a2a2a]'>
-          {/* icon is either a CATEGORY_ICONS key (SVG) or a URL string for OAuth connectors */}
           {category.icon.startsWith('http') ? (
-            <img src={category.icon} alt={category.label} className='h-5 w-5 rounded object-contain' onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            <img src={category.icon} alt={category.label} className='h-5 w-5 rounded object-contain'
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
           ) : (
             CATEGORY_ICONS[category.icon] ?? <FallbackCategoryIcon />
           )}
@@ -453,10 +475,16 @@ function CategorySection({
         <div className='min-w-0 flex-1'>
           <div className='flex items-center gap-2'>
             <span className='text-sm font-semibold text-zinc-100'>{category.label}</span>
-            <span className='text-[10px] text-zinc-500'>
-              {enabledCount}/{allTools.length} active
-              {confirmCount > 0 && ` · ${confirmCount} need confirmation`}
-            </span>
+            {locked ? (
+              <span className='rounded border border-zinc-600/40 bg-zinc-700/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-500'>
+                Not connected
+              </span>
+            ) : (
+              <span className='text-[10px] text-zinc-500'>
+                {enabledCount}/{allTools.length} active
+                {confirmCount > 0 && ` · ${confirmCount} need confirmation`}
+              </span>
+            )}
           </div>
           <p className='text-[11px] text-zinc-500 leading-snug'>{category.description}</p>
         </div>
@@ -468,8 +496,11 @@ function CategorySection({
         </svg>
       </button>
 
-      {/* Tool rows */}
-      {expanded && (
+      {/* Body — lock banner or tool rows */}
+      {expanded && locked && (
+        <IntegrationLockBanner label={category.label} integrationLabel={category.label.replace(' Bot', '').replace(' (Bot Token)', '')} />
+      )}
+      {expanded && !locked && (
         <div className='border-t border-[#2a2a2a] px-4 py-3 space-y-2'>
           {allTools.map((tool) => {
             const isEnabled = !disabledTools.includes(tool.id)
@@ -491,15 +522,7 @@ function CategorySection({
   )
 }
 
-// ── OAuth connector action type (from backend) ────────────────────────────────
-
-type ConnectorAction = {
-  id: string
-  name: string
-  description: string
-  parameters: Record<string, string>
-  category: string
-}
+// ── OAuth connector meta type ─────────────────────────────────────────────────
 
 type ConnectorMeta = {
   id: string
@@ -535,7 +558,6 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
             (c) => c.connected && c.status === 'active'
           )
           setConnectors(active)
-          // Fetch actions for each active connector
           const actionsMap: Record<string, ConnectorAction[]> = {}
           await Promise.all(
             active.map(async (c) => {
@@ -556,6 +578,15 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
   const toolPermissions = settings.toolPermissions ?? {}
   const disabledTools   = settings.disabledTools   ?? []
 
+  // Build a lookup: integrationId → connected?
+  const integrationConnected = useMemo(() => {
+    const map: Record<string, boolean> = {}
+    for (const integration of (settings.integrations ?? []) as IntegrationConfig[]) {
+      map[integration.id] = integration.status === 'connected' && integration.enabled
+    }
+    return map
+  }, [settings.integrations])
+
   const handleToolToggle = (toolId: string) => {
     const next = disabledTools.includes(toolId)
       ? disabledTools.filter((id) => id !== toolId)
@@ -567,7 +598,7 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
     onPatch({ toolPermissions: { ...toolPermissions, [toolId]: perm } })
   }
 
-  // Build connector categories from active OAuth connectors
+  // OAuth connector categories (only connected ones returned by backend)
   const connectorCategories: ToolCategory[] = useMemo(() => {
     return connectors.map((c) => ({
       id: `connector-${c.id}`,
@@ -575,13 +606,12 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
       icon: c.icon || 'connector',
       description: c.description,
       canDisable: true,
-      tools: [], // populated dynamically from connectorActions[c.id]
+      tools: [],
     }))
   }, [connectors])
 
   const allCategories = [...STATIC_TOOL_CATEGORIES, ...connectorCategories]
 
-  // Filter by search
   const filteredCategories = useMemo(() => {
     if (!search.trim()) return allCategories
     const q = search.toLowerCase()
@@ -595,17 +625,17 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
       .filter((cat) => cat.tools.length > 0 || cat.label.toLowerCase().includes(q))
   }, [allCategories, search])
 
-  // Count tools needing confirmation
   const totalConfirm = useMemo(() => {
     let n = 0
     for (const cat of STATIC_TOOL_CATEGORIES) {
+      if (cat.requiresIntegrationId && !integrationConnected[cat.requiresIntegrationId]) continue
       for (const t of cat.tools) {
         const perm = toolPermissions[t.id] ?? t.defaultPermission
         if (perm === 'confirm' && !disabledTools.includes(t.id)) n++
       }
     }
     return n
-  }, [toolPermissions, disabledTools])
+  }, [toolPermissions, disabledTools, integrationConnected])
 
   return (
     <div className='space-y-5'>
@@ -615,13 +645,16 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
         <p className='mt-1 text-sm text-zinc-400'>
           Control which tools the agent can use and whether it must ask before using them.
           Tools set to <span className='text-amber-300 font-medium'>Ask for confirmation</span> will pause the agent and send you an approval card.
+          Bot integration tools only appear once their credentials are connected.
         </p>
       </div>
 
       {/* Confirmation summary pill */}
       {totalConfirm > 0 && (
         <div className='flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5'>
-          <span className='text-amber-300 text-lg'>⚠️</span>
+          <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-4 w-4 shrink-0 text-amber-400'>
+            <path d='M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z'/><path d='M12 9v4M12 17h.01'/>
+          </svg>
           <p className='text-xs text-amber-200'>
             <span className='font-semibold'>{totalConfirm} tool{totalConfirm > 1 ? 's' : ''}</span> require your confirmation before the agent can use them.
             An approval card will appear in Chat or your connected messaging channel.
@@ -643,7 +676,7 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
         />
       </div>
 
-      {/* Loading state for connectors */}
+      {/* Loading state */}
       {loadingConnectors && (
         <div className='flex items-center gap-2 text-xs text-zinc-500'>
           <div className='h-3 w-3 animate-spin rounded-full border border-zinc-600 border-t-zinc-300' />
@@ -655,6 +688,10 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
       <div className='space-y-3'>
         {filteredCategories.map((cat) => {
           const cId = cat.id.startsWith('connector-') ? cat.id.replace('connector-', '') : null
+          // A category is locked when it requires an integration that isn't connected yet
+          const locked = Boolean(
+            cat.requiresIntegrationId && !integrationConnected[cat.requiresIntegrationId]
+          )
           return (
             <CategorySection
               key={cat.id}
@@ -664,19 +701,18 @@ export function ToolsTab({ settings, onPatch }: ToolsTabProps) {
               onToolToggle={handleToolToggle}
               onPermissionChange={handlePermissionChange}
               connectorActions={cId ? connectorActions[cId] : undefined}
+              locked={locked}
             />
           )
         })}
       </div>
 
-      {/* Empty search result */}
       {filteredCategories.length === 0 && (
         <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-8 text-center text-sm text-zinc-500'>
           No tools match "{search}"
         </div>
       )}
 
-      {/* Footer: reset */}
       <div className='flex justify-end'>
         <button
           type='button'
