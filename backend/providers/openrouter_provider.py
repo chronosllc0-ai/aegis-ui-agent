@@ -24,7 +24,7 @@ OPENROUTER_MODELS = [
     "qwen/qwen3.5-9b",
     "qwen/qwen3.5-122b-a10b",
     "mistralai/mistral-small-4",
-    "google/gemini-3.1-pro-preview-custom-tools",
+    "google/gemini-2.5-pro",
     "minimax/minimax-m2.7",
     "minimax/minimax-m2.5",
     "nvidia/nemotron-3-super-120b-a12b",
