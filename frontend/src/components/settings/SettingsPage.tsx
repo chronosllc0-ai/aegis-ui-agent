@@ -13,23 +13,25 @@ import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
 import { AdminPanel } from '../admin/AdminPanel'
+import { MemoryTab } from './MemoryTab'
 
 type SettingsPageProps = {
   onBack: () => void
   onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
-  initialTab?: (typeof TABS)[number]
+  initialTab?: SettingsTab
   isAdmin?: boolean
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support', 'Memory', 'Admin'] as const
+export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
 export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false }: SettingsPageProps) {
   const { settings, patchSettings } = useSettingsContext()
 
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(() => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
     if (initialTab && TABS.includes(initialTab)) return initialTab
-    const persisted = localStorage.getItem(TAB_KEY) as (typeof TABS)[number] | null
+    const persisted = localStorage.getItem(TAB_KEY) as SettingsTab | null
     return persisted && TABS.includes(persisted) ? persisted : 'Profile'
   })
 
@@ -50,7 +52,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
 
   const onPatch = (next: Partial<AppSettings>) => patchSettings(next)
 
-  const selectTab = (tab: (typeof TABS)[number]) => {
+  const selectTab = (tab: SettingsTab) => {
     setActiveTab(tab)
     setSidebarOpen(false) // collapse sidebar on mobile after selecting
   }
@@ -126,6 +128,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
           />
         )}
         {activeTab === 'Support' && <SupportTab />}
+        {activeTab === 'Memory' && <MemoryTab />}
         {activeTab === 'Admin' && isAdmin && <AdminPanel />}
       </div>
     </section>

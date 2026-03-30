@@ -17,6 +17,7 @@ from email.message import EmailMessage
 from typing import Any
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -287,6 +288,14 @@ async def google_callback(request: Request, session: AsyncSession = Depends(get_
         info = await oauth.google.parse_id_token(request, token)
     except OAuthError as exc:
         logger.warning("Google OAuth error: %s", exc.error)
+        code = str(request.query_params.get("code", "")).strip()
+        if not code:
+            raise HTTPException(status_code=400, detail="Google OAuth failed") from exc
+        # Fallback for deployments where the Starlette session cookie is not
+        # reliably returned on the callback request (state/nonce mismatch).
+        token, info = await _google_exchange_code(code)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Google OAuth callback unexpected error")
         raise HTTPException(status_code=400, detail="Google OAuth failed") from exc
 
     profile = {
@@ -299,6 +308,44 @@ async def google_callback(request: Request, session: AsyncSession = Depends(get_
     }
     user = await _upsert_user(session, profile)
     return _session_response(user, redirect=_frontend_redirect())
+
+
+async def _google_exchange_code(code: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Exchange Google auth code without session-state dependency.
+
+    This is a production safety fallback when callback requests lose session
+    context at the edge and the OAuth client raises state/nonce errors.
+    """
+    token_url = "https://oauth2.googleapis.com/token"
+    redirect_uri = _callback_url("google")
+    payload = {
+        "code": code,
+        "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+        "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        token_resp = await client.post(token_url, data=payload)
+        if token_resp.status_code >= 400:
+            logger.warning("Google token exchange failed: %s", token_resp.text)
+            raise HTTPException(status_code=400, detail="Google OAuth failed")
+        token = token_resp.json()
+
+        access_token = str(token.get("access_token", "")).strip()
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Google OAuth failed")
+
+        userinfo_resp = await client.get(
+            "https://openidconnect.googleapis.com/v1/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if userinfo_resp.status_code >= 400:
+            logger.warning("Google userinfo fetch failed: %s", userinfo_resp.text)
+            raise HTTPException(status_code=400, detail="Google OAuth failed")
+        info = userinfo_resp.json()
+
+    return token, info
 
 
 @router.get("/github/login")

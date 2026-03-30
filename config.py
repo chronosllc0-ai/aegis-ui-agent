@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     COINBASE_COMMERCE_API_KEY: str = ""
     COINBASE_COMMERCE_WEBHOOK_SECRET: str = ""
 
+    # ── Artifact / Research / Background services ────────────────────
+    ARTIFACT_STORAGE_PATH: str = "./artifacts"
+    SEARCH_API_KEY: str = ""
+    SEARCH_PROVIDER: str = "brave"
+
     # ── Railway / Deployment ─────────────────────────────────────────
     RAILWAY_ENVIRONMENT: str = ""
     RAILWAY_PUBLIC_DOMAIN: str = ""

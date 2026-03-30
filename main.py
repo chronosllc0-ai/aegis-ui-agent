@@ -6,6 +6,7 @@ import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 from http.cookies import SimpleCookie
+import json
 import logging
 from pathlib import Path
 import time as _time
@@ -13,7 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import uvicorn
-from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,10 +25,19 @@ from starlette.middleware.sessions import SessionMiddleware
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
+from backend.artifacts.router import artifact_router
 from backend import database
 from backend.automation import automation_router
+from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
 from backend.connectors.router import connector_router
+from backend.gallery.router import gallery_router
+from backend.memory.router import memory_router
 from backend.payments import payments_router
+from backend.planner.executor_routes import executor_router
+from backend.planner.router import planner_router
+from backend.research.router import research_router
+from backend.tasks.router import task_router
+from backend.tasks.worker import BackgroundWorker
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -36,6 +46,7 @@ from backend.key_management import KeyManager
 from backend.providers import get_provider, list_providers
 from config import settings
 from integrations.discord import DiscordIntegration
+from integrations.github_connector import GitHubIntegration
 from integrations.slack_connector import SlackIntegration
 from integrations.telegram import TelegramIntegration
 from orchestrator import AgentOrchestrator
@@ -72,7 +83,14 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(automation_router)
 app.include_router(connector_router)
+app.include_router(gallery_router)
+app.include_router(memory_router)
+app.include_router(artifact_router)
 app.include_router(payments_router)
+app.include_router(planner_router)
+app.include_router(executor_router)
+app.include_router(research_router)
+app.include_router(task_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
@@ -80,6 +98,7 @@ key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 db_init_task: asyncio.Task[None] | None = None
 db_init_error: str | None = None
 db_ready = False
+_background_worker = BackgroundWorker(max_concurrent=3)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -173,6 +192,7 @@ async def startup_event() -> None:
         db_init_task = asyncio.create_task(_initialize_database())
 
     start_scheduler()
+    await _background_worker.start()
 
 
 @app.on_event("shutdown")
@@ -186,6 +206,7 @@ async def shutdown_event() -> None:
             await db_init_task
         except asyncio.CancelledError:
             logger.info("Database initialization task cancelled during shutdown")
+    await _background_worker.stop()
 
 
 # ── Auth helper ───────────────────────────────────────────────────────
@@ -275,8 +296,45 @@ class DiscordRegistry:
         self._configs[integration_id] = config
 
 
+class GitHubRegistry:
+    """In-memory github integration registry."""
+
+    def __init__(self) -> None:
+        self._integrations: dict[str, dict[str, GitHubIntegration]] = {}
+        self._configs: dict[str, dict[str, dict[str, Any]]] = {}
+
+    def get_github(self, owner_user_id: str, integration_id: str) -> GitHubIntegration | None:
+        return self._integrations.get(owner_user_id, {}).get(integration_id)
+
+    def get_config(self, owner_user_id: str, integration_id: str) -> dict[str, Any]:
+        return self._configs.get(owner_user_id, {}).get(integration_id, {})
+
+    def list_candidates(self, integration_id: str) -> list[tuple[str, GitHubIntegration, dict[str, Any]]]:
+        candidates: list[tuple[str, GitHubIntegration, dict[str, Any]]] = []
+        for owner_user_id, owner_integrations in self._integrations.items():
+            integration = owner_integrations.get(integration_id)
+            if not integration:
+                continue
+            config = self._configs.get(owner_user_id, {}).get(integration_id, {})
+            candidates.append((owner_user_id, integration, config))
+        return candidates
+
+    def upsert(
+        self,
+        owner_user_id: str,
+        integration_id: str,
+        integration: GitHubIntegration,
+        config: dict[str, Any],
+    ) -> None:
+        owner_integrations = self._integrations.setdefault(owner_user_id, {})
+        owner_configs = self._configs.setdefault(owner_user_id, {})
+        owner_integrations[integration_id] = integration
+        owner_configs[integration_id] = config
+
+
 slack_registry = SlackRegistry()
 discord_registry = DiscordRegistry()
+github_registry = GitHubRegistry()
 
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
@@ -1074,6 +1132,187 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
             metadata={"integration_id": integration_id, "source": "send_message"},
         )
     return {"ok": bool(result.get("ok")), "result": result}
+
+
+@app.post("/api/integrations/github/register/{integration_id}")
+async def register_github_integration(
+    integration_id: str,
+    payload: dict[str, Any],
+    user: dict[str, Any] = Depends(_get_current_user),
+) -> dict[str, Any]:
+    config = {
+        "token": str(payload.get("token", "")).strip(),
+        "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
+        "app_id": str(payload.get("app_id", "")).strip(),
+        "owner_user_id": user["uid"],
+    }
+    integration = GitHubIntegration()
+    connection = await integration.connect(config)
+    github_registry.upsert(user["uid"], integration_id, integration, config)
+    return {"connection": connection}
+
+
+@app.post("/api/integrations/github/{integration_id}/test")
+async def test_github_integration(
+    integration_id: str,
+    user: dict[str, Any] = Depends(_get_current_user),
+) -> dict[str, Any]:
+    integration = github_registry.get_github(user["uid"], integration_id)
+    if not integration:
+        raise HTTPException(status_code=404, detail="GitHub integration not found")
+    return await integration.execute_tool("github_list_repos", {"per_page": 5})
+
+
+@app.post("/api/integrations/github/{integration_id}/webhook")
+async def github_webhook(integration_id: str, request: Request) -> dict[str, Any]:
+    """Receive GitHub webhook events (push, PR, issue, etc.)."""
+    candidates = github_registry.list_candidates(integration_id)
+    if not candidates:
+        raise HTTPException(status_code=404, detail="GitHub integration not found")
+
+    body = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    selected_integration: GitHubIntegration | None = None
+    for _owner_user_id, integration, config in candidates:
+        webhook_secret = str(config.get("webhook_secret", "")).strip()
+        if not webhook_secret:
+            if selected_integration is None:
+                selected_integration = integration
+            continue
+        if signature and integration.verify_webhook_signature(body, signature):
+            selected_integration = integration
+            break
+    if selected_integration is None:
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from exc
+
+    event_type = request.headers.get("X-GitHub-Event", "ping")
+    return {"ok": True, "event": event_type, "action": payload.get("action"), "received": True}
+
+
+# ── Cloud Agent Spawn endpoints ───────────────────────────────────────
+
+
+@app.post("/api/agents/spawn")
+async def spawn_agent_task(
+    payload: dict[str, Any],
+    user: dict[str, Any] = Depends(_get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Spawn a new cloud agent task."""
+    instruction = str(payload.get("instruction", "")).strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="instruction is required")
+
+    task = await create_agent_task(
+        db,
+        user_id=user["uid"],
+        instruction=instruction,
+        platform=str(payload.get("platform", "web")).strip(),
+        platform_chat_id=payload.get("platform_chat_id"),
+        platform_message_id=payload.get("platform_message_id"),
+        agent_type=str(payload.get("agent_type", "navigator")).strip(),
+        provider=payload.get("provider"),
+        model=payload.get("model"),
+    )
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
+
+
+@app.get("/api/agents/tasks")
+async def list_agent_tasks(
+    status: str | None = None,
+    platform: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict[str, Any] = Depends(_get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """List agent tasks for the current user."""
+    tasks = await get_user_tasks(db, user["uid"], status=status, platform=platform, limit=limit, offset=offset)
+    return {
+        "tasks": [
+            {
+                "id": t.id,
+                "instruction": t.instruction[:200],
+                "status": t.status,
+                "platform": t.platform,
+                "agent_type": t.agent_type,
+                "provider": t.provider,
+                "model": t.model,
+                "credits_used": t.credits_used,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            }
+            for t in tasks
+        ]
+    }
+
+
+@app.get("/api/agents/tasks/{task_id}")
+async def get_agent_task(
+    task_id: str,
+    user: dict[str, Any] = Depends(_get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Get a specific agent task with actions."""
+    task = await get_task_by_id(db, task_id)
+    if not task or task.user_id != user["uid"]:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    actions = await get_task_actions(db, task_id)
+    return {
+        "id": task.id,
+        "instruction": task.instruction,
+        "status": task.status,
+        "platform": task.platform,
+        "agent_type": task.agent_type,
+        "provider": task.provider,
+        "model": task.model,
+        "sandbox_id": task.sandbox_id,
+        "result_summary": task.result_summary,
+        "error_message": task.error_message,
+        "credits_used": task.credits_used,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "actions": [
+            {
+                "id": a.id,
+                "sequence": a.sequence,
+                "action_type": a.action_type,
+                "description": a.description,
+                "duration_ms": a.duration_ms,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in actions
+        ],
+    }
+
+
+@app.post("/api/agents/tasks/{task_id}/cancel")
+async def cancel_agent_task(
+    task_id: str,
+    user: dict[str, Any] = Depends(_get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Cancel a running or pending agent task."""
+    task = await get_task_by_id(db, task_id)
+    if not task or task.user_id != user["uid"]:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail=f"Cannot cancel task in '{task.status}' status")
+
+    updated = await update_task_status(db, task_id, "cancelled")
+    return {"task_id": task_id, "status": updated.status if updated else "cancelled"}
 
 
 # ── Bot slash command infrastructure ────────────────────────────────

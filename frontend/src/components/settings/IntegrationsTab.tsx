@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { apiUrl } from '../../lib/api'
 
 type IntegrationsTabProps = {
   integrations: IntegrationConfig[]
@@ -29,8 +30,9 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
   }
 
   const postJson = async (path: string, payload: Record<string, unknown>) => {
-    const response = await fetch(path, {
+    const response = await fetch(apiUrl(path), {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
@@ -123,6 +125,33 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     }
   }
 
+  const connectGithub = async (integration: IntegrationConfig) => {
+    const settings = integration.settings ?? {}
+    const payload = {
+      token: settings.token ?? '',
+      webhook_secret: settings.webhook_secret ?? '',
+      app_id: settings.app_id ?? '',
+    }
+    if (!payload.token) {
+      updateIntegration(integration.id, { status: 'error', enabled: false })
+      setIntegrationError(integration.id, 'Token is required.')
+      return
+    }
+    setBusyId(integration.id)
+    setIntegrationError(integration.id, null)
+    try {
+      const data = await postJson(`/api/integrations/github/register/${integration.id}`, payload)
+      const connected = Boolean(data?.connection?.connected)
+      updateIntegration(integration.id, { status: connected ? 'connected' : 'error', enabled: connected })
+      if (!connected) setIntegrationError(integration.id, 'Connection failed.')
+    } catch (err) {
+      updateIntegration(integration.id, { status: 'error' })
+      setIntegrationError(integration.id, err instanceof Error ? err.message : 'Connection failed.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const testTelegram = async (integration: IntegrationConfig) => {
     setBusyId(integration.id)
     setIntegrationError(integration.id, null)
@@ -171,6 +200,22 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     }
   }
 
+  const testGithub = async (integration: IntegrationConfig) => {
+    setBusyId(integration.id)
+    setIntegrationError(integration.id, null)
+    try {
+      const data = await postJson(`/api/integrations/github/${integration.id}/test`, {})
+      const ok = Boolean(data?.ok)
+      updateIntegration(integration.id, { status: ok ? 'connected' : 'error' })
+      if (!ok) setIntegrationError(integration.id, 'GitHub test failed.')
+    } catch (err) {
+      updateIntegration(integration.id, { status: 'error' })
+      setIntegrationError(integration.id, err instanceof Error ? err.message : 'GitHub test failed.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const toggleIntegration = async (integration: IntegrationConfig) => {
     if (integration.enabled) {
       updateIntegration(integration.id, { enabled: false, status: 'disabled' })
@@ -187,6 +232,10 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     }
     if (integration.id === 'discord') {
       await connectDiscord(integration)
+      return
+    }
+    if (integration.id === 'github') {
+      await connectGithub(integration)
       return
     }
     updateIntegration(integration.id, { enabled: true, status: 'disabled' })
@@ -216,13 +265,14 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
         <h3 className='mb-2 text-sm font-semibold'>Connected Integrations</h3>
         <div className='space-y-2'>
           {integrations.map((integration) => {
-            const isConfigurable = ['telegram', 'slack', 'discord'].includes(integration.id)
+            const isConfigurable = ['telegram', 'slack', 'discord', 'github'].includes(integration.id)
             const isBusy = busyId === integration.id
-            const canTest = ['telegram', 'slack', 'discord'].includes(integration.id)
+            const canTest = ['telegram', 'slack', 'discord', 'github'].includes(integration.id)
             const handleTest = () => {
               if (integration.id === 'telegram') return testTelegram(integration)
               if (integration.id === 'slack') return testSlack(integration)
               if (integration.id === 'discord') return testDiscord(integration)
+              if (integration.id === 'github') return testGithub(integration)
               return undefined
             }
             return (
@@ -414,6 +464,57 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                     <button
                       type='button'
                       onClick={() => connectDiscord(integration)}
+                      disabled={isBusy}
+                      className={`rounded bg-blue-600 px-3 py-1 ${isBusy ? 'opacity-60' : ''}`}
+                    >
+                      Save & Connect
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => setExpandedId(null)}
+                      className='rounded border border-[#2a2a2a] px-3 py-1'
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+                {expandedId === integration.id && integration.id === 'github' && (
+                <div className='mt-3 grid gap-2 text-xs'>
+                  <input
+                    placeholder='Personal access token or installation token'
+                    value={integration.settings?.token ?? ''}
+                    onChange={(event) =>
+                      updateIntegration(integration.id, {
+                        settings: { ...(integration.settings ?? {}), token: event.target.value },
+                      })
+                    }
+                    className='rounded border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2'
+                  />
+                  <input
+                    placeholder='Webhook secret (optional)'
+                    value={integration.settings?.webhook_secret ?? ''}
+                    onChange={(event) =>
+                      updateIntegration(integration.id, {
+                        settings: { ...(integration.settings ?? {}), webhook_secret: event.target.value },
+                      })
+                    }
+                    className='rounded border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2'
+                  />
+                  <input
+                    placeholder='GitHub App ID (optional)'
+                    value={integration.settings?.app_id ?? ''}
+                    onChange={(event) =>
+                      updateIntegration(integration.id, {
+                        settings: { ...(integration.settings ?? {}), app_id: event.target.value },
+                      })
+                    }
+                    className='rounded border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2'
+                  />
+                  <div className='flex gap-2'>
+                    <button
+                      type='button'
+                      onClick={() => connectGithub(integration)}
                       disabled={isBusy}
                       className={`rounded bg-blue-600 px-3 py-1 ${isBusy ? 'opacity-60' : ''}`}
                     >
