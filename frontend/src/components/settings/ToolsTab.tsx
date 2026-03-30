@@ -182,6 +182,12 @@ export const CATEGORY_ICONS: Record<string, ReactElement> = {
       <line x1='6' y1='3' x2='6' y2='15'/><circle cx='18' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><path d='M18 9a9 9 0 0 1-9 9'/>
     </svg>
   ),
+  connector: (
+    // Plug icon — generic fallback for OAuth connectors with no icon URL
+    <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
+      <path d='M12 22v-5'/><path d='M9 8V2'/><path d='M15 8V2'/><path d='M18 8H6a2 2 0 0 0-2 2v2a7 7 0 0 0 7 7h2a7 7 0 0 0 7-7v-2a2 2 0 0 0-2-2Z'/>
+    </svg>
+  ),
 }
 
 // Fallback SVG for unknown category IDs (OAuth connectors etc.)
