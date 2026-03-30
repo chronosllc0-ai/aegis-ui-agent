@@ -19,6 +19,7 @@ import { WorkflowView } from './components/WorkflowView'
 import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
 import { ChatPanel } from './components/ChatPanel'
+import { SubAgentPanel } from './components/SubAgentPanel'
 import { SettingsPage } from './components/settings/SettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
@@ -57,7 +58,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap } = useWebSocket(handleUsageMessage)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent: _spawnSubAgent, messageSubAgent, cancelSubAgent } = useWebSocket(handleUsageMessage)
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -878,6 +879,17 @@ function App() {
                 <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-red-300 border-t-transparent' />
                 Stop
               </button>
+            </div>
+          )}
+
+          {!showSettings && !showAutomations && subAgents.length > 0 && (
+            <div className='flex justify-center px-4 pb-2'>
+              <SubAgentPanel
+                agents={subAgents}
+                steps={subAgentSteps}
+                onCancel={cancelSubAgent}
+                onMessage={messageSubAgent}
+              />
             </div>
           )}
 

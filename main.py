@@ -350,6 +350,9 @@ class SessionRuntime:
         self.user_uid: str | None = None
         # Pending user-input futures keyed by request_id
         self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
+        # Sub-agent manager — created lazily on first spawn
+        from subagent_runtime import SubAgentManager
+        self.subagent_manager: SubAgentManager = SubAgentManager()
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -870,6 +873,35 @@ async def _run_navigation_task(
             },
         })
 
+    async def _on_spawn_subagent(sub_instruction: str, sub_model: str) -> str:
+        """Spawn a sub-agent on behalf of the main agent and return its sub_id."""
+        effective_model = sub_model or str(runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b")).strip()
+
+        async def _sub_send(msg: dict[str, Any]) -> None:
+            try:
+                await websocket.send_json(msg)
+            except Exception:  # noqa: BLE001
+                pass
+
+        sub_id = await runtime.subagent_manager.spawn(
+            instruction=sub_instruction,
+            model=effective_model,
+            parent_user_uid=runtime.user_uid,
+            orchestrator=_get_orchestrator(),
+            parent_settings=runtime.settings,
+            send_to_parent=_sub_send,
+            on_user_input=None,
+        )
+        # Send updated agent list to frontend
+        await websocket.send_json({
+            "type": "subagent_list",
+            "data": {"agents": runtime.subagent_manager.list_agents()},
+        })
+        return sub_id
+
+    async def _on_message_subagent(sub_id: str, message: str) -> bool:
+        return await runtime.subagent_manager.send_message(sub_id, message)
+
     try:
         result = await _get_orchestrator().execute_task(
             session_id=session_id,
@@ -883,6 +915,8 @@ async def _run_navigation_task(
             user_uid=runtime.user_uid,
             on_user_input=_on_user_input,
             on_reasoning_delta=_on_reasoning_delta,
+            on_spawn_subagent=_on_spawn_subagent,
+            on_message_subagent=_on_message_subagent,
         )
         result_status = result.get("status") if isinstance(result, dict) else "completed"
 
@@ -1077,6 +1111,75 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             elif action == "ping":
                 # Client keepalive ping — just ignore silently (server already handles ws-level pings)
                 pass
+            elif action == "spawn_subagent":
+                # ── Spawn a sub-agent ──────────────────────────────────
+                sub_instruction = str(data.get("instruction", "")).strip()
+                sub_model = str(data.get("model", runtime.settings.get("model", ""))).strip()
+                if not sub_instruction:
+                    await websocket.send_json({"type": "error", "data": {"message": "spawn_subagent: instruction is required"}})
+                    continue
+                if not sub_model:
+                    sub_model = str(runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b")).strip()
+
+                async def _sub_send(msg: dict[str, Any], _ws: "WebSocket" = websocket) -> None:
+                    try:
+                        await _ws.send_json(msg)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                sub_id = await runtime.subagent_manager.spawn(
+                    instruction=sub_instruction,
+                    model=sub_model,
+                    parent_user_uid=runtime.user_uid,
+                    orchestrator=_get_orchestrator(),
+                    parent_settings=runtime.settings,
+                    send_to_parent=_sub_send,
+                    on_user_input=None,  # sub-agents don't forward user-input to parent for now
+                )
+                await websocket.send_json({
+                    "type": "subagent_spawned",
+                    "data": {
+                        "sub_id": sub_id,
+                        "instruction": sub_instruction,
+                        "model": sub_model,
+                    },
+                })
+                # Also send updated agent count
+                await websocket.send_json({
+                    "type": "subagent_list",
+                    "data": {"agents": runtime.subagent_manager.list_agents()},
+                })
+            elif action == "message_subagent":
+                # ── Steer a running sub-agent ──────────────────────────
+                sub_id = str(data.get("sub_id", "")).strip()
+                sub_message = str(data.get("message", "")).strip()
+                if not sub_id or not sub_message:
+                    await websocket.send_json({"type": "error", "data": {"message": "message_subagent: sub_id and message are required"}})
+                    continue
+                ok = await runtime.subagent_manager.send_message(sub_id, sub_message)
+                if not ok:
+                    await websocket.send_json({"type": "error", "data": {"message": f"Sub-agent {sub_id} not found or not running"}})
+            elif action == "cancel_subagent":
+                # ── Cancel a specific sub-agent ────────────────────────
+                sub_id = str(data.get("sub_id", "")).strip()
+                if not sub_id:
+                    await websocket.send_json({"type": "error", "data": {"message": "cancel_subagent: sub_id is required"}})
+                    continue
+                ok = await runtime.subagent_manager.cancel(sub_id)
+                await websocket.send_json({
+                    "type": "subagent_cancelled",
+                    "data": {"sub_id": sub_id, "found": ok},
+                })
+                await websocket.send_json({
+                    "type": "subagent_list",
+                    "data": {"agents": runtime.subagent_manager.list_agents()},
+                })
+            elif action == "list_subagents":
+                # ── List all sub-agents for this session ───────────────
+                await websocket.send_json({
+                    "type": "subagent_list",
+                    "data": {"agents": runtime.subagent_manager.list_agents()},
+                })
             elif action == "stop":
                 runtime.cancel_event.set()
                 break
@@ -1092,6 +1195,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 await runtime.current_task
             except asyncio.CancelledError:
                 logger.info("Cancelled active websocket task during shutdown for session %s", session_id)
+        # Cancel all sub-agents when parent disconnects
+        await runtime.subagent_manager.cancel_all()
+        logger.info("All sub-agents cancelled for session %s", session_id)
         if runtime.user_uid:
             _user_runtimes.pop(runtime.user_uid, None)
         await live_manager.close_session(session_id)
