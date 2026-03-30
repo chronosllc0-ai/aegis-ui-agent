@@ -138,10 +138,15 @@ class OpenAIProvider(BaseProvider):
         response = await client.chat.completions.create(**params)
         async for chunk in response:
             delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                yield StreamChunk(delta=delta.content, finish_reason=chunk.choices[0].finish_reason)
-            elif delta:
-                yield StreamChunk(delta="", finish_reason=chunk.choices[0].finish_reason)
+            if delta:
+                # o-series models stream reasoning tokens in delta.reasoning
+                reasoning_text = getattr(delta, "reasoning", None)
+                if reasoning_text:
+                    yield StreamChunk(delta="", reasoning_delta=reasoning_text)
+                if delta.content:
+                    yield StreamChunk(delta=delta.content, finish_reason=chunk.choices[0].finish_reason)
+                elif not reasoning_text:
+                    yield StreamChunk(delta="", finish_reason=chunk.choices[0].finish_reason)
 
     def validate_api_key(self, api_key: str) -> bool:
         return bool(api_key and api_key.startswith("sk-"))

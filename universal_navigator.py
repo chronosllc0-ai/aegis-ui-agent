@@ -442,14 +442,20 @@ async def run_universal_navigation(
                     "steering": [],
                 })
 
-            async for chunk in provider.stream(
-                messages,
-                model=model,
-                temperature=0.2,
-                max_tokens=1024,
-                enable_reasoning=enable_reasoning,
-                reasoning_effort=reasoning_effort,
-            ):
+            # Derive integer budget so all providers (including Google) receive the same param
+            _effort_budgets = {"low": 2000, "medium": 8000, "high": 16000}
+            reasoning_budget = _effort_budgets.get(reasoning_effort, 8000)
+            # Reasoning models typically ignore temperature; only pass it for non-reasoning paths
+            stream_kwargs: dict = {
+                "model": model,
+                "max_tokens": 1024,
+                "enable_reasoning": enable_reasoning,
+                "reasoning_effort": reasoning_effort,
+                "reasoning_budget": reasoning_budget,
+            }
+            if not enable_reasoning:
+                stream_kwargs["temperature"] = 0.2
+            async for chunk in provider.stream(messages, **stream_kwargs):
                 if cancel_event and cancel_event.is_set():
                     break
                 if chunk.reasoning_delta:

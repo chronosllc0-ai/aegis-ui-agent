@@ -117,7 +117,7 @@ class GoogleProvider(BaseProvider):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         enable_reasoning: bool = False,
-        reasoning_budget: int = 8000,
+        reasoning_effort: str = "medium",
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
@@ -128,7 +128,11 @@ class GoogleProvider(BaseProvider):
             config["system_instruction"] = system
 
         if enable_reasoning and model_name in GOOGLE_THINKING_MODELS:
-            config["thinking_config"] = {"thinking_budget": reasoning_budget}
+            _effort_to_budget = {"low": 2000, "medium": 8000, "high": 16000}
+            thinking_budget = _effort_to_budget.get(reasoning_effort, 8000)
+            config["thinking_config"] = {"thinking_budget": thinking_budget}
+            # Gemini thinking models do not support explicit temperature
+            config.pop("temperature", None)
 
         async for chunk in client.aio.models.generate_content_stream(
             model=model_name,
