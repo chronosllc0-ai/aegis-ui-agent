@@ -115,6 +115,7 @@ class UniversalToolExecutor:
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
         on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
         on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+        is_subagent: bool = False,
     ) -> None:
         """executor: ActionExecutor instance from executor.py"""
         self._exe = executor
@@ -124,6 +125,8 @@ class UniversalToolExecutor:
         # Sub-agent callbacks — wired from the WS session when available
         self._on_spawn_subagent = on_spawn_subagent    # (instruction, model) -> sub_id
         self._on_message_subagent = on_message_subagent  # (sub_id, message) -> ok
+        # When True, tool calls are gated against SUBAGENT_ALLOWED_TOOLS
+        self._is_subagent = is_subagent
 
     async def run(self, tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
         """Execute a tool and return (text_result, optional_screenshot_bytes)."""
@@ -131,6 +134,13 @@ class UniversalToolExecutor:
         screenshot: bytes | None = None
 
         try:
+            # ── Sub-agent tool allowlist enforcement ──────────────────
+            # Terminal tools (done/error) are always allowed so the loop can exit cleanly.
+            if self._is_subagent and tool not in ("done", "error"):
+                from subagent_runtime import SUBAGENT_ALLOWED_TOOLS
+                if tool not in SUBAGENT_ALLOWED_TOOLS:
+                    return f"Tool '{tool}' is not available to sub-agents.", None
+
             if tool == "screenshot":
                 screenshot = await self._exe.screenshot()
                 self._last_screenshot = screenshot
@@ -418,6 +428,7 @@ async def run_universal_navigation(
     on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
     on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
     on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+    is_subagent: bool = False,
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider.
 
@@ -429,6 +440,7 @@ async def run_universal_navigation(
         on_user_input=on_user_input,
         on_spawn_subagent=on_spawn_subagent,
         on_message_subagent=on_message_subagent,
+        is_subagent=is_subagent,
     )
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, Literal
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ class SubAgentRuntime:
         self.cancel_event = asyncio.Event()
         self.steering_context: list[str] = []
         self.task: asyncio.Task[None] | None = None
-        self.status: str = "spawning"   # spawning | running | completed | failed | cancelled
+        self.status: Literal["spawning", "running", "completed", "failed", "cancelled"] = "spawning"
         self.steps: list[str] = []       # summary of completed steps for UI
 
 
@@ -188,6 +188,7 @@ class SubAgentManager:
                     user_uid=parent_user_uid,
                     on_user_input=on_user_input,
                     on_reasoning_delta=None,
+                    is_subagent=True,       # enforces SUBAGENT_ALLOWED_TOOLS in executor
                 )
                 runtime.status = "completed"
             except asyncio.CancelledError:
