@@ -77,6 +77,17 @@ You have access to these tools — call them by returning JSON in your response:
 {"tool": "cron_delete", "task_id": "uuid"}
   → Delete a scheduled task permanently.
 
+{"tool": "spawn_subagent", "instruction": "Research competitor pricing and write a report", "model": "nvidia/nemotron-3-super-120b-a12b"}
+  → Spawns a child agent to handle a parallel sub-task. Returns a sub_session_id you can
+    use with message_subagent. Use this when a task has a clearly separable part that can
+    run independently (e.g. research, data collection, code review). The sub-agent has
+    browser + web search + memory access, but no bot/messaging tools.
+    model: the model slug the sub-agent should use (use the same model as yourself by default).
+
+{"tool": "message_subagent", "sub_id": "uuid-returned-by-spawn", "message": "Focus on EU pricing only"}
+  → Sends a steering message to a running sub-agent. Use this to redirect, refine, or
+    check in on a sub-agent mid-task.
+
 {"tool": "done", "summary": "Task completed: ..."}
   → Signals that the task is complete. Always call this when finished.
 
@@ -89,6 +100,7 @@ RULES:
 3. Use pixel coordinates from the screenshot (1280×720 viewport).
 4. After each action, take a screenshot to verify the result before proceeding.
 5. Be concise and efficient — complete tasks in as few steps as possible.
+6. Sub-agents are best for parallel independent work. Don't spawn them for simple single steps.
 """
 
 # ── Tool executor ────────────────────────────────────────────────────
@@ -101,12 +113,20 @@ class UniversalToolExecutor:
         executor: Any,
         user_uid: str | None = None,
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+        on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
+        on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+        is_subagent: bool = False,
     ) -> None:
         """executor: ActionExecutor instance from executor.py"""
         self._exe = executor
         self._last_screenshot: bytes | None = None
         self._user_uid = user_uid
         self._on_user_input = on_user_input
+        # Sub-agent callbacks — wired from the WS session when available
+        self._on_spawn_subagent = on_spawn_subagent    # (instruction, model) -> sub_id
+        self._on_message_subagent = on_message_subagent  # (sub_id, message) -> ok
+        # When True, tool calls are gated against SUBAGENT_ALLOWED_TOOLS
+        self._is_subagent = is_subagent
 
     async def run(self, tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
         """Execute a tool and return (text_result, optional_screenshot_bytes)."""
@@ -114,6 +134,13 @@ class UniversalToolExecutor:
         screenshot: bytes | None = None
 
         try:
+            # ── Sub-agent tool allowlist enforcement ──────────────────
+            # Terminal tools (done/error) are always allowed so the loop can exit cleanly.
+            if self._is_subagent and tool not in ("done", "error"):
+                from subagent_runtime import SUBAGENT_ALLOWED_TOOLS
+                if tool not in SUBAGENT_ALLOWED_TOOLS:
+                    return f"Tool '{tool}' is not available to sub-agents.", None
+
             if tool == "screenshot":
                 screenshot = await self._exe.screenshot()
                 self._last_screenshot = screenshot
@@ -322,6 +349,28 @@ class UniversalToolExecutor:
                 except Exception as exc:  # noqa: BLE001
                     return f"cron_delete error: {exc}", None
 
+            elif tool == "spawn_subagent":
+                sub_instruction = str(tool_call.get("instruction", "")).strip()
+                sub_model = str(tool_call.get("model", "")).strip()
+                if not sub_instruction:
+                    return "spawn_subagent error: instruction is required.", None
+                if self._on_spawn_subagent:
+                    sub_id = await self._on_spawn_subagent(sub_instruction, sub_model)
+                    return f"Sub-agent spawned with id={sub_id}. It is now running independently. Use message_subagent to steer it.", None
+                return "spawn_subagent: sub-agent spawning is not available in this context.", None
+
+            elif tool == "message_subagent":
+                sub_id = str(tool_call.get("sub_id", "")).strip()
+                message = str(tool_call.get("message", "")).strip()
+                if not sub_id or not message:
+                    return "message_subagent error: sub_id and message are required.", None
+                if self._on_message_subagent:
+                    ok = await self._on_message_subagent(sub_id, message)
+                    if ok:
+                        return f"Steering message sent to sub-agent {sub_id}.", None
+                    return f"Sub-agent {sub_id} not found or not running.", None
+                return "message_subagent: sub-agent messaging is not available in this context.", None
+
             elif tool in ("done", "error"):
                 # Terminal tools — caller handles them
                 return "", None
@@ -377,12 +426,22 @@ async def run_universal_navigation(
     enable_reasoning: bool = False,
     reasoning_effort: str = "medium",
     on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
+    on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
+    on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+    is_subagent: bool = False,
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider.
 
     Returns a result dict compatible with the Gemini ADK path.
     """
-    tool_executor = UniversalToolExecutor(executor, user_uid=user_uid, on_user_input=on_user_input)
+    tool_executor = UniversalToolExecutor(
+        executor,
+        user_uid=user_uid,
+        on_user_input=on_user_input,
+        on_spawn_subagent=on_spawn_subagent,
+        on_message_subagent=on_message_subagent,
+        is_subagent=is_subagent,
+    )
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []
     parent_step_id: str | None = None

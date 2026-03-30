@@ -196,6 +196,9 @@ class AgentOrchestrator:
         user_uid: str | None = None,
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
         on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
+        on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
+        on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+        is_subagent: bool = False,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction.
 
@@ -240,6 +243,9 @@ class AgentOrchestrator:
                 enable_reasoning=enable_reasoning,
                 reasoning_effort=reasoning_effort,
                 on_reasoning_delta=on_reasoning_delta,
+                on_spawn_subagent=on_spawn_subagent,
+                on_message_subagent=on_message_subagent,
+                is_subagent=is_subagent,
             )
 
         # ── Gemini / ADK path (original) ───────────────────────────────
