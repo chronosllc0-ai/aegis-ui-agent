@@ -348,6 +348,8 @@ class SessionRuntime:
         self.settings: dict[str, Any] = {}
         self.conversation_id: str | None = None
         self.user_uid: str | None = None
+        # Pending user-input futures keyed by request_id
+        self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -836,6 +838,38 @@ async def _run_navigation_task(
     runtime.task_running = True
     runtime.cancel_event.clear()
 
+    async def _on_user_input(question: str, options: list[str]) -> str:
+        """Send a user_input_request WS message and await the user's response."""
+        import uuid as _uuid
+        request_id = str(_uuid.uuid4())
+        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        runtime.pending_user_inputs[request_id] = fut
+        try:
+            await websocket.send_json({
+                "type": "step",
+                "data": {
+                    "type": "user_input_request",
+                    "content": f"[ask_user_input] {question}",
+                    "question": question,
+                    "options": options,
+                    "request_id": request_id,
+                },
+            })
+            return await asyncio.wait_for(fut, timeout=300.0)
+        except asyncio.TimeoutError:
+            return "No response (timed out)."
+        finally:
+            runtime.pending_user_inputs.pop(request_id, None)
+
+    async def _on_reasoning_delta(step_id: str, delta_text: str) -> None:
+        await websocket.send_json({
+            "type": "reasoning_delta",
+            "data": {
+                "step_id": step_id,
+                "delta": delta_text,
+            },
+        })
+
     try:
         result = await _get_orchestrator().execute_task(
             session_id=session_id,
@@ -847,6 +881,8 @@ async def _run_navigation_task(
             settings=runtime.settings,
             on_workflow_step=lambda step: _send_workflow_step(websocket, step),
             user_uid=runtime.user_uid,
+            on_user_input=_on_user_input,
+            on_reasoning_delta=_on_reasoning_delta,
         )
         result_status = result.get("status") if isinstance(result, dict) else "completed"
 
@@ -1030,6 +1066,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                             metadata={"source": "voice", "action": "navigate"},
                         )
                         _start_navigation_task(websocket, runtime, session_id, transcript)
+            elif action == "user_input_response":
+                request_id = str(data.get("request_id", ""))
+                response_text = str(data.get("response", ""))
+                fut = runtime.pending_user_inputs.get(request_id)
+                if fut and not fut.done():
+                    fut.set_result(response_text)
+                else:
+                    logger.debug("user_input_response for unknown/expired request_id=%s", request_id)
             elif action == "ping":
                 # Client keepalive ping — just ignore silently (server already handles ws-level pings)
                 pass
@@ -1572,6 +1616,7 @@ async def _handle_slash_command(
             "/model — current model\n"
             "/models — list & switch model\n"
             "/stream start|stop — live screenshots\n"
+            "/reason on|off|low|medium|high|stream|status — reasoning mode\n"
             "/help — this message"
         )
 
@@ -1671,6 +1716,39 @@ async def _handle_slash_command(
             return "⏹ Screenshot stream stopped."
         else:
             return "Usage: /stream start|stop"
+
+    if cmd == "reason":
+        sub = arg.lower().strip()
+        if not runtime:
+            return "⚪ No active session."
+        if sub in ("on", "true", "1"):
+            runtime.settings["enable_reasoning"] = True
+            return "🧠 Reasoning enabled (effort: medium). Agent will think before each step."
+        elif sub in ("off", "false", "0"):
+            runtime.settings["enable_reasoning"] = False
+            return "⭕ Reasoning disabled."
+        elif sub in ("low", "medium", "high"):
+            runtime.settings["enable_reasoning"] = True
+            runtime.settings["reasoning_effort"] = sub
+            return f"🧠 Reasoning enabled with effort: *{sub}*."
+        elif sub == "stream":
+            runtime.settings["enable_reasoning"] = True
+            runtime.settings["stream_reasoning"] = True
+            return "🧠 Reasoning enabled with live streaming. You'll receive thinking updates in real-time."
+        elif sub == "status":
+            enabled = runtime.settings.get("enable_reasoning", False)
+            effort = runtime.settings.get("reasoning_effort", "medium")
+            streaming = runtime.settings.get("stream_reasoning", False)
+            status = "enabled" if enabled else "disabled"
+            return f"🧠 Reasoning: *{status}* | effort: {effort} | stream: {'on' if streaming else 'off'}"
+        else:
+            return (
+                "Usage: /reason <on|off|low|medium|high|stream|status>\n"
+                "  on/off — enable or disable reasoning\n"
+                "  low/medium/high — set effort level\n"
+                "  stream — enable with live streaming to this chat\n"
+                "  status — show current settings"
+            )
 
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
 

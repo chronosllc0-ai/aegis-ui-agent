@@ -1,5 +1,6 @@
 import type { AppSettings } from '../../hooks/useSettings'
 import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
+import { ToolsTab } from './ToolsTab'
 
 const PRESETS: Record<string, string> = {
   Professional: 'Respond clearly and professionally with concise rationale.',
@@ -107,6 +108,14 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         <Toggle label='Auto-screenshot' checked={settings.autoScreenshot} onToggle={(value) => onPatch({ autoScreenshot: value })} />
         <Toggle label='Verbose logging' checked={settings.verboseLogging} onToggle={(value) => onPatch({ verboseLogging: value })} />
         <Toggle label='Confirm destructive actions' checked={settings.confirmDestructiveActions} onToggle={(value) => onPatch({ confirmDestructiveActions: value })} />
+      </section>
+
+      <section className='space-y-3'>
+        <div>
+          <h3 className='text-sm font-semibold'>Tools & Permissions</h3>
+          <p className='mt-1 text-xs text-zinc-500'>Control which tools Aegis can use and whether each requires your approval before running.</p>
+        </div>
+        <ToolsTab settings={settings} onPatch={onPatch} />
       </section>
     </div>
   )

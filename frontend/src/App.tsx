@@ -57,7 +57,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId } = useWebSocket(handleUsageMessage)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap } = useWebSocket(handleUsageMessage)
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -93,6 +93,9 @@ function App() {
       return []
     }
   })
+  const browserGridRef = useRef<HTMLDivElement>(null)
+  const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
+
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
@@ -188,9 +191,18 @@ function App() {
     setUrlInput(currentUrl)
   }, [currentUrl])
 
+  // ── Browser tab title: Working… / Steering… / Aegis ──────────────
+  const titleTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
   useEffect(() => {
-    document.title = isWorking ? 'Aegis - Working...' : 'Aegis'
+    if (!isWorking) { setTitleMode('idle'); return }
+    setTitleMode((prev) => prev === 'steering' ? 'steering' : 'working')
   }, [isWorking])
+  useEffect(() => {
+    if (titleMode === 'working') document.title = '⚙ Aegis — Working…'
+    else if (titleMode === 'steering') document.title = '↩ Aegis — Steering…'
+    else document.title = 'Aegis'
+  }, [titleMode])
 
   useEffect(() => {
     document.body.style.overflow = isAuthenticated && !isDocsRoute && !isPrivacyRoute && !isTermsRoute ? 'hidden' : 'auto'
@@ -264,6 +276,19 @@ function App() {
   // Task history is saved at send-time (see handleSend) so titles always reflect
   // the actual user instruction, not a backend log message.
 
+  // ── Click coordinate extraction for ScreenView pulse overlay ──
+  useEffect(() => {
+    const lastClick = [...logs].reverse().find(l =>
+      l.message?.startsWith('[click]') || l.stepKind === 'click'
+    )
+    if (lastClick) {
+      const match = lastClick.message?.match(/"x":\s*(\d+).*?"y":\s*(\d+)/)
+      if (match) {
+        setLastClickCoords({ x: parseInt(match[1]), y: parseInt(match[2]) })
+      }
+    }
+  }, [logs])
+
   // ── Context tracking: feed log tokens into the context meter ──
   useEffect(() => {
     if (logs.length === 0) return
@@ -307,6 +332,33 @@ function App() {
   }, [activeConversationId, activeTaskIdRef, onNewConversationId])
 
   // When the selected task changes, load messages from server for that conversation
+  // ── Seed taskHistory from server conversations so history survives refresh ──
+  // When the server returns a conversation list (cross-device / post-refresh),
+  // merge any server conversations that aren't already in the local history.
+  useEffect(() => {
+    if (!conversations.length) return
+    setTaskHistory((prev) => {
+      const existingIds = new Set(prev.map((t) => t.id))
+      const toAdd: TaskHistoryItem[] = []
+      for (const conv of conversations) {
+        if (!existingIds.has(conv.id)) {
+          const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
+          const today = new Date()
+          const yesterday = new Date(today)
+          yesterday.setDate(today.getDate() - 1)
+          let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
+          if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
+          else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
+          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '' })
+        }
+      }
+      if (!toAdd.length) return prev
+      const merged = [...toAdd, ...prev].slice(0, 200) // keep max 200
+      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(merged)) } catch { /* quota */ }
+      return merged
+    })
+  }, [conversations])
+
   useEffect(() => {
     if (!selectedTaskId) { setServerMessages([]); return }
     const convId = taskToConvRef.current.get(selectedTaskId)
@@ -390,7 +442,20 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    send({ action: isWorking ? 'steer' : 'navigate', instruction: trimmed })
+    const action = isWorking ? 'steer' : 'navigate'
+    send({ action, instruction: trimmed })
+
+    // ── Update browser tab title for steering state ────────────────
+    if (action === 'steer') {
+      // Clear any pending timer to avoid stacked timeouts from rapid steers
+      if (titleTimeoutRef.current !== null) window.clearTimeout(titleTimeoutRef.current)
+      setTitleMode('steering')
+      // Flash "Steering…" for 3 s then revert to "Working…"
+      titleTimeoutRef.current = window.setTimeout(() => {
+        setTitleMode('working')
+        titleTimeoutRef.current = null
+      }, 3000)
+    }
 
     // Save to task history optimistically at send-time so the title always reflects
     // the real user instruction. We generate a stable taskId from a UUID that the
@@ -767,18 +832,54 @@ function App() {
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 activeTaskId={selectedTaskId}
                 serverMessages={serverMessages}
+                onStop={() => send({ action: 'stop' })}
+                reasoningMap={reasoningMap}
+                enableReasoning={settings.enableReasoning}
+                onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}
+                reasoningEffort={settings.reasoningEffort}
+                onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
+                currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
               />
             ) : (
-              <div className='grid h-full min-h-0 grid-cols-1 grid-rows-[3fr_1fr] gap-1.5 sm:gap-2 md:grid-cols-[2.2fr_1fr] md:grid-rows-[1fr] lg:gap-3'>
-                {showWorkflow ? (
-                  <WorkflowView steps={workflowSteps} />
-                ) : (
-                  <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' />
-                )}
-                <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} />
+              /* Browser layout — ScreenView full height, ActionLog as floating overlay on desktop */
+              <div
+                ref={browserGridRef}
+                className='relative flex h-full min-h-0 flex-col gap-1.5 sm:gap-2 lg:gap-3'
+              >
+                {/* Main content (screen / workflow) — full width */}
+                <div className='min-h-0 min-w-0 flex-1'>
+                  {showWorkflow ? (
+                    <WorkflowView steps={workflowSteps} />
+                  ) : (
+                    <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' lastClickCoords={lastClickCoords} />
+                  )}
+                </div>
+
+                {/* Action log — full width on mobile, floating overlay on desktop */}
+                <div className='min-h-[8rem] md:hidden'>
+                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
+                </div>
+                <div className='hidden md:block md:absolute md:bottom-3 md:right-3 md:w-[320px] md:max-h-[55%] md:z-10'>
+                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
+                </div>
               </div>
             )}
           </div>
+
+          {/* ── Stop button — overlays the send area while agent is working ── */}
+          {!showSettings && !showAutomations && appMode === 'browser' && isWorking && (
+            <div className='flex justify-end pb-1 pr-1'>
+              <button
+                type='button'
+                onClick={() => { send({ action: 'stop' }) }}
+                className='flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-500/20 hover:border-red-400/60'
+                title='Stop current task'
+              >
+                <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-red-300 border-t-transparent' />
+                Stop
+              </button>
+            </div>
+          )}
 
           {!showSettings && !showAutomations && appMode === 'browser' && (
             <div data-tour='input-bar'>

@@ -49,10 +49,30 @@ export interface ChatPanelProps {
   activeTaskId?: string | null
   /** Messages loaded from the server DB for the selected conversation */
   serverMessages?: ServerMessage[]
+  /** Called when user clicks Stop to kill the running task */
+  onStop?: () => void
+  /** Called when user responds to an ask_user_input card */
+  onUserInputResponse?: (answer: string, requestId: string) => void
+  /** Called when user confirms a plan_confirm card */
+  onPlanConfirm?: (requestId: string) => void
+  /** Called when user rejects a plan_confirm card */
+  onPlanReject?: (requestId: string) => void
+  /** Map of step_id → accumulated reasoning text */
+  reasoningMap?: Record<string, string>
+  /** Whether reasoning/thinking mode is enabled */
+  enableReasoning?: boolean
+  /** Toggle reasoning on/off */
+  onToggleReasoning?: (enabled: boolean) => void
+  /** Current reasoning effort level */
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  /** Change reasoning effort level */
+  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  /** Whether the currently selected model supports reasoning */
+  currentModelSupportsReasoning?: boolean
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'thinking'
 
 interface ChatMessage {
   id: string
@@ -65,6 +85,12 @@ interface ChatMessage {
   approvalId?: string
   planSteps?: string[]
   attachments?: AttachedFile[]
+  // user_input card fields
+  question?: string
+  options?: string[]
+  requestId?: string
+  // reasoning/thinking card fields
+  stepId?: string
 }
 
 interface AttachedFile {
@@ -105,67 +131,141 @@ function GeneratingCanvas({ label }: { label: string }) {
 }
 
 // ─── Parse logs → chat messages ──────────────────────────────────────────────
+// ── Heuristics for classifying LogEntry messages ─────────────────────────────
+// A "model response" is any step message that starts with "Model response" — these
+// are raw LLM text turns (not a tool call) and must render as AssistantCard, not
+// as a ToolCard dropdown. The backend currently surfaces them prefixed with
+// "Model response (no tool call):" but may also emit bare text.
+const RE_MODEL_RESPONSE = /^Model response/i
+// Real tool calls are identified by bracket-prefixed messages like [screenshot], [go_to_url], etc.
+const RE_TOOL_CALL = /^\[[\w_]+\]/
+// Only trigger the full-screen generating animation for explicit image/video creation tools.
+// Do NOT match free-text messages that happen to contain the word "generating".
+const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
+
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
-  return logs.map((entry) => {
+  const msgs: ChatMessage[] = []
+  for (const entry of logs) {
+    const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+
+    // ── Reasoning entries → thinking role cards ─────────────────────────────
+    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
+      const stepId = entry.stepId
+      if (stepId) {
+        msgs.push({
+          id: entry.id,
+          role: 'thinking',
+          text: entry.message,
+          timestamp: entry.timestamp,
+          stepId,
+        })
+      }
+      continue
+    }
+
+    // ── Special card types ─────────────────────────────────────────────────
+    if (msg.startsWith('[ask_user_input]')) {
+      try {
+        const jsonStr = msg.replace('[ask_user_input]', '').trim()
+        const parsed = JSON.parse(jsonStr)
+        msgs.push({
+          id: entry.id,
+          role: 'user_input' as ChatRole,
+          text: msg,
+          timestamp: entry.timestamp,
+          question: parsed.question as string,
+          options: parsed.options as string[],
+          requestId: parsed.request_id as string,
+        })
+        continue
+      } catch { /* fall through */ }
+    }
+    if (msg.startsWith('[summarize_task]')) {
+      const summary = msg.replace('[summarize_task]', '').trim()
+      msgs.push({ id: entry.id, role: 'task_summary' as ChatRole, text: summary, timestamp: entry.timestamp })
+      continue
+    }
+    if (msg.startsWith('[confirm_plan]')) {
+      try {
+        const jsonStr = msg.replace('[confirm_plan]', '').trim()
+        const parsed = JSON.parse(jsonStr)
+        msgs.push({
+          id: entry.id,
+          role: 'plan_confirm' as ChatRole,
+          text: parsed.plan as string ?? jsonStr,
+          timestamp: entry.timestamp,
+          requestId: parsed.request_id as string,
+        })
+      } catch {
+        const plan = msg.replace('[confirm_plan]', '').trim()
+        msgs.push({ id: entry.id, role: 'plan_confirm' as ChatRole, text: plan, timestamp: entry.timestamp })
+      }
+      continue
+    }
+
+    // ── User navigation (first event of a new task) ───────────────────────
     const isUser = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
-    const isTool = entry.type === 'step' && !isUser
-    const isError = entry.type === 'error'
-    const isResult = entry.type === 'result'
-    const isGenerating = (
-      entry.type === 'step' &&
-      typeof entry.message === 'string' &&
-      /\b(generating|creating image|creating video|rendering|synthesizing)\b/i.test(entry.message)
-    )
+
+    // ── Image/video generation spinner — ONLY for dedicated generation tools ─
+    const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
+
+    // ── Model text response — show as AssistantCard, never as ToolCard ──────
+    // Catches: "Model response (no tool call): ..." and bare model output steps
+    const isModelResponse = entry.type === 'step' && RE_MODEL_RESPONSE.test(msg)
+
+    // ── Real tool call — bracket-prefixed step messages ─────────────────────
+    const isToolCall = entry.type === 'step' && !isUser && !isModelResponse && RE_TOOL_CALL.test(msg)
+
+    // ── Anything else that's a step but not tool-shaped → assistant text ─────
+    const isStepText = entry.type === 'step' && !isUser && !isGenerating && !isModelResponse && !isToolCall
+
+    // Strip the "Model response (no tool call):" prefix for cleaner display
+    const displayText = isModelResponse
+      ? msg.replace(/^Model response\s*\([^)]*\)\s*:\s*/i, '').trim() || msg
+      : msg
 
     if (isGenerating) {
-      return {
-        id: entry.id,
-        role: 'generating' as ChatRole,
-        text: entry.message,
-        timestamp: entry.timestamp,
-      }
+      msgs.push({ id: entry.id, role: 'generating' as ChatRole, text: msg, timestamp: entry.timestamp })
+      continue
     }
     if (isUser) {
-      return {
-        id: entry.id,
-        role: 'user' as ChatRole,
-        text: entry.message,
-        timestamp: entry.timestamp,
-      }
+      msgs.push({ id: entry.id, role: 'user' as ChatRole, text: msg, timestamp: entry.timestamp })
+      continue
     }
-    if (isTool) {
-      return {
+    if (isModelResponse || isStepText) {
+      // These are assistant-side text messages — render as full readable AssistantCard
+      msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp })
+      continue
+    }
+    if (isToolCall) {
+      // Extract tool name from bracket prefix e.g. "[go_to_url] {...}" → "go_to_url"
+      const toolMatch = msg.match(/^\[([\w_]+)\]/)
+      const toolName = toolMatch?.[1] ?? entry.stepKind
+      // Args are everything after the bracket prefix (the JSON args object)
+      const argsRaw = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
+      let argsFormatted = argsRaw
+      try {
+        argsFormatted = JSON.stringify(JSON.parse(argsRaw), null, 2)
+      } catch { /* keep raw */ }
+      msgs.push({
         id: entry.id,
         role: 'tool' as ChatRole,
-        text: entry.message,
-        toolName: entry.stepKind,
+        text: `[${toolName}]`,
+        toolName,
+        toolArgs: argsFormatted || undefined,
         toolStatus: entry.status === 'failed' ? 'failed' : entry.status === 'completed' ? 'completed' : 'in_progress',
         timestamp: entry.timestamp,
-      }
+      })
+      continue
     }
-    if (isError) {
-      return {
-        id: entry.id,
-        role: 'assistant' as ChatRole,
-        text: `⚠️ ${entry.message}`,
-        timestamp: entry.timestamp,
-      }
+    if (entry.type === 'error') {
+      msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: `⚠️ ${msg}`, timestamp: entry.timestamp })
+      continue
     }
-    if (isResult) {
-      return {
-        id: entry.id,
-        role: 'assistant' as ChatRole,
-        text: entry.message,
-        timestamp: entry.timestamp,
-      }
-    }
-    return {
-      id: entry.id,
-      role: 'assistant' as ChatRole,
-      text: entry.message,
-      timestamp: entry.timestamp,
-    }
-  })
+    // result / interrupt / fallback → assistant text
+    msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp })
+  }
+  return msgs
 }
 
 // ─── Code block parser ────────────────────────────────────────────────────────
@@ -306,8 +406,13 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
 
 function ToolCard({ msg }: { msg: ChatMessage }) {
   const [expanded, setExpanded] = useState(false)
-  const icon = TOOL_ICON[msg.toolName ?? 'other'] ?? TOOL_ICON.other
+  const toolName = msg.toolName ?? 'other'
+  const icon = TOOL_ICON[toolName] ?? TOOL_ICON.other
   const badge = STATUS_BADGE[msg.toolStatus ?? 'in_progress']
+  // Human-readable label: convert snake_case to Title Case e.g. "go_to_url" → "Go To URL"
+  const toolLabel = toolName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  // When there are no args to show, clicking does nothing useful — still allow expand for consistency
+  const hasArgs = Boolean(msg.toolArgs)
 
   return (
     <div className='flex gap-2.5 mb-1.5'>
@@ -317,20 +422,30 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
       <div className='min-w-0 flex-1'>
         <button
           type='button'
-          onClick={() => setExpanded((v) => !v)}
-          className='w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
+          onClick={() => hasArgs && setExpanded((v) => !v)}
+          className={`w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left transition-colors ${hasArgs ? 'cursor-pointer hover:bg-[#1a1a1a]' : 'cursor-default'}`}
         >
           <div className='flex items-center justify-between gap-2'>
-            <span className='truncate text-xs md:text-lg font-medium text-zinc-300'>{msg.text}</span>
+            {/* Tool name in mono, args preview as dim secondary text */}
+            <div className='min-w-0 flex-1'>
+              <span className='font-mono text-xs font-medium text-zinc-300'>{toolLabel}</span>
+              {!expanded && msg.toolArgs && (
+                <span className='ml-2 text-[10px] text-zinc-600 truncate inline-block max-w-[180px] align-middle'>
+                  {msg.toolArgs.slice(0, 80)}
+                </span>
+              )}
+            </div>
             <div className='flex items-center gap-1.5 flex-shrink-0'>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
                 {msg.toolStatus ?? 'running'}
               </span>
-              <IcoChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {hasArgs && (
+                <IcoChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              )}
             </div>
           </div>
           {expanded && msg.toolArgs && (
-            <pre className='mt-2 overflow-x-auto rounded-lg bg-[#0d0d0d] p-2 text-[10px] text-zinc-400 font-mono'>
+            <pre className='mt-2 overflow-x-auto rounded-lg bg-[#0d0d0d] p-2 text-[10px] text-zinc-400 font-mono whitespace-pre-wrap break-words'>
               {msg.toolArgs}
             </pre>
           )}
@@ -404,14 +519,247 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
+// ─── User input request card ─────────────────────────────────────────────────
+function UserInputCard({
+  question,
+  options,
+  requestId,
+  onRespond,
+}: {
+  question: string
+  options: string[]
+  requestId: string
+  onRespond: (answer: string, requestId: string) => void
+}) {
+  const [customMode, setCustomMode] = useState(false)
+  const [customText, setCustomText] = useState('')
+  const [answered, setAnswered] = useState<string | null>(null)
+
+  const handleOption = (opt: string) => {
+    if (opt === 'Let me tell you') {
+      setCustomMode(true)
+      return
+    }
+    setAnswered(opt)
+    onRespond(opt, requestId)
+  }
+
+  if (answered) {
+    return (
+      <div className='rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3'>
+        <p className='text-xs text-zinc-400 mb-1'>You answered:</p>
+        <p className='text-sm text-emerald-300'>{answered}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className='rounded-xl border border-blue-500/20 bg-[#0f1628] p-4 space-y-3'>
+      <div className='flex items-start gap-2'>
+        <span className='text-lg'>❓</span>
+        <div>
+          <p className='text-xs font-medium text-blue-300 mb-1'>Aegis needs your input</p>
+          <p className='text-sm text-zinc-200'>{question}</p>
+        </div>
+      </div>
+      {!customMode ? (
+        <div className='flex flex-wrap gap-2'>
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type='button'
+              onClick={() => handleOption(opt)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                opt === 'Let me tell you'
+                  ? 'border-zinc-600 bg-[#1a1a1a] text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+                  : 'border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:border-blue-400'
+              }`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className='flex gap-2'>
+          <input
+            autoFocus
+            type='text'
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && customText.trim()) {
+                setAnswered(customText.trim())
+                onRespond(customText.trim(), requestId)
+              }
+            }}
+            placeholder='Type your answer...'
+            className='flex-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-500/60'
+          />
+          <button
+            type='button'
+            onClick={() => {
+              if (customText.trim()) {
+                setAnswered(customText.trim())
+                onRespond(customText.trim(), requestId)
+              }
+            }}
+            className='rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500 transition-colors'
+          >
+            Send
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Task summary card ────────────────────────────────────────────────────────
+function TaskSummaryCard({ summary }: { summary: string }) {
+  return (
+    <div className='rounded-xl border border-[#2a2a2a] bg-[#141414] p-4 space-y-2'>
+      <div className='flex items-center gap-2 mb-2'>
+        <span className='text-lg'>✅</span>
+        <p className='text-xs font-semibold text-emerald-300 uppercase tracking-wide'>Task Complete</p>
+      </div>
+      <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{summary}</div>
+    </div>
+  )
+}
+
+// ─── Plan confirm card ────────────────────────────────────────────────────────
+function PlanConfirmCard({
+  plan,
+  requestId,
+  onConfirm,
+  onReject,
+}: {
+  plan: string
+  requestId: string
+  onConfirm: (requestId: string) => void
+  onReject: (requestId: string) => void
+}) {
+  const [status, setStatus] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
+
+  if (status !== 'pending') {
+    return (
+      <div className={`rounded-xl border p-3 text-xs font-medium ${
+        status === 'confirmed'
+          ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
+          : 'border-red-500/20 bg-red-500/5 text-red-300'
+      }`}>
+        Plan {status === 'confirmed' ? 'confirmed ✓' : 'rejected ✗'}
+      </div>
+    )
+  }
+
+  return (
+    <div className='rounded-xl border border-amber-500/20 bg-[#1a1500] p-4 space-y-3'>
+      <div className='flex items-center gap-2'>
+        <span className='text-lg'>📋</span>
+        <p className='text-xs font-semibold text-amber-300 uppercase tracking-wide'>Plan ready — confirm to proceed</p>
+      </div>
+      <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{plan}</div>
+      <div className='flex gap-2 pt-1'>
+        <button
+          type='button'
+          onClick={() => { setStatus('confirmed'); onConfirm(requestId) }}
+          className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors'
+        >
+          ✓ Confirm Plan
+        </button>
+        <button
+          type='button'
+          onClick={() => { setStatus('rejected'); onReject(requestId) }}
+          className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors'
+        >
+          ✗ Reject
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── ThinkingCard (ChatGPT-style streaming reasoning dropdown) ────────────────
+interface ThinkingCardProps {
+  stepId: string
+  reasoningText: string
+  isStreaming: boolean
+}
+
+function ThinkingCard({ stepId: _stepId, reasoningText, isStreaming }: ThinkingCardProps) {
+  const [userCollapsed, setUserCollapsed] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const shouldExpand = isStreaming ? !userCollapsed : false
+  const [manualExpand, setManualExpand] = useState(false)
+
+  // Auto-scroll while streaming
+  useEffect(() => {
+    if ((shouldExpand || manualExpand) && contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight
+    }
+  })
+
+  const displayTitle = reasoningText.split('\n')[0]?.slice(0, 60) || 'Thinking…'
+  const isOpen = shouldExpand || manualExpand
+
+  return (
+    <div className='mb-1.5 overflow-hidden rounded-xl border border-violet-500/20 bg-[#1a1a1a]'>
+      <button
+        type='button'
+        onClick={() => {
+          if (isStreaming) {
+            setUserCollapsed((v) => !v)
+          } else {
+            setManualExpand((v) => !v)
+          }
+        }}
+        className='flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#2a2a2a] transition-colors'
+      >
+        {isStreaming ? (
+          <span className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
+            <span className='h-3 w-3 animate-spin rounded-full border-2 border-violet-400 border-t-transparent' />
+          </span>
+        ) : (
+          <svg className='h-4 w-4 flex-shrink-0 text-violet-400' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/>
+            <path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/>
+          </svg>
+        )}
+        <span className='flex-1 truncate text-xs font-medium text-violet-300'>
+          {isStreaming ? displayTitle : `Reasoned: ${displayTitle}`}
+        </span>
+        <svg
+          className={`h-3.5 w-3.5 flex-shrink-0 text-zinc-500 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'
+        >
+          <path d='M6 9l6 6 6-6' />
+        </svg>
+      </button>
+      {isOpen && (
+        <div
+          ref={contentRef}
+          className='max-h-48 overflow-y-auto px-3 pb-3 pt-1 font-mono text-xs leading-relaxed text-zinc-400 whitespace-pre-wrap'
+        >
+          {reasoningText || <span className='animate-pulse text-zinc-600'>…</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Plus-menu modal (ChatGPT-style bottom sheet) ────────────────────────────
 interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
   onConnector: (connector: ConnectorMeta) => void
   onClose: () => void
+  enableReasoning?: boolean
+  onToggleReasoning?: (enabled: boolean) => void
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  modelSupportsReasoning?: boolean
 }
 
-function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
+function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleReasoning, reasoningEffort, onChangeReasoningEffort, modelSupportsReasoning }: PlusMenuProps) {
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [query, setQuery] = useState('')
 
@@ -482,6 +830,61 @@ function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
           ))}
         </div>
 
+        {/* Reasoning toggle — shown above connector search bar, only for capable models */}
+        {modelSupportsReasoning && (
+          <>
+            <div className='mx-4 my-2 border-t border-[#2a2a2a]' />
+            <div className='px-3 pb-1'>
+              <div className='mb-2 flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <svg className='h-4 w-4 text-violet-400' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                    <path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z'/>
+                    <path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z'/>
+                  </svg>
+                  <span className='text-sm font-medium text-zinc-200'>Reasoning</span>
+                  {enableReasoning && (
+                    <span className='rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-300'>ON</span>
+                  )}
+                </div>
+                <button
+                  type='button'
+                  onClick={() => onToggleReasoning?.(!enableReasoning)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+                    enableReasoning ? 'bg-violet-600' : 'bg-[#2a2a2a]'
+                  }`}
+                  role='switch'
+                  aria-checked={enableReasoning}
+                  aria-label='Toggle reasoning'
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                      enableReasoning ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+              {enableReasoning && (
+                <div className='flex gap-1.5'>
+                  {(['low', 'medium', 'high'] as const).map((effort) => (
+                    <button
+                      key={effort}
+                      type='button'
+                      onClick={() => onChangeReasoningEffort?.(effort)}
+                      className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
+                        reasoningEffort === effort
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {effort}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {/* Divider + connectors section */}
         {connectors.length > 0 && (
           <>
@@ -540,6 +943,16 @@ export function ChatPanel({
   voiceDisabled = false,
   activeTaskId,
   serverMessages = [],
+  onStop,
+  onUserInputResponse,
+  onPlanConfirm,
+  onPlanReject,
+  reasoningMap,
+  enableReasoning,
+  onToggleReasoning,
+  reasoningEffort,
+  onChangeReasoningEffort,
+  currentModelSupportsReasoning,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -862,6 +1275,54 @@ export function ChatPanel({
             )
           }
           if (msg.role === 'subagent') return <SubagentCard key={msg.id} msg={msg} />
+          if (msg.role === 'user_input') {
+            return (
+              <UserInputCard
+                key={msg.id}
+                question={msg.question ?? msg.text}
+                options={msg.options ?? []}
+                requestId={msg.requestId ?? msg.id}
+                onRespond={(answer, reqId) => {
+                  onUserInputResponse?.(answer, reqId)
+                  onSend(answer, 'steer')
+                }}
+              />
+            )
+          }
+          if (msg.role === 'task_summary') return <TaskSummaryCard key={msg.id} summary={msg.text} />
+          if (msg.role === 'plan_confirm') {
+            return (
+              <PlanConfirmCard
+                key={msg.id}
+                plan={msg.text}
+                requestId={msg.requestId ?? msg.id}
+                onConfirm={(reqId) => {
+                  onPlanConfirm?.(reqId)
+                  onSend('confirmed', 'steer')
+                }}
+                onReject={(reqId) => {
+                  onPlanReject?.(reqId)
+                  onSend('rejected', 'steer')
+                }}
+              />
+            )
+          }
+          if (msg.role === 'thinking') {
+            const stepId = msg.stepId ?? ''
+            const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
+            const isStreaming = isWorking && reasoningText.length < 3
+            return (
+              <div key={msg.id} className='flex justify-start px-2 py-0.5'>
+                <div className='w-full max-w-[85%]'>
+                  <ThinkingCard
+                    stepId={stepId}
+                    reasoningText={reasoningText}
+                    isStreaming={isStreaming}
+                  />
+                </div>
+              </div>
+            )
+          }
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 
@@ -917,6 +1378,11 @@ export function ChatPanel({
             onAttach={handleAttach}
             onConnector={handleConnectorSelect}
             onClose={() => setShowPlusMenu(false)}
+            enableReasoning={enableReasoning}
+            onToggleReasoning={onToggleReasoning}
+            reasoningEffort={reasoningEffort}
+            onChangeReasoningEffort={onChangeReasoningEffort}
+            modelSupportsReasoning={currentModelSupportsReasoning}
           />
         )}
 
@@ -990,16 +1456,32 @@ export function ChatPanel({
           >
             <IcoMic className='h-4 w-4' />
           </button>
-          {/* Send */}
-          <button
-            type='button'
-            onClick={handleSend}
-            disabled={isDisabled || (!input.trim() && attachments.length === 0 && !activeConnector)}
-            className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
-            aria-label='Send message'
-          >
-            <IcoSend className='h-4 w-4' />
-          </button>
+          {/* Send / Stop — stop shown while agent is working and no text typed */}
+          {isWorking && !input.trim() && attachments.length === 0 ? (
+            <button
+              type='button'
+              onClick={() => onStop?.()}
+              className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 transition-colors hover:bg-red-500/20'
+              aria-label='Stop task'
+              title='Stop current task'
+            >
+              {/* Spinning ring + stop square */}
+              <span className='relative flex h-4 w-4 items-center justify-center'>
+                <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/60 border-t-transparent' />
+                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+              </span>
+            </button>
+          ) : (
+            <button
+              type='button'
+              onClick={handleSend}
+              disabled={isDisabled || (!input.trim() && attachments.length === 0 && !activeConnector)}
+              className='mb-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors'
+              aria-label='Send message'
+            >
+              <IcoSend className='h-4 w-4' />
+            </button>
+          )}
         </div>
 
         {/* Hidden file input */}

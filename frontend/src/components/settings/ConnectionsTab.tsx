@@ -387,6 +387,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                           {expanded ? 'Hide' : 'Actions'}
                         </button>
                       )}
+
                       {isConn ? (
                         <button type="button" onClick={() => handleOAuthDisconnect(c.id)} disabled={busy} className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40 disabled:opacity-50">
                           {busy ? 'Working…' : 'Disconnect'}
@@ -535,6 +536,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                     >
                       {expanded ? 'Close' : 'Configure'}
                     </button>
+
                     {isConn ? (
                       <button type="button" onClick={() => disconnectBot(integration.id)} className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40">
                         Disconnect

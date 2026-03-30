@@ -118,7 +118,11 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         {activeTab === 'Credits' && <CreditsTab />}
         {activeTab === 'Invoices' && <InvoiceTab />}
         {activeTab === 'Connections' && (
-          <ConnectionsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} isAdmin={isAdmin} />
+          <ConnectionsTab
+            integrations={settings.integrations}
+            onChange={(integrations) => onPatch({ integrations })}
+            isAdmin={isAdmin}
+          />
         )}
         {activeTab === 'Workflows' && (
           <WorkflowsTab
