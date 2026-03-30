@@ -265,6 +265,28 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     // result / interrupt / fallback → assistant text
     msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp })
   }
+
+  // ── Auto-complete in_progress tool steps ──────────────────────────────────
+  // The backend emits each step when it STARTS, not when it ends, so every tool
+  // card arrives as in_progress. Post-process rules:
+  //   1. Any tool step that is followed by another message → completed (work moved on)
+  //   2. If the task finished (last log entry is result/error), flip all remaining
+  //      in_progress tools to completed or failed respectively
+  const lastLog = logs[logs.length - 1]
+  const taskEnded = lastLog && (lastLog.type === 'result' || lastLog.type === 'error')
+  const taskFailed = taskEnded && lastLog.type === 'error'
+
+  for (let i = 0; i < msgs.length; i++) {
+    if (msgs[i].role !== 'tool' || msgs[i].toolStatus !== 'in_progress') continue
+    const hasSuccessor = i < msgs.length - 1
+    if (hasSuccessor) {
+      msgs[i] = { ...msgs[i], toolStatus: 'completed' }
+    } else if (taskEnded) {
+      msgs[i] = { ...msgs[i], toolStatus: taskFailed ? 'failed' : 'completed' }
+    }
+    // else: still the last message and task is running — keep spinner
+  }
+
   return msgs
 }
 
@@ -349,12 +371,6 @@ const TOOL_ICON: Record<string, React.ReactNode> = {
   other:    <Icons.workflows className='h-3.5 w-3.5' />,
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  in_progress: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-  completed:   'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  failed:      'bg-red-500/15 text-red-300 border-red-500/30',
-}
-
 // ─── Individual message renderers ────────────────────────────────────────────
 function UserBubble({ msg }: { msg: ChatMessage }) {
   return (
@@ -389,7 +405,7 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
         <IcoBrain className='h-3.5 w-3.5 text-zinc-300' />
       </div>
       <div className='min-w-0 flex-1'>
-        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-xl text-zinc-200 shadow-md'>
+        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-xl text-zinc-200 shadow-md break-words'>
           {parts.map((part, i) =>
             part.type === 'code' ? (
               <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
@@ -404,14 +420,37 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
+/** Animated spinner / tick / X that replaces the old text badge */
+function ToolStatusIcon({ status }: { status: 'in_progress' | 'completed' | 'failed' }) {
+  if (status === 'in_progress') {
+    return (
+      <span className='relative flex h-4 w-4 flex-shrink-0 items-center justify-center'>
+        <span className='absolute inset-0 animate-spin rounded-full border-2 border-blue-500/30 border-t-blue-400' />
+      </span>
+    )
+  }
+  if (status === 'completed') {
+    return (
+      <span className='flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/15'>
+        <IcoCheck className='h-2.5 w-2.5 text-emerald-400' />
+      </span>
+    )
+  }
+  // failed
+  return (
+    <span className='flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-red-500/15'>
+      <IcoX className='h-2.5 w-2.5 text-red-400' />
+    </span>
+  )
+}
+
 function ToolCard({ msg }: { msg: ChatMessage }) {
   const [expanded, setExpanded] = useState(false)
   const toolName = msg.toolName ?? 'other'
   const icon = TOOL_ICON[toolName] ?? TOOL_ICON.other
-  const badge = STATUS_BADGE[msg.toolStatus ?? 'in_progress']
+  const toolStatus = msg.toolStatus ?? 'in_progress'
   // Human-readable label: convert snake_case to Title Case e.g. "go_to_url" → "Go To URL"
   const toolLabel = toolName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  // When there are no args to show, clicking does nothing useful — still allow expand for consistency
   const hasArgs = Boolean(msg.toolArgs)
 
   return (
@@ -425,25 +464,23 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
           onClick={() => hasArgs && setExpanded((v) => !v)}
           className={`w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left transition-colors ${hasArgs ? 'cursor-pointer hover:bg-[#1a1a1a]' : 'cursor-default'}`}
         >
-          <div className='flex items-center justify-between gap-2'>
-            {/* Tool name in mono, args preview as dim secondary text */}
-            <div className='min-w-0 flex-1'>
-              <span className='font-mono text-xs font-medium text-zinc-300'>{toolLabel}</span>
-              {!expanded && msg.toolArgs && (
-                <span className='ml-2 text-[10px] text-zinc-600 truncate inline-block max-w-[180px] align-middle'>
-                  {msg.toolArgs.slice(0, 80)}
-                </span>
-              )}
-            </div>
-            <div className='flex items-center gap-1.5 flex-shrink-0'>
-              <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${badge}`}>
-                {msg.toolStatus ?? 'running'}
-              </span>
+          {/* Top row: tool name + status icon + chevron — always one line, never wraps */}
+          <div className='flex items-center gap-2'>
+            <span className='flex-1 truncate font-mono text-xs font-medium text-zinc-300'>{toolLabel}</span>
+            <div className='flex flex-shrink-0 items-center gap-1'>
+              <ToolStatusIcon status={toolStatus} />
               {hasArgs && (
                 <IcoChevronDown className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
               )}
             </div>
           </div>
+          {/* Args preview — only shown when collapsed and present */}
+          {!expanded && msg.toolArgs && (
+            <p className='mt-0.5 truncate text-[10px] text-zinc-600'>
+              {msg.toolArgs.slice(0, 120)}
+            </p>
+          )}
+          {/* Expanded args */}
           {expanded && msg.toolArgs && (
             <pre className='mt-2 overflow-x-auto rounded-lg bg-[#0d0d0d] p-2 text-[10px] text-zinc-400 font-mono whitespace-pre-wrap break-words'>
               {msg.toolArgs}
