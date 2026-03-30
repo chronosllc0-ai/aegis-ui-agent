@@ -1,3 +1,25 @@
+## Session 4.4 — March 30, 2026 (Google userinfo fallback error handling)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Hardened Google OAuth callback fallback parsing to avoid uncaught failures when `userinfo` is unavailable or non-JSON.
+- Added `userinfo_resp.raise_for_status()` before JSON parsing in the Google fallback flow.
+- Wrapped fallback with explicit handling for OAuth transport/status errors and JSON decoding errors, returning a controlled HTTP 400 instead of surfacing server 500s.
+
+### What's Working
+- Google fallback path now fails gracefully with `{"detail":"Google OAuth failed"}` for invalid JSON, non-2xx userinfo responses, and fallback OAuth errors.
+
+### What's NOT Working Yet
+- Live production verification still requires redeploy + provider-side log check.
+
+### Next Steps
+1. Redeploy backend and run Google login once against production.
+2. Confirm no callback 500s appear in Railway logs for malformed/failed userinfo responses.
+
+---
+
 ## Session 4.3 — March 30, 2026 (Google OAuth callback hardening)
 
 **Agent:** GPT-5.3-Codex  

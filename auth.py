@@ -18,6 +18,7 @@ from typing import Any
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request
+from httpx import HTTPError
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import delete
@@ -293,8 +294,13 @@ async def google_callback(request: Request, session: AsyncSession = Depends(get_
         info = await oauth.google.parse_id_token(request, token)
     except OAuthError as exc:
         logger.warning("Google OAuth ID token parse error: %s", exc.error)
-        userinfo_resp = await oauth.google.get("userinfo", token=token)
-        info = userinfo_resp.json()
+        try:
+            userinfo_resp = await oauth.google.get("userinfo", token=token)
+            userinfo_resp.raise_for_status()
+            info = userinfo_resp.json()
+        except (OAuthError, HTTPError, json.JSONDecodeError) as fallback_exc:
+            logger.warning("Google OAuth userinfo fallback also failed: %s", fallback_exc)
+            raise HTTPException(status_code=400, detail="Google OAuth failed") from fallback_exc
 
     provider_id = info.get("sub")
     if not provider_id:
