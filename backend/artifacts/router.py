@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import _verify_session
@@ -47,8 +47,19 @@ async def get_artifact(artifact_id: str, request: Request, db: AsyncSession = De
 
 
 @artifact_router.get("/{artifact_id}/download")
-async def download_artifact(artifact_id: str, request: Request, db: AsyncSession = Depends(get_session)) -> FileResponse:
+async def download_artifact(
+    artifact_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> FileResponse | RedirectResponse:
     uid = _get_user_uid(request)
+
+    # Try S3 pre-signed URL first
+    presigned_url = await ArtifactService.get_download_url(db, artifact_id, uid)
+    if presigned_url:
+        return RedirectResponse(url=presigned_url, status_code=302)
+
+    # Fall back to local file
     path = await ArtifactService.get_file_path(db, artifact_id, uid)
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Artifact file not found")

@@ -173,6 +173,7 @@ class AgentOrchestrator:
                 "anthropic": settings.ANTHROPIC_API_KEY,
                 "xai": settings.XAI_API_KEY,
                 "openrouter": settings.OPENROUTER_API_KEY,
+                "fireworks": settings.FIREWORKS_API_KEY,
             }
             api_key = env_keys.get(provider_name, "").strip()
 
