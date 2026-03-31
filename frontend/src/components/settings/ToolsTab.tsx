@@ -114,7 +114,6 @@ const GITHUB_BOT_TOOLS: ToolDef[] = [
   { id: 'github_commit_changes',       name: 'Commit Changes',      description: 'Stage and commit local repo changes',                risk: 'medium', defaultPermission: 'confirm' },
   { id: 'github_push_branch',          name: 'Push Branch',         description: 'Push the current branch to GitHub',                  risk: 'high',   defaultPermission: 'confirm' },
   { id: 'github_create_pull_request',  name: 'Create Pull Request', description: 'Open a mergeable pull request from the local branch', risk: 'high',   defaultPermission: 'confirm' },
-  { id: 'github_webhook_event',        name: 'Webhook Event',       description: 'Receive incoming webhook events',                    risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const MEMORY_TOOLS: ToolDef[] = [

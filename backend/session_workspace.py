@@ -7,6 +7,7 @@ and can be deleted when the websocket session disconnects.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 import re
@@ -59,6 +60,10 @@ def resolve_session_path(session_id: str, requested_path: str | None) -> Path:
     return resolved
 
 
-def cleanup_session_workspace(session_id: str) -> None:
-    """Delete the session workspace tree if it exists."""
-    shutil.rmtree(get_session_workspace_root(session_id), ignore_errors=True)
+async def cleanup_session_workspace(session_id: str) -> None:
+    """Delete the session workspace tree if it exists.
+
+    Uses ``asyncio.to_thread`` so the blocking ``shutil.rmtree`` call does not
+    stall the event loop when invoked from an async websocket disconnect handler.
+    """
+    await asyncio.to_thread(shutil.rmtree, get_session_workspace_root(session_id), True)
