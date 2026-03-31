@@ -18,14 +18,6 @@ class Settings(BaseSettings):
     XAI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     BRAVE_SEARCH_API_KEY: str = ""  # Brave Search API key for the built-in web_search tool
-    FIREWORKS_API_KEY: str = ""     # Fireworks AI API key (for Kimi K2.5 Turbo etc.)
-    FIREWORKS_BASE_URL: str = "https://api.fireworks.ai/inference/v1"  # Fireworks API base URL
-
-    # ── AWS S3 file storage (optional) ───────────────────────────────────────
-    AWS_ACCESS_KEY_ID: str = ""      # AWS access key for S3 uploads
-    AWS_SECRET_ACCESS_KEY: str = ""  # AWS secret key for S3 uploads
-    AWS_S3_BUCKET: str = ""          # S3 bucket name for artifact storage
-    AWS_S3_REGION: str = "us-east-1"  # S3 bucket region
 
     # ── Platform-level agent instruction (admin-only) ─────────────────
     # Injected at the top of every agent system prompt on every session.
