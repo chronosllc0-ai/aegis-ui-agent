@@ -24,6 +24,7 @@
 - I have *not* completed a live end-to-end browser check against a running backend yet.
 - I did not run the Python test suite in this environment because `pytest` is not currently available in the repo runtime here.
 - Full frontend lint still has pre-existing repo issues outside this change set (for example `react-refresh/only-export-components`, existing hook-effect violations, and unrelated `ChatPanel` lint findings already present on the branch baseline).
+- This PR is *not* a full GitHub CLI (`gh`) executor integration. It remains a PAT-backed direct REST integration with a limited GitHub tool surface; the PR fixes identity/gating, not GitHub CLI parity.
 
 ### Next Steps
 1. Run a live UI verification pass: connect a GitHub PAT in Settings, confirm the tool category unlocks, and verify the mobile Action Log layout visually.
