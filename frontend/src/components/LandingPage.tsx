@@ -177,7 +177,7 @@ const FAQ_ITEMS = [
   {
     question: 'What LLMs does Aegis support?',
     answer:
-      'Google Gemini, OpenAI (GPT-4o, o3-mini), Anthropic (Claude 3.5 Sonnet, Claude 3 Haiku), xAI (Grok), and any model available via OpenRouter — 40+ models and counting. You pick per session from the model selector.',
+      'Google Gemini, OpenAI (GPT-5.2, GPT-5.1), Anthropic (Claude 4.6 Sonnet, Claude 4.5 Haiku), xAI (Grok), and any model available via OpenRouter — 40+ models and counting. You pick per session from the model selector.',
   },
 ]
 
@@ -427,8 +427,7 @@ export function LandingPage({
                 <div className='inline-flex rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-3 text-cyan-200'>
                   {feature.icon({ className: 'h-5 w-5' })}
                 </div>
-                <h3 className='mt-5 text-lg font-semibold text-white'>{feature.title}</h3>
-                <p className='mt-3 text-sm leading-7 text-zinc-300'>{feature.description}</p>
+                <p className='mt-4 text-sm leading-7 text-zinc-300'>{feature.description}</p>
               </article>
             </Reveal>
           ))}
