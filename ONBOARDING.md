@@ -1,3 +1,51 @@
+## Session 5.30 - March 31, 2026 (Secure GitHub repo workflow runtime + session workspaces)
+
+**Agent:** Viktor  
+**Duration:** ~1 larger architecture pass
+
+### What Was Done
+- Read `AGENTS.md` and `ONBOARDING.md` before continuing work, per project instructions.
+- Added `backend/session_workspace.py` to provision per-session ephemeral workspaces under `/tmp/aegis-session-workspaces` with dedicated `files/` and `repos/` roots, traversal protection, and explicit cleanup helpers.
+- Added `backend/github_repo_workspace.py` to support authenticated GitHub repo-engineering flows with the connected GitHub PAT: list repos/issues/PRs, create issues/comments, read repo files, clone repos locally, create/reset branches, inspect status/diff, commit, push, and open pull requests.
+- Configured the GitHub repo workflow to use session-scoped `GIT_ASKPASS`, `GH_TOKEN` / `GITHUB_TOKEN`, and a workspace-scoped `gh` config directory so credentials stay inside the session runtime.
+- Fixed the generated askpass script to use POSIX-safe shell syntax.
+- Reworked `universal_navigator.py` so the universal runtime now builds its tool manifest from session settings, honors `disabled_tools`, `tool_permissions`, and connected integrations, threads through `system_instruction`, and exposes the full local-file / code-execution / GitHub repo workflow tool set only when allowed.
+- Ensured sub-agents remain ephemeral/in-memory only and do not inherit the GitHub repo tool surface.
+- Updated `orchestrator.py` to pass `session_id` and `settings` into the universal runtime so settings actually control runtime behavior.
+- Updated disconnect teardown in `main.py` so session workspaces are cleaned up after websocket sessions and bot-triggered runs.
+- Updated frontend settings metadata so the GitHub PAT tool list includes the new repo workflow tools, removed the stale `extract_data` tool from the Browser UI catalog, and strengthened the default/system preset instruction flow so preset clicks keep the secure GitHub workflow guidance instead of wiping it out.
+- Expanded the runtime Docker image dependencies to include `git`, `gh`, `nodejs`, and `npm`, which are required for local repo workflows plus JavaScript execution.
+
+### What's Working
+- A connected GitHub PAT can now unlock a real local repo workflow in the universal runtime instead of only REST issue/PR helpers.
+- The agent can clone into a session-scoped workspace, create a working branch, inspect/edit files locally, run Python or JavaScript verification inside the same session, inspect git status/diff, commit, push, and open a pull request.
+- Tool exposure now follows settings more closely: disabled tools disappear, connected integrations gate their tool families, and destructive tools can require approval.
+- Session workspaces are ephemeral and cleaned up on disconnect, matching the project rule that temporary agent work should not persist beyond the active session.
+- Frontend production build passes after these changes.
+- Targeted frontend ESLint on the touched settings files is down to pre-existing `react-hooks/exhaustive-deps` warnings in `ToolsTab.tsx`; no errors remain in the changed files I touched for this pass.
+
+### What's NOT Working Yet
+- I did not complete a live end-to-end run against a real connected GitHub PAT/repository in this environment.
+- I could not run the Python test suite here because `pytest` is not installed in the repo runtime environment.
+- The broader GitHub workflow PR is intentionally a hybrid architecture (`git` + GitHub REST + `gh pr create`), not a full GitHub CLI parity layer for every operation.
+- `ToolsTab.tsx` still has pre-existing hook dependency warnings that were already present in the file structure.
+
+### Next Steps
+1. Run a live manual verification with a connected GitHub PAT: clone a repo, make a small edit, commit, push, and open a PR from the UI/runtime path.
+2. Install/restore `pytest` in the repo environment and add targeted tests around session workspace cleanup plus GitHub repo workflow helpers.
+3. Merge the GitHub PAT gating PR first, then merge the follow-up repo workflow PR.
+
+### Decisions Made
+- Kept the repo-engineering flow session-scoped and ephemeral rather than persisting local repo state in the database.
+- Kept GitHub tool exposure gated behind the connected PAT integration exactly like other gated connectors.
+- Used `gh` specifically for pull-request creation while keeping clone/branch/status/diff/commit/push on standard `git`, which fits the current backend architecture without requiring a full CLI abstraction rewrite.
+- Removed the stale `extract_data` Browser tool entry from the frontend settings catalog because it was not implemented in runtime.
+
+### Blockers
+- The main remaining blocker is live PAT-backed end-to-end verification in a connected environment.
+
+---
+
 ## Session 5.29 - March 31, 2026 (GitHub PAT integration split + mobile action log polish)
 
 **Agent:** Viktor  

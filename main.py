@@ -51,6 +51,7 @@ from integrations.slack_connector import SlackIntegration
 from integrations.telegram import TelegramIntegration
 from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
+from backend.session_workspace import cleanup_session_workspace
 
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -1200,6 +1201,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         logger.info("All sub-agents cancelled for session %s", session_id)
         if runtime.user_uid:
             _user_runtimes.pop(runtime.user_uid, None)
+        cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
 
 
@@ -1683,6 +1685,7 @@ async def _run_navigation_task_from_bot(
         reply = f"❌ Task failed: {exc}"
     finally:
         runtime.task_running = False
+        cleanup_session_workspace(f"bot_{owner_uid}")
     # Send result back to bot
     if platform == "telegram":
         integration = telegram_registry.get_telegram(integration_id)

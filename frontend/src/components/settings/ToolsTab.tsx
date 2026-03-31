@@ -61,7 +61,6 @@ const BROWSER_TOOLS: ToolDef[] = [
   { id: 'type_text',    name: 'Type Text',        description: 'Type text into a focused element',       risk: 'low',    defaultPermission: 'auto' },
   { id: 'scroll',       name: 'Scroll',           description: 'Scroll the page',                        risk: 'low',    defaultPermission: 'auto' },
   { id: 'wait',         name: 'Wait',             description: 'Pause execution briefly',                risk: 'low',    defaultPermission: 'auto' },
-  { id: 'extract_data', name: 'Extract Data',     description: 'Extract structured data from the page',  risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const WEB_TOOLS: ToolDef[] = [
@@ -102,13 +101,20 @@ const DISCORD_TOOLS: ToolDef[] = [
 ]
 
 const GITHUB_BOT_TOOLS: ToolDef[] = [
-  { id: 'github_list_repos',        name: 'List Repos',       description: 'List repositories',               risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_get_issues',        name: 'Get Issues',       description: 'Fetch issues from a repo',        risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_create_issue',      name: 'Create Issue',     description: 'Open a new GitHub issue',         risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'github_get_pull_requests', name: 'Get PRs',          description: 'Fetch pull requests',             risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_create_comment',    name: 'Create Comment',   description: 'Post a comment on PR or issue',   risk: 'medium', defaultPermission: 'confirm' },
-  { id: 'github_get_file',          name: 'Get File',         description: 'Read a file from a repo',         risk: 'low',    defaultPermission: 'auto' },
-  { id: 'github_webhook_event',     name: 'Webhook Event',    description: 'Receive incoming webhook events',  risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_list_repos',           name: 'List Repos',          description: 'List repositories',                                  risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_get_issues',           name: 'Get Issues',          description: 'Fetch issues from a repo',                           risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_create_issue',         name: 'Create Issue',        description: 'Open a new GitHub issue',                            risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'github_get_pull_requests',    name: 'Get PRs',             description: 'Fetch pull requests',                                risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_create_comment',       name: 'Create Comment',      description: 'Post a comment on a PR or issue',                    risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'github_get_file',             name: 'Get File',            description: 'Read a file directly from a repo',                   risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_clone_repo',           name: 'Clone Repo',          description: 'Clone a repo into the current Aegis session',        risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_create_branch',        name: 'Create Branch',       description: 'Create or reset a working branch locally',           risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_repo_status',          name: 'Repo Status',         description: 'Inspect local git status for a cloned repo',         risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_repo_diff',            name: 'Repo Diff',           description: 'Read local git diffs for a cloned repo',             risk: 'low',    defaultPermission: 'auto' },
+  { id: 'github_commit_changes',       name: 'Commit Changes',      description: 'Stage and commit local repo changes',                risk: 'medium', defaultPermission: 'confirm' },
+  { id: 'github_push_branch',          name: 'Push Branch',         description: 'Push the current branch to GitHub',                  risk: 'high',   defaultPermission: 'confirm' },
+  { id: 'github_create_pull_request',  name: 'Create Pull Request', description: 'Open a mergeable pull request from the local branch', risk: 'high',   defaultPermission: 'confirm' },
+  { id: 'github_webhook_event',        name: 'Webhook Event',       description: 'Receive incoming webhook events',                    risk: 'low',    defaultPermission: 'auto' },
 ]
 
 const MEMORY_TOOLS: ToolDef[] = [
@@ -132,7 +138,7 @@ const CRON_TOOLS: ToolDef[] = [
 
 // ── Category icon SVGs ────────────────────────────────────────────────────────
 
-export const CATEGORY_ICONS: Record<string, ReactElement> = {
+const CATEGORY_ICONS: Record<string, ReactElement> = {
   browser: (
     <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-5 w-5 text-zinc-300'>
       <circle cx='12' cy='12' r='10'/><path d='M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/>
@@ -191,7 +197,7 @@ const FallbackCategoryIcon = () => (
 
 // ── Static category list ──────────────────────────────────────────────────────
 
-export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
+const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
   // ── System tools — always present, on by default ─────────────────────────
   {
     id: 'browser',
