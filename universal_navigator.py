@@ -482,6 +482,7 @@ def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subage
     try:
         from backend.database import _session_factory, PlatformSetting
         from sqlalchemy import select as _sa_select
+        from sqlalchemy.exc import SQLAlchemyError
         if _session_factory is not None:
             async with _session_factory() as _db:
                 _row = (await _db.execute(
@@ -489,8 +490,10 @@ def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subage
                 )).scalar_one_or_none()
                 if _row and _row.value.strip():
                     global_instruction = _row.value.strip()
-    except Exception:
-        pass
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to fetch global system instruction from DB (SQLAlchemy): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch global system instruction from DB: %s", exc)
     if not global_instruction:
         global_instruction = _app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION.strip()
 
@@ -877,24 +880,36 @@ class UniversalToolExecutor:
         return self._github_manager
 
     async def _web_search(self, query: str, count: int) -> list[dict[str, str]]:
-        """Search using Brave Search API when key is set, else fall back to DuckDuckGo HTML."""
+        """Search using Brave Search API when key is set, else fall back to DuckDuckGo HTML.
+
+        If Brave Search is configured but the request fails (network error, bad key,
+        rate-limit, etc.) the error is logged and the method falls through to the
+        DuckDuckGo HTML scraper so the user always gets some results.
+        """
         if _app_settings.BRAVE_SEARCH_API_KEY:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": count},
-                    headers={"Accept": "application/json", "X-Subscription-Token": _app_settings.BRAVE_SEARCH_API_KEY},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            results = []
-            for item in data.get("web", {}).get("results", []):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("description", ""),
-                })
-            return results
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.get(
+                        "https://api.search.brave.com/res/v1/web/search",
+                        params={"q": query, "count": count},
+                        headers={"Accept": "application/json", "X-Subscription-Token": _app_settings.BRAVE_SEARCH_API_KEY},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                results = []
+                for item in data.get("web", {}).get("results", []):
+                    results.append({
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "snippet": item.get("description", ""),
+                    })
+                return results
+            except httpx.HTTPStatusError as exc:
+                logger.warning("Brave Search HTTP error %s for query %r — falling back to DuckDuckGo", exc.response.status_code, query)
+            except httpx.RequestError as exc:
+                logger.warning("Brave Search request error for query %r: %s — falling back to DuckDuckGo", query, exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Brave Search unexpected error for query %r: %s — falling back to DuckDuckGo", query, exc)
         # Fallback: DuckDuckGo HTML scraping
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 Aegis"}) as client:
             response = await client.get("https://html.duckduckgo.com/html/", params={"q": query})
