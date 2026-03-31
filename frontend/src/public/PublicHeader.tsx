@@ -10,7 +10,7 @@ type PublicHeaderProps = {
   docsPortalHref: string
 }
 
-export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPortalHref }: PublicHeaderProps) {
+export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc: _onGoDoc, docsPortalHref }: PublicHeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
@@ -25,12 +25,11 @@ export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
         </button>
 
         <nav className='hidden items-center gap-5 text-sm text-zinc-300 lg:flex'>
-          <button type='button' onClick={onGoHome} className='transition hover:text-white'>Product</button>
+          <a href='/#features' className='transition hover:text-white'>Features</a>
+          <a href='/#use-cases' className='transition hover:text-white'>Use cases</a>
+          <a href='/#faq' className='transition hover:text-white'>FAQ</a>
+          <a href='/#pricing' className='transition hover:text-white'>Pricing</a>
           <button type='button' onClick={onGoDocsHome} className='transition hover:text-white'>Docs</button>
-          <button type='button' onClick={() => onGoDoc('first-live-run')} className='transition hover:text-white'>Tutorials</button>
-          <button type='button' onClick={() => onGoDoc('api-auth-reference')} className='transition hover:text-white'>API</button>
-          <button type='button' onClick={() => onGoDoc('faq')} className='transition hover:text-white'>FAQ</button>
-          <button type='button' onClick={() => onGoDoc('changelog')} className='transition hover:text-white'>Changelog</button>
           <a href={docsPortalHref} className='transition hover:text-white'>Docs portal</a>
         </nav>
 
@@ -66,12 +65,11 @@ export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
       {mobileMenuOpen && (
         <nav className='border-t border-white/8 bg-[#0a0d14]/95 px-4 py-4 backdrop-blur-xl lg:hidden'>
           <div className='grid gap-2 text-sm text-zinc-300'>
-            <button type='button' onClick={() => { onGoHome(); setMobileMenuOpen(false) }} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Product</button>
+            <a href='/#features' onClick={() => setMobileMenuOpen(false)} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Features</a>
+            <a href='/#use-cases' onClick={() => setMobileMenuOpen(false)} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Use cases</a>
+            <a href='/#faq' onClick={() => setMobileMenuOpen(false)} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>FAQ</a>
+            <a href='/#pricing' onClick={() => setMobileMenuOpen(false)} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Pricing</a>
             <button type='button' onClick={() => { onGoDocsHome(); setMobileMenuOpen(false) }} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Docs</button>
-            <button type='button' onClick={() => { onGoDoc('first-live-run'); setMobileMenuOpen(false) }} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Tutorials</button>
-            <button type='button' onClick={() => { onGoDoc('api-auth-reference'); setMobileMenuOpen(false) }} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>API</button>
-            <button type='button' onClick={() => { onGoDoc('faq'); setMobileMenuOpen(false) }} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>FAQ</button>
-            <button type='button' onClick={() => { onGoDoc('changelog'); setMobileMenuOpen(false) }} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Changelog</button>
             <a href={docsPortalHref} onClick={() => setMobileMenuOpen(false)} className='rounded-lg px-3 py-2.5 text-left transition hover:bg-white/6 hover:text-white'>Docs portal</a>
           </div>
         </nav>

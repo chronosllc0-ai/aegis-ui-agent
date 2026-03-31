@@ -20,6 +20,7 @@ import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
 import { ChatPanel } from './components/ChatPanel'
 import { SubAgentPanel } from './components/SubAgentPanel'
+import { UseCasePage } from './components/UseCasePage'
 import { SettingsPage } from './components/settings/SettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
@@ -108,6 +109,8 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>('browser')
+  // Use case page routing
+  const [activeUseCaseId, setActiveUseCaseId] = useState<string | null>(null)
   // draftInput reserved for future InputBar onChange wiring
   void useState
 
@@ -116,6 +119,7 @@ function App() {
   const isAuthRoute = pathname === '/auth'
   const isPrivacyRoute = pathname === PRIVACY_PATH
   const isTermsRoute = pathname === TERMS_PATH
+  const isUseCaseRoute = pathname.startsWith('/use-case/')
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
@@ -585,6 +589,18 @@ function App() {
     if (isTermsRoute) {
       return <TermsPage onGoHome={openHome} onGoAuth={openAuth} />
     }
+    if (isUseCaseRoute) {
+      const ucId = pathname.replace('/use-case/', '')
+      return (
+        <UseCasePage
+          useCaseId={activeUseCaseId ?? ucId}
+          onBack={openHome}
+          onGetStarted={openAuth}
+          onOpenDocsHome={openDocsHome}
+          onOpenDoc={openDoc}
+        />
+      )
+    }
     if (!isAuthRoute) {
       return (
         <LandingPage
@@ -596,6 +612,10 @@ function App() {
             sessionStorage.setItem('aegis.pendingPlan', plan)
             setPendingPlan(plan)
             openAuth()
+          }}
+          onOpenUseCase={(id) => {
+            setActiveUseCaseId(id)
+            navigateTo(`/use-case/${id}`)
           }}
         />
       )

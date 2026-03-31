@@ -13,19 +13,19 @@ const FOOTER_GROUPS = [
   {
     title: 'Product',
     links: [
-      { label: 'Overview', slug: 'home' },
-      { label: 'Quickstart', slug: 'quickstart' },
-      { label: 'Live sessions', slug: 'live-sessions' },
-      { label: 'Integrations', slug: 'integrations' },
+      { label: 'Features', slug: '#features' },
+      { label: 'Use cases', slug: '#use-cases' },
+      { label: 'Pricing', slug: '#pricing' },
+      { label: 'FAQ', slug: '#faq' },
     ],
   },
   {
     title: 'Docs',
     links: [
       { label: 'Docs home', slug: 'docs-home' },
+      { label: 'Quickstart', slug: 'quickstart' },
       { label: 'API reference', slug: 'api-auth-reference' },
       { label: 'Tutorials', slug: 'first-live-run' },
-      { label: 'FAQ', slug: 'faq' },
     ],
   },
   {
@@ -33,8 +33,8 @@ const FOOTER_GROUPS = [
     links: [
       { label: 'Authentication', slug: 'authentication' },
       { label: 'Provider keys', slug: 'provider-keys' },
-      { label: 'Workflows', slug: 'workflow-templates' },
       { label: 'Deployment', slug: 'deployment' },
+      { label: 'Changelog', slug: 'changelog' },
     ],
   },
 ]
@@ -89,6 +89,9 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
                   }
                   if (link.slug === 'docs-home') {
                     return <button key={link.label} type='button' onClick={onGoDocsHome} className='text-left transition hover:text-white'>{link.label}</button>
+                  }
+                  if (link.slug.startsWith('#')) {
+                    return <a key={link.label} href={`/${link.slug}`} className='text-left transition hover:text-white'>{link.label}</a>
                   }
                   return <button key={link.label} type='button' onClick={() => onGoDoc(link.slug)} className='text-left transition hover:text-white'>{link.label}</button>
                 })}
