@@ -25,7 +25,7 @@ export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc: _onGoD
         </button>
 
         <nav className='hidden items-center gap-5 text-sm text-zinc-300 lg:flex'>
-  onGoDoc?: (slug: string) => void
+          <a href='/#features' className='transition hover:text-white'>Features</a>
           <a href='/#use-cases' className='transition hover:text-white'>Use cases</a>
           <a href='/#faq' className='transition hover:text-white'>FAQ</a>
           <a href='/#pricing' className='transition hover:text-white'>Pricing</a>
