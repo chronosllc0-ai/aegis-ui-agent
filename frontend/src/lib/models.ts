@@ -10,6 +10,7 @@ export const PROVIDER_ICON_URLS: Record<string, string> = {
   anthropic:  'https://i.postimg.cc/L6yVy6b3/2eb79382ad63416682dcc08c91fcc46f.png',
   xai:        'https://i.postimg.cc/zvbZ76dr/download.png',
   openrouter: 'https://i.postimg.cc/QdMMqLYZ/openrouter_icon.png',
+  fireworks: 'https://fireworks.ai/favicon.ico',
 }
 
 // Chronos AI logo
@@ -117,6 +118,16 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'grok-3-mini', label: 'Grok 3 Mini', description: 'Efficient, cost-effective Grok 3 variant.', vision: false, reasoning: true, contextLength: 131_072 },
       { id: 'grok-3-mini-fast', label: 'Grok 3 Mini Fast', description: 'Ultra-fast variant of Grok 3 Mini.', vision: false, reasoning: true, contextLength: 131_072 },
       { id: 'grok-2-vision-1212', label: 'Grok 2 Vision', description: 'Previous generation with vision capabilities.', vision: true, contextLength: 32_768 },
+    ],
+  },
+  // ── Fireworks AI ────────────────────────────────────────────────────
+  {
+    id: 'fireworks',
+    displayName: 'Fireworks AI',
+    iconUrl: PROVIDER_ICON_URLS.fireworks,
+    keyPrefix: '',
+    models: [
+      { id: 'accounts/fireworks/models/kimi-k2p5-turbo', label: 'Kimi K2.5 Turbo', description: 'Moonshot AI Kimi K2.5 — fast and capable via Fireworks AI.', vision: false, contextLength: 131_072 },
     ],
   },
   // ── OpenRouter ──────────────────────────────────────────────────────
