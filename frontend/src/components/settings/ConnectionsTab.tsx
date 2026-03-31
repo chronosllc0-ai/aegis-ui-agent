@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiUrl } from '../../lib/api'
-import { maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { GITHUB_PAT_INTEGRATION_ID, maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
 // ── Props ────────────────────────────────────────────────────────────
 
@@ -45,6 +45,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
   slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
   github: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
+  [GITHUB_PAT_INTEGRATION_ID]: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
 }
 
 // OAuth connector icons — override backend-provided icon to ensure correct logos always display
@@ -57,6 +58,8 @@ const CONNECTOR_ICONS: Record<string, string> = {
 }
 
 // ── Main Component ───────────────────────────────────────────────────
+
+const BOT_INTEGRATION_IDS: readonly string[] = ['telegram', 'discord', 'slack', GITHUB_PAT_INTEGRATION_ID]
 
 export function ConnectionsTab({ integrations, onChange, isAdmin = false }: ConnectionsTabProps) {
   // — OAuth state
@@ -84,8 +87,8 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
   // — Global
   const [globalError, setGlobalError] = useState<string | null>(null)
 
-  // Filter: only bot-token integrations (Telegram, Discord, Slack-as-bot, GitHub)
-  const botIntegrations = integrations.filter((i) => ['telegram', 'discord', 'slack', 'github'].includes(i.id))
+  // Filter: only bot-token integrations (Telegram, Discord, Slack-as-bot, GitHub PAT)
+  const botIntegrations = integrations.filter((i) => BOT_INTEGRATION_IDS.includes(i.id))
   // Filter: built-in tool integrations (web search, filesystem, code exec)
   const builtInIntegrations = integrations.filter((i) => i.builtIn)
 
@@ -254,10 +257,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
       if (!settings.bot_token) { setBotError(integration.id, 'Bot token is required.'); return }
       payload = { bot_token: settings.bot_token, guild_id: settings.guild_id ?? '' }
       endpoint = `/api/integrations/discord/register/${integration.id}`
-    } else if (integration.id === 'github') {
+    } else if (integration.id === GITHUB_PAT_INTEGRATION_ID) {
       if (!settings.token) { setBotError(integration.id, 'Personal access token is required.'); return }
       payload = { token: settings.token, webhook_secret: settings.webhook_secret ?? '', app_id: settings.app_id ?? '' }
-      endpoint = `/api/integrations/github/register/${integration.id}`
+      endpoint = `/api/integrations/${integration.id}/register/${integration.id}`
     }
 
     setBotBusyId(integration.id)
@@ -279,9 +282,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
     setBotBusyId(integration.id)
     setBotError(integration.id, null)
     try {
-      const endpoint = integration.id === 'github'
-        ? `/api/integrations/github/${integration.id}/test`
-        : `/api/integrations/${integration.id}/${integration.id}/test`
+      const endpoint = `/api/integrations/${integration.id}/${integration.id}/test`
       const data = await postJson(endpoint, {})
       const ok = Boolean(data?.ok)
       updateIntegration(integration.id, { status: ok ? 'connected' : 'error' })
@@ -519,7 +520,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                   <div className="min-w-0 flex-1" style={{minWidth: '120px'}}>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-white">{integration.name}</span>
-                      {integration.id === 'github' && !isConn && (
+                      {integration.id === GITHUB_PAT_INTEGRATION_ID && !isConn && (
                         <span className="rounded-full bg-blue-600/20 px-2 py-0.5 text-[10px] font-semibold text-blue-400">New</span>
                       )}
                       {isConn && <StatusDot color="emerald" label="Connected" />}
@@ -561,7 +562,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                     {integration.id === 'discord' && (
                       <DiscordForm integration={integration} busy={isBusy} onUpdate={(p) => updateIntegration(integration.id, p)} onConnect={() => connectBot(integration)} onTest={() => testBot(integration)} />
                     )}
-                    {integration.id === 'github' && (
+                    {integration.id === GITHUB_PAT_INTEGRATION_ID && (
                       <GitHubForm integration={integration} busy={isBusy} onUpdate={(p) => updateIntegration(integration.id, p)} onConnect={() => connectBot(integration)} onTest={() => testBot(integration)} />
                     )}
                   </div>

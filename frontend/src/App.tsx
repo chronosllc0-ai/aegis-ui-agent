@@ -58,7 +58,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent: _spawnSubAgent, messageSubAgent, cancelSubAgent } = useWebSocket(handleUsageMessage)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket(handleUsageMessage)
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -857,7 +857,7 @@ function App() {
                 </div>
 
                 {/* Action log — stacked below the browser, full width on all screen sizes */}
-                <div className='h-48 min-h-0 shrink-0'>
+                <div className='h-40 min-h-0 shrink-0 sm:h-48'>
                   <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
               </div>

@@ -1,3 +1,44 @@
+## Session 5.29 - March 31, 2026 (GitHub PAT integration split + mobile action log polish)
+
+**Agent:** Viktor  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Read `AGENTS.md` and `ONBOARDING.md` before touching the repo, per project instructions.
+- Split the existing GitHub bot configuration into a dedicated *GitHub PAT* integration in the frontend catalog by introducing the canonical integration id `github-pat`.
+- Updated integration normalization/merge logic so older stored `github` configs are migrated forward to `github-pat` instead of disappearing from user settings.
+- Updated `IntegrationsTab`, `ConnectionsTab`, and `ToolsTab` so the PAT connection appears as its own integration, its tools are gated by that connection, and the UI points users to *Connections* for setup.
+- Added backend route aliases in `main.py` for `github-pat` register/test/webhook while keeping legacy `/api/integrations/github/*` routes working.
+- Reduced the mobile Action Log height in `frontend/src/App.tsx` from `h-48` to `h-40` while preserving the previous height on `sm+` screens.
+- Verified the frontend with a successful production build (`npm run build`).
+
+### What's Working
+- GitHub PAT now exists as a first-class integration entry rather than being implied only by the Tools UI.
+- Existing saved frontend settings using legacy `github` ids should normalize into the new `github-pat` entry.
+- GitHub bot tools in the Tools tab now lock/unlock against the dedicated PAT integration id.
+- Mobile view gives slightly more room to the main browser area by shrinking the Action Log on small screens.
+- Frontend production build passes successfully after the changes.
+
+### What's NOT Working Yet
+- I have *not* completed a live end-to-end browser check against a running backend yet.
+- I did not run the Python test suite in this environment because `pytest` is not currently available in the repo runtime here.
+- This pass has not yet been committed, pushed, or turned into a PR.
+
+### Next Steps
+1. Run a live UI verification pass: connect a GitHub PAT in Settings, confirm the tool category unlocks, and verify the mobile Action Log layout visually.
+2. Add or install the repo's Python test runner tooling, then run a targeted integration/API test pass for the GitHub PAT aliases.
+3. Commit the change set, push the branch, and open the PR once final verification is done.
+
+### Decisions Made
+- Kept backward compatibility by preserving legacy backend GitHub routes and adding `github-pat` aliases instead of replacing them.
+- Migrated legacy frontend `github` ids to `github-pat` during normalization so existing local settings remain usable.
+- Kept the GitHub brand icon while renaming the integration label to *GitHub PAT* for clarity.
+
+### Blockers
+- No code blocker right now; only missing final live verification + repo test tooling in this environment.
+
+---
+
 ## Session 4.4 — March 30, 2026 (Google userinfo fallback error handling)
 
 **Agent:** GPT-5.3-Codex  

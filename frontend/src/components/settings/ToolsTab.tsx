@@ -12,7 +12,7 @@
  *
  *  • Bot integration categories (Telegram, Slack Bot, Discord Bot, GitHub Bot):
  *      LOCKED behind their integration. Tools only appear once the matching
- *      integration has been saved and connected in the Integrations tab.
+ *      integration has been saved and connected in the Connections tab.
  *      While locked, a banner is shown directing the user to connect first.
  *
  *  • OAuth connector categories (Google, Notion, Linear…):
@@ -23,7 +23,7 @@
 
 import { useState, useMemo, useEffect, type ReactElement } from 'react'
 import type { AppSettings, ToolPermission } from '../../hooks/useSettings'
-import type { IntegrationConfig } from '../../lib/mcp'
+import { GITHUB_PAT_INTEGRATION_ID, type IntegrationConfig } from '../../lib/mcp'
 import { BrandIcon } from '../icons'
 import { apiUrl } from '../../lib/api'
 
@@ -284,7 +284,7 @@ export const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     icon: 'github-bot',
     description: 'Manage repos, issues, and PRs via a personal access token.',
     canDisable: true,
-    requiresIntegrationId: 'github',
+    requiresIntegrationId: GITHUB_PAT_INTEGRATION_ID,
     tools: GITHUB_BOT_TOOLS,
   },
 ]
