@@ -45,12 +45,14 @@ export type AppSettings = {
 
 const STORAGE_KEY = 'aegis.settings.v4'
 
+export const DEFAULT_SYSTEM_INSTRUCTION = 'You are Aegis. Be helpful, concise, and safe. Use only enabled tools, respect connected integrations, ask for approval before destructive actions, and when working with GitHub clone into the session workspace, use a feature branch, verify changes, then commit, push, and open a pull request only when the user asks.'
+
 const DEFAULT_SETTINGS: AppSettings = {
   displayName: 'Aegis User',
   avatarUrl: '',
   email: 'user@example.com',
   theme: 'dark',
-  systemInstruction: 'You are Aegis. Be helpful, concise, and safe when taking actions.',
+  systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
   personalityPreset: 'Professional',
   temperature: 0.7,
   provider: 'chronos',

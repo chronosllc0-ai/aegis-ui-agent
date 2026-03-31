@@ -1,4 +1,4 @@
-import type { AppSettings } from '../../hooks/useSettings'
+import { DEFAULT_SYSTEM_INSTRUCTION, type AppSettings } from '../../hooks/useSettings'
 import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
 import { ToolsTab } from './ToolsTab'
 
@@ -7,6 +7,10 @@ const PRESETS: Record<string, string> = {
   Casual: 'Use friendly and conversational language with practical guidance.',
   Technical: 'Prioritize precise technical details and implementation tradeoffs.',
   Creative: 'Offer imaginative solutions and exploratory suggestions.',
+}
+
+function presetInstruction(styleInstruction: string): string {
+  return `${DEFAULT_SYSTEM_INSTRUCTION} ${styleInstruction}`
 }
 
 type AgentTabProps = {
@@ -33,7 +37,7 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         />
         <div className='flex gap-2'>
           {Object.entries(PRESETS).map(([name, prompt]) => (
-            <button key={name} type='button' onClick={() => onPatch({ personalityPreset: name, systemInstruction: prompt })} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs'>
+            <button key={name} type='button' onClick={() => onPatch({ personalityPreset: name, systemInstruction: presetInstruction(prompt) })} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs'>
               {name}
             </button>
           ))}

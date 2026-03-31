@@ -144,7 +144,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
       webhook_secret: '',
       app_id: '',
     },
-    tools: ['github_list_repos', 'github_get_issues', 'github_create_issue', 'github_get_pull_requests', 'github_create_comment', 'github_get_file', 'github_webhook_event'],
+    tools: ['github_list_repos', 'github_get_issues', 'github_create_issue', 'github_get_pull_requests', 'github_create_comment', 'github_get_file', 'github_clone_repo', 'github_create_branch', 'github_repo_status', 'github_repo_diff', 'github_commit_changes', 'github_push_branch', 'github_create_pull_request', 'github_webhook_event'],
   },
 ]
 
