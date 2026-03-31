@@ -11,6 +11,7 @@
 - Added backend route aliases in `main.py` for `github-pat` register/test/webhook while keeping legacy `/api/integrations/github/*` routes working.
 - Reduced the mobile Action Log height in `frontend/src/App.tsx` from `h-48` to `h-40` while preserving the previous height on `sm+` screens.
 - Verified the frontend with a successful production build (`npm run build`).
+- Committed the change on `feat/github-pat-integration`, pushed the branch, and opened PR #87.
 
 ### What's Working
 - GitHub PAT now exists as a first-class integration entry rather than being implied only by the Tools UI.
@@ -22,12 +23,12 @@
 ### What's NOT Working Yet
 - I have *not* completed a live end-to-end browser check against a running backend yet.
 - I did not run the Python test suite in this environment because `pytest` is not currently available in the repo runtime here.
-- This pass has not yet been committed, pushed, or turned into a PR.
+- Full frontend lint still has pre-existing repo issues outside this change set (for example `react-refresh/only-export-components`, existing hook-effect violations, and unrelated `ChatPanel` lint findings already present on the branch baseline).
 
 ### Next Steps
 1. Run a live UI verification pass: connect a GitHub PAT in Settings, confirm the tool category unlocks, and verify the mobile Action Log layout visually.
 2. Add or install the repo's Python test runner tooling, then run a targeted integration/API test pass for the GitHub PAT aliases.
-3. Commit the change set, push the branch, and open the PR once final verification is done.
+3. Review and merge PR #87 (`feat/github-pat-integration`) once UI verification is complete.
 
 ### Decisions Made
 - Kept backward compatibility by preserving legacy backend GitHub routes and adding `github-pat` aliases instead of replacing them.
