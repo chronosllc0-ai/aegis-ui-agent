@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { DEFAULT_INTEGRATIONS, normalizeIntegrationConfig, type IntegrationConfig } from '../lib/mcp'
+import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig } from '../lib/mcp'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
@@ -88,9 +88,7 @@ function loadInitialSettings(): AppSettings {
 
     return {
       ...merged,
-      integrations: Array.isArray(merged.integrations)
-        ? merged.integrations.map((integration) => normalizeIntegrationConfig(integration))
-        : DEFAULT_SETTINGS.integrations,
+      integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
     }
   } catch {
     localStorage.removeItem(STORAGE_KEY)

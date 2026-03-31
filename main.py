@@ -1436,6 +1436,7 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
+@app.post("/api/integrations/github-pat/register/{integration_id}")
 async def register_github_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     config = {
         "token": str(payload.get("token", "")).strip(),
@@ -1449,6 +1450,7 @@ async def register_github_integration(integration_id: str, payload: dict[str, An
 
 
 @app.post("/api/integrations/github/{integration_id}/test")
+@app.post("/api/integrations/github-pat/{integration_id}/test")
 async def test_github_integration(integration_id: str) -> dict[str, Any]:
     integration = github_registry.get_github(integration_id)
     if not integration:
@@ -1457,6 +1459,7 @@ async def test_github_integration(integration_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/integrations/github/{integration_id}/webhook")
+@app.post("/api/integrations/github-pat/{integration_id}/webhook")
 async def github_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Receive GitHub webhook events (push, PR, issue, etc.)."""
     integration = github_registry.get_github(integration_id)
