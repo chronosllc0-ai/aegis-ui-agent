@@ -1,3 +1,74 @@
+## Session 5.32 - March 31, 2026 (Chronos Gateway Nemotron + Fireworks runtime errors hotfix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused debugging pass
+
+### What Was Done
+- Investigated reported production runtime errors from the Action Log screenshots:
+  - `'async with' outside async function (universal_navigator.py, line 487)`
+  - `'Settings' object has no attribute 'FIREWORKS_API_KEY'`
+- Fixed `universal_navigator.py` by making `_build_system_prompt(...)` asynchronous and awaiting it in `run_universal_navigation(...)`, which resolves the syntax/runtime failure path for Chronos Gateway model runs (including Nemotron selections).
+- Fixed missing Fireworks config wiring by adding `FIREWORKS_API_KEY` to `Settings` in `config.py` and documenting it in `.env.example`.
+- Kept existing provider resolution flow unchanged in `orchestrator.py`; the fix is compatibility/config completeness + valid async semantics.
+- Re-ran compile/import sanity checks to ensure app startup and universal navigator module import both succeed.
+
+### What's Working
+- Universal navigator module now compiles; the `async with` syntax error path is removed.
+- Fireworks provider fallback env key lookup now has a valid settings attribute.
+- Main app imports successfully after these fixes.
+
+### What's NOT Working Yet
+- I did not run a live production request against your deployed Chronos Gateway/Fireworks sessions from this environment.
+
+### Next Steps
+1. Redeploy production with this patch.
+2. Re-run one task on Chronos Gateway + Nemotron and confirm no `async with outside async function` error appears.
+3. Re-run one task on Fireworks provider and confirm no missing `FIREWORKS_API_KEY` attribute error appears.
+4. If Fireworks still fails, verify actual `FIREWORKS_API_KEY` value is set in production environment variables.
+
+### Decisions Made
+- Chose a minimal-risk fix: keep DB-backed global instruction loading as-is but make the prompt builder truly async.
+- Added Fireworks key to first-class config + env example instead of using dynamic `getattr` fallback, to keep settings typed and explicit.
+
+### Blockers
+- Final confirmation requires deployment/runtime access.
+
+---
+
+## Session 5.31 - March 31, 2026 (Railway production crash fix: artifact download response model)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hotfix pass
+
+### What Was Done
+- Investigated the Railway deploy failure logs from production (`Mar 31, 2026`), which showed startup crash during FastAPI route registration.
+- Traced the crash to `backend/artifacts/router.py` at the download route using a return annotation union (`FileResponse | RedirectResponse`) that FastAPI tried to treat as a response model.
+- Fixed `GET /api/artifacts/{artifact_id}/download` by disabling response-model generation (`response_model=None`) and changing the function return annotation to `Response`, while preserving the existing runtime behavior (302 redirect for presigned URLs, file stream fallback for local files).
+- Added the missing `Response` import to keep types explicit and startup-safe.
+- Ran import/compile checks to confirm the application now starts without the previous `FastAPIError: Invalid args for response field` failure.
+
+### What's Working
+- Application import/startup no longer crashes on the artifact download route definition.
+- Railway-style healthcheck failures caused by this FastAPI response-field error should be resolved once redeployed.
+- Existing artifact download semantics remain unchanged (redirect when remote URL exists, otherwise return file).
+
+### What's NOT Working Yet
+- I could not run a live Railway redeploy from this environment, so final verification on the hosted service is still pending.
+
+### Next Steps
+1. Trigger a new Railway production deploy.
+2. Confirm `/health` passes and the replica becomes healthy.
+3. Open an artifact download URL in production to verify both redirect and direct file paths still work.
+
+### Decisions Made
+- Used `response_model=None` on this mixed-response endpoint to avoid FastAPI trying to build a Pydantic model from response classes.
+- Kept the route contract and URL surface unchanged to minimize hotfix risk.
+
+### Blockers
+- Live Railway deployment verification requires project environment access.
+
+---
+
 ## Session 5.30 - March 31, 2026 (Secure GitHub repo workflow runtime + session workspaces)
 
 **Agent:** Viktor  

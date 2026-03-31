@@ -430,7 +430,7 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
     return available
 
 
-def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subagent: bool) -> str:
+async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subagent: bool) -> str:
     """Build the current system prompt from enabled tools and user instruction."""
     workspace_root = get_session_workspace_root(session_id)
     files_root = get_session_files_root(session_id)
@@ -1308,7 +1308,7 @@ async def run_universal_navigation(
         on_message_subagent=on_message_subagent,
         is_subagent=is_subagent,
     )
-    system_prompt = _build_system_prompt(session_id=session_id, settings=resolved_settings, is_subagent=is_subagent)
+    system_prompt = await _build_system_prompt(session_id=session_id, settings=resolved_settings, is_subagent=is_subagent)
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []
     parent_step_id: str | None = None
