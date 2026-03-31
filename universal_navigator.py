@@ -22,6 +22,8 @@ from uuid import uuid4
 
 import httpx
 
+from config import settings as _app_settings
+from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.session_workspace import (
@@ -472,14 +474,45 @@ def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subage
             ]
         )
 
+    # ── Global system instruction (admin-controlled, authoritative) ──────────
+    # Fetch from DB if available; fall back to the AEGIS_GLOBAL_SYSTEM_INSTRUCTION
+    # env var; fall back to empty string.  This block is prepended before
+    # everything else so it cannot be overridden by user runtime instructions.
+    global_instruction = ""
+    try:
+        from backend.database import _session_factory, PlatformSetting
+        from sqlalchemy import select as _sa_select
+        from sqlalchemy.exc import SQLAlchemyError
+        if _session_factory is not None:
+            async with _session_factory() as _db:
+                _row = (await _db.execute(
+                    _sa_select(PlatformSetting).where(PlatformSetting.key == GLOBAL_INSTRUCTION_KEY)
+                )).scalar_one_or_none()
+                if _row and _row.value.strip():
+                    global_instruction = _row.value.strip()
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to fetch global system instruction from DB (SQLAlchemy): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch global system instruction from DB: %s", exc)
+    if not global_instruction:
+        global_instruction = _app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION.strip()
+
+    global_block = (
+        f"Global operator instructions (authoritative — always follow these):\n{global_instruction}\n\n"
+        if global_instruction
+        else ""
+    )
+
+    # ── User runtime instructions (additive, appended after core prompt) ─────
     custom_instruction = str(settings.get("system_instruction", "")).strip()
     custom_block = (
-        f"\nAdditional system instruction from the user:\n{custom_instruction}\n"
+        f"\nRuntime instructions from the user (additive — follow unless they conflict with global instructions above):\n{custom_instruction}\n"
         if custom_instruction
         else ""
     )
 
     return (
+        f"{global_block}"
         "You are Aegis, an AI agent that can browse the web and, when enabled, use "
         "workspace, memory, automation, and GitHub repo-engineering tools.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
@@ -847,7 +880,37 @@ class UniversalToolExecutor:
         return self._github_manager
 
     async def _web_search(self, query: str, count: int) -> list[dict[str, str]]:
-        """Search DuckDuckGo's HTML endpoint without requiring extra credentials."""
+        """Search using Brave Search API when key is set, else fall back to DuckDuckGo HTML.
+
+        If Brave Search is configured but the request fails (network error, bad key,
+        rate-limit, etc.) the error is logged and the method falls through to the
+        DuckDuckGo HTML scraper so the user always gets some results.
+        """
+        if _app_settings.BRAVE_SEARCH_API_KEY:
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.get(
+                        "https://api.search.brave.com/res/v1/web/search",
+                        params={"q": query, "count": count},
+                        headers={"Accept": "application/json", "X-Subscription-Token": _app_settings.BRAVE_SEARCH_API_KEY},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                results = []
+                for item in data.get("web", {}).get("results", []):
+                    results.append({
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "snippet": item.get("description", ""),
+                    })
+                return results
+            except httpx.HTTPStatusError as exc:
+                logger.warning("Brave Search HTTP error %s for query %r — falling back to DuckDuckGo", exc.response.status_code, query)
+            except httpx.RequestError as exc:
+                logger.warning("Brave Search request error for query %r: %s — falling back to DuckDuckGo", query, exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Brave Search unexpected error for query %r: %s — falling back to DuckDuckGo", query, exc)
+        # Fallback: DuckDuckGo HTML scraping
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 Aegis"}) as client:
             response = await client.get("https://html.duckduckgo.com/html/", params={"q": query})
             response.raise_for_status()

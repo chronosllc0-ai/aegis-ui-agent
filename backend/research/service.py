@@ -59,7 +59,7 @@ class ResearchService:
 
         await emit("searching")
         results: list[dict] = []
-        search_key = getattr(settings, "SEARCH_API_KEY", "")
+        search_key = settings.BRAVE_SEARCH_API_KEY
         for idx, query in enumerate(queries, start=1):
             if search_key:
                 items = await brave_search(query, search_key, count=6)

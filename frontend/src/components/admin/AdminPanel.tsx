@@ -43,7 +43,7 @@ type AuditEntry = {
 
 /* ─── Sub-tabs ───────────────────────────────────────────────────────── */
 
-const ADMIN_TABS = ['Dashboard', 'Users', 'Messaging', 'Emailing', 'Audit Log'] as const
+const ADMIN_TABS = ['Dashboard', 'Users', 'Agent Config', 'Messaging', 'Emailing', 'Audit Log'] as const
 type AdminTab = (typeof ADMIN_TABS)[number]
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -584,6 +584,104 @@ function UsersTab() {
   )
 }
 
+/* ─── Agent Config Tab ───────────────────────────────────────────────── */
+
+function AgentConfigTab() {
+  const [instruction, setInstruction] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => {
+    fetch(apiUrl('/api/admin/platform-settings'), { credentials: 'include' })
+      .then((r) => r.json())
+      .then((data) => {
+        setInstruction(data.global_system_instruction ?? '')
+        setLoading(false)
+      })
+      .catch(() => {
+        toast.error('Failed to load platform settings')
+        setLoading(false)
+      })
+  }, [toast])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      const r = await fetch(apiUrl('/api/admin/platform-settings'), {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ global_system_instruction: instruction }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      setSaved(true)
+      toast.success('Global system instruction saved')
+    } catch {
+      toast.error('Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className='flex items-center justify-center py-16'>
+        <LuLoader className='h-5 w-5 animate-spin text-zinc-400' />
+      </div>
+    )
+  }
+
+  return (
+    <div className='max-w-2xl space-y-6'>
+      <div>
+        <h2 className='text-base font-semibold text-white'>Aegis Global System Instructions</h2>
+        <p className='mt-1 text-xs text-zinc-400'>
+          This instruction is injected at the top of every agent system prompt on every session,
+          for every user. It is authoritative — users cannot see or override it. Use it to enforce
+          platform-wide behavior, safety guardrails, brand voice, or restrictions.
+        </p>
+      </div>
+
+      <div className='rounded-xl border border-amber-500/20 bg-amber-500/5 p-4'>
+        <p className='text-xs font-medium text-amber-300'>Admin-only</p>
+        <p className='mt-1 text-xs text-zinc-400'>
+          Only admins can view or edit this. Users see a note in their Agent tab that global
+          operator instructions apply, but they cannot read the content.
+        </p>
+      </div>
+
+      <div className='space-y-2'>
+        <label htmlFor='global-instruction' className='text-xs font-medium text-zinc-300'>
+          Global instruction
+        </label>
+        <textarea
+          id='global-instruction'
+          value={instruction}
+          onChange={(e) => { setInstruction(e.target.value); setSaved(false) }}
+          rows={10}
+          placeholder='e.g. You are operating as Aegis on the Acme Corp platform. Always respond in formal English. Never discuss competitor products. Route any billing questions to support@acme.com.'
+          className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] p-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none'
+        />
+        <p className='text-xs text-zinc-500'>
+          Leave blank to use only the built-in Aegis identity and the per-user runtime instructions.
+        </p>
+      </div>
+
+      <button
+        type='button'
+        onClick={handleSave}
+        disabled={saving}
+        className='rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-600 disabled:opacity-50'
+      >
+        {saving ? 'Saving...' : saved ? 'Saved' : 'Save instruction'}
+      </button>
+    </div>
+  )
+}
+
 /* ─── Audit Log Tab ──────────────────────────────────────────────────── */
 
 function AuditLogTab() {
@@ -709,6 +807,7 @@ export function AdminPanel() {
       <div className='min-h-0 flex-1 overflow-y-auto'>
         {activeTab === 'Dashboard' && <DashboardTab />}
         {activeTab === 'Users' && <UsersTab />}
+        {activeTab === 'Agent Config' && <AgentConfigTab />}
         {activeTab === 'Messaging' && <AdminMessaging />}
         {activeTab === 'Emailing' && <AdminEmailing />}
         {activeTab === 'Audit Log' && <AuditLogTab />}
