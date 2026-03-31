@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     XAI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
+    BRAVE_SEARCH_API_KEY: str = ""  # Brave Search API key for the built-in web_search tool
+
+    # ── Platform-level agent instruction (admin-only) ─────────────────
+    # Injected at the top of every agent system prompt on every session.
+    # Users cannot see or override it. Prefer the DB-backed setting
+    # (editable live in Admin > Agent Config) — this env var is a
+    # deploy-time fallback when the DB row has not been set yet.
+    AEGIS_GLOBAL_SYSTEM_INSTRUCTION: str = ""
 
     # ── Default provider / model ─────────────────────────────────────
     DEFAULT_PROVIDER: str = "google"

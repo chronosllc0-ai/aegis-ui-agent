@@ -443,6 +443,22 @@ class OAuthPendingState(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PlatformSetting(Base):
+    """Key-value store for platform-wide admin-controlled settings.
+
+    Currently used for:
+      - ``aegis_global_system_instruction``: injected at the top of every
+        agent system prompt (authoritative, users cannot override).
+    """
+
+    __tablename__ = "platform_settings"
+
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    updated_by = Column(String(255), nullable=True)  # admin uid who last changed it
+
+
 class ScheduledTask(Base):
     """A user-defined cron job that runs an agent prompt on a schedule."""
 

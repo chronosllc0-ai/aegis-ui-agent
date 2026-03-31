@@ -27,8 +27,12 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
       <section className='space-y-3'>
         <h3 className='text-sm font-semibold'>Personality</h3>
         <label htmlFor='agent-system-instruction' className='text-xs font-medium text-zinc-400'>
-          System instruction
+          Runtime instructions
         </label>
+        <p className='text-xs text-zinc-500'>
+          These instructions are added to your session and guide how Aegis responds to you. Global
+          operator instructions set by the platform admin always apply and take precedence.
+        </p>
         <textarea
           id='agent-system-instruction'
           value={settings.systemInstruction}
