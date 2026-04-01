@@ -44,7 +44,7 @@ const STATUS_STYLES: Record<string, { icon: string; color: string; bg: string }>
   running: { icon: '◉', color: 'text-blue-400', bg: 'bg-blue-900/30' },
   completed: { icon: '✓', color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
   failed: { icon: '✗', color: 'text-red-400', bg: 'bg-red-900/30' },
-  skipped: { icon: '—', color: 'text-zinc-600', bg: 'bg-zinc-800/50' },
+  skipped: { icon: '-', color: 'text-zinc-600', bg: 'bg-zinc-800/50' },
 }
 
 const PLAN_STATUS_COLORS: Record<string, string> = {
