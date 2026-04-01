@@ -2,6 +2,7 @@
 // Last updated: 2026-03-24 - sourced from official provider docs
 
 import { createElement } from 'react'
+import { AEGIS_LOGO_URL as AEGIS_LOGO_URL_BRAND, CHRONOS_LOGO_URL as CHRONOS_LOGO_URL_BRAND } from './branding'
 
 // ── Provider icon URLs (hosted on postimg) ────────────────────────
 export const PROVIDER_ICON_URLS: Record<string, string> = {
@@ -13,8 +14,9 @@ export const PROVIDER_ICON_URLS: Record<string, string> = {
   fireworks: 'https://fireworks.ai/favicon.ico',
 }
 
-// Chronos AI logo
-export const CHRONOS_LOGO_URL = 'https://i.postimg.cc/c1zHTpc3/IMG-20260103-192235-443.webp'
+// Aegis + Chronos logos (compat exports for existing imports)
+export const AEGIS_LOGO_URL = AEGIS_LOGO_URL_BRAND
+export const CHRONOS_LOGO_URL = CHRONOS_LOGO_URL_BRAND
 
 export type ModelInfo = {
   id: string
@@ -208,10 +210,11 @@ export const MODEL_OPTIONS = allModelIds()
  * naturally on dark surfaces without jarring light backgrounds.
  */
 export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
+  const spinClass = provider.id === 'chronos' ? 'chronos-spin' : ''
   return createElement('img', {
     src: provider.iconUrl,
     alt: provider.displayName,
-    className: `${className} rounded-full object-cover`,
+    className: `${className} ${spinClass} rounded-full object-cover`,
     style: { filter: 'brightness(0.85) saturate(1.2)' },
     'aria-hidden': 'true',
   })

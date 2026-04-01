@@ -95,7 +95,7 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
         </>
       ) : (
         <div className='flex min-h-full w-full flex-col items-center justify-start px-3 py-5 text-center sm:px-6 sm:py-8 md:justify-center'>
-          <img src='/aegis-owl-logo.svg' alt='Aegis logo' className='mb-3 h-10 w-10 opacity-90 sm:mb-5 sm:h-16 sm:w-16' />
+          <img src='/aegis-logo.png' alt='Aegis logo' className='mb-3 h-10 w-10 opacity-90 sm:mb-5 sm:h-16 sm:w-16' />
           <h2 className='text-xl font-semibold sm:text-2xl md:text-3xl'>Tell me what to do</h2>
           <p className='mb-4 mt-1.5 max-w-xl text-xs text-zinc-400 sm:mb-8 sm:mt-2 sm:text-sm'>Aegis can operate any UI with visual understanding. Start with a natural language instruction or choose an example below.</p>
           <div className='grid w-full max-w-3xl gap-2 sm:gap-3 sm:grid-cols-2'>
