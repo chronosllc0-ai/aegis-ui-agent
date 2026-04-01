@@ -1735,3 +1735,30 @@
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
+
+## Session 5.21 - April 1, 2026 (Hero Demo Modal Image-Only Update)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `frontend/src/components/VideoPlaceholder.tsx` to render the added hero preview image (`/og-image.png`) as an image-only demo modal state.
+- Removed the fallback overlay CTA row and play-style visual indicator block from the hero demo module.
+- Simplified the component API by removing the optional video source behavior so the hero now consistently presents a static image modal.
+
+### What's Working
+- Hero demo section now displays only the provided image artwork, with no video controls/indicators.
+- Frontend production build passes after the component simplification.
+
+### What's NOT Working Yet
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. If desired, replace `/og-image.png` with a dedicated high-resolution hero asset filename for clearer intent.
+2. Capture visual QA screenshot once browser screenshot tooling is available.
+
+### Decisions Made
+- Kept the existing `/og-image.png` path as the canonical hero demo image to match current repo assets.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
