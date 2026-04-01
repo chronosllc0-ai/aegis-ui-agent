@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import Any, AsyncIterator
 
 from .base import BaseProvider, ChatMessage, ChatResponse, ProviderCapabilities, StreamChunk
 
-logger = logging.getLogger(__name__)
-
 FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
 
 FIREWORKS_MODELS = [
-    "accounts/fireworks/models/kimi-k2p5-turbo",
+    "accounts/fireworks/models/kimi-k2p5",
     "accounts/fireworks/models/kimi-k2-instruct-0905",
 ]
 
@@ -27,7 +24,7 @@ class FireworksProvider(BaseProvider):
 
     provider_name = "fireworks"
 
-    def __init__(self, api_key: str, default_model: str = "accounts/fireworks/models/kimi-k2p5-turbo") -> None:
+    def __init__(self, api_key: str, default_model: str = "accounts/fireworks/models/kimi-k2p5") -> None:
         self.api_key = api_key
         self.default_model = default_model
         self._client: Any = None
@@ -50,7 +47,7 @@ class FireworksProvider(BaseProvider):
             vision=False,
             function_calling=True,
             reasoning=True,
-            max_context_tokens=131_072,
+            max_context_tokens=262_144,
         )
 
     @property
@@ -66,16 +63,14 @@ class FireworksProvider(BaseProvider):
         if not candidate:
             return self.default_model
         if candidate.startswith("accounts/fireworks/models/"):
+            if candidate.endswith("/kimi-k2p5-turbo"):
+                return "accounts/fireworks/models/kimi-k2p5"
             return candidate
         if "/" not in candidate:
             candidate = candidate.replace("kimi-k2.5", "kimi-k2p5")
+            candidate = candidate.replace("kimi-k2p5-turbo", "kimi-k2p5")
             return f"accounts/fireworks/models/{candidate}"
         return candidate
-
-    def _fallback_models(self, attempted: str) -> list[str]:
-        """Return fallback model IDs for not-found responses."""
-        fallbacks = ["accounts/fireworks/models/kimi-k2p5-turbo", "accounts/fireworks/models/kimi-k2-instruct-0905"]
-        return [name for name in fallbacks if name != attempted]
 
     async def chat(
         self,
@@ -104,24 +99,7 @@ class FireworksProvider(BaseProvider):
             if status != 404:
                 response_obj = getattr(exc, "response", None)
                 status = getattr(response_obj, "status_code", None)
-            if status == 404:
-                for fallback in self._fallback_models(model_name):
-                    try:
-                        logger.warning("Fireworks model %s not found; retrying with %s", model_name, fallback)
-                        response = await client.chat.completions.create(
-                            model=fallback,
-                            messages=self._build_messages(messages),
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                        )
-                        model_name = fallback
-                        break
-                    except Exception:  # noqa: BLE001
-                        continue
-                else:
-                    raise
-            else:
-                raise
+            raise
         choice = response.choices[0]
         usage = {}
         if response.usage:
