@@ -1,3 +1,34 @@
+## Session 5.33 - April 1, 2026 (Cloud Run timeout increase for long-running tasks)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short follow-up pass
+
+### What Was Done
+- Updated `infrastructure/deploy.sh` to increase backend Cloud Run request timeout from `300` seconds to a configurable timeout env var defaulting to `3600` seconds.
+- Added `BACKEND_TIMEOUT="${BACKEND_TIMEOUT:-3600}"` near deploy config setup.
+- Wired the backend deploy command to use `--timeout "$BACKEND_TIMEOUT"` instead of the previous hardcoded value.
+- Added deploy output logging to print the active backend timeout value before deployment starts.
+
+### What's Working
+- Default backend timeout for Cloud Run deploys via `infrastructure/deploy.sh` is now `3600s` (1 hour), which is significantly longer than the previous 5-minute cap and better aligned with long-running agent tasks.
+- Timeout can now be overridden per deploy (`BACKEND_TIMEOUT=... ./infrastructure/deploy.sh`) without editing source.
+
+### What's NOT Working Yet
+- I did not run an actual `gcloud run deploy` from this environment, so live Cloud Run acceptance verification is still pending.
+
+### Next Steps
+1. Run deployment using `infrastructure/deploy.sh`.
+2. Confirm deployed backend revision shows timeout `3600s` in Cloud Run revision settings.
+3. For workloads that exceed HTTP request limits, route those jobs to background task execution and polling/webhook status updates.
+
+### Decisions Made
+- Implemented timeout as an environment-configurable value with a safe long-running default to avoid future hardcoded edits.
+
+### Blockers
+- Live verification requires GCP project credentials/access.
+
+---
+
 ## Session 5.32 - April 1, 2026 (Railway frontend build fix + landing hero refresh)
 
 **Agent:** GPT-5.3-Codex  
