@@ -20,39 +20,39 @@ type LandingPageProps = {
 // ─── Features / Capability Map ───────────────────────────────────────────────
 const FEATURES = [
   {
-    title: 'Vision-first navigation',
+    title: 'Vision first browser use',
     description:
       'Aegis reasons over the live screen state before every major action so the operator stays aligned with what is actually visible right now.',
     icon: Icons.globe,
   },
   {
-    title: 'Real-time control',
+    title: 'Real-time Agent Control',
     description:
       'Steer, interrupt, queue, and monitor transcripts without restarting the session or losing context.',
     icon: Icons.workflows,
   },
   {
-    title: 'Memory across sessions',
+    title: 'Persistent Memory',
     description:
-      'Aegis stores facts, preferences, and decisions in semantic memory that persists across sessions — so it always knows your stack, your team, and how you like things done.',
+      'Aegis stores facts, preferences, and decisions in semantic memory that persists across sessions - so it always knows your stack, your team, and how you like things done.',
     icon: Icons.star,
   },
   {
-    title: 'Scheduled automations',
+    title: 'Smart Automation',
     description:
-      'Turn any task into a recurring cron job with a single prompt. Daily digests, weekly reports, PR reminders — scheduled and running without any code or settings UI.',
+      'Turn any task into a recurring cron job with a single prompt. Daily digests, weekly reports, PR reminders - scheduled and running without any code or settings UI.',
     icon: Icons.clock,
   },
   {
-    title: 'Human-in-the-loop approval',
+    title: 'Human in the loop approvals',
     description:
       'Aegis pauses at decision points, shows its plan, and waits for your go-ahead before touching anything sensitive. Confidence-based control you can adjust per tool.',
     icon: Icons.check,
   },
   {
-    title: 'Sub-agent orchestration',
+    title: 'Sub agents Orchestration',
     description:
-      'Spawn parallel agents that research, execute, and report simultaneously. Aegis coordinates their results into a single coherent output — faster than any single-thread tool.',
+      'Spawn parallel agents that research, execute, and report simultaneously. Aegis coordinates their results into a single coherent output - faster than any single-thread tool.',
     icon: Icons.workflows,
   },
 ]
@@ -132,12 +132,12 @@ const FAQ_ITEMS = [
   {
     question: 'What is Aegis, exactly?',
     answer:
-      'Aegis is an AI agent that can see your browser, write and run code, search the web, manage files, send messages, and work with your GitHub repositories — all from a single interface. It\'s not a chatbot. It completes tasks end to end.',
+      'Aegis is an AI agent that can see your browser, write and run code, search the web, manage files, send messages, and work with your GitHub repositories - all from a single interface. It\'s not a chatbot. It completes tasks end to end.',
   },
   {
     question: 'How is Aegis different from ChatGPT or Claude?',
     answer:
-      'ChatGPT and Claude give you text. Aegis gives you results. It can browse real websites, execute Python scripts, push commits to GitHub, post to Slack, and schedule recurring tasks — none of which those tools do natively.',
+      'ChatGPT and Claude give you text. Aegis gives you results. It can browse real websites, execute Python scripts, push commits to GitHub, post to Slack, and schedule recurring tasks - none of which those tools do natively.',
   },
   {
     question: 'What can Aegis actually do end to end?',
@@ -167,17 +167,17 @@ const FAQ_ITEMS = [
   {
     question: 'Can Aegis really push code to my GitHub?',
     answer:
-      'Yes — with a Personal Access Token connected. Aegis clones your repo into an ephemeral session workspace, makes changes, commits them to a new branch, pushes, and opens a pull request via the GitHub CLI. The workspace is deleted when your session ends.',
+      'Yes - with a Personal Access Token connected. Aegis clones your repo into an ephemeral session workspace, makes changes, commits them to a new branch, pushes, and opens a pull request via the GitHub CLI. The workspace is deleted when your session ends.',
   },
   {
     question: 'Is my data safe? What persists across sessions?',
     answer:
-      'Session workspaces are ephemeral — files and cloned repos are wiped on disconnect. Memory is the only thing that persists: facts and preferences you explicitly tell Aegis to store. Nothing is shared between users.',
+      'Session workspaces are ephemeral - files and cloned repos are wiped on disconnect. Memory is the only thing that persists: facts and preferences you explicitly tell Aegis to store. Nothing is shared between users.',
   },
   {
     question: 'What LLMs does Aegis support?',
     answer:
-      'Google Gemini, OpenAI (GPT-5.2, GPT-5.1), Anthropic (Claude 4.6 Sonnet, Claude 4.5 Haiku), xAI (Grok), and any model available via OpenRouter — 40+ models and counting. You pick per session from the model selector.',
+      'Google Gemini, OpenAI (GPT-5.2, GPT-5.1), Anthropic (Claude 4.6 Sonnet, Claude 4.5 Haiku), xAI (Grok), and any model available via OpenRouter - 40+ models and counting. You pick per session from the model selector.',
   },
 ]
 
@@ -260,7 +260,7 @@ const CAPABILITY_CHECKS = [
   'Human-in-the-loop approval flows',
   'Parallel sub-agent orchestration',
   '6+ LLM providers, 40+ models',
-  'BYOK — use your own API keys',
+  'BYOK - use your own API keys',
 ]
 
 const PROVIDER_HIGHLIGHTS = PROVIDERS.map((p) => ({
@@ -325,7 +325,7 @@ export function LandingPage({
                 Your AI coworker that actually ships.
               </h1>
               <p className='mt-4 max-w-2xl text-sm leading-7 text-zinc-300 sm:mt-6 sm:text-base sm:leading-8 md:text-lg'>
-                Aegis browses, codes, researches, files PRs, sends messages, and schedules recurring tasks — end to end, without you switching tabs. Give it a task. Get back a result.
+                Aegis browses, codes, researches, files PRs, sends messages, and schedules recurring tasks - end to end, without you switching tabs. Give it a task. Get back a result.
               </p>
             </Reveal>
             <Reveal mode='load' delayMs={180}>
@@ -406,7 +406,7 @@ export function LandingPage({
             Everything you need to move from instruction to shipped output.
           </h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
-            Aegis combines browser automation, code execution, persistent memory, scheduled automations, and multi-agent orchestration in a single operator surface — so nothing falls through the gap between tools.
+            Aegis combines browser automation, code execution, persistent memory, scheduled automations, and multi-agent orchestration in a single operator surface - so nothing falls through the gap between tools.
           </p>
         </Reveal>
         <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
@@ -424,8 +424,11 @@ export function LandingPage({
                     <span className='text-[10px] uppercase tracking-wider'>Image coming soon</span>
                   </div>
                 </div>
-                <div className='inline-flex rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-3 text-cyan-200'>
-                  {feature.icon({ className: 'h-5 w-5' })}
+                <div className='inline-flex items-center gap-2.5 text-cyan-200'>
+                  <span className='inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10'>
+                    {feature.icon({ className: 'h-4.5 w-4.5' })}
+                  </span>
+                  <p className='text-sm font-semibold text-cyan-100'>{feature.title}</p>
                 </div>
                 <p className='mt-4 text-sm leading-7 text-zinc-300'>{feature.description}</p>
               </article>
@@ -434,7 +437,7 @@ export function LandingPage({
         </div>
       </section>
 
-      {/* ── WHY YOU MUST SHIFT — COMPARISON ──────────────────────────────── */}
+      {/* ── WHY YOU MUST SHIFT - COMPARISON ──────────────────────────────── */}
       <section className='mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-18'>
         <Reveal className='max-w-2xl'>
           <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>The shift</p>
@@ -482,7 +485,7 @@ export function LandingPage({
                   Just Aegis. Done.
                 </h2>
                 <p className='mt-5 text-sm leading-8 text-zinc-300'>
-                  One instruction. Aegis browses, researches, codes, files the PR, and sends the Slack update. You review the result — you don't do the work.
+                  One instruction. Aegis browses, researches, codes, files the PR, and sends the Slack update. You review the result - you don't do the work.
                 </p>
                 <div className='mt-8 flex flex-wrap gap-3'>
                   <button
@@ -525,7 +528,7 @@ export function LandingPage({
             What Aegis can own for your team.
           </h2>
           <p className='mt-4 text-sm leading-7 text-zinc-400'>
-            Click any workflow to see exactly how Aegis handles it — with prompts you can run right now.
+            Click any workflow to see exactly how Aegis handles it - with prompts you can run right now.
           </p>
         </Reveal>
 

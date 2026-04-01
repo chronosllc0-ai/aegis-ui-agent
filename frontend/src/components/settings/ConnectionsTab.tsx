@@ -48,7 +48,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   [GITHUB_PAT_INTEGRATION_ID]: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
 }
 
-// OAuth connector icons — override backend-provided icon to ensure correct logos always display
+// OAuth connector icons - override backend-provided icon to ensure correct logos always display
 const CONNECTOR_ICONS: Record<string, string> = {
   google: 'https://www.gstatic.com/images/branding/googleg/1x/googleg_standard_color_128dp.png',
   github: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
@@ -62,29 +62,29 @@ const CONNECTOR_ICONS: Record<string, string> = {
 const BOT_INTEGRATION_IDS: readonly string[] = ['telegram', 'discord', 'slack', GITHUB_PAT_INTEGRATION_ID]
 
 export function ConnectionsTab({ integrations, onChange, isAdmin = false }: ConnectionsTabProps) {
-  // — OAuth state
+  // - OAuth state
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [oauthLoading, setOauthLoading] = useState(true)
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null)
   const [oauthExpandedId, setOauthExpandedId] = useState<string | null>(null)
   const [oauthActions, setOauthActions] = useState<Record<string, ActionMeta[]>>({})
 
-  // — Credential setup form state
+  // - Credential setup form state
   const [credFormId, setCredFormId] = useState<string | null>(null)
   const [credForm, setCredForm] = useState<{ client_id: string; client_secret: string }>({ client_id: '', client_secret: '' })
   const [credSaving, setCredSaving] = useState(false)
   const [credError, setCredError] = useState<string | null>(null)
 
-  // — Bot-token state
+  // - Bot-token state
   const [botExpandedId, setBotExpandedId] = useState<string | null>(null)
   const [botBusyId, setBotBusyId] = useState<string | null>(null)
   const [botErrors, setBotErrors] = useState<Record<string, string | null>>({})
 
-  // — Custom MCP
+  // - Custom MCP
   const [showCustom, setShowCustom] = useState(false)
   const [customForm, setCustomForm] = useState<CustomServerForm>({ serverName: '', serverUrl: '', authType: 'none', apiKey: '' })
 
-  // — Global
+  // - Global
   const [globalError, setGlobalError] = useState<string | null>(null)
 
   // Filter: only bot-token integrations (Telegram, Discord, Slack-as-bot, GitHub PAT)
@@ -101,9 +101,9 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
       if (connError) {
         const detail = params.get('connector_error_detail')
         const label = connError === 'credentials_not_configured'
-          ? 'Connector credentials not configured — add Client ID & Secret in Settings → Connections.'
+          ? 'Connector credentials not configured - add Client ID & Secret in Settings → Connections.'
           : detail
-            ? `Connection failed: ${connError} — ${decodeURIComponent(detail)}`
+            ? `Connection failed: ${connError} - ${decodeURIComponent(detail)}`
             : `Connection failed: ${connError}`
         setGlobalError(label)
       }
@@ -242,7 +242,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
 
   const connectBot = async (integration: IntegrationConfig) => {
     const settings = integration.settings ?? {}
-    let payload: Record<string, string> = {}
+    let payload: Record<string, unknown> = {}
     let endpoint = ''
 
     if (integration.id === 'telegram') {
@@ -259,7 +259,18 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
       endpoint = `/api/integrations/discord/register/${integration.id}`
     } else if (integration.id === GITHUB_PAT_INTEGRATION_ID) {
       if (!settings.token) { setBotError(integration.id, 'Personal access token is required.'); return }
-      payload = { token: settings.token, webhook_secret: settings.webhook_secret ?? '', app_id: settings.app_id ?? '' }
+      let repoPermissions: Record<string, string> = {}
+      const rawPermissions = String(settings.repo_permissions_json ?? '').trim()
+      if (rawPermissions) {
+        try {
+          const parsed = JSON.parse(rawPermissions) as Record<string, string>
+          repoPermissions = Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, String(v).toLowerCase()]))
+        } catch {
+          setBotError(integration.id, 'repo_permissions_json must be valid JSON (object).')
+          return
+        }
+      }
+      payload = { token: settings.token, webhook_secret: settings.webhook_secret ?? '', app_id: settings.app_id ?? '', repo_permissions: repoPermissions }
       endpoint = `/api/integrations/${integration.id}/register/${integration.id}`
     }
 
@@ -402,7 +413,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                           Setup
                         </button>
                       ) : (
-                        <span className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-500" title="Not configured — contact your admin">
+                        <span className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-500" title="Not configured - contact your admin">
                           Not set up
                         </span>
                       )}
@@ -575,7 +586,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                   </div>
                 )}
 
-                {/* Bot Config Panel — shown after successful connection */}
+                {/* Bot Config Panel - shown after successful connection */}
                 {isConn && (
                   <BotConfigPanel
                     platform={integration.id}
@@ -751,14 +762,32 @@ function DiscordForm({ integration, busy, onUpdate, onConnect, onTest }: BotForm
 function GitHubForm({ integration, busy, onUpdate, onConnect, onTest }: BotFormProps) {
   const s = integration.settings ?? {}
   const set = (key: string, val: string) => onUpdate({ settings: { ...s, [key]: val } })
+  const defaultPermissions = `{
+  "metadata": "read",
+  "issues": "write",
+  "pull_requests": "write",
+  "discussions": "write",
+  "environments": "write",
+  "workflows": "write",
+  "checks": "read",
+  "deployments": "read",
+  "dependabot_alerts": "read"
+}`
   return (
     <div className="grid gap-2.5">
       <p className="text-xs text-zinc-400">
-        Create a <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">personal access token</a> with <code className="rounded bg-zinc-800 px-1 text-zinc-300">repo</code> scope, or use a GitHub App installation token.
+        Use a GitHub App installation token (recommended) or PAT. When using a GitHub App, include repo permissions JSON so Aegis only exposes tools your app can access.
       </p>
       <input placeholder="Personal access token or installation token" value={s.token ?? ''} onChange={(e) => set('token', e.target.value)} className={inputCls} />
       <input placeholder="Webhook secret (optional)" value={s.webhook_secret ?? ''} onChange={(e) => set('webhook_secret', e.target.value)} className={inputCls} />
       <input placeholder="GitHub App ID (optional)" value={s.app_id ?? ''} onChange={(e) => set('app_id', e.target.value)} className={inputCls} />
+      <textarea
+        placeholder="GitHub App repository permissions JSON"
+        value={s.repo_permissions_json ?? defaultPermissions}
+        onChange={(e) => set('repo_permissions_json', e.target.value)}
+        rows={7}
+        className={inputCls}
+      />
       <div className="flex gap-2">
         <button type="button" onClick={onConnect} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
           {busy ? 'Connecting...' : 'Save & Connect'}
@@ -830,7 +859,7 @@ function BotConfigPanel({
           })
         }
       } catch {
-        /* silent — use defaults */
+        /* silent - use defaults */
       } finally {
         if (!cancelled) setLoading(false)
       }

@@ -1,5 +1,5 @@
 /**
- * SubAgentPanel — "N background agents" pill above the input bar.
+ * SubAgentPanel - "N background agents" pill above the input bar.
  *
  * Shows a compact pill when sub-agents are active. Clicking it opens a
  * slide-up drawer listing each sub-agent's live steps and status.

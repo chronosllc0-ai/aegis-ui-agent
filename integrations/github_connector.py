@@ -27,6 +27,7 @@ class GitHubIntegration(BaseIntegration):
         self._webhook_secret: str | None = None
         self._app_id: str | None = None
         self._username: str | None = None
+        self._repo_permissions: dict[str, str] = {}
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate the token by calling /user and store metadata."""
@@ -36,6 +37,11 @@ class GitHubIntegration(BaseIntegration):
         self._token = token or None
         self._webhook_secret = webhook_secret or None
         self._app_id = app_id or None
+        raw_permissions = config.get("repo_permissions", {}) or {}
+        if isinstance(raw_permissions, dict):
+            self._repo_permissions = {str(k): str(v).strip().lower() for k, v in raw_permissions.items()}
+        else:
+            self._repo_permissions = {}
 
         if not self._token:
             self.connected = False
@@ -76,18 +82,34 @@ class GitHubIntegration(BaseIntegration):
         self._webhook_secret = None
         self._app_id = None
         self._username = None
+        self._repo_permissions = {}
+
+    def _has_permission(self, permission: str, required: str) -> bool:
+        """Return whether the configured GitHub App permissions satisfy a tool requirement."""
+        if not self._repo_permissions:
+            return True
+        level = self._repo_permissions.get(permission, "none")
+        if required == "read":
+            return level in {"read", "write"}
+        return level == "write"
 
     def list_tools(self) -> list[dict[str, Any]]:
         """Return tools this integration supports."""
-        return [
-            {"name": "github_list_repos", "description": "List repositories for the authenticated user"},
-            {"name": "github_get_issues", "description": "Get issues for a repository"},
-            {"name": "github_create_issue", "description": "Create a new issue"},
-            {"name": "github_get_pull_requests", "description": "List pull requests for a repo"},
-            {"name": "github_create_comment", "description": "Comment on an issue or PR"},
-            {"name": "github_get_file", "description": "Get file content from a repo"},
-            {"name": "github_webhook_event", "description": "Process incoming webhook event"},
-        ]
+        tools: list[dict[str, Any]] = []
+        if self._has_permission("metadata", "read"):
+            tools.append({"name": "github_list_repos", "description": "List repositories for the authenticated user"})
+        if self._has_permission("issues", "read"):
+            tools.append({"name": "github_get_issues", "description": "Get issues for a repository"})
+        if self._has_permission("issues", "write"):
+            tools.append({"name": "github_create_issue", "description": "Create a new issue"})
+        if self._has_permission("pull_requests", "read"):
+            tools.append({"name": "github_get_pull_requests", "description": "List pull requests for a repo"})
+        if self._has_permission("issues", "write") or self._has_permission("pull_requests", "write") or self._has_permission("discussions", "write"):
+            tools.append({"name": "github_create_comment", "description": "Comment on an issue or PR"})
+        if self._has_permission("contents", "read"):
+            tools.append({"name": "github_get_file", "description": "Get file content from a repo"})
+        tools.append({"name": "github_webhook_event", "description": "Process incoming webhook event"})
+        return tools
 
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """Dispatch GitHub tool execution."""
