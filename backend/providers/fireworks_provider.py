@@ -99,6 +99,8 @@ class FireworksProvider(BaseProvider):
             status = getattr(getattr(exc, "status_code", None), "__int__", lambda: None)()
             if status != 404:
                 response_obj = getattr(exc, "response", None)
+            if status != 404:
+                response_obj = getattr(exc, "response", None)
                 status = getattr(response_obj, "status_code", None)
             if status == 404:
                 for fallback in self._fallback_models(model_name):
