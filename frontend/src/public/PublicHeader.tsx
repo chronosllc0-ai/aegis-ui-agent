@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Icons } from '../components/icons'
-import { CHRONOS_LOGO_URL } from '../lib/models'
+import { AEGIS_LOGO_URL } from '../lib/models'
 
 type PublicHeaderProps = {
   onGoHome: () => void
@@ -17,7 +17,7 @@ export function PublicHeader({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc: _onGoD
     <header className='sticky top-0 z-20 border-b border-white/8 bg-[#0a0d14]/82 backdrop-blur-xl'>
       <div className='mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:gap-6 sm:px-6 sm:py-5'>
         <button type='button' onClick={onGoHome} className='flex items-center gap-2 text-left sm:gap-3'>
-          <img src={CHRONOS_LOGO_URL} alt='Chronos AI' className='chronos-spin h-7 w-7 rounded-full sm:h-8 sm:w-8' />
+          <img src={AEGIS_LOGO_URL} alt='Aegis owl logo' className='h-7 w-7 sm:h-8 sm:w-8' />
           <div>
             <p className='text-sm font-semibold text-white'>Aegis</p>
             <p className='hidden text-[11px] uppercase tracking-[0.22em] text-cyan-200 sm:block'>by Chronos AI</p>

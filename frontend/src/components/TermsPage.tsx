@@ -1,4 +1,4 @@
-import { CHRONOS_LOGO_URL } from '../lib/models'
+import { AEGIS_LOGO_URL } from '../lib/models'
 
 type Props = {
   onGoHome: () => void
@@ -474,7 +474,7 @@ export function TermsPage({ onGoHome, onGoAuth }: Props) {
       <header className='sticky top-0 z-30 border-b border-white/8 bg-[#090c13]/90 backdrop-blur-md'>
         <div className='mx-auto flex max-w-7xl items-center justify-between px-6 py-4'>
           <button type='button' onClick={onGoHome} className='flex items-center gap-3'>
-            <img src={CHRONOS_LOGO_URL} alt='Aegis' className='chronos-spin h-8 w-8 rounded-full' />
+            <img src={AEGIS_LOGO_URL} alt='Aegis owl logo' className='h-8 w-8' />
             <span className='font-semibold text-white'>Aegis</span>
           </button>
           <div className='flex gap-3'>
