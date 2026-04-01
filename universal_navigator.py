@@ -430,61 +430,6 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
     return available
 
 
-def _effective_permission_mode(tool: dict[str, Any], settings: dict[str, Any]) -> str:
-    """Return the effective permission mode for prompt guidance."""
-    tool_name = str(tool.get("name", "")).strip()
-    explicit = str((settings.get("tool_permissions", {}) or {}).get(tool_name, "")).strip().lower()
-    if explicit in {"auto", "confirm"}:
-        return explicit
-    default_permission = str(tool.get("default_permission", "auto")).strip().lower()
-    if default_permission in {"auto", "confirm"}:
-        return default_permission
-    return "auto"
-
-
-def _build_tool_handbook(available: list[dict[str, Any]], settings: dict[str, Any]) -> str:
-    """Build a complete tool-by-tool handbook for the system prompt."""
-    confirm_destructive = bool((settings.get("behavior", {}) or {}).get("confirm_destructive_actions", False))
-    handbook_lines: list[str] = [
-        "Tool handbook (use only these tools; never invent tools):",
-    ]
-    for index, tool in enumerate(available, start=1):
-        tool_name = str(tool.get("name", ""))
-        risk = str(tool.get("risk", "low")).lower()
-        permission = _effective_permission_mode(tool, settings)
-        integration_gate = str(tool.get("requires_integration", "")).strip()
-        subagent_available = bool(tool.get("subagent_available", False))
-        permission_note = "approval required before execution" if permission == "confirm" else "can run automatically"
-        integration_note = (
-            f"requires integration '{integration_gate}' to be connected"
-            if integration_gate
-            else "no integration connection required"
-        )
-        subagent_note = (
-            "available to sub-agents"
-            if subagent_available
-            else "not guaranteed for sub-agents (depends on sub-agent allowlist)"
-        )
-        handbook_lines.extend(
-            [
-                f"{index}. {tool_name}",
-                f"   - Purpose: {tool.get('description', '')}",
-                f"   - Risk: {risk}",
-                f"   - Permission gate: {permission_note}",
-                f"   - Integration gate: {integration_note}",
-                f"   - Sub-agent gate: {subagent_note}",
-                f"   - Example: {json.dumps(tool.get('example', {}), ensure_ascii=False)}",
-            ]
-        )
-    handbook_lines.append(
-        "Permission policy: explicit per-tool settings override defaults. "
-        "If confirm_destructive_actions=true, high-risk tools without an explicit override should be treated as confirm."
-        if confirm_destructive
-        else "Permission policy: explicit per-tool settings override defaults."
-    )
-    return "\n".join(handbook_lines)
-
-
 async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subagent: bool) -> str:
     """Build the current system prompt from enabled tools and user instruction."""
     workspace_root = get_session_workspace_root(session_id)
