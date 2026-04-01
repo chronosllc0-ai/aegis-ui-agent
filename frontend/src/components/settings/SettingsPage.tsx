@@ -13,6 +13,7 @@ import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
 import { MemoryTab } from './MemoryTab'
+import { ObservabilityTab } from './ObservabilityTab'
 import { AdminPanel } from '../admin/AdminPanel'
 
 type SettingsPageProps = {
@@ -20,13 +21,14 @@ type SettingsPageProps = {
   onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
   initialTab?: SettingsTab
   isAdmin?: boolean
+  onTabChange?: (tab: SettingsTab) => void
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support', 'Admin'] as const
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
-export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false }: SettingsPageProps) {
+export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false, onTabChange }: SettingsPageProps) {
   const { settings, patchSettings } = useSettingsContext()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
@@ -54,6 +56,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
 
   const selectTab = (tab: SettingsTab) => {
     setActiveTab(tab)
+    onTabChange?.(tab)
     setSidebarOpen(false) // collapse sidebar on mobile after selecting
   }
 
@@ -140,6 +143,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
           />
         )}
         {activeTab === 'Memory' && <MemoryTab />}
+        {activeTab === 'Observability' && <ObservabilityTab />}
         {activeTab === 'Support' && <SupportTab />}
         {activeTab === 'Admin' && isAdmin && <AdminPanel />}
       </div>

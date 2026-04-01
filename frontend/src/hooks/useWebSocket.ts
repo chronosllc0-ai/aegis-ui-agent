@@ -70,7 +70,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
   const [currentUrl, setCurrentUrl] = useState('about:blank')
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
-  // Server-assigned conversation ID for the active session — used to load history from DB
+  // Server-assigned conversation ID for the active session - used to load history from DB
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   // Maps step_id → accumulated reasoning text
   const [reasoningMap, setReasoningMap] = useState<Record<string, string>>({})
@@ -265,7 +265,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         return
       }
       if (payload.type === 'reasoning') {
-        // Full reasoning result — update log entry status
+        // Full reasoning result - update log entry status
         const stepId = String(payload.data?.step_id ?? '')
         const content = String(payload.data?.content ?? '')
         if (stepId) {
@@ -382,10 +382,10 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         lastNotConnectedAtRef.current = now
         const statusMsg =
           wsRef.current === null
-            ? 'WebSocket not connected — check your network and try refreshing.'
+            ? 'WebSocket not connected - check your network and try refreshing.'
             : wsRef.current.readyState === WebSocket.CONNECTING
-              ? 'WebSocket still connecting — please wait a moment and try again.'
-              : 'WebSocket disconnected — reconnecting automatically…'
+              ? 'WebSocket still connecting - please wait a moment and try again.'
+              : 'WebSocket disconnected - reconnecting automatically…'
         appendLog({ message: statusMsg, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
       }
       return false

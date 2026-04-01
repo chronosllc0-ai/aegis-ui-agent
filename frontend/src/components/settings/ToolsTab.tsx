@@ -1,11 +1,11 @@
 /**
- * ToolsTab — unified tool permission centre.
+ * ToolsTab - unified tool permission centre.
  *
  * Tool visibility rules
  * ─────────────────────
  *  • System categories (Browser, Web Search, File System, Code Execution):
  *      Always present. ON by default. User can disable the whole category or
- *      individual tools — when disabled the tools are not sent to the agent.
+ *      individual tools - when disabled the tools are not sent to the agent.
  *
  *  • Built-in categories (Memory, Cron, Agent Interaction):
  *      Always present with no gating. Cannot be linked to a connection.
@@ -16,7 +16,7 @@
  *      While locked, a banner is shown directing the user to connect first.
  *
  *  • OAuth connector categories (Google, Notion, Linear…):
- *      Injected dynamically from the backend — only active connectors appear.
+ *      Injected dynamically from the backend - only active connectors appear.
  *      Already gated: the backend /api/connectors endpoint only returns
  *      connectors that are connected & active.
  */
@@ -174,7 +174,7 @@ const CATEGORY_ICONS: Record<string, ReactElement> = {
       <polyline points='16 18 22 12 16 6'/><polyline points='8 6 2 12 8 18'/>
     </svg>
   ),
-  // Bot integrations — real brand icons via BrandIcon
+  // Bot integrations - real brand icons via BrandIcon
   telegram:    <BrandIcon id='telegram'  className='h-5 w-5' />,
   'slack-bot': <BrandIcon id='slack'     className='h-5 w-5' />,
   discord:     <BrandIcon id='discord'   className='h-5 w-5' />,
@@ -197,12 +197,12 @@ const FallbackCategoryIcon = () => (
 // ── Static category list ──────────────────────────────────────────────────────
 
 const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
-  // ── System tools — always present, on by default ─────────────────────────
+  // ── System tools - always present, on by default ─────────────────────────
   {
     id: 'browser',
     label: 'Browser Control',
     icon: 'browser',
-    description: 'Core browser automation — navigate, click, type, screenshot. On by default.',
+    description: 'Core browser automation - navigate, click, type, screenshot. On by default.',
     canDisable: true,
     tools: BROWSER_TOOLS,
   },
@@ -230,7 +230,7 @@ const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     canDisable: true,
     tools: CODE_TOOLS,
   },
-  // ── Built-in tools — always present, no gating ───────────────────────────
+  // ── Built-in tools - always present, no gating ───────────────────────────
   {
     id: 'agent-interaction',
     label: 'Agent Interaction',
@@ -255,7 +255,7 @@ const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     canDisable: true,
     tools: CRON_TOOLS,
   },
-  // ── Bot integration tools — gated behind connected integration ────────────
+  // ── Bot integration tools - gated behind connected integration ────────────
   {
     id: 'telegram',
     label: 'Telegram Bot',
@@ -390,7 +390,7 @@ function ToolRow({
   )
 }
 
-// ── Lock banner — shown when a bot integration isn't connected yet ─────────────
+// ── Lock banner - shown when a bot integration isn't connected yet ─────────────
 
 function IntegrationLockBanner({ label, integrationLabel }: { label: string; integrationLabel: string }) {
   return (
@@ -501,7 +501,7 @@ function CategorySection({
         </svg>
       </button>
 
-      {/* Body — lock banner or tool rows */}
+      {/* Body - lock banner or tool rows */}
       {expanded && locked && (
         <IntegrationLockBanner label={category.label} integrationLabel={category.label.replace(' Bot', '').replace(' (Bot Token)', '')} />
       )}

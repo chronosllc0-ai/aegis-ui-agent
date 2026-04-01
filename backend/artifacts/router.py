@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import _verify_session
@@ -46,12 +46,12 @@ async def get_artifact(artifact_id: str, request: Request, db: AsyncSession = De
     return {"ok": True, "artifact": artifact}
 
 
-@artifact_router.get("/{artifact_id}/download")
+@artifact_router.get("/{artifact_id}/download", response_model=None)
 async def download_artifact(
     artifact_id: str,
     request: Request,
     db: AsyncSession = Depends(get_session),
-) -> FileResponse | RedirectResponse:
+) -> Response:
     uid = _get_user_uid(request)
 
     # Try S3 pre-signed URL first
