@@ -465,7 +465,7 @@ function App() {
     return result
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
-  const handleSend = (instruction: string, selectedMode: SteeringMode) => {
+  const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
 
@@ -475,18 +475,18 @@ function App() {
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: trimmed })
+      send({ action: 'queue', instruction: trimmed, metadata })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: trimmed })
+      send({ action: 'interrupt', instruction: trimmed, metadata })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
     const action = isWorking ? 'steer' : 'navigate'
-    send({ action, instruction: trimmed })
+    send({ action, instruction: trimmed, metadata })
 
     // ── Update browser tab title for steering state ────────────────
     if (action === 'steer') {
@@ -903,6 +903,12 @@ function App() {
                 reasoningEffort={settings.reasoningEffort}
                 onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
                 currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
+                contextSnapshot={{
+                  tokensUsed: contextMeter.current.tokensUsed,
+                  contextLimit: contextMeter.current.contextLimit,
+                  modelId: contextMeter.current.modelId,
+                  isCompacting: contextMeter.isCompacting,
+                }}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */

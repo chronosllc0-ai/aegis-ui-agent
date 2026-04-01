@@ -33,7 +33,7 @@ const IcoBrain        = (p: SvgProps) => <Svg {...p}><path d='M9 3a3 3 0 0 0-3 3
 export interface ChatPanelProps {
   logs: LogEntry[]
   isWorking: boolean
-  onSend: (instruction: string, mode: SteeringMode) => void
+  onSend: (instruction: string, mode: SteeringMode, metadata?: Record<string, unknown>) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
@@ -69,6 +69,13 @@ export interface ChatPanelProps {
   onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
   /** Whether the currently selected model supports reasoning */
   currentModelSupportsReasoning?: boolean
+  /** Current task context meter snapshot (persisted with outgoing user messages) */
+  contextSnapshot?: {
+    tokensUsed: number
+    contextLimit: number
+    modelId: string
+    isCompacting: boolean
+  }
 }
 
 // ─── Message shape ────────────────────────────────────────────────────────────
@@ -982,6 +989,7 @@ export function ChatPanel({
   reasoningEffort,
   onChangeReasoningEffort,
   currentModelSupportsReasoning,
+  contextSnapshot,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1016,6 +1024,9 @@ export function ChatPanel({
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
           text: m.content,
           timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+          attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
+            ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
+            : undefined,
         }))
       )
     } else if (taskChanged) {
@@ -1171,7 +1182,13 @@ export function ChatPanel({
     if (withContext.startsWith('/plan ')) {
       onDecomposePlan(withContext.slice(6))
     } else {
-      onSend(withContext || '(attachment)', 'steer')
+      onSend(withContext || '(attachment)', 'steer', {
+        attachments: attachments.length > 0 ? attachments : undefined,
+        active_connector: activeConnector
+          ? { id: activeConnector.id, name: activeConnector.name }
+          : undefined,
+        context_snapshot: contextSnapshot ?? undefined,
+      })
     }
     setInput('')
     setAttachments([])
