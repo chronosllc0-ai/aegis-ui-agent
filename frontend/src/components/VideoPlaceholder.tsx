@@ -1,4 +1,9 @@
-export function VideoPlaceholder({ className = '' }: { className?: string }) {
+type VideoPlaceholderProps = {
+  className?: string
+  src?: string
+}
+
+export function VideoPlaceholder({ className = '', src }: VideoPlaceholderProps) {
   return (
     <div
       className={`overflow-hidden rounded-2xl border border-[#1f1f1f] bg-[#0d1018] shadow-[0_20px_80px_rgba(0,0,0,0.35)] sm:rounded-[28px] ${className}`}
