@@ -38,12 +38,11 @@ export function ObservabilityTab() {
       setLoading(true)
       try {
         const response = await fetch(apiUrl('/api/agents/tasks?limit=50'), { credentials: 'include' })
-      } catch (err) {
-        console.error('Failed to load task telemetry:', err)
-        if (!cancelled) setTasks([])
+        if (!response.ok) throw new Error(`Failed to load task telemetry (${response.status})`)
         const data = await response.json() as { tasks?: AgentTask[] }
         if (!cancelled) setTasks(data.tasks ?? [])
-      } catch {
+      } catch (err) {
+        console.error('Failed to load task telemetry:', err)
         if (!cancelled) setTasks([])
       } finally {
         if (!cancelled) setLoading(false)
