@@ -2,6 +2,7 @@
 // Last updated: 2026-03-24 - sourced from official provider docs
 
 import { createElement } from 'react'
+import { CHRONOS_LOGO_URL } from './branding'
 
 // ── Provider icon URLs (hosted on postimg) ────────────────────────
 export const PROVIDER_ICON_URLS: Record<string, string> = {
