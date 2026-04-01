@@ -1,3 +1,41 @@
+## Session 5.32 - April 1, 2026 (Railway frontend build fix + landing hero refresh)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Investigated the reported Railway build failure and confirmed the TypeScript compile break shown in the logs (`frontend/src/components/settings/ObservabilityTab.tsx(46,9): error TS1005: 'try' expected`).
+- Fixed `ObservabilityTab` fetch/load flow by repairing the malformed nested `try/catch` block and restoring proper response handling (`response.ok` check + parsed task assignment).
+- Updated the landing hero description paragraph to the new product copy provided in the request.
+- Updated the hero demo panel (`VideoPlaceholder`) to show the provided dual-phone bezel image (`/og-image.png`) when no video source is configured, with a small overlay CTA strip.
+- Updated the provider highlight cards section under the hero video to continuously animate from right to left using the existing marquee animation utility class.
+- Switched brand logo usage back to the owl mark by repointing `CHRONOS_LOGO_URL` to `/aegis-owl-logo.svg`, and removed circular spin styling in public header/footer + legal page footer logos so the owl renders cleanly.
+- Ran a frontend production build to verify TypeScript + Vite now compile successfully.
+
+### What's Working
+- Railway-blocking frontend TypeScript syntax issue in `ObservabilityTab` is fixed locally; `npm run build` now succeeds.
+- Hero messaging now matches the requested updated long-form description.
+- Hero demo module now displays the two-phone bezel artwork by default.
+- Provider cards below hero now auto-scroll right-to-left.
+- Owl logo is restored across shared brand surfaces using the central logo constant.
+
+### What's NOT Working Yet
+- I could not trigger or observe a live Railway redeploy from this environment, so hosted verification is pending.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Confirm build phase passes and deployment reaches healthy.
+3. Verify hero section visually in production (copy, scrolling provider cards, bezel image, owl logo).
+
+### Decisions Made
+- Kept the marquee implementation CSS-driven and lightweight by duplicating provider cards for seamless looping.
+- Reused existing `frontend/public/og-image.png` for the requested bezel artwork to avoid introducing a new asset path.
+
+### Blockers
+- Final production verification depends on Railway environment access.
+
+---
+
 ## Session 5.31 - March 31, 2026 (Railway production crash fix: artifact download response model)
 
 **Agent:** GPT-5.3-Codex  
