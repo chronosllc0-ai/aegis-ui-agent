@@ -27,7 +27,7 @@ const USE_CASES: UseCase[] = [
     category: 'Engineering',
     title: 'Software Engineering',
     longDescription:
-      'Aegis connects to your GitHub repository, understands the codebase structure, implements changes based on your instructions, and opens a properly described pull request. It handles the entire engineering loop — from reading issues to committing code — without you switching tabs.',
+      'Aegis connects to your GitHub repository, understands the codebase structure, implements changes based on your instructions, and opens a properly described pull request. It handles the entire engineering loop - from reading issues to committing code - without you switching tabs.',
     prompts: [
       {
         label: 'PR from TODOs',
@@ -54,7 +54,7 @@ const USE_CASES: UseCase[] = [
     prompts: [
       {
         label: 'Database comparison',
-        text: 'Research the top 5 open-source vector databases right now — compare them on license, performance benchmarks, and managed hosting options. Write a comparison table to a file.',
+        text: 'Research the top 5 open-source vector databases right now - compare them on license, performance benchmarks, and managed hosting options. Write a comparison table to a file.',
       },
       {
         label: 'Competitive landscape',
@@ -77,11 +77,11 @@ const USE_CASES: UseCase[] = [
     prompts: [
       {
         label: 'SEO blog post',
-        text: 'Research the SEO landscape for AI agent platforms — find the top 10 ranking articles, identify the content gaps none of them cover, and write a 1,500-word blog post targeting the gap with the highest search intent.',
+        text: 'Research the SEO landscape for AI agent platforms - find the top 10 ranking articles, identify the content gaps none of them cover, and write a 1,500-word blog post targeting the gap with the highest search intent.',
       },
       {
         label: 'LinkedIn posts',
-        text: 'Scrape our last 5 blog posts from mohex.org, identify the writing tone and structure, then write 3 LinkedIn posts promoting our new GitHub integration — match our voice exactly.',
+        text: 'Scrape our last 5 blog posts from mohex.org, identify the writing tone and structure, then write 3 LinkedIn posts promoting our new GitHub integration - match our voice exactly.',
       },
     ],
     capabilities: [
@@ -96,11 +96,11 @@ const USE_CASES: UseCase[] = [
     category: 'Sales',
     title: 'Sales & Prospect Research',
     longDescription:
-      "Before a sales call, Aegis researches the prospect end to end — funding history, tech stack from job listings, recent news, and executive activity on LinkedIn. It delivers a clean one-page brief you can read in 2 minutes.",
+      "Before a sales call, Aegis researches the prospect end to end - funding history, tech stack from job listings, recent news, and executive activity on LinkedIn. It delivers a clean one-page brief you can read in 2 minutes.",
     prompts: [
       {
         label: 'Prospect brief',
-        text: "Research Acme Corp — find their latest funding round, their tech stack from job listings, their CEO's recent LinkedIn activity, and any press mentions in the last 3 months. Write a one-page call brief.",
+        text: "Research Acme Corp - find their latest funding round, their tech stack from job listings, their CEO's recent LinkedIn activity, and any press mentions in the last 3 months. Write a one-page call brief.",
       },
       {
         label: 'Outreach drafts',
@@ -188,7 +188,7 @@ const USE_CASES: UseCase[] = [
     category: 'Operations',
     title: 'Executive Operations',
     longDescription:
-      'Aegis runs scheduled automations on your behalf. Set up a cron once and it runs every day, week, or hour — scraping news, checking repos, posting digests, and keeping your team updated without you lifting a finger.',
+      'Aegis runs scheduled automations on your behalf. Set up a cron once and it runs every day, week, or hour - scraping news, checking repos, posting digests, and keeping your team updated without you lifting a finger.',
     prompts: [
       {
         label: 'Daily news digest',

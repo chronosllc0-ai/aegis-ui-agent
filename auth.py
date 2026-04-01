@@ -541,5 +541,11 @@ async def me(request: Request) -> dict[str, Any]:
 async def logout() -> JSONResponse:
     """Clear the auth session cookie."""
     response = JSONResponse({"ok": True})
-    response.delete_cookie("aegis_session", path="/")
+    response.delete_cookie(
+        "aegis_session",
+        path="/",
+        domain=settings.resolved_cookie_domain,
+        secure=bool(settings.COOKIE_SECURE),
+        samesite=settings.normalized_cookie_samesite,
+    )
     return response

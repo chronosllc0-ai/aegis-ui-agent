@@ -12,7 +12,7 @@ const THRESHOLDS = [90, 75, 50] as const
 export function SpendingAlert({ balance, onUpgrade }: SpendingAlertProps) {
   const [dismissed, setDismissed] = useState<Set<number>>(new Set())
 
-  // Derive active threshold from props — no effect needed
+  // Derive active threshold from props - no effect needed
   const activeThreshold = (() => {
     if (!balance) return null
     for (const t of THRESHOLDS) {

@@ -1,5 +1,5 @@
 /**
- * useConversations — server-side conversation + message persistence.
+ * useConversations - server-side conversation + message persistence.
  *
  * All data lives in the backend DB (conversations / conversation_messages tables).
  * localStorage is used ONLY as a read-cache to make the UI feel instant.
@@ -26,8 +26,8 @@ export type ServerMessage = {
 }
 
 // ── Cache keys ─────────────────────────────────────────────────────────
-const CONV_CACHE_KEY = 'aegis.server.conversations'
-const MSG_CACHE_KEY = (id: string) => `aegis.server.msgs.${id}`
+const CONV_CACHE_KEY = (uid: string) => `aegis.server.conversations.${uid}`
+const MSG_CACHE_KEY = (uid: string, id: string) => `aegis.server.msgs.${uid}.${id}`
 
 function readCache<T>(key: string): T | null {
   try {
@@ -42,35 +42,53 @@ function writeCache(key: string, value: unknown) {
 }
 
 // ── Hook ───────────────────────────────────────────────────────────────
-export function useConversations() {
+export function useConversations(userUid: string | null) {
+  const cacheUid = userUid || 'anon'
   const [conversations, setConversations] = useState<ServerConversation[]>(
-    () => readCache<ServerConversation[]>(CONV_CACHE_KEY) ?? []
+    () => readCache<ServerConversation[]>(CONV_CACHE_KEY(cacheUid)) ?? []
   )
   const [loadingMessages, setLoadingMessages] = useState(false)
   const fetchedConvsRef = useRef(false)
 
+  useEffect(() => {
+    setConversations(readCache<ServerConversation[]>(CONV_CACHE_KEY(cacheUid)) ?? [])
+  }, [cacheUid])
+
   // Load conversation list from server once on mount
   const fetchConversations = useCallback(async () => {
+    if (!userUid) {
+      setConversations([])
+      return
+    }
     try {
       const res = await fetch(`${API}/api/conversations`, { credentials: 'include' })
       if (!res.ok) return
       const data = await res.json() as { ok: boolean; conversations: ServerConversation[] }
       if (data.ok) {
         setConversations(data.conversations)
-        writeCache(CONV_CACHE_KEY, data.conversations)
+        writeCache(CONV_CACHE_KEY(cacheUid), data.conversations)
       }
-    } catch { /* network error — cache serves */ }
-  }, [])
+    } catch { /* network error - cache serves */ }
+  }, [cacheUid, userUid])
 
   useEffect(() => {
+    if (!userUid) {
+      fetchedConvsRef.current = false
+      return
+    }
     if (fetchedConvsRef.current) return
     fetchedConvsRef.current = true
     void fetchConversations()
-  }, [fetchConversations])
+  }, [fetchConversations, userUid])
+
+  useEffect(() => {
+    fetchedConvsRef.current = false
+  }, [userUid])
 
   // Fetch messages for a specific conversation (with cache-first)
   const fetchMessages = useCallback(async (conversationId: string): Promise<ServerMessage[]> => {
-    const cacheKey = MSG_CACHE_KEY(conversationId)
+    if (!userUid) return []
+    const cacheKey = MSG_CACHE_KEY(cacheUid, conversationId)
     const cached = readCache<ServerMessage[]>(cacheKey)
     setLoadingMessages(true)
     try {
@@ -88,21 +106,22 @@ export function useConversations() {
     } catch { /* return cache */ }
     finally { setLoadingMessages(false) }
     return cached ?? []
-  }, [])
+  }, [cacheUid, userUid])
 
   // Delete a conversation (soft-delete on server + remove from local list)
   const deleteConversation = useCallback(async (conversationId: string) => {
     setConversations(prev => prev.filter(c => c.id !== conversationId))
+    if (!userUid) return
     try {
       await fetch(`${API}/api/conversations/${conversationId}`, {
         method: 'DELETE',
         credentials: 'include',
       })
     } catch { /* best effort */ }
-    try { localStorage.removeItem(MSG_CACHE_KEY(conversationId)) } catch { /* ok */ }
-  }, [])
+    try { localStorage.removeItem(MSG_CACHE_KEY(cacheUid, conversationId)) } catch { /* ok */ }
+  }, [cacheUid, userUid])
 
-  // Called when the WS emits a conversation_id — adds/refreshes that conversation in our list
+  // Called when the WS emits a conversation_id - adds/refreshes that conversation in our list
   const onNewConversationId = useCallback((conversationId: string, title?: string) => {
     setConversations(prev => {
       const exists = prev.find(c => c.id === conversationId)
@@ -115,12 +134,12 @@ export function useConversations() {
         updated_at: new Date().toISOString(),
       }
       const next = [newConv, ...prev]
-      writeCache(CONV_CACHE_KEY, next)
+      writeCache(CONV_CACHE_KEY(cacheUid), next)
       return next
     })
     // Refresh from server after a short delay to get the real title
     window.setTimeout(() => { void fetchConversations() }, 2000)
-  }, [fetchConversations])
+  }, [cacheUid, fetchConversations])
 
   return { conversations, fetchMessages, deleteConversation, onNewConversationId, refreshConversations: fetchConversations, loadingMessages }
 }

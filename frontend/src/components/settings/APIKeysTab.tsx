@@ -95,7 +95,7 @@ export function APIKeysTab() {
   return (
     <div className='space-y-6'>
       <div className='rounded-xl border border-violet-500/30 bg-violet-500/5 p-3 text-xs text-violet-200'>
-        <span className='font-semibold'>Chronos Gateway</span> uses platform API keys — no key needed. Select <em>Chronos Gateway</em> in the Agent tab and start immediately. Credits are deducted per request.
+        <span className='font-semibold'>Chronos Gateway</span> uses platform API keys - no key needed. Select <em>Chronos Gateway</em> in the Agent tab and start immediately. Credits are deducted per request.
       </div>
 
       <div>
@@ -178,7 +178,7 @@ export function APIKeysTab() {
           <span>How BYOK works</span>
         </p>
         <ul className='mt-2 list-inside list-disc space-y-1 text-zinc-400'>
-          <li>Keys are encrypted with AES-256 before storage — we never see your plaintext key.</li>
+          <li>Keys are encrypted with AES-256 before storage - we never see your plaintext key.</li>
           <li>Each request to an LLM uses <em>your</em> key, billed directly to your provider account.</li>
           <li>You can remove a key anytime; Aegis falls back to the platform default or disables the provider.</li>
           <li>No key data is ever logged or transmitted to third parties.</li>

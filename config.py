@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     XAI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
+    FIREWORKS_API_KEY: str = ""
     BRAVE_SEARCH_API_KEY: str = ""  # Brave Search API key for the built-in web_search tool
 
     # ── Platform-level agent instruction (admin-only) ─────────────────

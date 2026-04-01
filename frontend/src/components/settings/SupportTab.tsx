@@ -217,7 +217,7 @@ export function SupportTab() {
       <div className='flex items-center justify-between'>
         <div>
           <h3 className='text-sm font-semibold text-white'>Support</h3>
-          <p className='mt-0.5 text-xs text-zinc-400'>Talk to our team — we typically respond within a few hours.</p>
+          <p className='mt-0.5 text-xs text-zinc-400'>Talk to our team - we typically respond within a few hours.</p>
         </div>
         <button
           type='button'
