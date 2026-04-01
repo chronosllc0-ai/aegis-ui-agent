@@ -1994,22 +1994,19 @@ async def save_bot_config(platform: str, integration_id: str, payload: dict[str,
 if FRONTEND_DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
 
-    FRONTEND_SPA_ROUTES = {
-        "",
-        "auth",
-        "privacy",
-        "terms",
-        "docs",
-        "app",
-        "automations",
-        "settings",
-        "admin",
-    }
+    FRONTEND_SPA_ROUTES = {"", "app", "automations", "settings", "admin"}
+    FRONTEND_SPA_PREFIX_ROUTES = ("app/", "automations/", "settings/", "admin/", "use-case/", "docs/")
     FRONTEND_STATIC_PAGES = {
         "about": "about.html",
         "services": "services.html",
         "blog": "blog.html",
         "contact": "contact.html",
+        "docs": "docs.html",
+        "auth": "auth.html",
+        "privacy": "privacy.html",
+        "terms": "terms.html",
+        "portfolio": "portfolio.html",
+        "pricing": "pricing.html",
     }
 
     @app.get("/{full_path:path}")
@@ -2033,7 +2030,7 @@ if FRONTEND_DIST_DIR.exists():
         if normalized and candidate.exists() and candidate.is_file():
             return FileResponse(candidate)
 
-        if first_segment in FRONTEND_SPA_ROUTES or first_segment.startswith("use-case"):
+        if normalized in FRONTEND_SPA_ROUTES or any(normalized.startswith(prefix) for prefix in FRONTEND_SPA_PREFIX_ROUTES):
             return FileResponse(FRONTEND_DIST_DIR / "index.html")
 
         return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)

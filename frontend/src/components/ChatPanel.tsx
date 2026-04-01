@@ -407,22 +407,17 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
 function AssistantCard({ msg }: { msg: ChatMessage }) {
   const parts = useMemo(() => parseCodeBlocks(msg.text), [msg.text])
   return (
-    <div className='flex gap-2.5 mb-2 max-w-[85%]'>
-      <div className='mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[#2a2a2a]'>
-        <IcoBrain className='h-3.5 w-3.5 text-zinc-300' />
+    <div className='mb-3 max-w-[92%]'>
+      <div className='min-w-0 text-sm md:text-xl text-zinc-200 break-words'>
+        {parts.map((part, i) =>
+          part.type === 'code' ? (
+            <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
+          ) : (
+            <span key={i} className='whitespace-pre-wrap'>{part.content}</span>
+          )
+        )}
       </div>
-      <div className='min-w-0 flex-1'>
-        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-3.5 py-2.5 text-sm md:text-xl text-zinc-200 shadow-md break-words'>
-          {parts.map((part, i) =>
-            part.type === 'code' ? (
-              <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
-            ) : (
-              <span key={i} className='whitespace-pre-wrap'>{part.content}</span>
-            )
-          )}
-        </div>
-        <p className='mt-0.5 text-[10px] text-zinc-600'>{msg.timestamp}</p>
-      </div>
+      <p className='mt-0.5 text-[10px] text-zinc-600'>{msg.timestamp}</p>
     </div>
   )
 }
@@ -459,6 +454,19 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
   // Human-readable label: convert snake_case to Title Case e.g. "go_to_url" → "Go To URL"
   const toolLabel = toolName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   const hasArgs = Boolean(msg.toolArgs)
+
+  const isShellStyle = toolName === 'exec_python' || toolName === 'exec_javascript'
+  if (isShellStyle) {
+    return (
+      <div className='mb-2 overflow-hidden rounded-xl border border-[#2a2a2a] bg-black'>
+        <div className='flex items-center justify-between border-b border-[#2a2a2a] bg-[#111] px-3 py-1.5'>
+          <span className='font-mono text-[11px] text-zinc-300'>$ {toolLabel}</span>
+          <ToolStatusIcon status={toolStatus} />
+        </div>
+        <pre className='max-h-52 overflow-auto p-3 font-mono text-xs text-zinc-200 whitespace-pre-wrap break-words'>{msg.toolArgs ?? msg.text}</pre>
+      </div>
+    )
+  }
 
   return (
     <div className='flex gap-2.5 mb-1.5'>
@@ -580,7 +588,7 @@ function UserInputCard({
   const [answered, setAnswered] = useState<string | null>(null)
 
   const handleOption = (opt: string) => {
-    if (opt === 'Let me tell you') {
+    if (opt === 'Let me tell you' || opt === 'No, let me choose') {
       setCustomMode(true)
       return
     }
@@ -622,6 +630,15 @@ function UserInputCard({
               {opt}
             </button>
           ))}
+          {!options.includes('No, let me choose') && (
+            <button
+              type='button'
+              onClick={() => handleOption('No, let me choose')}
+              className='rounded-lg border border-zinc-600 bg-[#1a1a1a] px-3 py-1.5 text-xs font-medium text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+            >
+              No, let me choose
+            </button>
+          )}
         </div>
       ) : (
         <div className='flex gap-2'>
@@ -659,6 +676,7 @@ function UserInputCard({
 
 // ─── Task summary card ────────────────────────────────────────────────────────
 function TaskSummaryCard({ summary }: { summary: string }) {
+  const [decision, setDecision] = useState<'pending' | 'implement' | 'discard'>('pending')
   return (
     <div className='rounded-xl border border-[#2a2a2a] bg-[#141414] p-4 space-y-2'>
       <div className='flex items-center gap-2 mb-2'>
@@ -666,6 +684,11 @@ function TaskSummaryCard({ summary }: { summary: string }) {
         <p className='text-xs font-semibold text-emerald-300 uppercase tracking-wide'>Task Complete</p>
       </div>
       <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{summary}</div>
+      <div className='flex gap-2 pt-1'>
+        <button type='button' onClick={() => setDecision('implement')} className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500'>Implement</button>
+        <button type='button' onClick={() => setDecision('discard')} className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-500/20'>Discard</button>
+      </div>
+      {decision !== 'pending' && <p className='text-[11px] text-zinc-500'>Decision recorded: {decision}</p>}
     </div>
   )
 }

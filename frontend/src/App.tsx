@@ -424,28 +424,78 @@ function App() {
     [historySearch, taskHistory],
   )
 
+  const scopedSubAgents = useMemo(() => {
+    if (!selectedTaskId) return []
+    return subAgents.filter((agent) => agent.parent_task_id === selectedTaskId)
+  }, [selectedTaskId, subAgents])
+
+  const scopedSubAgentSteps = useMemo(() => {
+    const ids = new Set(scopedSubAgents.map((agent) => agent.sub_id))
+    const scoped: typeof subAgentSteps = {}
+    for (const [subId, steps] of Object.entries(subAgentSteps)) {
+      if (ids.has(subId)) scoped[subId] = steps
+    }
+    return scoped
+  }, [scopedSubAgents, subAgentSteps])
+
   const visibleLogs: LogEntry[] = useMemo(() => {
     if (!selectedTaskId) return logs
     const filtered = logs.filter((entry) => entry.taskId === selectedTaskId)
-    // If the task was from a previous session, logs are empty (in-memory only).
-    // Inject a synthetic entry so the panel isn't blank - shows the original instruction.
-    if (filtered.length === 0) {
-      const saved = taskHistory.find((t) => t.id === selectedTaskId)
-      if (saved) {
-        return [{
-          id: `restored-${selectedTaskId}`,
-          taskId: selectedTaskId,
-          message: saved.instruction,
-          timestamp: saved.dateLabel,
-          type: 'step' as const,
-          status: 'completed' as const,
-          stepKind: 'navigate' as const,
-          elapsedSeconds: 0,
-        }]
-      }
+    if (filtered.length > 0) return filtered
+
+    // Rehydrate log timeline from persisted server messages metadata.
+    const restoredFromServer = serverMessages
+      .map((msg, idx) => {
+        const metadata = (msg.metadata ?? {}) as Record<string, unknown>
+        const action = String(metadata.action ?? '')
+        if (action === 'step') {
+          const stepObj = (metadata.step ?? {}) as Record<string, unknown>
+          return {
+            id: `restored-step-${msg.id}-${idx}`,
+            taskId: selectedTaskId,
+            message: String(stepObj.content ?? msg.content),
+            timestamp: msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+            type: 'step' as const,
+            status: 'completed' as const,
+            stepKind: 'other' as const,
+            elapsedSeconds: 0,
+          }
+        }
+        if (action === 'workflow_step') {
+          const wf = (metadata.workflow_step ?? {}) as Record<string, unknown>
+          return {
+            id: `restored-wf-${msg.id}-${idx}`,
+            taskId: selectedTaskId,
+            message: String(wf.description ?? msg.content),
+            timestamp: msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+            type: 'step' as const,
+            status: 'completed' as const,
+            stepKind: 'other' as const,
+            elapsedSeconds: 0,
+          }
+        }
+        return null
+      })
+      .filter(Boolean) as LogEntry[]
+
+    if (restoredFromServer.length > 0) return restoredFromServer
+
+    const saved = taskHistory.find((t) => t.id === selectedTaskId)
+    if (saved) {
+      return [{
+        id: `restored-${selectedTaskId}`,
+        taskId: selectedTaskId,
+        message: saved.instruction,
+        timestamp: saved.dateLabel,
+        type: 'step' as const,
+        status: 'completed' as const,
+        stepKind: 'navigate' as const,
+        elapsedSeconds: 0,
+      }]
     }
+
     return filtered
-  }, [logs, selectedTaskId, taskHistory])
+  }, [logs, selectedTaskId, taskHistory, serverMessages])
 
   // ── Inject compaction entries into visible logs ──
   const enrichedLogs: LogEntry[] = useMemo(() => {
@@ -739,6 +789,18 @@ function App() {
                           <p className='truncate text-zinc-200'>{item.title}</p>
                           <p className='truncate text-zinc-500'>{item.instruction}</p>
                         </button>
+                        {subAgents.some((agent) => agent.parent_task_id === item.id) && (
+                          <div className='mt-1 ml-3 space-y-0.5 border-l border-[#2a2a2a] pl-2'>
+                            {subAgents
+                              .filter((agent) => agent.parent_task_id === item.id)
+                              .slice(0, 4)
+                              .map((agent) => (
+                                <div key={agent.sub_id} className='text-[10px] text-zinc-500'>
+                                  ↳ {agent.instruction.slice(0, 28)}{agent.instruction.length > 28 ? '…' : ''} · {agent.status}
+                                </div>
+                              ))}
+                          </div>
+                        )}
                         <button
                           type='button'
                           onClick={(e) => { e.stopPropagation(); onDeleteTask(item.id) }}
@@ -948,11 +1010,11 @@ function App() {
             </div>
           )}
 
-          {!showSettings && !showAutomations && subAgents.length > 0 && (
+          {!showSettings && !showAutomations && scopedSubAgents.length > 0 && (
             <div className='flex justify-center px-4 pb-2'>
               <SubAgentPanel
-                agents={subAgents}
-                steps={subAgentSteps}
+                agents={scopedSubAgents}
+                steps={scopedSubAgentSteps}
                 onCancel={cancelSubAgent}
                 onMessage={messageSubAgent}
               />
