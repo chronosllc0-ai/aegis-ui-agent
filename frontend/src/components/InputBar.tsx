@@ -209,14 +209,14 @@ export function InputBar({
 
       <SuggestionChips onSelectSuggestion={(id) => void handleSuggestionSelect(id)} onOpenGallery={() => setGalleryOpen(true)} />
 
-      {/* Main input row — [Plan] [textarea] [↑] */}
+      {/* Main input row - [Plan] [textarea] [↑] */}
       <div className='flex items-end gap-1.5 sm:gap-2'>
-        {/* Plan toggle — inline, no popup */}
+        {/* Plan toggle - inline, no popup */}
         {onDecomposePlan && (
           <button
             type='button'
             onClick={() => setPlanMode((p) => !p)}
-            title={planMode ? 'Disable plan mode' : 'Enable plan mode — sends /plan command'}
+            title={planMode ? 'Disable plan mode' : 'Enable plan mode - sends /plan command'}
             className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold tracking-wide transition sm:px-4 sm:py-2 sm:text-sm ${
               planMode
                 ? 'border-blue-500 bg-blue-500/10 text-blue-300'

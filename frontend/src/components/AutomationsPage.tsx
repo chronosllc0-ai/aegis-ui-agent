@@ -94,7 +94,7 @@ function humanizeCron(expr: string): string {
 }
 
 function relativeTime(isoStr?: string): string {
-  if (!isoStr) return '—'
+  if (!isoStr) return '-'
   const dt = new Date(isoStr)
   const diffMs = dt.getTime() - Date.now()
   const absDiff = Math.abs(diffMs)
@@ -280,7 +280,7 @@ function AutomationModal({ initial, onSave, onClose }: ModalProps) {
                   onChange={(e) => handleWorkflowSelect(e.target.value)}
                   className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
                 >
-                  <option value=''>— choose a workflow —</option>
+                  <option value=''>- choose a workflow -</option>
                   {workflows.map((wf) => (
                     <option key={wf.id} value={wf.id}>{wf.name}</option>
                   ))}
@@ -337,7 +337,7 @@ function AutomationModal({ initial, onSave, onClose }: ModalProps) {
 
             {cronExpr && preset !== '__custom__' && (
               <p className='mt-1 text-[11px] text-zinc-500'>
-                {humanizeCron(cronExpr)} — <span className='font-mono'>{cronExpr}</span>
+                {humanizeCron(cronExpr)} - <span className='font-mono'>{cronExpr}</span>
               </p>
             )}
             {cronExpr && preset === '__custom__' && customCron && (
@@ -629,7 +629,7 @@ export function AutomationsPage() {
               Schedule your first automation
             </h3>
             <p className='max-w-xs text-xs text-zinc-500'>
-              Automations let Aegis run tasks on a schedule — daily reports, weekly
+              Automations let Aegis run tasks on a schedule - daily reports, weekly
               summaries, recurring checks, and more.
             </p>
             <button

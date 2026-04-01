@@ -288,7 +288,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
             />
 
-            {/* password strength indicator — only during signup */}
+            {/* password strength indicator - only during signup */}
             {mode === 'signup' && <PasswordStrength password={password} />}
 
             {mode === 'signup' && (

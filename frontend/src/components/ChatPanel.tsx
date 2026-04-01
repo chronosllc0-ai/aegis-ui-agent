@@ -5,7 +5,7 @@ import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
 
-// Inline SVG primitives — avoids react-icons subpath d.ts resolution issues with tsc bundler mode
+// Inline SVG primitives - avoids react-icons subpath d.ts resolution issues with tsc bundler mode
 type SvgProps = { className?: string }
 function Svg({ className, children }: SvgProps & { children: ReactNode }) {
   return (
@@ -45,7 +45,7 @@ export interface ChatPanelProps {
   onToggleVoice?: () => void
   /** True when mic hardware isn't available / not HTTPS */
   voiceDisabled?: boolean
-  /** Currently selected task ID — used to persist/restore conversation */
+  /** Currently selected task ID - used to persist/restore conversation */
   activeTaskId?: string | null
   /** Messages loaded from the server DB for the selected conversation */
   serverMessages?: ServerMessage[]
@@ -132,7 +132,7 @@ function GeneratingCanvas({ label }: { label: string }) {
 
 // ─── Parse logs → chat messages ──────────────────────────────────────────────
 // ── Heuristics for classifying LogEntry messages ─────────────────────────────
-// A "model response" is any step message that starts with "Model response" — these
+// A "model response" is any step message that starts with "Model response" - these
 // are raw LLM text turns (not a tool call) and must render as AssistantCard, not
 // as a ToolCard dropdown. The backend currently surfaces them prefixed with
 // "Model response (no tool call):" but may also emit bare text.
@@ -206,14 +206,14 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     // ── User navigation (first event of a new task) ───────────────────────
     const isUser = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
 
-    // ── Image/video generation spinner — ONLY for dedicated generation tools ─
+    // ── Image/video generation spinner - ONLY for dedicated generation tools ─
     const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
 
-    // ── Model text response — show as AssistantCard, never as ToolCard ──────
+    // ── Model text response - show as AssistantCard, never as ToolCard ──────
     // Catches: "Model response (no tool call): ..." and bare model output steps
     const isModelResponse = entry.type === 'step' && RE_MODEL_RESPONSE.test(msg)
 
-    // ── Real tool call — bracket-prefixed step messages ─────────────────────
+    // ── Real tool call - bracket-prefixed step messages ─────────────────────
     const isToolCall = entry.type === 'step' && !isUser && !isModelResponse && RE_TOOL_CALL.test(msg)
 
     // ── Anything else that's a step but not tool-shaped → assistant text ─────
@@ -233,7 +233,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
     if (isModelResponse || isStepText) {
-      // These are assistant-side text messages — render as full readable AssistantCard
+      // These are assistant-side text messages - render as full readable AssistantCard
       msgs.push({ id: entry.id, role: 'assistant' as ChatRole, text: displayText, timestamp: entry.timestamp })
       continue
     }
@@ -284,7 +284,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     } else if (taskEnded) {
       msgs[i] = { ...msgs[i], toolStatus: taskFailed ? 'failed' : 'completed' }
     }
-    // else: still the last message and task is running — keep spinner
+    // else: still the last message and task is running - keep spinner
   }
 
   return msgs
@@ -350,7 +350,7 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
             </button>
             {showTooltip && (
               <div className='absolute bottom-full right-0 mb-1.5 z-50 whitespace-nowrap rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2.5 py-1.5 text-[10px] text-zinc-400 shadow-xl'>
-                E2B Sandbox — coming soon
+                E2B Sandbox - coming soon
               </div>
             )}
           </div>
@@ -464,7 +464,7 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
           onClick={() => hasArgs && setExpanded((v) => !v)}
           className={`w-full rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-left transition-colors ${hasArgs ? 'cursor-pointer hover:bg-[#1a1a1a]' : 'cursor-default'}`}
         >
-          {/* Top row: tool name + status icon + chevron — always one line, never wraps */}
+          {/* Top row: tool name + status icon + chevron - always one line, never wraps */}
           <div className='flex items-center gap-2'>
             <span className='flex-1 truncate font-mono text-xs font-medium text-zinc-300'>{toolLabel}</span>
             <div className='flex flex-shrink-0 items-center gap-1'>
@@ -474,7 +474,7 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
               )}
             </div>
           </div>
-          {/* Args preview — only shown when collapsed and present */}
+          {/* Args preview - only shown when collapsed and present */}
           {!expanded && msg.toolArgs && (
             <p className='mt-0.5 truncate text-[10px] text-zinc-600'>
               {msg.toolArgs.slice(0, 120)}
@@ -693,7 +693,7 @@ function PlanConfirmCard({
     <div className='rounded-xl border border-amber-500/20 bg-[#1a1500] p-4 space-y-3'>
       <div className='flex items-center gap-2'>
         <span className='text-lg'>📋</span>
-        <p className='text-xs font-semibold text-amber-300 uppercase tracking-wide'>Plan ready — confirm to proceed</p>
+        <p className='text-xs font-semibold text-amber-300 uppercase tracking-wide'>Plan ready - confirm to proceed</p>
       </div>
       <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{plan}</div>
       <div className='flex gap-2 pt-1'>
@@ -867,18 +867,18 @@ function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleRea
           ))}
         </div>
 
-        {/* Think harder — flat list row, only for capable models. Hidden for non-reasoning models. */}
+        {/* Think harder - flat list row, only for capable models. Hidden for non-reasoning models. */}
         {modelSupportsReasoning && (
           <>
             <div className='mx-4 my-1 border-t border-[#2a2a2a]' />
-            {/* Primary row — lightbulb icon + label + checkmark, tapping toggles */}
+            {/* Primary row - lightbulb icon + label + checkmark, tapping toggles */}
             <button
               type='button'
               onClick={() => onToggleReasoning?.(!enableReasoning)}
               className='flex w-full items-center gap-4 rounded-xl px-3 py-2.5 text-left hover:bg-[#2a2a2a] transition-colors'
             >
               <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
-                {/* Lightbulb icon — provider-neutral "think harder" signal */}
+                {/* Lightbulb icon - provider-neutral "think harder" signal */}
                 <svg className='h-5 w-5 text-zinc-200' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
                   <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/>
                   <path d='M9 18h6'/><path d='M10 22h4'/>
@@ -892,7 +892,7 @@ function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleRea
                 </svg>
               )}
             </button>
-            {/* Effort sub-row — only shown when active */}
+            {/* Effort sub-row - only shown when active */}
             {enableReasoning && (
               <div className='flex gap-1.5 px-3 pb-2'>
                 {(['low', 'medium', 'high'] as const).map((effort) => (
@@ -1247,7 +1247,7 @@ export function ChatPanel({
             className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-4 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/20 transition-colors shadow-md'
           >
             <IcoGlobe className='h-3.5 w-3.5' />
-            Agent is browsing — Switch to Browser
+            Agent is browsing - Switch to Browser
           </button>
         </div>
       )}
@@ -1290,7 +1290,7 @@ export function ChatPanel({
               return (
                 <div key={msg.id} className='my-2 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-xs text-zinc-500 flex items-center gap-2'>
                   {approvedIds.has(msg.id) ? <IcoCheck className='h-3 w-3 text-emerald-400' /> : <IcoX className='h-3 w-3 text-red-400' />}
-                  {approvedIds.has(msg.id) ? 'Approved' : 'Rejected'} — {msg.text}
+                  {approvedIds.has(msg.id) ? 'Approved' : 'Rejected'} - {msg.text}
                 </div>
               )
             }
@@ -1469,7 +1469,7 @@ export function ChatPanel({
             />
           </div>
 
-          {/* Voice — Gemini Live primary, browser SpeechRecognition fallback */}
+          {/* Voice - Gemini Live primary, browser SpeechRecognition fallback */}
           <button
             type='button'
             onClick={handleMicClick}
@@ -1485,7 +1485,7 @@ export function ChatPanel({
           >
             <IcoMic className='h-4 w-4' />
           </button>
-          {/* Send / Stop — stop shown while agent is working and no text typed */}
+          {/* Send / Stop - stop shown while agent is working and no text typed */}
           {isWorking && !input.trim() && attachments.length === 0 ? (
             <button
               type='button'
@@ -1525,7 +1525,7 @@ export function ChatPanel({
         {/* Connection status indicator */}
         {connectionStatus !== 'connected' && (
           <p className='mt-1.5 text-center text-[10px] text-zinc-600'>
-            {connectionStatus === 'connecting' ? 'Reconnecting to agent…' : 'Disconnected — check your connection'}
+            {connectionStatus === 'connecting' ? 'Reconnecting to agent…' : 'Disconnected - check your connection'}
           </p>
         )}
       </div>

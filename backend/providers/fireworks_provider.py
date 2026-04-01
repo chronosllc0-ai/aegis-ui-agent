@@ -14,6 +14,7 @@ FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
 
 FIREWORKS_MODELS = [
     "accounts/fireworks/models/kimi-k2p5-turbo",
+    "accounts/fireworks/models/kimi-k2-instruct-0905",
 ]
 
 
@@ -59,6 +60,23 @@ class FireworksProvider(BaseProvider):
     def _build_messages(self, messages: list[ChatMessage]) -> list[dict[str, Any]]:
         return [{"role": m.role, "content": m.content} for m in messages]
 
+    def _normalize_model_name(self, model: str | None) -> str:
+        """Normalize common Fireworks model aliases to canonical slugs."""
+        candidate = (model or self.default_model).strip()
+        if not candidate:
+            return self.default_model
+        if candidate.startswith("accounts/fireworks/models/"):
+            return candidate
+        if "/" not in candidate:
+            candidate = candidate.replace("kimi-k2.5", "kimi-k2p5")
+            return f"accounts/fireworks/models/{candidate}"
+        return candidate
+
+    def _fallback_models(self, attempted: str) -> list[str]:
+        """Return fallback model IDs for not-found responses."""
+        fallbacks = ["accounts/fireworks/models/kimi-k2p5-turbo", "accounts/fireworks/models/kimi-k2-instruct-0905"]
+        return [name for name in fallbacks if name != attempted]
+
     async def chat(
         self,
         messages: list[ChatMessage],
@@ -69,13 +87,37 @@ class FireworksProvider(BaseProvider):
         **kwargs: Any,
     ) -> ChatResponse:
         client = self._get_client()
-        model_name = model or self.default_model
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=self._build_messages(messages),
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        model_name = self._normalize_model_name(model)
+        try:
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=self._build_messages(messages),
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as exc:  # noqa: BLE001
+            status = getattr(getattr(exc, "status_code", None), "__int__", lambda: None)()
+            if status != 404:
+                response_obj = getattr(exc, "response", None)
+                status = getattr(response_obj, "status_code", None)
+            if status == 404:
+                for fallback in self._fallback_models(model_name):
+                    try:
+                        logger.warning("Fireworks model %s not found; retrying with %s", model_name, fallback)
+                        response = await client.chat.completions.create(
+                            model=fallback,
+                            messages=self._build_messages(messages),
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                        )
+                        model_name = fallback
+                        break
+                    except Exception:  # noqa: BLE001
+                        continue
+                else:
+                    raise
+            else:
+                raise
         choice = response.choices[0]
         usage = {}
         if response.usage:
@@ -104,7 +146,7 @@ class FireworksProvider(BaseProvider):
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
-        model_name = model or self.default_model
+        model_name = self._normalize_model_name(model)
 
         create_params: dict[str, Any] = {
             "model": model_name,
