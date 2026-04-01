@@ -1791,3 +1791,64 @@
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
+
+## Session 5.23 - April 1, 2026 (Backend Prompt Builder Removal + Global/User Instruction Policy)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Removed the failing backend prompt-builder injection call in `universal_navigator.py` by deleting the undefined `_build_tool_handbook(...)` dependency from system prompt construction.
+- Kept the system prompt pipeline aligned to instruction layering:
+  1) admin-managed global system instruction (authoritative), and
+  2) optional user system instruction appended only when present.
+- Added a regression test `tests/test_universal_navigator_system_prompt.py` that verifies:
+  - global system instruction is always present,
+  - user runtime instruction is included only when provided,
+  - no user instruction section appears when unset.
+
+### What's Working
+- Prompt generation no longer references `_build_tool_handbook`, preventing runtime `NameError` failures during task execution.
+- Instruction precedence now cleanly follows global-first with optional user-additive behavior.
+- New regression test passes locally.
+
+### What's NOT Working Yet
+- Full-suite test status was not re-run in this pass; only focused regression coverage was executed.
+
+### Next Steps
+1. Run full backend/frontend CI test suite to ensure no unrelated regressions.
+2. Consider adding an API-level test around run settings to validate end-to-end prompt composition for admin+user instructions.
+
+### Decisions Made
+- Chose to remove prompt-builder dependency entirely and rely on deterministic instruction layering (global baseline + optional user additive) for reliability and policy clarity.
+
+### Blockers
+- None in this pass.
+
+## Session 5.24 - April 1, 2026 (Chronos Logo Refresh + Hero Image Modal Cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated the Chronos Gateway logo URL to the new admin-provided hosted image in both branding constants and provider model-catalog constants.
+- Removed Chronos-only icon spin behavior from provider icon rendering and deleted the corresponding CSS animation keyframes.
+- Converted `VideoPlaceholder` to an image-first modal component (no video path, no play CTA overlay) and set it to display the dual-phone bezel preview image by default.
+
+### What's Working
+- Landing page and provider/model picker now use the new Chronos logo image without rotation animation.
+- Hero media panel renders as a pure image modal with no video controls or watch CTA.
+- Frontend production build passes.
+
+### What's NOT Working Yet
+- Browser screenshot artifact could not be captured in this environment because the browser screenshot tool is unavailable in this runtime.
+
+### Next Steps
+1. Replace `/og-image.png` with a dedicated higher-resolution dual-phone bezel asset path if design wants a distinct file name.
+2. Run a quick visual QA pass in staging across mobile + desktop breakpoints for logo contrast and icon crop.
+
+### Decisions Made
+- Kept `/og-image.png` as the modal image source since it already matches the requested dual-phone bezel visual and avoids introducing new static asset plumbing in this pass.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
