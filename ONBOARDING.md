@@ -1791,3 +1791,36 @@
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
+
+## Session 5.23 - April 1, 2026 (Backend Prompt Builder Removal + Global/User Instruction Policy)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Removed the failing backend prompt-builder injection call in `universal_navigator.py` by deleting the undefined `_build_tool_handbook(...)` dependency from system prompt construction.
+- Kept the system prompt pipeline aligned to instruction layering:
+  1) admin-managed global system instruction (authoritative), and
+  2) optional user system instruction appended only when present.
+- Added a regression test `tests/test_universal_navigator_system_prompt.py` that verifies:
+  - global system instruction is always present,
+  - user runtime instruction is included only when provided,
+  - no user instruction section appears when unset.
+
+### What's Working
+- Prompt generation no longer references `_build_tool_handbook`, preventing runtime `NameError` failures during task execution.
+- Instruction precedence now cleanly follows global-first with optional user-additive behavior.
+- New regression test passes locally.
+
+### What's NOT Working Yet
+- Full-suite test status was not re-run in this pass; only focused regression coverage was executed.
+
+### Next Steps
+1. Run full backend/frontend CI test suite to ensure no unrelated regressions.
+2. Consider adding an API-level test around run settings to validate end-to-end prompt composition for admin+user instructions.
+
+### Decisions Made
+- Chose to remove prompt-builder dependency entirely and rely on deterministic instruction layering (global baseline + optional user additive) for reliability and policy clarity.
+
+### Blockers
+- None in this pass.
