@@ -55,7 +55,7 @@ PROVIDER_CATALOGUE: dict[str, dict[str, Any]] = {
         "class": "FireworksProvider",
         "display_name": "Fireworks AI",
         "key_prefix": "",
-        "default_model": "accounts/fireworks/models/kimi-k2p5-turbo",
+        "default_model": "accounts/fireworks/models/kimi-k2p5",
     },
 }
 

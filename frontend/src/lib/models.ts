@@ -14,7 +14,7 @@ export const PROVIDER_ICON_URLS: Record<string, string> = {
 }
 
 // Chronos AI logo
-export const CHRONOS_LOGO_URL = '/aegis-owl-logo.svg'
+export const CHRONOS_LOGO_URL = 'https://i.postimg.cc/FRyC2G1k/IMG_20260103_192235_443.webp'
 
 export type ModelInfo = {
   id: string
@@ -127,8 +127,8 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.fireworks,
     keyPrefix: '',
     models: [
-      { id: 'accounts/fireworks/models/kimi-k2p5-turbo', label: 'Kimi K2.5 Turbo', description: 'Moonshot AI Kimi K2.5 - fast and capable via Fireworks AI.', vision: false, contextLength: 131_072 },
-      { id: 'accounts/fireworks/models/kimi-k2-instruct-0905', label: 'Kimi K2 Instruct', description: 'Fallback Kimi K2 instruct model on Fireworks AI.', vision: false, contextLength: 131_072 },
+      { id: 'accounts/fireworks/models/kimi-k2p5', label: 'Kimi K2.5', description: 'Moonshot AI Kimi K2.5 with native reasoning via Fireworks AI.', vision: false, reasoning: true, contextLength: 262_144 },
+      { id: 'accounts/fireworks/models/kimi-k2-instruct-0905', label: 'Kimi K2 Instruct', description: 'Moonshot AI Kimi K2 Instruct model on Fireworks AI.', vision: false, contextLength: 128_000 },
     ],
   },
   // ── OpenRouter ──────────────────────────────────────────────────────
@@ -208,11 +208,10 @@ export const MODEL_OPTIONS = allModelIds()
  * naturally on dark surfaces without jarring light backgrounds.
  */
 export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
-  const spinClass = provider.id === 'chronos' ? 'chronos-spin' : ''
   return createElement('img', {
     src: provider.iconUrl,
     alt: provider.displayName,
-    className: `${className} ${spinClass} rounded-full object-cover`,
+    className: `${className} rounded-full object-cover`,
     style: { filter: 'brightness(0.85) saturate(1.2)' },
     'aria-hidden': 'true',
   })

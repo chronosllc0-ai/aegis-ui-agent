@@ -697,9 +697,23 @@ async def delete_conversation(
 # ── WebSocket helpers ─────────────────────────────────────────────────
 
 
-async def _send_step(websocket: WebSocket, step: dict[str, Any]) -> None:
+async def _send_step(
+    websocket: WebSocket,
+    step: dict[str, Any],
+    *,
+    runtime: "SessionRuntime | None" = None,
+    session_id: str | None = None,
+) -> None:
     """Send step payload to frontend."""
     await websocket.send_json({"type": "step", "data": step})
+    if runtime and session_id:
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            str(step.get("content") or step.get("type") or "Step update"),
+            metadata={"source": "websocket", "action": "step", "step": step},
+        )
 
 
 async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
@@ -724,9 +738,23 @@ async def _send_initial_frame(websocket: WebSocket) -> None:
         logger.warning("Initial frame capture failed: %s", exc)
 
 
-async def _send_workflow_step(websocket: WebSocket, workflow_step: dict[str, Any]) -> None:
+async def _send_workflow_step(
+    websocket: WebSocket,
+    workflow_step: dict[str, Any],
+    *,
+    runtime: "SessionRuntime | None" = None,
+    session_id: str | None = None,
+) -> None:
     """Send workflow graph step payload to frontend."""
     await websocket.send_json({"type": "workflow_step", "data": workflow_step})
+    if runtime and session_id:
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            str(workflow_step.get("description") or workflow_step.get("action") or "Workflow step update"),
+            metadata={"source": "websocket", "action": "workflow_step", "workflow_step": workflow_step},
+        )
 
 
 async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice") -> None:
@@ -734,7 +762,15 @@ async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice
     await websocket.send_json({"type": "transcript", "data": {"text": text, "source": source}})
 
 
-async def _send_context_update(websocket: WebSocket, tokens_used: int, context_limit: int, compacting: bool = False) -> None:
+async def _send_context_update(
+    websocket: WebSocket,
+    tokens_used: int,
+    context_limit: int,
+    compacting: bool = False,
+    *,
+    runtime: "SessionRuntime | None" = None,
+    session_id: str | None = None,
+) -> None:
     """Push a context-window usage update to the frontend meter."""
     await websocket.send_json({
         "type": "context_update",
@@ -742,6 +778,20 @@ async def _send_context_update(websocket: WebSocket, tokens_used: int, context_l
         "context_limit": context_limit,
         "compacting": compacting,
     })
+    if runtime and session_id:
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            f"Context usage {tokens_used}/{context_limit}",
+            metadata={
+                "source": "websocket",
+                "action": "context_update",
+                "tokens_used": tokens_used,
+                "context_limit": context_limit,
+                "compacting": compacting,
+            },
+        )
 
 
 async def _log_web_message(
@@ -819,6 +869,8 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
             "type": "queue",
             "content": f"Starting queued task: {queued_instruction}",
         },
+        runtime=runtime,
+        session_id=session_id,
     )
     await _log_web_message(
         runtime,
@@ -838,7 +890,12 @@ async def _run_navigation_task(
     instruction: str,
 ) -> None:
     """Execute a single navigation task and optionally schedule one queued follow-up."""
-    callback: Callable[[dict[str, Any]], Awaitable[None]] = lambda step: _send_step(websocket, step)
+    callback: Callable[[dict[str, Any]], Awaitable[None]] = lambda step: _send_step(
+        websocket,
+        step,
+        runtime=runtime,
+        session_id=session_id,
+    )
     runtime.task_running = True
     runtime.cancel_event.clear()
 
@@ -912,7 +969,12 @@ async def _run_navigation_task(
             cancel_event=runtime.cancel_event,
             steering_context=runtime.steering_context,
             settings=runtime.settings,
-            on_workflow_step=lambda step: _send_workflow_step(websocket, step),
+            on_workflow_step=lambda step: _send_workflow_step(
+                websocket,
+                step,
+                runtime=runtime,
+                session_id=session_id,
+            ),
             user_uid=runtime.user_uid,
             on_user_input=_on_user_input,
             on_reasoning_delta=_on_reasoning_delta,
@@ -1010,6 +1072,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             data = await websocket.receive_json()
             action = data.get("action")
             instruction = str(data.get("instruction", "")).strip()
+            raw_metadata = data.get("metadata")
+            client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
 
             if action == "navigate":
                 if runtime.task_running:
@@ -1021,24 +1085,34 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "navigate"},
+                    metadata={"source": "websocket", "action": "navigate", "client": client_metadata or {}},
                 )
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "steer":
                 runtime.steering_context.append(instruction)
-                await _send_step(websocket, {"type": "steer", "content": f"Steering note added: {instruction}"})
+                await _send_step(
+                    websocket,
+                    {"type": "steer", "content": f"Steering note added: {instruction}"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
                 await _log_web_message(
                     runtime,
                     session_id,
                     "user",
                     instruction,
-                    metadata={"source": "websocket", "action": "steer"},
+                    metadata={"source": "websocket", "action": "steer", "client": client_metadata or {}},
                 )
             elif action == "interrupt":
                 runtime.cancel_event.set()
-                await _send_step(websocket, {"type": "interrupt", "content": "Task interrupted"})
+                await _send_step(
+                    websocket,
+                    {"type": "interrupt", "content": "Task interrupted"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
                 if runtime.current_task is not None and not runtime.current_task.done():
                     try:
                         await runtime.current_task
@@ -1052,12 +1126,25 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "interrupt"},
+                    metadata={"source": "websocket", "action": "interrupt", "client": client_metadata or {}},
                 )
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "queue":
                 runtime.queued_instructions.append(instruction)
-                await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
+                await _send_step(
+                    websocket,
+                    {"type": "queue", "content": f"Queued instruction: {instruction}"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
+                await _log_web_message(
+                    runtime,
+                    session_id,
+                    "user",
+                    instruction,
+                    title=instruction[:200],
+                    metadata={"source": "websocket", "action": "queue", "client": client_metadata or {}},
+                )
             elif action == "dequeue":
                 raw_index = data.get("index", -1)
                 try:
@@ -1068,7 +1155,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
 
                 if 0 <= index < len(runtime.queued_instructions):
                     removed = runtime.queued_instructions.pop(index)
-                    await _send_step(websocket, {"type": "queue", "content": f"Removed queued instruction: {removed}"})
+                    await _send_step(
+                        websocket,
+                        {"type": "queue", "content": f"Removed queued instruction: {removed}"},
+                        runtime=runtime,
+                        session_id=session_id,
+                    )
                 else:
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid queue index"}})
             elif action == "config":
@@ -1077,7 +1169,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
                 runtime.settings = candidate_settings
-                await _send_step(websocket, {"type": "config", "content": "Session settings updated"})
+                await _send_step(
+                    websocket,
+                    {"type": "config", "content": "Session settings updated"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
             elif action == "audio_chunk":
                 transcript = await live_manager.process_audio(session_id, data.get("audio"))
                 if transcript:

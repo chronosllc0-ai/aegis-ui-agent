@@ -1791,3 +1791,133 @@
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
+
+## Session 5.23 - April 1, 2026 (Backend Prompt Builder Removal + Global/User Instruction Policy)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Removed the failing backend prompt-builder injection call in `universal_navigator.py` by deleting the undefined `_build_tool_handbook(...)` dependency from system prompt construction.
+- Kept the system prompt pipeline aligned to instruction layering:
+  1) admin-managed global system instruction (authoritative), and
+  2) optional user system instruction appended only when present.
+- Added a regression test `tests/test_universal_navigator_system_prompt.py` that verifies:
+  - global system instruction is always present,
+  - user runtime instruction is included only when provided,
+  - no user instruction section appears when unset.
+
+### What's Working
+- Prompt generation no longer references `_build_tool_handbook`, preventing runtime `NameError` failures during task execution.
+- Instruction precedence now cleanly follows global-first with optional user-additive behavior.
+- New regression test passes locally.
+
+### What's NOT Working Yet
+- Full-suite test status was not re-run in this pass; only focused regression coverage was executed.
+
+### Next Steps
+1. Run full backend/frontend CI test suite to ensure no unrelated regressions.
+2. Consider adding an API-level test around run settings to validate end-to-end prompt composition for admin+user instructions.
+
+### Decisions Made
+- Chose to remove prompt-builder dependency entirely and rely on deterministic instruction layering (global baseline + optional user additive) for reliability and policy clarity.
+
+### Blockers
+- None in this pass.
+
+## Session 5.24 - April 1, 2026 (Chronos Logo Refresh + Hero Image Modal Cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated the Chronos Gateway logo URL to the new admin-provided hosted image in both branding constants and provider model-catalog constants.
+- Removed Chronos-only icon spin behavior from provider icon rendering and deleted the corresponding CSS animation keyframes.
+- Converted `VideoPlaceholder` to an image-first modal component (no video path, no play CTA overlay) and set it to display the dual-phone bezel preview image by default.
+
+### What's Working
+- Landing page and provider/model picker now use the new Chronos logo image without rotation animation.
+- Hero media panel renders as a pure image modal with no video controls or watch CTA.
+- Frontend production build passes.
+
+### What's NOT Working Yet
+- Browser screenshot artifact could not be captured in this environment because the browser screenshot tool is unavailable in this runtime.
+
+### Next Steps
+1. Replace `/og-image.png` with a dedicated higher-resolution dual-phone bezel asset path if design wants a distinct file name.
+2. Run a quick visual QA pass in staging across mobile + desktop breakpoints for logo contrast and icon crop.
+
+### Decisions Made
+- Kept `/og-image.png` as the modal image source since it already matches the requested dual-phone bezel visual and avoids introducing new static asset plumbing in this pass.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
+
+## Session 5.25 - April 1, 2026 (Fireworks Kimi K2.5 Model ID + Context/Reasoning Fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated Fireworks default/canonical K2.5 model ID across backend + frontend from `accounts/fireworks/models/kimi-k2p5-turbo` to `accounts/fireworks/models/kimi-k2p5`.
+- Removed backend auto-fallback retry behavior for Fireworks 404s so model selection now respects the requested model directly (no silent fallback switching).
+- Added legacy alias normalization so older `kimi-k2p5-turbo` inputs map to the correct supported K2.5 ID.
+- Corrected model context windows in frontend catalog:
+  - K2.5 → 256k (`262_144`)
+  - K2 Instruct → 128k (`128_000`)
+- Enabled reasoning for Fireworks K2.5 in the frontend model catalog (`reasoning: true`).
+- Updated Fireworks provider capability context max to 256k (`262_144`) to match K2.5 baseline.
+- Added regression tests for Fireworks default model and legacy alias normalization.
+
+### What's Working
+- K2.5 now resolves to Fireworks' correct model ID and no longer depends on the outdated `-turbo` slug.
+- Fireworks catalog metadata now aligns with requested context windows and reasoning behavior.
+- Focused backend regression tests and frontend build pass.
+
+### What's NOT Working Yet
+- Full repository test suite still not run in this pass.
+
+### Next Steps
+1. Execute full backend test suite to ensure no provider edge regressions.
+2. Validate live Fireworks calls in staging with actual API key for end-to-end confirmation.
+
+### Decisions Made
+- Kept K2 Instruct available as a selectable model, but removed automatic fallback chaining at runtime for Fireworks requests.
+
+### Blockers
+- No direct Fireworks API live-call validation executed in this runtime (no staging credentials used in-session).
+
+## Session 5.26 - April 1, 2026 (Thread Persistence Hardening: Steps + Metadata + Attachments)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Hardened websocket conversation persistence so task step updates and workflow-step updates are now stored in `conversation_messages` (not only user prompts + final task result).
+- Added metadata persistence for client-side payload details sent with navigate/steer/interrupt/queue actions (`metadata.client`), so thread records retain richer per-message state.
+- Updated frontend `ChatPanel` send contract to include optional metadata payload and now forwards:
+  - attachments,
+  - active connector context,
+  - context-bar snapshot (`tokensUsed`, `contextLimit`, `modelId`, `isCompacting`).
+- Updated `App.tsx` send pipeline to forward that metadata over websocket and include it on queue/interrupt/navigate/steer actions.
+- Added server-message hydration of persisted attachments back into chat bubbles when loading a historical thread.
+
+### What's Working
+- Switching/reloading threads now restores much richer history from server DB because intermediate step/workflow updates are persisted, not dropped.
+- Uploaded attachments metadata is now included in persisted user message metadata and rehydrated into chat message rendering.
+- Frontend build passes and backend modules compile.
+- Focused regression tests still pass.
+
+### What's NOT Working Yet
+- Full repository test suite and full websocket integration suite were not fully re-run in this pass.
+- Server-side persistence of raw screenshot frame binaries is still not part of `conversation_messages` (would require artifact/blob policy layer).
+
+### Next Steps
+1. Add end-to-end websocket persistence tests asserting saved/reloaded thread parity for step + metadata-rich messages.
+2. Optionally persist frame references as artifact IDs linked to conversation messages if full visual replay is required.
+
+### Decisions Made
+- Persisted structured runtime events as assistant messages with metadata payloads to preserve full operational context while keeping current DB schema intact.
+
+### Blockers
+- None in this pass.
