@@ -14,7 +14,7 @@ export const PROVIDER_ICON_URLS: Record<string, string> = {
 }
 
 // Chronos AI logo
-export const CHRONOS_LOGO_URL = '/aegis-owl-logo.svg'
+export const CHRONOS_LOGO_URL = 'https://i.postimg.cc/FRyC2G1k/IMG_20260103_192235_443.webp'
 
 export type ModelInfo = {
   id: string
@@ -208,11 +208,10 @@ export const MODEL_OPTIONS = allModelIds()
  * naturally on dark surfaces without jarring light backgrounds.
  */
 export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
-  const spinClass = provider.id === 'chronos' ? 'chronos-spin' : ''
   return createElement('img', {
     src: provider.iconUrl,
     alt: provider.displayName,
-    className: `${className} ${spinClass} rounded-full object-cover`,
+    className: `${className} rounded-full object-cover`,
     style: { filter: 'brightness(0.85) saturate(1.2)' },
     'aria-hidden': 'true',
   })
