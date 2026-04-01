@@ -1762,3 +1762,32 @@
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
+
+## Session 5.22 - April 1, 2026 (Railway Build Fix: Logo Constant Cleanup + TS Compile Errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Fixed frontend TypeScript build break in `frontend/src/lib/models.ts` by removing the conflicting `CHRONOS_LOGO_URL` import and wiring the Chronos provider icon to the locally exported constant (`iconUrl: CHRONOS_LOGO_URL`).
+- Removed unused `AEGIS_LOGO_URL` imports from legal/public components where they were declared but never read (`PrivacyPage`, `TermsPage`, `PublicHeader`, `PublicFooter`).
+- Replaced unresolved `CHRONOS_LOGO_URL` references in those same components with direct static image path usage (`'/aegis-owl-logo.svg'`) to eliminate missing symbol errors.
+- Fixed `frontend/src/components/VideoPlaceholder.tsx` TypeScript errors by defining a typed props object with optional `src` and using it in the component signature.
+
+### What's Working
+- `frontend` production build now succeeds (`npm run build`) with TypeScript + Vite completing successfully.
+- Railway-reported compile errors for `AEGIS_LOGO_URL`, `CHRONOS_LOGO_URL`, `CHRONOS_LOGO_URL_VALUE`, and undefined `src` in `VideoPlaceholder` are resolved.
+
+### What's NOT Working Yet
+- Vite still reports a non-blocking large-chunk warning (>500 kB bundle), but this does not fail production build.
+- Browser screenshot artifact could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. Redeploy on Railway to confirm this commit clears the failed build in production.
+2. Optionally split large frontend bundles to address the Vite chunk-size warning.
+
+### Decisions Made
+- Used local static logo asset path (`/aegis-owl-logo.svg`) in UI surfaces that only need a fixed image, avoiding fragile cross-module constant imports for legal/public pages.
+
+### Blockers
+- No browser screenshot tool available in this runtime.

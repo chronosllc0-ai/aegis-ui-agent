@@ -2,7 +2,6 @@
 // Last updated: 2026-03-24 - sourced from official provider docs
 
 import { createElement } from 'react'
-import { CHRONOS_LOGO_URL } from './branding'
 
 // ── Provider icon URLs (hosted on postimg) ────────────────────────
 export const PROVIDER_ICON_URLS: Record<string, string> = {
@@ -40,7 +39,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'chronos',
     displayName: 'Chronos Gateway',
-    iconUrl: CHRONOS_LOGO_URL_VALUE,
+    iconUrl: CHRONOS_LOGO_URL,
     keyPrefix: '',
     gatewayOnly: true,
     models: [

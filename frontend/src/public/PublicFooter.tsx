@@ -1,4 +1,3 @@
-import { AEGIS_LOGO_URL } from '../lib/models'
 import { PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
 
 type PublicFooterProps = {
@@ -45,7 +44,7 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
       <div className='mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 lg:grid-cols-[1.2fr_2fr]'>
         <div>
           <button type='button' onClick={onGoHome} className='flex items-center gap-3 text-left'>
-            <img src={CHRONOS_LOGO_URL} alt='Aegis owl logo' className='h-10 w-10' />
+            <img src='/aegis-owl-logo.svg' alt='Aegis owl logo' className='h-10 w-10' />
             <div>
               <p className='text-lg font-semibold text-white'>Aegis</p>
               <p className='text-sm text-zinc-400'>by Chronos AI</p>
