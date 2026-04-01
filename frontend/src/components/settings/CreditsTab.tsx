@@ -20,7 +20,7 @@ type PaymentsConfig = {
   active_methods: string[]
 }
 
-// ── Plans — mirrors PRICING in LandingPage.tsx ───────────────────────────
+// ── Plans - mirrors PRICING in LandingPage.tsx ───────────────────────────
 
 const PLANS = [
   {
@@ -195,7 +195,7 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
                   <p className='text-[10px] uppercase tracking-wider text-zinc-500'>Cycle renews</p>
                   <p className='mt-1 text-xs text-zinc-300'>
-                    {balance.cycle_end ? new Date(balance.cycle_end).toLocaleDateString() : '—'}
+                    {balance.cycle_end ? new Date(balance.cycle_end).toLocaleDateString() : '-'}
                   </p>
                 </div>
                 <div className='rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-3'>
@@ -340,7 +340,7 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
             </>
           ) : selectedPlan ? (
             <>
-              Subscribe to {PLANS.find((p) => p.key === selectedPlan)?.name} —{' '}
+              Subscribe to {PLANS.find((p) => p.key === selectedPlan)?.name} -{' '}
               ${PLANS.find((p) => p.key === selectedPlan)?.price}
               {PLANS.find((p) => p.key === selectedPlan)?.period}
             </>
@@ -391,7 +391,7 @@ export function CreditsTab({ initialPlan }: CreditsTabProps) {
           <div className='text-xs text-zinc-400 space-y-2'>
             <div className='flex justify-between py-2 border-b border-[#1e1e1e]'>
               <span>
-                {currentPlanName} plan — current cycle
+                {currentPlanName} plan - current cycle
               </span>
               <span className='text-zinc-300'>
                 {balance.used.toLocaleString()} / {balance.allowance.toLocaleString()} credits

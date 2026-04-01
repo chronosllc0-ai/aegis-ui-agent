@@ -25,7 +25,7 @@ const EVENT_ICONS: Record<string, { icon: string; color: string }> = {
   step_started: { icon: '◉', color: 'text-blue-400' },
   step_completed: { icon: '✓', color: 'text-emerald-400' },
   step_failed: { icon: '✗', color: 'text-red-400' },
-  step_skipped: { icon: '—', color: 'text-zinc-500' },
+  step_skipped: { icon: '-', color: 'text-zinc-500' },
   plan_completed: { icon: '■', color: 'text-emerald-400' },
   plan_cancelled: { icon: '■', color: 'text-amber-400' },
   heartbeat: { icon: '·', color: 'text-zinc-700' },

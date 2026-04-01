@@ -14,10 +14,10 @@ const RELEASES: ReleaseEntry[] = [
     version: '1.2.0',
     date: 'March 2026',
     changes: [
-      { type: 'new', text: 'Sub-agent orchestration — Aegis can now spawn and coordinate multiple AI sub-agents to tackle complex multi-step tasks in parallel' },
-      { type: 'new', text: 'Cross-device chat persistence — conversation history now synced to the server DB and available on any device after login' },
-      { type: 'new', text: 'Connector OAuth overhaul — Notion, Google Drive, Slack integrations with robust token refresh and error handling' },
-      { type: 'fix', text: 'Notion OAuth invalid_grant — workspace_id/workspace_name now passed correctly in token exchange' },
+      { type: 'new', text: 'Sub-agent orchestration - Aegis can now spawn and coordinate multiple AI sub-agents to tackle complex multi-step tasks in parallel' },
+      { type: 'new', text: 'Cross-device chat persistence - conversation history now synced to the server DB and available on any device after login' },
+      { type: 'new', text: 'Connector OAuth overhaul - Notion, Google Drive, Slack integrations with robust token refresh and error handling' },
+      { type: 'fix', text: 'Notion OAuth invalid_grant - workspace_id/workspace_name now passed correctly in token exchange' },
       { type: 'fix', text: 'Gemini Live voice model updated to gemini-3.1-flash-live-preview' },
       { type: 'improve', text: 'Action log and chat fonts scaled up on desktop for better readability' },
     ],
@@ -142,7 +142,7 @@ export function SubAgentModal({ onClose, onTryNow }: { onClose: () => void; onTr
         {/* Body */}
         <div className='px-5 py-4'>
           <p className='text-sm text-zinc-300 leading-relaxed'>
-            Aegis can now break complex tasks into parallel workstreams, spawning specialized sub-agents for research, coding, browsing, and data analysis — all coordinated in real time.
+            Aegis can now break complex tasks into parallel workstreams, spawning specialized sub-agents for research, coding, browsing, and data analysis - all coordinated in real time.
           </p>
 
           {/* Video placeholder */}

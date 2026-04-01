@@ -46,7 +46,7 @@
   100% { opacity: 0; transform: translateY(-6px); }
 }
 
-/* Chronos "C" logo spin — slow elegant rotation */
+/* Chronos "C" logo spin - slow elegant rotation */
 @keyframes chronos-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }

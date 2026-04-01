@@ -110,7 +110,7 @@ export function AdminEmailing() {
     setSendToAll(false)
   }
 
-  // Sanitize username — lowercase, alphanumeric + dots/hyphens/underscores
+  // Sanitize username - lowercase, alphanumeric + dots/hyphens/underscores
   const safeUsername = fromUsername.toLowerCase().replace(/[^a-z0-9._-]/g, '')
   const fromAddress = safeUsername
     ? fromName.trim()
@@ -371,7 +371,7 @@ export function AdminEmailing() {
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder='Write your message here. Plain text is fine — it will be wrapped in the Aegis branded email template.'
+            placeholder='Write your message here. Plain text is fine - it will be wrapped in the Aegis branded email template.'
             rows={7}
             className='w-full resize-none rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition'
           />

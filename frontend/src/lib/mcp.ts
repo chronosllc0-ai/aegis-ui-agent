@@ -43,7 +43,7 @@ const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
   custom: FaPlus,
 }
 
-/* Hosted brand images — used for platform icons so the correct logo always shows */
+/* Hosted brand images - used for platform icons so the correct logo always shows */
 const PLATFORM_IMAGE_URL: Record<string, string> = {
   telegram: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
   discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
