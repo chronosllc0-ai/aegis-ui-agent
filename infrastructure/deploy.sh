@@ -3,6 +3,7 @@ set -euo pipefail
 
 PROJECT_ID="${GCP_PROJECT_ID:-aegis-hackathon}"
 REGION="${GCP_REGION:-us-central1}"
+BACKEND_TIMEOUT="${BACKEND_TIMEOUT:-3600}"
 BACKEND_SERVICE="aegis-backend"
 FRONTEND_SERVICE="aegis-frontend"
 BACKEND_IMAGE="gcr.io/$PROJECT_ID/$BACKEND_SERVICE"
@@ -16,6 +17,7 @@ fi
 echo "🚀 Deploying Aegis to Google Cloud Run..."
 echo "   Project: $PROJECT_ID"
 echo "   Region: $REGION"
+echo "   Backend timeout: ${BACKEND_TIMEOUT}s"
 
 gcloud services enable \
   run.googleapis.com \
@@ -41,7 +43,7 @@ BACKEND_URL=$(gcloud run deploy "$BACKEND_SERVICE" \
   --allow-unauthenticated \
   --memory 2Gi \
   --cpu 2 \
-  --timeout 300 \
+  --timeout "$BACKEND_TIMEOUT" \
   --max-instances 5 \
   --set-env-vars "GEMINI_API_KEY=${GEMINI_API_KEY},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
   --project="$PROJECT_ID" \
