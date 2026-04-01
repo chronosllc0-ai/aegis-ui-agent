@@ -26,7 +26,7 @@ export function PrivacyPage({ onGoHome, onGoAuth }: Props) {
         <>
           <p>
             {COMPANY} ("<strong>Chronos</strong>", "<strong>we</strong>", "<strong>us</strong>", or "<strong>our</strong>")
-            operates {PRODUCT} at <code>{SITE}</code> — an AI-powered browser automation agent platform.
+            operates {PRODUCT} at <code>{SITE}</code> - an AI-powered browser automation agent platform.
             This Privacy Policy explains what personal data we collect, why we collect it, how we store and protect it,
             with whom we share it, and what rights you have over it.
           </p>
@@ -45,7 +45,7 @@ export function PrivacyPage({ onGoHome, onGoAuth }: Props) {
           <p className='mt-1'>
             When you register or sign in, we collect your <strong>email address</strong>, <strong>display name</strong>,
             and <strong>profile picture URL</strong> (if you sign in via Google or GitHub OAuth). For password-based accounts
-            we store a one-way <strong>bcrypt hash</strong> of your password — we never store your plaintext password.
+            we store a one-way <strong>bcrypt hash</strong> of your password - we never store your plaintext password.
           </p>
 
           <p className='mt-4 font-medium text-zinc-200'>2.2 OAuth Connection Tokens</p>
@@ -169,7 +169,7 @@ export function PrivacyPage({ onGoHome, onGoAuth }: Props) {
               <tbody className='divide-y divide-[#2a2a2a]'>
                 {[
                   ['Railway', 'Backend hosting & database', 'All stored data resides on Railway infrastructure'],
-                  ['Netlify', 'Frontend CDN hosting', 'Static assets only — no user data'],
+                  ['Netlify', 'Frontend CDN hosting', 'Static assets only - no user data'],
                   ['OpenAI', 'AI model inference (if BYOK set)', 'Your instructions & conversation context per request'],
                   ['Anthropic', 'AI model inference (if BYOK set)', 'Your instructions & conversation context per request'],
                   ['xAI', 'AI model inference (if BYOK set)', 'Your instructions & conversation context per request'],
@@ -190,7 +190,7 @@ export function PrivacyPage({ onGoHome, onGoAuth }: Props) {
             </table>
           </div>
           <p className='mt-3 text-xs text-zinc-500'>
-            AI providers receive only the content of individual requests — not your email, name, API keys,
+            AI providers receive only the content of individual requests - not your email, name, API keys,
             or OAuth tokens. Each provider processes data under their own privacy policies.
           </p>
         </>

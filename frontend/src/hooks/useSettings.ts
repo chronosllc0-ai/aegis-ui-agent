@@ -14,8 +14,8 @@ export type WorkflowTemplate = {
 }
 
 /** Per-tool permission mode.
- *  'auto'    — agent runs this tool without asking (default)
- *  'confirm' — agent sends an approval card before using this tool */
+ *  'auto'    - agent runs this tool without asking (default)
+ *  'confirm' - agent sends an approval card before using this tool */
 export type ToolPermission = 'auto' | 'confirm'
 
 export type AppSettings = {

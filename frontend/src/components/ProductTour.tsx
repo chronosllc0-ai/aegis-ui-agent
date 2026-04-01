@@ -28,7 +28,7 @@ const STEPS: TourStep[] = [
     selector: '[data-tour="action-log"]',
     fallbackSelector: '.grid > div:last-child',
     title: 'Action log',
-    body: 'Every action Aegis takes appears here — clicks, navigations, form fills. You can review everything as it happens.',
+    body: 'Every action Aegis takes appears here - clicks, navigations, form fills. You can review everything as it happens.',
     placement: 'left',
   },
   {
@@ -47,7 +47,7 @@ const STEPS: TourStep[] = [
   {
     selector: '[data-tour="model-picker"]',
     title: 'Model picker',
-    body: 'Switch AI providers and models on the fly — Google, OpenAI, Anthropic, Mistral, or Groq. Pick the best tool for the job.',
+    body: 'Switch AI providers and models on the fly - Google, OpenAI, Anthropic, Mistral, or Groq. Pick the best tool for the job.',
     placement: 'top',
   },
 ]

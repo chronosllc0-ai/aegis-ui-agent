@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 670 557" role="img" aria-label="Aegis Owl Logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020611"/>
+      <stop offset="100%" stop-color="#050b1a"/>
+    </linearGradient>
+    <filter id="owlGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="4.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="670" height="557" rx="28" fill="url(#bg)"/>
+
+  <g fill="none" stroke="#F8FAFC" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" filter="url(#owlGlow)">
+    <!-- Wings -->
+    <path d="M18 70l145 116-72 56 87 44-142 173"/>
+    <path d="M39 133l107 70"/>
+    <path d="M56 182l102 45"/>
+    <path d="M78 224l95 22"/>
+    <path d="M217 307l-70 82 56-16"/>
+    <path d="M214 346l-58 73 53-15"/>
+
+    <path d="M651 70L506 186l72 56-87 44 142 173"/>
+    <path d="M631 133l-107 70"/>
+    <path d="M614 182l-102 45"/>
+    <path d="M592 224l-95 22"/>
+
+    <!-- Head and face -->
+    <path d="M228 80l106 96 106-96"/>
+    <path d="M254 97c25-26 61-39 80-39 21 0 56 13 81 39"/>
+    <path d="M243 162c14-39 46-63 92-63 45 0 76 24 90 63"/>
+    <path d="M297 191l37 25 37-25"/>
+    <path d="M334 216v20"/>
+    <circle cx="294" cy="160" r="7" fill="#F8FAFC"/>
+    <circle cx="374" cy="160" r="7" fill="#F8FAFC"/>
+
+    <!-- Shield body -->
+    <path d="M247 232l87-43 87 43-10 91c-17 41-47 79-77 101-30-22-60-60-77-101l-10-91z"/>
+
+    <!-- Legs / claws -->
+    <path d="M304 435c-9 6-13 17-11 30"/>
+    <path d="M334 430c-8 6-11 19-7 33"/>
+    <path d="M364 435c8 6 13 17 11 30"/>
+    <path d="M334 451c0 8-6 14-14 14"/>
+    <path d="M334 451c0 8 6 14 14 14"/>
+
+    <!-- Circuit line base -->
+    <path d="M18 548h158"/>
+    <path d="M166 548h63l15-12h75l17 12h138l18-12h111"/>
+    <path d="M519 503h67l20-17h36"/>
+    <path d="M507 474l29-25h65"/>
+    <circle cx="642" cy="486" r="4.5" fill="#F8FAFC"/>
+    <circle cx="606" cy="548" r="4.5" fill="#F8FAFC"/>
+  </g>
+</svg>

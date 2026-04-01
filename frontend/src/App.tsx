@@ -6,7 +6,7 @@ import { PrivacyPage } from './components/PrivacyPage'
 import { TermsPage } from './components/TermsPage'
 import { useNotifications } from './context/NotificationContext'
 import { AuthPage } from './components/AuthPage'
-// CostEstimator removed from main UI — credit details live in Settings > Usage
+// CostEstimator removed from main UI - credit details live in Settings > Usage
 import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
 import { OnboardingWizard, isOnboardingComplete } from './components/OnboardingWizard'
@@ -48,6 +48,22 @@ type TaskHistoryItem = {
   dateLabel: string
   instruction: string
 }
+const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
+const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
+  profile: 'Profile',
+  'agent-configuration': 'Agent Configuration',
+  'api-keys': 'API Keys',
+  usage: 'Usage',
+  credits: 'Credits',
+  invoices: 'Invoices',
+  connections: 'Connections',
+  workflows: 'Workflows',
+  memory: 'Memory',
+  observability: 'Observability',
+  support: 'Support',
+  admin: 'Admin',
+}
+const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().replace(/\s+/g, '-')
 
 // Rough token estimate for context tracking (≈4 chars per token)
 function estimateTokens(text: string): number {
@@ -81,26 +97,19 @@ function App() {
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  // Server-side conversation persistence — replaces localStorage for history + messages
-  const { conversations, fetchMessages, deleteConversation, onNewConversationId } = useConversations()
+  // Server-side conversation persistence - replaces localStorage for history + messages
+  const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
+  const { conversations, fetchMessages, deleteConversation, onNewConversationId } = useConversations(authUser?.uid ?? null)
   // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
   const taskToConvRef = useRef<Map<string, string>>(new Map())
   // Server messages loaded for the selected conversation
   const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
-  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('aegis.taskHistory')
-      return saved ? (JSON.parse(saved) as TaskHistoryItem[]) : []
-    } catch {
-      return []
-    }
-  })
+  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const browserGridRef = useRef<HTMLDivElement>(null)
   const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authUser, setAuthUser] = useState<{ name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
   const [, setPendingPlan] = useState<string | null>(() => {
     return sessionStorage.getItem('aegis.pendingPlan')
   })
@@ -126,6 +135,8 @@ function App() {
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
+  const isSettingsPath = pathname.startsWith('/settings')
+  const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
   const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
@@ -204,8 +215,8 @@ function App() {
     setTitleMode((prev) => prev === 'steering' ? 'steering' : 'working')
   }, [isWorking])
   useEffect(() => {
-    if (titleMode === 'working') document.title = '⚙ Aegis — Working…'
-    else if (titleMode === 'steering') document.title = '↩ Aegis — Steering…'
+    if (titleMode === 'working') document.title = '⚙ Aegis - Working…'
+    else if (titleMode === 'steering') document.title = '↩ Aegis - Steering…'
     else document.title = 'Aegis'
   }, [titleMode])
 
@@ -215,6 +226,33 @@ function App() {
       document.body.style.overflow = 'auto'
     }
   }, [isAuthenticated, isDocsRoute, isPrivacyRoute, isTermsRoute])
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(taskHistoryKey(authUser?.uid ?? null))
+      setTaskHistory(saved ? (JSON.parse(saved) as TaskHistoryItem[]) : [])
+    } catch {
+      setTaskHistory([])
+    }
+  }, [authUser?.uid])
+
+  useEffect(() => {
+    setShowSettings(isSettingsPath || isAdminPath)
+    setShowAutomations(isAutomationsPath)
+    if (!isSettingsPath) return
+    const slug = pathname.split('/')[2]
+    if (!slug) {
+      setSettingsInitialTab(undefined)
+      return
+    }
+    const mapped = SETTINGS_ROUTE_MAP[slug]
+    if (mapped) setSettingsInitialTab(mapped)
+  }, [isAdminPath, isAutomationsPath, isSettingsPath, pathname])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    if (showSettings && !isSettingsPath && !isAdminPath) navigateTo('/settings')
+  }, [isAuthenticated, isAdminPath, isSettingsPath, showSettings])
 
   useEffect(() => {
     let active = true
@@ -241,7 +279,7 @@ function App() {
           // Handle ?settings=<Tab> deep-link (e.g. after OAuth callback redirect)
           const params = new URLSearchParams(window.location.search)
           const settingsTab = params.get('settings') as SettingsTab | null
-          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support'].includes(settingsTab)) {
+          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
             setSettingsInitialTab(settingsTab)
             setShowSettings(true)
             // Strip the ?settings= param from the URL without a page reload
@@ -359,7 +397,7 @@ function App() {
       }
       if (!toAdd.length) return prev
       const merged = [...toAdd, ...prev].slice(0, 200) // keep max 200
-      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(merged)) } catch { /* quota */ }
+      try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(merged)) } catch { /* quota */ }
       return merged
     })
   }, [conversations])
@@ -390,7 +428,7 @@ function App() {
     if (!selectedTaskId) return logs
     const filtered = logs.filter((entry) => entry.taskId === selectedTaskId)
     // If the task was from a previous session, logs are empty (in-memory only).
-    // Inject a synthetic entry so the panel isn't blank — shows the original instruction.
+    // Inject a synthetic entry so the panel isn't blank - shows the original instruction.
     if (filtered.length === 0) {
       const saved = taskHistory.find((t) => t.id === selectedTaskId)
       if (saved) {
@@ -466,7 +504,7 @@ function App() {
     // the real user instruction. We generate a stable taskId from a UUID that the
     // WebSocket hook will also assign synchronously for 'navigate' (it calls
     // crypto.randomUUID() internally). We capture it immediately after send().
-    // We save regardless of WS state so the history entry is never lost — if the
+    // We save regardless of WS state so the history entry is never lost - if the
     // WS was closed the agent won't respond but the user still sees their input.
     if (isNewTask) {
       const taskId = activeTaskIdRef.current !== 'idle'
@@ -478,7 +516,7 @@ function App() {
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
-        try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* quota */ }
+        try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* quota */ }
         return next
       })
       setSelectedTaskId(taskId)
@@ -507,14 +545,14 @@ function App() {
         setActivePlanId(data.plan.id as string)
       }
     } catch {
-      // silent — plan decompose errors are non-fatal
+      // silent - plan decompose errors are non-fatal
     }
   }
 
   const onDeleteTask = (id: string) => {
     setTaskHistory((prev) => {
       const next = prev.filter((t) => t.id !== id)
-      try { localStorage.setItem('aegis.taskHistory', JSON.stringify(next)) } catch { /* ok */ }
+      try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* ok */ }
       return next
     })
     // Also delete server-side conversation if we have a mapping
@@ -720,7 +758,7 @@ function App() {
 
           {/* ── Bottom section: Usage → Workflows → Settings → User ── */}
           <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
-            {/* Usage dropdown (Botpress-style) — above workflow templates */}
+            {/* Usage dropdown (Botpress-style) - above workflow templates */}
             <UsageDropdown
               balance={balance}
               context={{
@@ -730,22 +768,22 @@ function App() {
               }}
               modelLabel={currentModelLabel}
             />
-            <button type='button' onClick={() => { setShowAutomations(true); setShowSettings(false); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left ${showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a]'}`}>
+            <button type='button' onClick={() => { navigateTo('/automations'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left ${showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a]'}`}>
               {Icons.clock({ className: 'h-3.5 w-3.5' })}
               <span>Automations</span>
             </button>
-            <button type='button' onClick={() => { setSettingsInitialTab('Workflows'); setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { navigateTo('/settings/workflows'); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.workflows({ className: 'h-3.5 w-3.5' })}
               <span>Workflow templates ({settings.workflowTemplates.length})</span>
             </button>
-            <button type='button' onClick={() => { setSettingsInitialTab(undefined); setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
+            <button type='button' onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
               {Icons.settings({ className: 'h-3.5 w-3.5' })}
               <span>Settings</span>
             </button>
             {isAdmin && (
               <button
                 type='button'
-                onClick={() => { setSettingsInitialTab('Admin'); setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }}
+                onClick={() => { navigateTo('/admin'); setSidebarOpen(false) }}
                 className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800'
               >
                 <LuShield className='h-3.5 w-3.5' />
@@ -755,12 +793,13 @@ function App() {
             <UserMenu
               name={authUser?.name ?? settings.displayName}
               avatarUrl={authUser?.avatar_url ?? settings.avatarUrl}
-              onOpenSettings={() => { setShowSettings(true); setShowAutomations(false); setSidebarOpen(false) }}
+              onOpenSettings={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }}
               onSignOut={async () => {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
                 setAuthUser(null)
                 setIsAuthenticated(false)
-                navigateTo('/')
+                setTaskHistory([])
+                window.location.href = '/'
               }}
             />
           </div>
@@ -774,7 +813,7 @@ function App() {
                 <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
                 </button>
-                <img src='/aegis-logo.png' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
+                <img src='/aegis-owl-logo.svg' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
                 {/* ── Chat ↔ Browser mode switcher ── */}
                 {!showSettings && !showAutomations && (
@@ -831,6 +870,10 @@ function App() {
                 onRunWorkflow={(instruction) => handleSend(instruction, 'steer')}
                 initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
                 isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+                onTabChange={(tab) => {
+                  const base = isAdminPath ? '/admin' : '/settings'
+                  navigateTo(`${base}/${settingsSlugForTab(tab)}`)
+                }}
               />
             ) : showAutomations ? (
               <AutomationsPage />
@@ -862,12 +905,12 @@ function App() {
                 currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
               />
             ) : (
-              /* Browser layout — ScreenView full height, ActionLog as floating overlay on desktop */
+              /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
               <div
                 ref={browserGridRef}
                 className='relative flex h-full min-h-0 flex-col gap-1.5 sm:gap-2 lg:gap-3'
               >
-                {/* Main content (screen / workflow) — full width */}
+                {/* Main content (screen / workflow) - full width */}
                 <div className='min-h-0 min-w-0 flex-1'>
                   {showWorkflow ? (
                     <WorkflowView steps={workflowSteps} />
@@ -876,7 +919,7 @@ function App() {
                   )}
                 </div>
 
-                {/* Action log — stacked below the browser, full width on all screen sizes */}
+                {/* Action log - stacked below the browser, full width on all screen sizes */}
                 <div className='h-40 min-h-0 shrink-0 sm:h-48'>
                   <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
@@ -884,7 +927,7 @@ function App() {
             )}
           </div>
 
-          {/* ── Stop button — overlays the send area while agent is working ── */}
+          {/* ── Stop button - overlays the send area while agent is working ── */}
           {!showSettings && !showAutomations && appMode === 'browser' && isWorking && (
             <div className='flex justify-end pb-1 pr-1'>
               <button

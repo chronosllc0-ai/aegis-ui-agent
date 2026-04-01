@@ -64,7 +64,7 @@ export function useContextMeter(currentModelId: string) {
       activeTaskRef.current = taskId
       const existing = snapshots.current.get(taskId)
       if (existing) {
-        // Restore snapshot — update contextLimit if model changed
+        // Restore snapshot - update contextLimit if model changed
         const updated = {
           ...existing,
           modelId: currentModelId,

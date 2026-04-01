@@ -1,4 +1,4 @@
-// Credit rates per 1K tokens — mirrors backend/credit_rates.py.
+// Credit rates per 1K tokens - mirrors backend/credit_rates.py.
 // Fetched from /api/usage/rates on startup and cached client-side.
 
 export type CostTier = 'budget' | 'mid' | 'standard' | 'premium' | 'ultra'
@@ -11,7 +11,7 @@ export type CreditRate = {
 
 export type CreditRates = Record<string, Record<string, CreditRate>>
 
-// Tier UI config — colours use Tailwind classes, no emojis
+// Tier UI config - colours use Tailwind classes, no emojis
 export const TIER_CONFIG: Record<CostTier, { color: string; bg: string; text: string; label: string }> = {
   budget:   { color: '#22c55e', bg: 'bg-green-500/10',  text: 'text-green-400',  label: 'Budget' },
   mid:      { color: '#eab308', bg: 'bg-yellow-500/10', text: 'text-yellow-400', label: 'Mid' },

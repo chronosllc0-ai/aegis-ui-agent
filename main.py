@@ -1440,15 +1440,19 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
 @app.post("/api/integrations/github/register/{integration_id}")
 @app.post("/api/integrations/github-pat/register/{integration_id}")
 async def register_github_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    repo_permissions = payload.get("repo_permissions", {}) or {}
+    if not isinstance(repo_permissions, dict):
+        repo_permissions = {}
     config = {
         "token": str(payload.get("token", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
         "app_id": str(payload.get("app_id", "")).strip(),
+        "repo_permissions": repo_permissions,
     }
     integration = GitHubIntegration()
     connection = await integration.connect(config)
     github_registry.upsert(integration_id, integration, config)
-    return {"connection": connection}
+    return {"connection": connection, "tools": integration.list_tools()}
 
 
 @app.post("/api/integrations/github/{integration_id}/test")
