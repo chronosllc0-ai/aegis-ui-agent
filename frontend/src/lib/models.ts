@@ -40,7 +40,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'chronos',
     displayName: 'Chronos Gateway',
-    iconUrl: CHRONOS_LOGO_URL,
+    iconUrl: CHRONOS_LOGO_URL_VALUE,
     keyPrefix: '',
     gatewayOnly: true,
     models: [

@@ -15,7 +15,7 @@ const EFFECTIVE_DATE = 'March 23, 2026'
 const COMPANY = 'Chronos AI'
 const PRODUCT = 'Aegis'
 const SITE = 'mohex.org'
-const CONTACT_EMAIL = 'privacy@mohex.org'
+const CONTACT_EMAIL = 'contact@mohex.org'
 
 export function PrivacyPage({ onGoHome, onGoAuth }: Props) {
   const sections: Section[] = [
