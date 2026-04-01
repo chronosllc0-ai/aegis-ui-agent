@@ -325,7 +325,7 @@ export function LandingPage({
                 Your AI coworker that actually ships.
               </h1>
               <p className='mt-4 max-w-2xl text-sm leading-7 text-zinc-300 sm:mt-6 sm:text-base sm:leading-8 md:text-lg'>
-                Aegis browses, codes, researches, files PRs, sends messages, and schedules recurring tasks - end to end, without you switching tabs. Give it a task. Get back a result.
+                Aegis is your AI coworker that actually browses, codes, researches, files PRs, sends messages, and schedules your recurring tasks end to end, without you switching tabs. Aegis combines the multimodal capabilities of frontier models like Gemini 3.1 pro and OpenAI GPT-5.4 to reason and use browser for research and software testing as it builds on the fly!
               </p>
             </Reveal>
             <Reveal mode='load' delayMs={180}>
@@ -377,12 +377,12 @@ export function LandingPage({
       </section>
 
       {/* ── PROVIDER CARDS ───────────────────────────────────────────────── */}
-      <section className='mx-auto flex w-full max-w-7xl flex-wrap justify-center gap-2 px-4 py-6 sm:gap-4 sm:px-6 sm:py-8'>
-        {PROVIDER_HIGHLIGHTS.map((ph, i) => {
-          const provider = PROVIDERS.find((p) => p.id === ph.id)
-          return (
-            <Reveal key={ph.id} delayMs={revealDelay(i, 70)}>
-              <article className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
+      <section className='mx-auto w-full max-w-7xl overflow-hidden px-4 py-6 sm:px-6 sm:py-8'>
+        <div className='animate-marquee flex w-max gap-2 sm:gap-4'>
+          {[...PROVIDER_HIGHLIGHTS, ...PROVIDER_HIGHLIGHTS].map((ph, i) => {
+            const provider = PROVIDERS.find((p) => p.id === ph.id)
+            return (
+              <article key={`${ph.id}-${i}`} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
                 {provider && (
                   <span className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'>
                     {renderProviderIcon(provider, 'h-7 w-7')}
@@ -393,9 +393,9 @@ export function LandingPage({
                   <p className='text-xs text-zinc-400'>{ph.count} models</p>
                 </div>
               </article>
-            </Reveal>
-          )
-        })}
+            )
+          })}
+        </div>
       </section>
 
       {/* ── FEATURES / CAPABILITY MAP ────────────────────────────────────── */}
@@ -413,16 +413,8 @@ export function LandingPage({
           {FEATURES.map((feature, index) => (
             <Reveal key={feature.title} delayMs={revealDelay(index)}>
               <article className='flex flex-col rounded-[28px] border border-white/8 bg-[#0c1018] p-6'>
-                {/* Image placeholder */}
-                <div className='mb-5 flex h-32 w-full items-center justify-center overflow-hidden rounded-[16px] border border-white/6 bg-[#080b12]'>
-                  <div className='flex flex-col items-center gap-2 text-zinc-600'>
-                    <svg viewBox='0 0 24 24' fill='none' className='h-6 w-6' stroke='currentColor' strokeWidth='1.5' aria-hidden='true'>
-                      <rect x='3' y='3' width='18' height='18' rx='3' />
-                      <circle cx='8.5' cy='8.5' r='1.5' />
-                      <path d='m21 15-5-5L5 21' />
-                    </svg>
-                    <span className='text-[10px] uppercase tracking-wider'>Image coming soon</span>
-                  </div>
+                <div className='mb-5 h-32 w-full overflow-hidden rounded-[16px] border border-white/6 bg-[#080b12]'>
+                  <img src='/og-image.png' alt='Aegis workflow preview' loading='lazy' className='h-full w-full object-cover opacity-90' />
                 </div>
                 <div className='inline-flex items-center gap-2.5 text-cyan-200'>
                   <span className='inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10'>
@@ -504,16 +496,8 @@ export function LandingPage({
                   </button>
                 </div>
               </div>
-              {/* Screenshot / image placeholder */}
-              <div className='relative flex min-h-[260px] items-center justify-center border-l border-white/6 bg-[#080b12] lg:min-h-[380px]'>
-                <div className='flex flex-col items-center gap-3 text-zinc-600'>
-                  <svg viewBox='0 0 24 24' fill='none' className='h-8 w-8' stroke='currentColor' strokeWidth='1.5' aria-hidden='true'>
-                    <rect x='3' y='3' width='18' height='18' rx='3' />
-                    <circle cx='8.5' cy='8.5' r='1.5' />
-                    <path d='m21 15-5-5L5 21' />
-                  </svg>
-                  <p className='text-sm'>Screenshot coming soon</p>
-                </div>
+              <div className='relative min-h-[260px] overflow-hidden border-l border-white/6 bg-[#080b12] lg:min-h-[380px]'>
+                <img src='/og-image.png' alt='Aegis product screenshot' loading='lazy' className='h-full w-full object-cover' />
               </div>
             </div>
           </div>

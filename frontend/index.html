@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/aegis-logo.png" />
-    <!-- Prevent zoom/shake on mobile; maximum-scale=1 locks the viewport -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- Accessible mobile viewport (zoom allowed) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <!-- Primary SEO -->
     <title>Aegis - Your AI Coworker That Actually Ships | Chronos AI</title>
-    <meta name="description" content="Aegis is your AI coworker that browses, codes, researches, files PRs, sends messages, and schedules recurring tasks - end to end. Free to start. Powered by GPT-4o, Claude, Gemini, and more." />
+    <meta name="description" content="Aegis is an AI coworker that browses, codes, researches, files PRs, and runs recurring tasks end to end from one workspace." />
     <meta name="keywords" content="AI agent, browser automation, natural language automation, GPT-4o, Claude, Grok, AI workflow, web automation, Aegis, Chronos AI" />
     <meta name="author" content="Chronos AI" />
     <meta name="robots" content="index, follow" />
@@ -61,6 +61,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>Aegis: AI-powered universal UI navigator</h1>
+        <p>Aegis helps teams browse, code, research, file pull requests, send messages, and schedule recurring operations from one platform.</p>
+        <nav>
+          <a href="/about">About</a>
+          <a href="/services">Services</a>
+          <a href="/blog">Blog</a>
+          <a href="/contact">Contact</a>
+          <a href="/docs">Docs</a>
+          <a href="/auth">Sign in</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </main>
+    </noscript>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1897,18 +1897,49 @@ async def save_bot_config(platform: str, integration_id: str, payload: dict[str,
 if FRONTEND_DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
 
+    FRONTEND_SPA_ROUTES = {
+        "",
+        "auth",
+        "privacy",
+        "terms",
+        "docs",
+        "app",
+        "automations",
+        "settings",
+        "admin",
+    }
+    FRONTEND_STATIC_PAGES = {
+        "about": "about.html",
+        "services": "services.html",
+        "blog": "blog.html",
+        "contact": "contact.html",
+    }
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str) -> FileResponse:
-        """Serve compiled frontend files in production."""
-        candidate = (FRONTEND_DIST_DIR / full_path).resolve()
+        """Serve compiled frontend files in production with explicit 404 handling."""
+        normalized = full_path.strip("/")
+        first_segment = normalized.split("/", 1)[0] if normalized else ""
+
+        static_page = FRONTEND_STATIC_PAGES.get(first_segment)
+        if normalized == first_segment and static_page:
+            static_candidate = FRONTEND_DIST_DIR / static_page
+            if static_candidate.exists():
+                return FileResponse(static_candidate)
+
+        candidate = (FRONTEND_DIST_DIR / normalized).resolve()
         try:
             candidate.relative_to(FRONTEND_DIST_DIR.resolve())
         except ValueError:
+            return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)
+
+        if normalized and candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+
+        if first_segment in FRONTEND_SPA_ROUTES or first_segment.startswith("use-case"):
             return FileResponse(FRONTEND_DIST_DIR / "index.html")
 
-        if full_path and candidate.exists() and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST_DIR / "index.html")
+        return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)
 
 
 if __name__ == "__main__":
