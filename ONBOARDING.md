@@ -1,3 +1,130 @@
+## Session 5.35 - April 1, 2026 (Brand rollback: Chronos logo restored + Aegis owl PNG rollout)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused follow-up pass
+
+### What Was Done
+- Restored the Chronos logo configuration to the prior hosted purple "C" image URL and kept it as the `Chronos Gateway` provider icon source in `frontend/src/lib/models.ts`.
+- Added a separate `AEGIS_LOGO_URL` constant (`/aegis-logo.png`) and switched Aegis surface branding to use this PNG owl asset instead of the prior SVG path.
+- Updated landing/public header, public footer, terms page header, and privacy page header to use `AEGIS_LOGO_URL`.
+- Updated in-app Aegis logo references (`App.tsx`, `AuthPage.tsx`, `ScreenView.tsx`, `OnboardingWizard.tsx`) from `/aegis-owl-logo.svg` to `/aegis-logo.png`.
+- Applied `chronos-spin` to the Chronos provider icon rendering path so the Chronos Gateway logo spins again where provider icons are displayed.
+
+### What's Working
+- Chronos gateway icon source is back to the prior Chronos image and now spins in provider icon contexts.
+- Aegis UI logo surfaces now consistently use the provided owl PNG.
+
+### What's NOT Working Yet
+- I did not run a live visual QA sweep in a browser session in this environment, so final pixel-level confirmation across all screens is pending.
+
+### Next Steps
+1. Manually verify header/browser frame/settings provider chips in a live session.
+2. If desired, tune owl logo sizing per surface for perfect visual parity with previous SVG spacing.
+
+### Decisions Made
+- Split brand assets into two explicit constants (`AEGIS_LOGO_URL` vs `CHRONOS_LOGO_URL`) to avoid future accidental cross-brand regressions.
+
+### Blockers
+- No technical blockers; only pending live visual verification.
+
+---
+
+## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short follow-up pass
+
+### What Was Done
+- Addressed PR #100 code review warning about continuous marquee animation not respecting reduced-motion accessibility settings.
+- Added a `prefers-reduced-motion: reduce` media query in `frontend/src/index.css` to disable `.animate-marquee` animation for users who opt out of motion effects at the OS/browser level.
+
+### What's Working
+- Provider marquee now remains animated for standard motion preferences but is disabled for reduced-motion users, improving vestibular accessibility and compliance with expected motion-safe behavior.
+
+### What's NOT Working Yet
+- I did not run a live browser accessibility audit tool in this environment; verification here is code-level plus build validation.
+
+### Next Steps
+1. Run a quick manual browser check with reduced motion enabled to confirm cards stop animating.
+2. Optionally add a lint/accessibility check for motion preferences in frontend QA.
+
+### Decisions Made
+- Used the minimal CSS-only fix scoped to `.animate-marquee` so behavior changes only where needed.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.33 - April 1, 2026 (Cloud Run timeout increase for long-running tasks)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short follow-up pass
+
+### What Was Done
+- Updated `infrastructure/deploy.sh` to increase backend Cloud Run request timeout from `300` seconds to a configurable timeout env var defaulting to `3600` seconds.
+- Added `BACKEND_TIMEOUT="${BACKEND_TIMEOUT:-3600}"` near deploy config setup.
+- Wired the backend deploy command to use `--timeout "$BACKEND_TIMEOUT"` instead of the previous hardcoded value.
+- Added deploy output logging to print the active backend timeout value before deployment starts.
+
+### What's Working
+- Default backend timeout for Cloud Run deploys via `infrastructure/deploy.sh` is now `3600s` (1 hour), which is significantly longer than the previous 5-minute cap and better aligned with long-running agent tasks.
+- Timeout can now be overridden per deploy (`BACKEND_TIMEOUT=... ./infrastructure/deploy.sh`) without editing source.
+
+### What's NOT Working Yet
+- I did not run an actual `gcloud run deploy` from this environment, so live Cloud Run acceptance verification is still pending.
+
+### Next Steps
+1. Run deployment using `infrastructure/deploy.sh`.
+2. Confirm deployed backend revision shows timeout `3600s` in Cloud Run revision settings.
+3. For workloads that exceed HTTP request limits, route those jobs to background task execution and polling/webhook status updates.
+
+### Decisions Made
+- Implemented timeout as an environment-configurable value with a safe long-running default to avoid future hardcoded edits.
+
+### Blockers
+- Live verification requires GCP project credentials/access.
+
+---
+
+## Session 5.32 - April 1, 2026 (Railway frontend build fix + landing hero refresh)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Investigated the reported Railway build failure and confirmed the TypeScript compile break shown in the logs (`frontend/src/components/settings/ObservabilityTab.tsx(46,9): error TS1005: 'try' expected`).
+- Fixed `ObservabilityTab` fetch/load flow by repairing the malformed nested `try/catch` block and restoring proper response handling (`response.ok` check + parsed task assignment).
+- Updated the landing hero description paragraph to the new product copy provided in the request.
+- Updated the hero demo panel (`VideoPlaceholder`) to show the provided dual-phone bezel image (`/og-image.png`) when no video source is configured, with a small overlay CTA strip.
+- Updated the provider highlight cards section under the hero video to continuously animate from right to left using the existing marquee animation utility class.
+- Switched brand logo usage back to the owl mark by repointing `CHRONOS_LOGO_URL` to `/aegis-owl-logo.svg`, and removed circular spin styling in public header/footer + legal page footer logos so the owl renders cleanly.
+- Ran a frontend production build to verify TypeScript + Vite now compile successfully.
+
+### What's Working
+- Railway-blocking frontend TypeScript syntax issue in `ObservabilityTab` is fixed locally; `npm run build` now succeeds.
+- Hero messaging now matches the requested updated long-form description.
+- Hero demo module now displays the two-phone bezel artwork by default.
+- Provider cards below hero now auto-scroll right-to-left.
+- Owl logo is restored across shared brand surfaces using the central logo constant.
+
+### What's NOT Working Yet
+- I could not trigger or observe a live Railway redeploy from this environment, so hosted verification is pending.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Confirm build phase passes and deployment reaches healthy.
+3. Verify hero section visually in production (copy, scrolling provider cards, bezel image, owl logo).
+
+### Decisions Made
+- Kept the marquee implementation CSS-driven and lightweight by duplicating provider cards for seamless looping.
+- Reused existing `frontend/public/og-image.png` for the requested bezel artwork to avoid introducing a new asset path.
+
+### Blockers
+- Final production verification depends on Railway environment access.
+
+---
+
 ## Session 5.31 - March 31, 2026 (Railway production crash fix: artifact download response model)
 
 **Agent:** GPT-5.3-Codex  
@@ -1636,6 +1763,33 @@
 ### Decisions Made
 - Kept redirect target as `/admin/users`, and taught `App.tsx` to interpret `/admin/*` paths consistently.
 - Kept banner fallback to `authUser.email` for resilience if status fetch fails transiently.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
+
+## Session 5.21 - April 1, 2026 (Hero Demo Modal Image-Only Update)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `frontend/src/components/VideoPlaceholder.tsx` to render the added hero preview image (`/og-image.png`) as an image-only demo modal state.
+- Removed the fallback overlay CTA row and play-style visual indicator block from the hero demo module.
+- Simplified the component API by removing the optional video source behavior so the hero now consistently presents a static image modal.
+
+### What's Working
+- Hero demo section now displays only the provided image artwork, with no video controls/indicators.
+- Frontend production build passes after the component simplification.
+
+### What's NOT Working Yet
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. If desired, replace `/og-image.png` with a dedicated high-resolution hero asset filename for clearer intent.
+2. Capture visual QA screenshot once browser screenshot tooling is available.
+
+### Decisions Made
+- Kept the existing `/og-image.png` path as the canonical hero demo image to match current repo assets.
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
