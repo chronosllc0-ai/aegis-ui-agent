@@ -127,8 +127,8 @@ export const PROVIDERS: ProviderInfo[] = [
     iconUrl: PROVIDER_ICON_URLS.fireworks,
     keyPrefix: '',
     models: [
-      { id: 'accounts/fireworks/models/kimi-k2p5-turbo', label: 'Kimi K2.5 Turbo', description: 'Moonshot AI Kimi K2.5 - fast and capable via Fireworks AI.', vision: false, contextLength: 131_072 },
-      { id: 'accounts/fireworks/models/kimi-k2-instruct-0905', label: 'Kimi K2 Instruct', description: 'Fallback Kimi K2 instruct model on Fireworks AI.', vision: false, contextLength: 131_072 },
+      { id: 'accounts/fireworks/models/kimi-k2p5', label: 'Kimi K2.5', description: 'Moonshot AI Kimi K2.5 with native reasoning via Fireworks AI.', vision: false, reasoning: true, contextLength: 262_144 },
+      { id: 'accounts/fireworks/models/kimi-k2-instruct-0905', label: 'Kimi K2 Instruct', description: 'Moonshot AI Kimi K2 Instruct model on Fireworks AI.', vision: false, contextLength: 128_000 },
     ],
   },
   // ── OpenRouter ──────────────────────────────────────────────────────
