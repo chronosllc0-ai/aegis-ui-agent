@@ -1,34 +1,3 @@
-## Session 5.35 - April 1, 2026 (Brand rollback: Chronos logo restored + Aegis owl PNG rollout)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused follow-up pass
-
-### What Was Done
-- Restored the Chronos logo configuration to the prior hosted purple "C" image URL and kept it as the `Chronos Gateway` provider icon source in `frontend/src/lib/models.ts`.
-- Added a separate `AEGIS_LOGO_URL` constant (`/aegis-logo.png`) and switched Aegis surface branding to use this PNG owl asset instead of the prior SVG path.
-- Updated landing/public header, public footer, terms page header, and privacy page header to use `AEGIS_LOGO_URL`.
-- Updated in-app Aegis logo references (`App.tsx`, `AuthPage.tsx`, `ScreenView.tsx`, `OnboardingWizard.tsx`) from `/aegis-owl-logo.svg` to `/aegis-logo.png`.
-- Applied `chronos-spin` to the Chronos provider icon rendering path so the Chronos Gateway logo spins again where provider icons are displayed.
-
-### What's Working
-- Chronos gateway icon source is back to the prior Chronos image and now spins in provider icon contexts.
-- Aegis UI logo surfaces now consistently use the provided owl PNG.
-
-### What's NOT Working Yet
-- I did not run a live visual QA sweep in a browser session in this environment, so final pixel-level confirmation across all screens is pending.
-
-### Next Steps
-1. Manually verify header/browser frame/settings provider chips in a live session.
-2. If desired, tune owl logo sizing per surface for perfect visual parity with previous SVG spacing.
-
-### Decisions Made
-- Split brand assets into two explicit constants (`AEGIS_LOGO_URL` vs `CHRONOS_LOGO_URL`) to avoid future accidental cross-brand regressions.
-
-### Blockers
-- No technical blockers; only pending live visual verification.
-
----
-
 ## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
 
 **Agent:** GPT-5.3-Codex  

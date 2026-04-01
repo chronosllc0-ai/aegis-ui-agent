@@ -13,9 +13,8 @@ export const PROVIDER_ICON_URLS: Record<string, string> = {
   fireworks: 'https://fireworks.ai/favicon.ico',
 }
 
-// Aegis + Chronos logos
-export const AEGIS_LOGO_URL = '/aegis-logo.png'
-export const CHRONOS_LOGO_URL = 'https://i.postimg.cc/c1zHTpc3/IMG-20260103-192235-443.webp'
+// Chronos AI logo
+export const CHRONOS_LOGO_URL = '/aegis-owl-logo.svg'
 
 export type ModelInfo = {
   id: string
