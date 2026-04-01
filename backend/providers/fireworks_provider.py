@@ -77,51 +77,6 @@ class FireworksProvider(BaseProvider):
         fallbacks = ["accounts/fireworks/models/kimi-k2p5-turbo", "accounts/fireworks/models/kimi-k2-instruct-0905"]
         return [name for name in fallbacks if name != attempted]
 
-    @staticmethod
-    def _extract_status_code(exc: Exception) -> int | None:
-        """Extract an HTTP status code from provider SDK exceptions."""
-        direct = getattr(exc, "status_code", None)
-        if isinstance(direct, int):
-            return direct
-        response_obj = getattr(exc, "response", None)
-        response_status = getattr(response_obj, "status_code", None)
-        if isinstance(response_status, int):
-            return response_status
-        return None
-
-    async def _create_with_fallback(
-        self,
-        client: Any,
-        *,
-        model_name: str,
-        messages: list[dict[str, Any]],
-        temperature: float,
-        max_tokens: int,
-        stream: bool,
-    ) -> tuple[Any, str]:
-        """Create a Fireworks completion and retry on 404 with model fallbacks."""
-        create_params: dict[str, Any] = {
-            "model": model_name,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": stream,
-        }
-        try:
-            return await client.chat.completions.create(**create_params), model_name
-        except Exception as exc:  # noqa: BLE001
-            if self._extract_status_code(exc) != 404:
-                raise
-            for fallback in self._fallback_models(model_name):
-                try:
-                    logger.warning("Fireworks model %s not found; retrying with %s", model_name, fallback)
-                    create_params["model"] = fallback
-                    return await client.chat.completions.create(**create_params), fallback
-                except Exception as fallback_exc:  # noqa: BLE001
-                    if self._extract_status_code(fallback_exc) != 404:
-                        raise
-            raise
-
     async def chat(
         self,
         messages: list[ChatMessage],
@@ -133,14 +88,40 @@ class FireworksProvider(BaseProvider):
     ) -> ChatResponse:
         client = self._get_client()
         model_name = self._normalize_model_name(model)
-        response, model_name = await self._create_with_fallback(
-            client,
-            model_name=model_name,
-            messages=self._build_messages(messages),
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False,
-        )
+        try:
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=self._build_messages(messages),
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as exc:  # noqa: BLE001
+            status = getattr(getattr(exc, "status_code", None), "__int__", lambda: None)()
+            if status != 404:
+                response_obj = getattr(exc, "response", None)
+                status = getattr(response_obj, "status_code", None)
+                response_obj = getattr(exc, "response", None)
+            if status != 404:
+                response_obj = getattr(exc, "response", None)
+                status = getattr(response_obj, "status_code", None)
+            if status == 404:
+                for fallback in self._fallback_models(model_name):
+                    try:
+                        logger.warning("Fireworks model %s not found; retrying with %s", model_name, fallback)
+                        response = await client.chat.completions.create(
+                            model=fallback,
+                            messages=self._build_messages(messages),
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                        )
+                        model_name = fallback
+                        break
+                    except Exception:  # noqa: BLE001
+                        continue
+                else:
+                    raise
+            else:
+                raise
         choice = response.choices[0]
         usage = {}
         if response.usage:
@@ -170,14 +151,16 @@ class FireworksProvider(BaseProvider):
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
         model_name = self._normalize_model_name(model)
-        response, _resolved_model = await self._create_with_fallback(
-            client,
-            model_name=model_name,
-            messages=self._build_messages(messages),
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
-        )
+
+        create_params: dict[str, Any] = {
+            "model": model_name,
+            "messages": self._build_messages(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        response = await client.chat.completions.create(**create_params)
         async for chunk in response:
             if chunk.choices:
                 delta = chunk.choices[0].delta

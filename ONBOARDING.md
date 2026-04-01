@@ -1,255 +1,96 @@
-## Session 5.38 - April 1, 2026 (Hotfix: harden tool handbook resolution across all providers/models)
+## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused runtime reliability pass
+**Duration:** ~1 short follow-up pass
 
 ### What Was Done
-- Traced the recurring runtime error `name '_build_tool_handbook' is not defined` reported from live runs across providers/models.
-- Hardened `universal_navigator.py` prompt construction so `_build_system_prompt(...)` no longer relies on direct symbol lookup for `_build_tool_handbook`.
-- Switched handbook resolution to a guarded runtime lookup via `globals().get("_build_tool_handbook")` and only invoke when callable.
-- Added robust fallback behavior:
-  - if helper is missing, continue without handbook block and log a warning;
-  - if helper exists but raises any exception, continue without handbook block and log the exception context.
+- Addressed PR #100 code review warning about continuous marquee animation not respecting reduced-motion accessibility settings.
+- Added a `prefers-reduced-motion: reduce` media query in `frontend/src/index.css` to disable `.animate-marquee` animation for users who opt out of motion effects at the OS/browser level.
 
 ### What's Working
-- Prompt construction is now resilient to stale/partial module runtime states that would previously raise a `NameError`.
-- The handbook block still renders when helper wiring is intact.
-- The navigation loop can proceed across providers without failing task startup due to handbook helper resolution.
+- Provider marquee now remains animated for standard motion preferences but is disabled for reduced-motion users, improving vestibular accessibility and compliance with expected motion-safe behavior.
 
 ### What's NOT Working Yet
-- Live production confirmation is still required after deploy to verify no further Action Log entries surface this handbook-name error.
+- I did not run a live browser accessibility audit tool in this environment; verification here is code-level plus build validation.
 
 ### Next Steps
-1. Deploy this hotfix.
-2. Run one task on each provider/model family used in production and confirm the Action Log no longer shows `_build_tool_handbook` NameError.
-3. If any provider still fails, capture the exact stack trace from server logs to isolate a second code path.
+1. Run a quick manual browser check with reduced motion enabled to confirm cards stop animating.
+2. Optionally add a lint/accessibility check for motion preferences in frontend QA.
 
 ### Decisions Made
-- Chose symbol-lookup hardening at callsite (inside `_build_system_prompt`) so runtime stays safe even during partial/stale import states.
+- Used the minimal CSS-only fix scoped to `.animate-marquee` so behavior changes only where needed.
 
 ### Blockers
-- Final validation depends on deployed runtime verification.
+- None.
 
 ---
 
-## Session 5.37 - April 1, 2026 (Review-fix pass: Observability try/catch hardening + Fireworks dedupe/refactor)
+## Session 5.33 - April 1, 2026 (Cloud Run timeout increase for long-running tasks)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused review remediation pass
+**Duration:** ~1 short follow-up pass
 
 ### What Was Done
-- Addressed PR review concerns in `frontend/src/components/settings/ObservabilityTab.tsx`:
-  - Kept explicit non-OK response checks in place.
-  - Ensured catch blocks are structured correctly and now log errors with context (`console.error`) instead of silently swallowing failures.
-- Refactored `backend/providers/fireworks_provider.py` to remove duplicated completion-call logic:
-  - Added `_extract_status_code(...)` for consistent error/status parsing.
-  - Added `_create_with_fallback(...)` to centralize 404 retry/fallback behavior.
-  - Reused the shared helper in both `chat(...)` and `stream(...)` so model fallback behavior is consistent across both code paths.
-- Re-ran backend compile and frontend build checks.
+- Updated `infrastructure/deploy.sh` to increase backend Cloud Run request timeout from `300` seconds to a configurable timeout env var defaulting to `3600` seconds.
+- Added `BACKEND_TIMEOUT="${BACKEND_TIMEOUT:-3600}"` near deploy config setup.
+- Wired the backend deploy command to use `--timeout "$BACKEND_TIMEOUT"` instead of the previous hardcoded value.
+- Added deploy output logging to print the active backend timeout value before deployment starts.
 
 ### What's Working
-- ObservabilityTab compile/runtime path remains clean and now logs fetch failures explicitly.
-- Fireworks provider now has a single fallback mechanism used by both chat and stream, reducing drift/duplication risk.
-- Frontend build and backend compile checks pass.
+- Default backend timeout for Cloud Run deploys via `infrastructure/deploy.sh` is now `3600s` (1 hour), which is significantly longer than the previous 5-minute cap and better aligned with long-running agent tasks.
+- Timeout can now be overridden per deploy (`BACKEND_TIMEOUT=... ./infrastructure/deploy.sh`) without editing source.
 
 ### What's NOT Working Yet
-- Live provider verification for Fireworks fallback behavior still requires deployed runtime testing.
+- I did not run an actual `gcloud run deploy` from this environment, so live Cloud Run acceptance verification is still pending.
 
 ### Next Steps
-1. Deploy and smoke test Fireworks chat + stream paths with a model that 404s.
-2. Verify ObservabilityTab behavior in production for non-OK API responses.
+1. Run deployment using `infrastructure/deploy.sh`.
+2. Confirm deployed backend revision shows timeout `3600s` in Cloud Run revision settings.
+3. For workloads that exceed HTTP request limits, route those jobs to background task execution and polling/webhook status updates.
 
 ### Decisions Made
-- Chose helper extraction in Fireworks provider instead of local tweaks to eliminate duplicate retry code and ensure one source of truth.
+- Implemented timeout as an environment-configurable value with a safe long-running default to avoid future hardcoded edits.
 
 ### Blockers
-- Production verification pending.
+- Live verification requires GCP project credentials/access.
 
 ---
 
-## Session 5.36 - April 1, 2026 (Logo refinement: stronger owl SVG variant)
+## Session 5.32 - April 1, 2026 (Railway frontend build fix + landing hero refresh)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 quick visual pass
+**Duration:** ~1 focused pass
 
 ### What Was Done
-- Reworked `frontend/public/aegis-owl-logo.svg` to better match the stronger reference style (bolder white strokes, balanced wing/head geometry, shield body, and circuit-line base).
-- Kept SVG attributes React-friendly and production-safe (`viewBox`, explicit stroke/fill properties, rounded joins/caps, and contained glow filter).
-- Preserved existing app references to `/aegis-owl-logo.svg` so the stronger variant automatically appears in all previously swapped surfaces.
-- Verified frontend production build after the SVG refresh.
+- Investigated the reported Railway build failure and confirmed the TypeScript compile break shown in the logs (`frontend/src/components/settings/ObservabilityTab.tsx(46,9): error TS1005: 'try' expected`).
+- Fixed `ObservabilityTab` fetch/load flow by repairing the malformed nested `try/catch` block and restoring proper response handling (`response.ok` check + parsed task assignment).
+- Updated the landing hero description paragraph to the new product copy provided in the request.
+- Updated the hero demo panel (`VideoPlaceholder`) to show the provided dual-phone bezel image (`/og-image.png`) when no video source is configured, with a small overlay CTA strip.
+- Updated the provider highlight cards section under the hero video to continuously animate from right to left using the existing marquee animation utility class.
+- Switched brand logo usage back to the owl mark by repointing `CHRONOS_LOGO_URL` to `/aegis-owl-logo.svg`, and removed circular spin styling in public header/footer + legal page footer logos so the owl renders cleanly.
+- Ran a frontend production build to verify TypeScript + Vite now compile successfully.
 
 ### What's Working
-- New stronger owl logo renders via the existing logo path without additional wiring changes.
-- Frontend build passes successfully.
+- Railway-blocking frontend TypeScript syntax issue in `ObservabilityTab` is fixed locally; `npm run build` now succeeds.
+- Hero messaging now matches the requested updated long-form description.
+- Hero demo module now displays the two-phone bezel artwork by default.
+- Provider cards below hero now auto-scroll right-to-left.
+- Owl logo is restored across shared brand surfaces using the central logo constant.
 
 ### What's NOT Working Yet
-- Visual confirmation in deployed production/mobile devices is still pending.
+- I could not trigger or observe a live Railway redeploy from this environment, so hosted verification is pending.
 
 ### Next Steps
-1. Deploy and confirm the stronger owl rendering on mobile + desktop.
-2. If needed, tune stroke width/glow intensity after live visual QA.
+1. Trigger a new Railway deploy from the updated branch.
+2. Confirm build phase passes and deployment reaches healthy.
+3. Verify hero section visually in production (copy, scrolling provider cards, bezel image, owl logo).
 
 ### Decisions Made
-- Updated the same SVG file path in-place (`/aegis-owl-logo.svg`) to avoid touching multiple component references again.
+- Kept the marquee implementation CSS-driven and lightweight by duplicating provider cards for seamless looping.
+- Reused existing `frontend/public/og-image.png` for the requested bezel artwork to avoid introducing a new asset path.
 
 ### Blockers
-- None in code; only post-deploy visual verification pending.
-
----
-
-## Session 5.35 - April 1, 2026 (Hotfix: tool handbook NameError + brighter owl logo swap)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused hotfix pass
-
-### What Was Done
-- Investigated production runtime error: `name '_build_tool_handbook' is not defined`.
-- Added a defensive fallback around handbook generation in `universal_navigator.py` so prompt construction no longer fails hard if a stale/partial runtime state is encountered.
-- Swapped app logo references from `/aegis-logo.png` to a new brighter/bolder owl asset `/aegis-owl-logo.svg` across the main UI surfaces (app header, auth page, screen empty state, onboarding wizard).
-- Added the new SVG asset under `frontend/public/`.
-
-### What's Working
-- Prompt construction now survives missing handbook helper states and continues without crashing.
-- Frontend builds successfully with the new owl logo asset and updated references.
-
-### What's NOT Working Yet
-- Live production verification of the NameError path still requires deploy/runtime log confirmation.
-
-### Next Steps
-1. Deploy hotfix and verify Action Log no longer shows `_build_tool_handbook` NameError.
-2. Confirm new owl logo appears consistently across mobile and desktop views.
-
-### Decisions Made
-- Chose a safe fallback for runtime robustness instead of reverting handbook functionality.
-- Used a local vector owl asset for visual sharpness across resolutions.
-
-### Blockers
-- Final confidence requires deployed environment verification.
-
----
-
-## Session 5.34 - April 1, 2026 (Production hardening pass: auth/session isolation, URL routing, Fireworks fallback, landing edits, GitHub permission-aware tools, observability tabs)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 broad stabilization + UX pass
-
-### What Was Done
-- Fixed cross-account local cache leakage in frontend conversation/task history flows by keying cached conversation data and task history by authenticated user UID instead of global keys.
-- Updated sign-out behavior so logout fully invalidates the auth cookie with the configured domain/samesite/secure attributes, and frontend now hard-refreshes to avoid stale client auth state.
-- Added route-aware settings/automations navigation so app URLs update as users move across dashboard sections (`/settings/...`, `/admin`, `/automations`) for correct deep-linking and share behavior.
-- Extended `SettingsPage` with tab-change callbacks and synchronized route slugs with settings tabs.
-- Hardened Fireworks model handling:
-  - model alias normalization (`kimi-k2.5` → `kimi-k2p5`)
-  - fallback retry on 404 to a known Kimi fallback model
-  - added fallback model entry in frontend model catalog.
-- Added GitHub App permission-aware tool exposure in `integrations/github_connector.py` and wired `repo_permissions` through registration payload + response.
-- Updated GitHub bot connection form to accept GitHub App repository permissions JSON and forward it during connect.
-- Landing page feature card update:
-  - restored titles in the requested sequence
-  - changed icon blocks into icon + title bullet styling.
-- Removed em-dash characters (`—`) from frontend pages/content to match requested writing style.
-- Added a new user-facing **Observability** sub-tab in Settings with per-user runtime telemetry (task statuses, credits, per-task action/error details).
-- Added a global observability section to Admin → Agent Config using existing admin agent stats/task endpoints.
-
-### What's Working
-- Frontend build passes with the new routing, settings tab, and landing page edits.
-- Python compile checks pass for touched backend files.
-- User-isolated local cache keys now prevent cross-user task/conversation bleed-through on shared devices/sessions.
-- Settings and admin sections now support shareable URL paths rather than remaining pinned to root.
-
-### What's NOT Working Yet
-- Live production verification is still required for all reported scenarios (especially Fireworks provider runtime + account switching in deployed environment).
-- GitHub App permission mapping currently covers the repo tools exposed by this integration class and can be expanded further if new tools are added.
-
-### Next Steps
-1. Deploy and verify the four reported bugs in production with real user/admin accounts.
-2. Validate Fireworks Kimi requests in prod logs to confirm primary/fallback model behavior.
-3. If needed, expand GitHub permission mapping as additional repo tools are introduced.
-4. Iterate observability dashboards with richer timeseries and server-level telemetry collection.
-
-### Decisions Made
-- Kept observability implementation lightweight by reusing existing agent task/action endpoints and admin stats endpoints.
-- Implemented route synchronization incrementally (without replacing the entire UI with anchor-only navigation) to minimize production risk.
-
-### Blockers
-- Final confidence requires production deploy + runtime testing access.
-
----
-
-## Session 5.33 - March 31, 2026 (Comprehensive Aegis identity + tool/permission handbook system prompt)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused prompt architecture pass
-
-### What Was Done
-- Expanded universal system prompt construction in `universal_navigator.py` to provide a broad agent identity and operating policy aligned with Chronos branding.
-- Added explicit identity/safety rules that state Aegis is built by Chronos AI, operates in a secured runtime, and must never disclose hidden VM/system internals, secrets, or internal infrastructure details.
-- Added a generated **tool handbook** section that enumerates every currently available tool with:
-  - purpose
-  - risk level
-  - effective permission gate (`auto` vs `confirm`, including overrides)
-  - integration gate requirements
-  - sub-agent availability note
-  - example payload
-- Added helper functions to compute effective permission mode and render the handbook so the prompt stays in sync with `TOOL_DEFINITIONS` and runtime settings.
-- Ensured prompt guidance explicitly covers summary flow (`summarize_task`) and required closure behavior with `done` summary.
-
-### What's Working
-- Prompt now includes broad identity + non-disclosure boundaries for runtime internals.
-- Prompt now includes comprehensive per-tool usage and gate guidance derived from the live available tool manifest.
-- Compile checks pass after the prompt-builder changes.
-
-### What's NOT Working Yet
-- This pass did not include a live production task run to manually inspect full model behavior across every provider.
-
-### Next Steps
-1. Redeploy and run one manual task each on Chronos Gateway and Fireworks to validate end-to-end behavior under the expanded prompt.
-2. Verify the longer system prompt does not cause undesirable verbosity for small tasks; tune wording if needed.
-3. Consider adding a max-length guard or condensed mode if prompt token budget becomes an issue with future tool additions.
-
-### Decisions Made
-- Implemented handbook generation dynamically from `available` tools rather than hardcoding static tool docs, reducing drift risk as tools evolve.
-- Kept the policy strict about not exposing VM/system internals while still allowing high-level, user-safe explanations.
-
-### Blockers
-- Final behavioral verification depends on deployment/runtime access.
-
----
-
-## Session 5.32 - March 31, 2026 (Chronos Gateway Nemotron + Fireworks runtime errors hotfix)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused debugging pass
-
-### What Was Done
-- Investigated reported production runtime errors from the Action Log screenshots:
-  - `'async with' outside async function (universal_navigator.py, line 487)`
-  - `'Settings' object has no attribute 'FIREWORKS_API_KEY'`
-- Fixed `universal_navigator.py` by making `_build_system_prompt(...)` asynchronous and awaiting it in `run_universal_navigation(...)`, which resolves the syntax/runtime failure path for Chronos Gateway model runs (including Nemotron selections).
-- Fixed missing Fireworks config wiring by adding `FIREWORKS_API_KEY` to `Settings` in `config.py` and documenting it in `.env.example`.
-- Kept existing provider resolution flow unchanged in `orchestrator.py`; the fix is compatibility/config completeness + valid async semantics.
-- Re-ran compile/import sanity checks to ensure app startup and universal navigator module import both succeed.
-
-### What's Working
-- Universal navigator module now compiles; the `async with` syntax error path is removed.
-- Fireworks provider fallback env key lookup now has a valid settings attribute.
-- Main app imports successfully after these fixes.
-
-### What's NOT Working Yet
-- I did not run a live production request against your deployed Chronos Gateway/Fireworks sessions from this environment.
-
-### Next Steps
-1. Redeploy production with this patch.
-2. Re-run one task on Chronos Gateway + Nemotron and confirm no `async with outside async function` error appears.
-3. Re-run one task on Fireworks provider and confirm no missing `FIREWORKS_API_KEY` attribute error appears.
-4. If Fireworks still fails, verify actual `FIREWORKS_API_KEY` value is set in production environment variables.
-
-### Decisions Made
-- Chose a minimal-risk fix: keep DB-backed global instruction loading as-is but make the prompt builder truly async.
-- Added Fireworks key to first-class config + env example instead of using dynamic `getattr` fallback, to keep settings typed and explicit.
-
-### Blockers
-- Final confirmation requires deployment/runtime access.
+- Final production verification depends on Railway environment access.
 
 ---
 
@@ -1891,6 +1732,62 @@
 ### Decisions Made
 - Kept redirect target as `/admin/users`, and taught `App.tsx` to interpret `/admin/*` paths consistently.
 - Kept banner fallback to `authUser.email` for resilience if status fetch fails transiently.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
+
+## Session 5.21 - April 1, 2026 (Hero Demo Modal Image-Only Update)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `frontend/src/components/VideoPlaceholder.tsx` to render the added hero preview image (`/og-image.png`) as an image-only demo modal state.
+- Removed the fallback overlay CTA row and play-style visual indicator block from the hero demo module.
+- Simplified the component API by removing the optional video source behavior so the hero now consistently presents a static image modal.
+
+### What's Working
+- Hero demo section now displays only the provided image artwork, with no video controls/indicators.
+- Frontend production build passes after the component simplification.
+
+### What's NOT Working Yet
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. If desired, replace `/og-image.png` with a dedicated high-resolution hero asset filename for clearer intent.
+2. Capture visual QA screenshot once browser screenshot tooling is available.
+
+### Decisions Made
+- Kept the existing `/og-image.png` path as the canonical hero demo image to match current repo assets.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
+
+## Session 5.22 - April 1, 2026 (Railway Build Fix: Logo Constant Cleanup + TS Compile Errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Fixed frontend TypeScript build break in `frontend/src/lib/models.ts` by removing the conflicting `CHRONOS_LOGO_URL` import and wiring the Chronos provider icon to the locally exported constant (`iconUrl: CHRONOS_LOGO_URL`).
+- Removed unused `AEGIS_LOGO_URL` imports from legal/public components where they were declared but never read (`PrivacyPage`, `TermsPage`, `PublicHeader`, `PublicFooter`).
+- Replaced unresolved `CHRONOS_LOGO_URL` references in those same components with direct static image path usage (`'/aegis-owl-logo.svg'`) to eliminate missing symbol errors.
+- Fixed `frontend/src/components/VideoPlaceholder.tsx` TypeScript errors by defining a typed props object with optional `src` and using it in the component signature.
+
+### What's Working
+- `frontend` production build now succeeds (`npm run build`) with TypeScript + Vite completing successfully.
+- Railway-reported compile errors for `AEGIS_LOGO_URL`, `CHRONOS_LOGO_URL`, `CHRONOS_LOGO_URL_VALUE`, and undefined `src` in `VideoPlaceholder` are resolved.
+
+### What's NOT Working Yet
+- Vite still reports a non-blocking large-chunk warning (>500 kB bundle), but this does not fail production build.
+- Browser screenshot artifact could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. Redeploy on Railway to confirm this commit clears the failed build in production.
+2. Optionally split large frontend bundles to address the Vite chunk-size warning.
+
+### Decisions Made
+- Used local static logo asset path (`/aegis-owl-logo.svg`) in UI surfaces that only need a fixed image, avoiding fragile cross-module constant imports for legal/public pages.
 
 ### Blockers
 - No browser screenshot tool available in this runtime.

@@ -11,6 +11,11 @@
 .animate-marquee:hover {
   animation-play-state: paused;
 }
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+  }
+}
 
 /* ── Falling circles into integrations file icon ───────────────────────────── */
 @keyframes fall-1 {
