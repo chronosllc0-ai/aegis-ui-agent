@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Icons } from '../components/icons'
-import { CHRONOS_LOGO_URL } from '../lib/models'
+import { AEGIS_LOGO_URL } from '../lib/models'
 
 type PublicHeaderProps = {
   onGoHome: () => void

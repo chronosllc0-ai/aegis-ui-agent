@@ -208,10 +208,11 @@ export const MODEL_OPTIONS = allModelIds()
  * naturally on dark surfaces without jarring light backgrounds.
  */
 export function renderProviderIcon(provider: ProviderInfo, className = 'h-4 w-4') {
+  const spinClass = provider.id === 'chronos' ? 'chronos-spin' : ''
   return createElement('img', {
     src: provider.iconUrl,
     alt: provider.displayName,
-    className: `${className} rounded-full object-cover`,
+    className: `${className} ${spinClass} rounded-full object-cover`,
     style: { filter: 'brightness(0.85) saturate(1.2)' },
     'aria-hidden': 'true',
   })

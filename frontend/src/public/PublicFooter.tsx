@@ -1,4 +1,4 @@
-import { CHRONOS_LOGO_URL } from '../lib/models'
+import { AEGIS_LOGO_URL } from '../lib/models'
 import { PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
 
 type PublicFooterProps = {

@@ -1,4 +1,4 @@
-import { CHRONOS_LOGO_URL } from '../lib/models'
+import { AEGIS_LOGO_URL } from '../lib/models'
 
 type Props = {
   onGoHome: () => void
