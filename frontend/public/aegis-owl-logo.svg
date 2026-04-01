@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="64" fill="#030712"/>
+  <g stroke="#F8FAFC" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M95 118L174 186"/>
+    <path d="M174 186L110 238"/>
+    <path d="M110 238L178 276"/>
+    <path d="M178 276L94 361"/>
+    <path d="M417 118L338 186"/>
+    <path d="M338 186L402 238"/>
+    <path d="M402 238L334 276"/>
+    <path d="M334 276L418 361"/>
+    <path d="M176 177L256 104L336 177"/>
+    <path d="M192 191C202 155 224 137 256 137C288 137 310 155 320 191"/>
+    <path d="M210 221L256 253L302 221"/>
+    <path d="M256 252L256 279"/>
+    <path d="M209 326L256 355L303 326L293 277H219L209 326Z"/>
+    <path d="M185 390H327"/>
+    <path d="M159 422H353"/>
+    <path d="M145 450H367"/>
+    <circle cx="227" cy="198" r="7" fill="#F8FAFC"/>
+    <circle cx="285" cy="198" r="7" fill="#F8FAFC"/>
+    <path d="M134 422H88"/>
+    <path d="M424 422H378"/>
+    <path d="M432 450H386"/>
+  </g>
+</svg>
