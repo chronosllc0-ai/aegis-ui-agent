@@ -2,7 +2,7 @@
 // Last updated: 2026-03-24 - sourced from official provider docs
 
 import { createElement } from 'react'
-import { CHRONOS_LOGO_URL as CHRONOS_LOGO_URL_VALUE } from './branding'
+import { CHRONOS_LOGO_URL } from './branding'
 
 // ── Provider icon URLs (hosted on postimg) ────────────────────────
 export const PROVIDER_ICON_URLS: Record<string, string> = {
@@ -14,8 +14,8 @@ export const PROVIDER_ICON_URLS: Record<string, string> = {
   fireworks: 'https://fireworks.ai/favicon.ico',
 }
 
-// Aegis + Chronos logos
-export { AEGIS_LOGO_URL, CHRONOS_LOGO_URL } from './branding'
+// Chronos AI logo
+export const CHRONOS_LOGO_URL = '/aegis-owl-logo.svg'
 
 export type ModelInfo = {
   id: string
