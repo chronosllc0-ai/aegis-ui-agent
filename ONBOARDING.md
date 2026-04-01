@@ -1,3 +1,30 @@
+## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short follow-up pass
+
+### What Was Done
+- Addressed PR #100 code review warning about continuous marquee animation not respecting reduced-motion accessibility settings.
+- Added a `prefers-reduced-motion: reduce` media query in `frontend/src/index.css` to disable `.animate-marquee` animation for users who opt out of motion effects at the OS/browser level.
+
+### What's Working
+- Provider marquee now remains animated for standard motion preferences but is disabled for reduced-motion users, improving vestibular accessibility and compliance with expected motion-safe behavior.
+
+### What's NOT Working Yet
+- I did not run a live browser accessibility audit tool in this environment; verification here is code-level plus build validation.
+
+### Next Steps
+1. Run a quick manual browser check with reduced motion enabled to confirm cards stop animating.
+2. Optionally add a lint/accessibility check for motion preferences in frontend QA.
+
+### Decisions Made
+- Used the minimal CSS-only fix scoped to `.animate-marquee` so behavior changes only where needed.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.33 - April 1, 2026 (Cloud Run timeout increase for long-running tasks)
 
 **Agent:** GPT-5.3-Codex  
