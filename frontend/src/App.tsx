@@ -903,6 +903,7 @@ function App() {
                 reasoningEffort={settings.reasoningEffort}
                 onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
                 currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
+                userName={authUser?.name ?? settings.displayName}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
