@@ -325,7 +325,7 @@ export function LandingPage({
                 Your AI coworker that actually ships.
               </h1>
               <p className='mt-4 max-w-2xl text-sm leading-7 text-zinc-300 sm:mt-6 sm:text-base sm:leading-8 md:text-lg'>
-                Aegis browses, codes, researches, files PRs, sends messages, and schedules recurring tasks - end to end, without you switching tabs. Give it a task. Get back a result.
+                Aegis is your AI coworker that actually browses, codes, researches, files PRs, sends messages, and schedules your recurring tasks end to end, without you switching tabs. Aegis combines the multimodal capabilities of frontier models like Gemini 3.1 pro and OpenAI GPT-5.4 to reason and use browser for research and software testing as it builds on the fly!
               </p>
             </Reveal>
             <Reveal mode='load' delayMs={180}>
@@ -377,12 +377,12 @@ export function LandingPage({
       </section>
 
       {/* ── PROVIDER CARDS ───────────────────────────────────────────────── */}
-      <section className='mx-auto flex w-full max-w-7xl flex-wrap justify-center gap-2 px-4 py-6 sm:gap-4 sm:px-6 sm:py-8'>
-        {PROVIDER_HIGHLIGHTS.map((ph, i) => {
-          const provider = PROVIDERS.find((p) => p.id === ph.id)
-          return (
-            <Reveal key={ph.id} delayMs={revealDelay(i, 70)}>
-              <article className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
+      <section className='mx-auto w-full max-w-7xl overflow-hidden px-4 py-6 sm:px-6 sm:py-8'>
+        <div className='animate-marquee flex w-max gap-2 sm:gap-4'>
+          {[...PROVIDER_HIGHLIGHTS, ...PROVIDER_HIGHLIGHTS].map((ph, i) => {
+            const provider = PROVIDERS.find((p) => p.id === ph.id)
+            return (
+              <article key={`${ph.id}-${i}`} className='flex items-center gap-3 rounded-2xl border border-white/8 bg-[#0c1018] px-5 py-3'>
                 {provider && (
                   <span className='inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#111] ring-1 ring-white/[0.06]'>
                     {renderProviderIcon(provider, 'h-7 w-7')}
@@ -393,9 +393,9 @@ export function LandingPage({
                   <p className='text-xs text-zinc-400'>{ph.count} models</p>
                 </div>
               </article>
-            </Reveal>
-          )
-        })}
+            )
+          })}
+        </div>
       </section>
 
       {/* ── FEATURES / CAPABILITY MAP ────────────────────────────────────── */}
