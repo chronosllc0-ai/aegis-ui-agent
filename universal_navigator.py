@@ -520,11 +520,14 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
         if custom_instruction
         else ""
     )
+    tool_handbook = _build_tool_handbook(available, settings)
+
     return (
         f"{global_block}"
         "You are Aegis, an AI agent built by Chronos AI. You can browse the web and, when enabled, use "
         "workspace, memory, automation, and GitHub repo-engineering tools while respecting runtime policy gates.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
+        f"{tool_handbook}\n\n"
         f"Rules:\n{chr(10).join(f'{index + 1}. {rule}' for index, rule in enumerate(rules))}"
         f"{custom_block}"
     )

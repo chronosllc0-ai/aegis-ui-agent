@@ -38,7 +38,7 @@ export function ObservabilityTab() {
       setLoading(true)
       try {
         const response = await fetch(apiUrl('/api/agents/tasks?limit=50'), { credentials: 'include' })
-        if (!response.ok) throw new Error('Failed to load task telemetry')
+        if (!response.ok) throw new Error(`Failed to load task telemetry (${response.status})`)
         const data = await response.json() as { tasks?: AgentTask[] }
         if (!cancelled) setTasks(data.tasks ?? [])
       } catch (err) {
@@ -69,8 +69,7 @@ export function ObservabilityTab() {
       if (!response.ok) throw new Error('Failed')
       const data = await response.json() as AgentTaskDetail
       setDetails((prev) => ({ ...prev, [taskId]: data }))
-    } catch (err) {
-      console.error(`Failed to load task details for ${taskId}:`, err)
+    } catch {
       setDetails((prev) => ({ ...prev, [taskId]: { id: taskId, error_message: 'Unable to load details.', actions: [] } }))
     }
   }
