@@ -35,6 +35,9 @@ export function ActionLog({ entries, taskLabels, showWorkflow, onToggleWorkflow,
   const grouped = useMemo(() => {
     const map = new Map<string, LogEntry[]>()
     for (const entry of entries) {
+      // User chat messages (stepKind 'navigate' at t=0) belong to the ChatPanel,
+      // not the ActionLog — skip them so they don't appear in both places.
+      if (entry.stepKind === 'navigate' && entry.elapsedSeconds === 0) continue
       if (!map.has(entry.taskId)) map.set(entry.taskId, [])
       map.get(entry.taskId)?.push(entry)
     }

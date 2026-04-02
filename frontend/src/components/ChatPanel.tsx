@@ -40,6 +40,8 @@ export interface ChatPanelProps {
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
+  /** True when the agent is actively executing browser steps right now */
+  isBrowsing?: boolean
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -111,10 +113,68 @@ const RE_MODEL_RESPONSE  = /^Model response/i
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
 
+/**
+ * Browser-execution tool names that belong exclusively in the ActionLog.
+ * Non-browser tools (search, code, file ops, APIs, etc.) still surface in chat
+ * as collapsible ShellCards so the user has visibility into non-browser work.
+ */
+const BROWSER_TOOL_NAMES = new Set([
+  'navigate_browser', 'navigate', 'go_to_url', 'open_url', 'load_url',
+  'click_element', 'click', 'left_click', 'right_click', 'double_click',
+  'type_text', 'type', 'input_text', 'fill_input', 'clear_and_type',
+  'scroll_page', 'scroll', 'scroll_down', 'scroll_up', 'scroll_to_element',
+  'hover_element', 'hover', 'mouse_move',
+  'press_key', 'key_press', 'keyboard_press',
+  'take_screenshot', 'screenshot',
+  'extract_text', 'get_page_text', 'get_inner_text',
+  'get_element', 'find_element', 'wait_for_element', 'wait_for_selector',
+  'select_option', 'check_checkbox', 'uncheck_checkbox',
+  'get_page_html', 'get_dom', 'evaluate_js', 'execute_script',
+  'drag_and_drop', 'upload_file_to_browser',
+])
+
+/**
+ * Internal agent meta-tools that are pure housekeeping — never shown as
+ * cards in the chat panel. The isWorking shimmer already signals activity.
+ */
+const SILENT_TOOL_NAMES = new Set([
+  'thinking', 'think', 'internal_think',
+  'wait', 'sleep', 'pause', 'noop', 'no_op',
+  'set_next_step', 'plan_step', 'record_thought',
+])
+
+/**
+ * Returns true if this log entry should be hidden from the chat conversation.
+ *
+ * Rules:
+ *   1. Raw browser stepKinds (click / type / scroll) → ActionLog only.
+ *   2. Navigate entries with elapsedSeconds > 0 → ActionLog only.
+ *   3. Tool calls in BROWSER_TOOL_NAMES → ActionLog only.
+ *   4. Tool calls in SILENT_TOOL_NAMES → hidden entirely (internal housekeeping).
+ *
+ * Non-browser, non-silent tool calls (web_search, run_code, read_file…)
+ * pass through and render as ShellCards in chat.
+ */
+function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
+  if (entry.stepKind === 'click' || entry.stepKind === 'type' || entry.stepKind === 'scroll') return true
+  if (entry.stepKind === 'navigate' && entry.elapsedSeconds > 0) return true
+
+  if (RE_TOOL_CALL.test(msg)) {
+    const match = msg.match(/^\[([\w_]+)\]/)
+    const toolName = match?.[1]?.toLowerCase()
+    if (toolName && (BROWSER_TOOL_NAMES.has(toolName) || SILENT_TOOL_NAMES.has(toolName))) return true
+  }
+
+  return false
+}
+
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
     const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+
+    // ── Browser-execution steps: ActionLog only, never in chat ──────────────
+    if (isBrowserOnlyEntry(entry, msg)) continue
 
     if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
       const stepId = entry.stepId
@@ -1021,6 +1081,7 @@ export function ChatPanel({
   connectionStatus,
   onSwitchToBrowser,
   latestFrame,
+  isBrowsing = false,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
