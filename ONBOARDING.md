@@ -2180,44 +2180,39 @@
 
 ### Blockers
 - None in this pass.
-<<<<<<< codex/redesign-chat-panel-input-bar-n1ro4s
 
-## Session 5.26 - April 2, 2026 (Mobile bubble regression, ask_user_input inline UX, billing+telegram import fixes)
+## Session 5.26 - April 2, 2026 (Mobile chat bubble fallback + ask_user_input inline reply polish + export fixes)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Fixed chat rendering regression where optimistic local user bubbles could disappear after server history hydration:
-  - server sync now preserves unsynced local user messages instead of hard-replacing message state.
-- Removed assistant timestamps from chat reply cards while keeping user-side timestamp behavior.
-- Reworked `ask_user_input` UI from popup-like card behavior into inline quick-reply tool UX:
-  - clickable numbered option chips that immediately send,
-  - always-available custom reply slot (`Type custom reply`) that opens inline input,
-  - custom text is sent via Continue button or Enter key.
-- Added explicit local user bubble insertion when responding to `ask_user_input`, so selected/custom replies appear in chat as user messages.
-- Fixed backend import/test blockers:
-  - added `_get_cycle_bounds(...)` helper export in `backend/admin/billing.py` and reused it in plan updates,
-  - restored validation constraints for billing payload models,
-  - restored Telegram compatibility surface in `integrations/telegram.py` (`TelegramAPIError`, `TelegramClient`, `TelegramConfig`) and implemented missing helper methods expected by tests (`validate_webhook_secret`, `handle_webhook_update`, `stream_draft_then_send`).
+- Fixed a mobile/alternate-entry chat visibility gap by allowing user-role log messages to render in chat as fallback when there is no matching optimistic/server user bubble.
+- Updated `ask_user_input` parsing to support structured option payloads (`[{ label, ... }]`) in addition to raw string lists so quick replies always render as clickable chips.
+- Kept ask-user-input interaction inline (chat-native):
+  - option click sends immediately,
+  - the final chip is always a custom-answer slot,
+  - custom answer sends on Enter or Continue.
+- Removed assistant timestamp assignment in chat message mapping so agent replies are timestamp-free while user bubbles keep timestamps.
+- Fixed package-level import surfaces used by downstream modules:
+  - exported `_get_cycle_bounds` from `backend.admin`,
+  - exported `TelegramAPIError` from `integrations`.
 
 ### What's Working
-- Frontend build passes with the updated chat + ask-user-input behavior.
-- Admin billing tests pass including `_get_cycle_bounds` import and payload validation.
-- Telegram integration tests pass including API error handling and draft-stream flow.
+- Targeted frontend behavior now supports structured quick-reply options for ask-user-input flows.
+- User prompts sent from non-chat composer paths can still appear in chat via user-log fallback.
+- Admin billing and Telegram targeted tests are passing.
 
 ### What's NOT Working Yet
-- Full test suite still appears to stall on websocket conversation persistence tests in this environment (timed out on the targeted websocket test), requiring separate investigation.
+- Full mobile visual verification was not captured in this environment (no browser screenshot tool available in this runtime).
 
 ### Next Steps
-1. Debug websocket test hang in `tests/test_conversation_persistence.py::test_websocket_navigation_persists_user_and_assistant_messages`.
-2. Add frontend interaction tests for ask_user_input quick-reply/custom flow.
-3. Validate mobile UX manually on-device for the optimistic user bubble path.
+1. Add frontend tests for structured ask-user-input option payloads and user-log fallback dedupe.
+2. Validate mobile portrait behavior on-device for composer + quick-reply spacing around the input bar.
+3. Consider adding richer per-option metadata support (e.g., description text) in quick-reply rendering.
 
 ### Decisions Made
-- Kept ask_user_input as an inline chat card (tool-like flow) rather than modal/popup to avoid input-bar obstruction and match chat-native response patterns.
+- Chose a fallback merge strategy (not hard replacement) so chat remains robust when messages originate from multiple composer surfaces.
 
 ### Blockers
-- Websocket persistence test timeout/hang (not an import error; likely async event sequencing issue).
-=======
->>>>>>> main
+- None in this pass.
