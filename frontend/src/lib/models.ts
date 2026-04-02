@@ -22,6 +22,7 @@ export type ModelInfo = {
   description: string
   vision?: boolean
   reasoning?: boolean           // true = model supports reasoning/thinking tokens
+  reasoningModes?: Array<'medium' | 'high' | 'extended' | 'adaptive'>
   contextLength: number  // max context window in tokens
 }
 
@@ -188,6 +189,20 @@ export function contextLengthForModel(modelId: string): number {
     if (m) return m.contextLength
   }
   return 128_000 // safe default
+}
+
+export function reasoningModesForModel(modelId: string): Array<'medium' | 'high' | 'extended' | 'adaptive'> {
+  const model = modelInfo(modelId)
+  if (!model?.reasoning) return []
+  if (model.reasoningModes?.length) return model.reasoningModes
+  const id = modelId.toLowerCase()
+  if (id.includes('gpt-5') || id.startsWith('o3') || id.startsWith('o4')) {
+    return ['medium', 'high', 'adaptive']
+  }
+  if (id.includes('gemini') || id.includes('claude') || id.includes('qwen')) {
+    return ['medium', 'high', 'extended']
+  }
+  return ['medium', 'high']
 }
 
 export function allModelIds(): string[] {

@@ -26,6 +26,15 @@ OPENAI_MODELS = [
 OPENAI_REASONING_MODELS = {"o3", "o4-mini"}
 
 
+def _normalize_reasoning_effort(effort: str) -> str:
+    normalized = (effort or "medium").strip().lower()
+    if normalized == "extended":
+        return "high"
+    if normalized == "adaptive":
+        return "medium"
+    return normalized if normalized in {"low", "medium", "high"} else "medium"
+
+
 class OpenAIProvider(BaseProvider):
     """Adapter for the OpenAI chat completions API."""
 
@@ -131,7 +140,7 @@ class OpenAIProvider(BaseProvider):
             "stream": True,
         }
         if model_name in OPENAI_REASONING_MODELS and enable_reasoning:
-            params["reasoning_effort"] = reasoning_effort
+            params["reasoning_effort"] = _normalize_reasoning_effort(reasoning_effort)
         else:
             params["temperature"] = temperature
 

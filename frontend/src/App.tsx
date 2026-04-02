@@ -48,6 +48,9 @@ type TaskHistoryItem = {
   dateLabel: string
   instruction: string
 }
+function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
+  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
+}
 const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   profile: 'Profile',
@@ -518,6 +521,10 @@ function App() {
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
+    const mentionMatches = [...trimmed.matchAll(/@([a-zA-Z0-9._-]+)/g)].map((m) => m[1].toLowerCase())
+    const mentionedAgents = subAgents.filter((agent) => mentionMatches.includes(subAgentDisplayName(agent).toLowerCase()))
+    const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
+    const finalInstruction = cleanedInstruction || trimmed
 
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
@@ -525,18 +532,25 @@ function App() {
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: trimmed, metadata })
+      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: trimmed, metadata })
+      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
     const action = isWorking ? 'steer' : 'navigate'
-    send({ action, instruction: trimmed, metadata })
+    const activeSubAgent = subAgents.find((a) => a.sub_id === selectedTaskId)
+    if (activeSubAgent) {
+      void messageSubAgent(activeSubAgent.sub_id, finalInstruction)
+      return
+    }
+
+    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // ── Update browser tab title for steering state ────────────────
     if (action === 'steer') {
@@ -562,7 +576,7 @@ function App() {
         : `pending-${crypto.randomUUID()}`
       const now = new Date()
       const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      const newEntry = { id: taskId, title: trimmed, dateLabel, instruction: trimmed }
+      const newEntry = { id: taskId, title: finalInstruction, dateLabel, instruction: finalInstruction }
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
@@ -768,11 +782,12 @@ function App() {
         {sidebarOpen && (
           <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
         )}
-        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
-          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
-            New Task
+        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-gradient-to-b from-[#1a1f2d] via-[#191b26] to-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
+          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
+            ⌁ New thread
           </button>
-          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
+          <button type='button' onClick={() => setShowAutomations(true)} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/30 px-3 py-2 text-left text-sm text-zinc-400'>◷ Automations</button>
+          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Threads' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
           {/* ── Task list — Codex-style text-only threads ── */}
           <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
@@ -793,9 +808,9 @@ function App() {
                             <button
                               type='button'
                               onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }}
-                              className={`flex-1 min-w-0 rounded-lg px-2 py-1.5 text-left transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#1e1e1e]'}`}
+                              className={`flex-1 min-w-0 px-2 py-1 text-left transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
                             >
-                              <p className={`truncate text-xs font-medium ${isActive ? 'text-zinc-100' : ''}`}>
+                              <p className={`truncate text-sm font-normal ${isActive ? 'text-zinc-100' : ''}`}>
                                 {item.title || item.instruction.slice(0, 40) || 'Untitled'}
                               </p>
                             </button>
@@ -816,20 +831,21 @@ function App() {
                               {agentsForTask.map((agent, aIdx) => {
                                 const nameColors = ['text-orange-400','text-green-400','text-sky-400','text-violet-400','text-rose-400']
                                 const nc = nameColors[aIdx % nameColors.length]
-                                const taskTitle = agent.instruction.split(' ').slice(0, 5).join(' ').slice(0, 30) || 'Sub-task'
+                                const taskTitle = agent.instruction.split(' ').slice(0, 6).join(' ').slice(0, 36) || 'Sub-task'
                                 const isLive = agent.status === 'spawning' || agent.status === 'running'
+                                const shortName = subAgentDisplayName(agent).slice(0, 12) || `Agent ${aIdx + 1}`
                                 return (
                                   <button
                                     key={agent.sub_id}
                                     type='button'
                                     onClick={() => { setSelectedTaskId(agent.sub_id); setSidebarOpen(false) }}
-                                    className={`flex w-full items-baseline gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[#1e1e1e] ${selectedTaskId === agent.sub_id ? 'bg-[#1e1e1e]' : ''}`}
+                                    className={`flex w-full items-baseline gap-1.5 px-2 py-1 text-left transition-colors ${selectedTaskId === agent.sub_id ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
                                   >
-                                    <span className='truncate text-[11px] text-zinc-500 flex-1'>
-                                      {taskTitle}{taskTitle.length < agent.instruction.length ? '…' : ''}
+                                    <span className={`text-[11px] font-semibold flex-shrink-0 ${nc} ${isLive ? 'agent-name-shimmer' : ''}`}>
+                                      {shortName}
                                     </span>
-                                    <span className={`text-[10px] font-semibold flex-shrink-0 ${nc} ${isLive ? 'agent-name-shimmer' : ''}`}>
-                                      {agent.instruction.split(' ').slice(0, 2).join(' ').slice(0, 12) || `Agent ${aIdx + 1}`}
+                                    <span className='truncate text-[11px] flex-1'>
+                                      — {taskTitle}{taskTitle.length < agent.instruction.length ? '…' : ''}
                                     </span>
                                   </button>
                                 )
@@ -998,6 +1014,7 @@ function App() {
                   modelId: contextMeter.current.modelId,
                   isCompacting: contextMeter.isCompacting,
                 }}
+                subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
