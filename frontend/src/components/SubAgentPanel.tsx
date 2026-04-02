@@ -64,7 +64,8 @@ function liveStatusText(agent: SubAgentInfo, steps: SubAgentStep[]): string {
 export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread }: SubAgentPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [hoveredModel, setHoveredModel] = useState<string | null>(null) // sub_id of hovered name
-  const [draft, setDraft] = useState<Record<string, string>>({})
+  void onCancel
+  void onMessage
 
   const activeCount = useMemo(
     () => agents.filter((a) => a.status === 'spawning' || a.status === 'running').length,
@@ -72,13 +73,6 @@ export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread
   )
 
   if (agents.length === 0) return null
-
-  const handleSend = (subId: string) => {
-    const msg = (draft[subId] ?? '').trim()
-    if (!msg) return
-    onMessage(subId, msg)
-    setDraft((prev) => ({ ...prev, [subId]: '' }))
-  }
 
   return (
     <div className='w-full'>
@@ -124,33 +118,6 @@ export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread
                 <p className={`flex-1 truncate text-[11px] ${isLive ? 'text-zinc-400' : 'text-zinc-600'}`}>
                   {statusStr}
                 </p>
-
-                {/* Send message input (only when live) */}
-                {isLive && (
-                  <div className='flex items-center gap-1 flex-shrink-0'>
-                    <input
-                      value={draft[agent.sub_id] ?? ''}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, [agent.sub_id]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleSend(agent.sub_id) }}
-                      placeholder='Message…'
-                      className='w-28 rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-0.5 text-[11px] text-zinc-300 outline-none focus:border-zinc-600'
-                    />
-                    <button
-                      type='button'
-                      onClick={() => handleSend(agent.sub_id)}
-                      className='rounded-md bg-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-600'
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => onCancel(agent.sub_id)}
-                      className='rounded-md border border-red-500/25 px-1.5 py-0.5 text-[11px] text-red-400 hover:bg-red-500/10'
-                    >
-                      Stop
-                    </button>
-                  </div>
-                )}
 
                 {/* Open thread button */}
                 <button

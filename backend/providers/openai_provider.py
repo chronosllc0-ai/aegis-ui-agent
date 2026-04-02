@@ -6,6 +6,7 @@ import base64
 import logging
 from typing import Any, AsyncIterator
 
+from ._utils import normalize_reasoning_effort
 from .base import BaseProvider, ChatMessage, ChatResponse, ProviderCapabilities, StreamChunk
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ class OpenAIProvider(BaseProvider):
             "stream": True,
         }
         if model_name in OPENAI_REASONING_MODELS and enable_reasoning:
-            params["reasoning_effort"] = reasoning_effort
+            params["reasoning_effort"] = normalize_reasoning_effort(reasoning_effort)
         else:
             params["temperature"] = temperature
 

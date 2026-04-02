@@ -1,3 +1,283 @@
+## Session 5.42 - April 2, 2026 (Follow-up: @mentions + explicit sub-agent message routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused follow-up pass
+
+### What Was Done
+- Implemented composer `@` mention picker in `ChatPanel`:
+  - detects trailing `@query`,
+  - shows matching spawned sub-agent names,
+  - inserts selected mention token into the prompt.
+- Added mention-aware routing in `App.handleSend(...)`:
+  - extracts tagged sub-agent handles,
+  - forwards message copies to tagged sub-agents via `messageSubAgent(...)`,
+  - includes `target_subagents` metadata in parent-agent sends.
+- Added explicit sub-agent-thread direct messaging behavior:
+  - when user is currently in a sub-agent thread, sends route directly to that sub-agent instance instead of parent navigate/steer.
+- Standardized display-name derivation for sub-agents via shared `subAgentDisplayName(...)` helper and reused it in thread sidebar + mention source list.
+
+### What's Working
+- Users can now type `@` in chat composer and select spawned sub-agent names.
+- Parent-thread messages can fan out to tagged sub-agents.
+- Sub-agent thread context now behaves like a direct message channel to that sub-agent.
+
+### What's NOT Working Yet
+- Mention routing currently uses display-name matching; future pass should persist explicit handles/IDs for collision-proof tagging.
+
+### Next Steps
+1. Persist canonical mention handles per sub-agent in runtime events.
+2. Add UI badges indicating which sub-agents were targeted on each user message.
+3. Add integration tests for mention parse + routing semantics.
+
+### Decisions Made
+- Chose minimal invasive routing by extending existing `messageSubAgent(...)` path instead of introducing a new websocket action.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.41 - April 2, 2026 (Taskbar/sub-agent UI refresh + card redesign pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused UI pass
+
+### What Was Done
+- Redesigned sidebar thread/task bar styling toward the reference look: lighter gradient sidebar, text-forward thread rows, and nested sub-agent thread rows showing agent name + task summary rather than heavy boxed cards.
+- Updated sub-agent panel behavior to focus on background-agent status list UX (name shimmer + live status + model tooltip + open thread action), removing inline message/stop controls from that bar.
+- Added File System consent flow in Connections tab:
+  - still off by default,
+  - explicit warning prompts before enabling,
+  - desktop directory picker consent request (where supported) before activation.
+- Added persistent filesystem data-access warning copy under built-in tools section.
+- Reworked `ask_user_input` card behavior so the final option behaves like a writable slot (inline input row) while keeping selectable options + continue flow.
+- Logged this pass in onboarding.
+
+### What's Working
+- Thread list is now less boxy and closer to title/letter style requested.
+- Background agents bar now behaves more like a compact status surface with expandable list and open-thread actions.
+- Filesystem toggle now has explicit user-consent prompts and warning copy.
+- ask-user-input card now supports inline writable option slot pattern.
+
+### What's NOT Working Yet
+- Full @mention-to-subagent tagging flow and cross-thread parent↔sub-agent messaging protocol still needs dedicated wiring.
+- Native host filesystem bridging remains browser-permission scoped (cannot bypass browser sandbox).
+
+### Next Steps
+1. Implement `@` mention picker in composer tied to active spawned sub-agent names.
+2. Add explicit parent/sub-agent thread routing and message-target API payloads.
+3. Iterate summary/approval card visual polish further against reference shots.
+
+### Decisions Made
+- Prioritized interactive parity and safety semantics first, then visual-only refinements.
+
+### Blockers
+- Browser security model limits direct filesystem access beyond user-granted handles.
+
+---
+
+## Session 5.40 - April 2, 2026 (PR review follow-up: shell startup safety + release-note documentation)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review warning in `universal_navigator.py` by switching shell execution from `bash -lc` to `bash -c` in `_run_shell(...)` to avoid login-shell startup behavior.
+- Addressed review suggestion about behavior-change communication by adding a new changelog entry (`v1.2.1`) documenting:
+  - reasoning controls relocation to Settings,
+  - `enableReasoning` default now on for new profiles,
+  - shell executor safety hardening.
+
+### What's Working
+- Shell tool now launches commands without login-shell rc sourcing path.
+- Release notes now explicitly communicate the reasoning-default behavior change for users/upgraders.
+
+### What's NOT Working Yet
+- Hosted release rollout verification remains pending product deployment.
+
+### Next Steps
+1. Deploy updated build and confirm changelog modal surfaces `v1.2.1` notes.
+2. Merge PR once reviewer confirms warning/suggestion are satisfied.
+
+### Decisions Made
+- Kept the fix minimal (`-lc` → `-c`) so execution semantics stay the same while reducing startup risk.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.39 - April 2, 2026 (Railway build-log follow-up verification for ChatPanel TS2304)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 verification + hotfix confirmation pass
+
+### What Was Done
+- Reviewed the new Railway screenshots showing `TS2304` unresolved names in `frontend/src/components/ChatPanel.tsx` (`reasoningEffort`, `enableReasoning`, `currentModelSupportsReasoning`, `onToggleReasoning`).
+- Verified current branch code no longer references those undefined symbols in the cited line regions.
+- Reproduced the Railway-style frontend stage locally with a fresh install (`npm ci` then `npm run build`) to validate that the failing TypeScript path is resolved.
+
+### What's Working
+- Frontend build now passes cleanly after fresh dependency install.
+- The specific TS2304 ChatPanel unresolved-symbol cluster from Railway screenshots is not reproducible on current head.
+
+### What's NOT Working Yet
+- Hosted Railway confirmation still depends on redeploying this latest commit.
+
+### Next Steps
+1. Redeploy current head to Railway.
+2. Confirm build logs no longer show `ChatPanel.tsx` TS2304 errors.
+
+### Decisions Made
+- Kept this pass as a strict verification pass (no additional code edits) because the current source already contains the fix.
+
+### Blockers
+- None in code; only hosted redeploy verification remaining.
+
+---
+
+## Session 5.38 - April 2, 2026 (Input bar simplification + move reasoning controls to Agent settings)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend pass
+
+### What Was Done
+- Simplified the chat input composer to keep only the requested controls in the action row (`+`, `Plan`, and send/stop), removing extra chips and the inline Think button.
+- Removed the “Think harder” control block from the plus-menu so reasoning controls are no longer mixed into the chat composer UI.
+- Added reasoning controls to **Settings → Agent → Provider & Model**:
+  - `Enable reasoning` toggle
+  - reasoning mode choices rendered only when the selected model supports reasoning
+  - default reasoning mode remains `medium` with support for `high`, `extended`, and `adaptive` based on model capability mapping.
+- Updated settings typing/defaults so reasoning is enabled by default and supports expanded effort values (`medium | high | extended | adaptive`).
+- Added model-aware helper `reasoningModesForModel(...)` to central model metadata logic.
+- Added provider-side normalization/mapping for extended reasoning modes to keep API compatibility:
+  - OpenAI/xAI normalize unsupported effort labels (`extended`/`adaptive`) to supported values.
+  - Google thinking budget mapping now includes `extended` and `adaptive` budgets.
+- Updated chat log parsing so `[thinking] ...` tool-like lines render as plain thinking accordion rows instead of shell cards.
+
+### What's Working
+- Input bar now matches the requested minimal control set.
+- Reasoning controls are centralized in Agent configuration where they belong.
+- Thinking traces are rendered as plain “Thinking” accordion rows with shimmer, not shell terminal cards.
+
+### What's NOT Working Yet
+- Visual QA on deployed Railway/mobile environment is still pending.
+
+### Next Steps
+1. Deploy and verify on Railway/mobile that reasoning controls appear only for reasoning-capable selected models.
+2. Optionally persist per-model preferred reasoning mode if you want automatic switching between providers/models.
+
+### Decisions Made
+- Kept reasoning as a settings-level capability rather than a per-message inline composer switch.
+- Implemented compatibility mapping in providers to avoid API rejections when UI offers extended/adaptive semantics.
+
+### Blockers
+- Hosted visual verification still requires redeploy.
+
+---
+
+## Session 5.37 - April 2, 2026 (Railway frontend build-break follow-up: undefined ChatPanel symbols)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hotfix pass
+
+### What Was Done
+- Investigated Railway build-log screenshots and traced the reported TypeScript compile failures to missing symbol references in `ChatPanel.tsx` (`currentModelMeta`, `reasoningEffort`, `isLocalOnly`, `hasFullAccess`), indicating composer UI values were referenced without reliable local declarations.
+- Hardened `InputBarCursor` by introducing explicit optional props for composer metadata (`modelChipLabel`, `effortChipLabel`, `isLocalOnly`, `hasFullAccess`) with safe defaults.
+- Updated composer chip/status rendering to consume those props rather than undeclared in-scope names.
+- Added concrete parent-level computed values in `ChatPanel` and passed them into `InputBarCursor`, ensuring all values used by the input bar are always declared in the component scope.
+- Re-ran frontend production build to verify the TypeScript failure path is resolved.
+
+### What's Working
+- `ChatPanel` now compiles with strongly defined composer metadata inputs and no unresolved symbol references.
+- Frontend production build succeeds locally after the fix.
+
+### What's NOT Working Yet
+- Railway deploy itself was not executed from this environment; confirmation on hosted infra still depends on a fresh deploy run.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Verify Build Logs no longer report TS2304 undefined-name errors from `ChatPanel.tsx`.
+3. If any residual build issues remain, capture the first error block (not the package-install scrollback) and patch iteratively.
+
+### Decisions Made
+- Kept the fix minimal and type-safe by wiring explicit props/defaults instead of relying on implicit free variables in JSX.
+
+### Blockers
+- Hosted verification requires Railway redeploy access.
+
+---
+
+## Session 5.36 - April 2, 2026 (Enable real sandbox shell command execution)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused runtime pass
+
+### What Was Done
+- Added a new universal runtime tool `exec_shell` so Aegis can execute real shell commands (for scripts/CLI workflows) inside the per-session workspace sandbox.
+- Implemented runtime execution handler `_run_shell(...)` in `universal_navigator.py` using async process execution (`bash -lc ...`) with bounded timeout, sanitized environment variable pass-through, and structured stdout/stderr/return-code output.
+- Wired `exec_shell` into the active tool dispatch path and local-workspace capability detection so the model can plan shell steps alongside file/code tools.
+- Extended sub-agent capabilities to include `exec_shell` plus existing code execution tools (`exec_python`, `exec_javascript`) so spawned sub-agents can also run commands/scripts in sandbox scope.
+- Updated sub-agent system prompt documentation to advertise the new runnable code/command tools.
+- Updated frontend Settings → Tools catalog to expose the new `Run Shell` permission toggle under Code Execution.
+
+### What's Working
+- The agent now has a first-class tool to run real shell commands for command/script tasks.
+- Sub-agents can use shell/python/javascript execution within the same session-sandbox boundary.
+- Tool permissions UI now includes `exec_shell` so users/admins can gate it like other high-risk execution tools.
+
+### What's NOT Working Yet
+- This pass did not add a terminal emulator stream transport; execution is currently command-result based (stdout/stderr snapshots after command completion).
+
+### Next Steps
+1. Add progressive stdout streaming events for long-running shell commands.
+2. Add command execution history persistence metadata (duration/resource usage) in task logs.
+3. Optionally add explicit command policy guardrails (denylist/allowlist) configurable from admin settings.
+
+### Decisions Made
+- Reused the existing session workspace sandbox and environment filtering model to keep shell execution consistent with current Python/JavaScript tool safety posture.
+- Kept `exec_shell` high-risk with default `confirm` permission.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend pass
+
+### What Was Done
+- Reworked the chat input composer to more closely match the provided reference style: larger rounded container, embedded send button, toolbar row with `+` and `Plan`, and a secondary status strip for environment/access context.
+- Added inline model/context chips in the composer row (`GPT-5.4`, `Extra High`, `IDE context`) to mirror the requested visual treatment.
+- Updated shell/tool run cards to better communicate sandboxed execution by adding explicit `sandbox`/`Sandboxed` badges on collapsed and expanded terminal views.
+- Improved shell-card run lifecycle behavior so cards auto-expand while a run is active and automatically collapse into one-line summary rows once execution finishes (click row to reopen details).
+- Refined thinking-stream behavior so the latest thinking message shows the shimmering `Thinking` state while work is active, with thought details still hidden behind click-to-expand dropdown behavior.
+
+### What's Working
+- Chat composer now presents the requested compact modern layout with prominent CTA controls and bottom status strip.
+- Terminal runs now read as sandboxed and fold back to concise timeline rows after completion, matching the requested interaction model.
+- Thinking indicator now visibly streams on the newest active thought while preserving explicit opt-in reveal for detailed reasoning text.
+
+### What's NOT Working Yet
+- This pass did not yet redesign the ask-user-input card, task summary card, or broader thread visual system (queued for next steps).
+- No browser screenshot artifact was captured in this environment for visual confirmation.
+
+### Next Steps
+1. Redesign `ask_user_input` card to match the reference interaction style exactly.
+2. Redesign summary/plan cards and unify thread spacing/typography to the same visual system.
+3. Add explicit backend/runtime metadata plumbing if shell cards should reflect real sandbox container IDs or tool-run provenance.
+
+### Decisions Made
+- Prioritized immediate chat-panel parity elements requested first (input bar, shell run lifecycle, thinking indicator) before touching ask-user-input and summary/thread redesign.
+- Kept behavior backward compatible: only presentation and local chat rendering logic changed in this pass.
+
+### Blockers
+- Exact pixel-level parity is limited by image clarity and absence of inspectable design source.
+
+---
+
 ## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
 
 **Agent:** GPT-5.3-Codex  
@@ -1824,3 +2104,242 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.24 - April 2, 2026 (Action Log Browser-only Filtering + Task Label Source Ownership)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated browser Action Log behavior so it now renders only browser tool-call entries and task outcome events (result/error/interrupt), while preserving full logs for chat rendering.
+- Added browser-tool filtering in `frontend/src/App.tsx` via `isBrowserActionLogEntry(...)` with an explicit browser-tool allowlist.
+- Added task-label injection to Action Log groups by passing `taskLabels` from task history into `ActionLog`, so labels don’t depend on first log line ordering.
+- Added panel-origin label metadata on new task creation:
+  - Chat composer sends `task_label_source: "chat"` and `task_label`.
+  - Browser URL submit sends `task_label_source: "browser"` and `task_label`.
+  - Task history entries now persist `labelSource` for source ownership.
+- Updated shared docs content (`shared/docs/content.ts`) changelog and WebSocket reference notes to document the new Action Log behavior.
+- Updated root `README.md` with a “Clean action log” feature row and a UX note explaining source-owned task labels.
+
+### What's Working
+- Browser Action Log surface is now scoped to browser tool telemetry + task outcomes.
+- Chat panel still receives full execution/log stream (including non-browser tools).
+- Task titles render from history labels in Action Log groups, reducing missing/unstable labels.
+- Shared docs + README now reflect these UX/telemetry rules.
+
+### What's NOT Working Yet
+- No end-to-end UI test run was completed in this pass to validate all panel interactions under live session traffic.
+
+### Next Steps
+1. Add a focused frontend test for Action Log filtering (browser tools included, non-browser tools excluded).
+2. Add regression coverage for task label source ownership when starting tasks from chat vs browser URL bar.
+3. Validate on a live session that restored task history keeps Action Log group labels stable after refresh.
+
+### Decisions Made
+- Chose presentation-layer filtering for Action Log (in `App.tsx`) so non-browser tool logs remain available for chat and future observability surfaces.
+
+### Blockers
+- None in this pass.
+
+## Session 5.25 - April 2, 2026 (Phase 2-4 Split-Surface UX: Handoff Prompt, Auto-Return, Feature Flags)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented phase 2 contextual handoff UX:
+  - Added a transition-based browse prompt in chat that appears when a task starts browsing while the user is in chat mode.
+  - Prompt is shown at most once per task id and can be dismissed.
+- Implemented phase 3 auto-return behavior:
+  - Added optional auto-switch from browser surface back to chat after task completion.
+  - Added completion notification when auto-return triggers.
+- Implemented phase 4 safety-net rollout controls:
+  - Added feature flags in settings (`separateExecutionSurfaces`, `promptToSwitchOnBrowse`, `autoReturnToChat`) with defaults enabled.
+  - Added Agent settings toggles for all three controls.
+- Updated shared docs changelog and README UX notes to reflect phase 2-4 behavior.
+
+### What's Working
+- Handoff prompt now triggers on idle→working transition (chat mode only) and is non-spammy per task.
+- Auto-return to chat works on working→idle transition when user is on browser surface and setting is enabled.
+- Safety flags allow turning split-surface UX off or tuning prompt/auto-return independently.
+- Frontend compiles cleanly.
+
+### What's NOT Working Yet
+- No dedicated UI integration test harness exists yet for multi-transition chat/browser state flows.
+
+### Next Steps
+1. Add integration tests for:
+   - handoff prompt appears once per task,
+   - dismiss behavior,
+   - auto-return enabled/disabled paths.
+2. Add telemetry counters for prompt shown, prompt dismissed, and auto-return triggered.
+3. Consider exposing a short in-product tooltip that explains these toggles under Agent settings.
+
+### Decisions Made
+- Implemented transition-based effects in `App.tsx` (instead of continuous prompt rendering) to avoid prompt fatigue and duplicate prompts.
+
+### Blockers
+- None in this pass.
+
+## Session 5.26 - April 2, 2026 (Mobile bubble regression, ask_user_input inline UX, billing+telegram import fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Fixed chat rendering regression where optimistic local user bubbles could disappear after server history hydration:
+  - server sync now preserves unsynced local user messages instead of hard-replacing message state.
+- Removed assistant timestamps from chat reply cards while keeping user-side timestamp behavior.
+- Reworked `ask_user_input` UI from popup-like card behavior into inline quick-reply tool UX:
+  - clickable numbered option chips that immediately send,
+  - always-available custom reply slot (`Type custom reply`) that opens inline input,
+  - custom text is sent via Continue button or Enter key.
+- Added explicit local user bubble insertion when responding to `ask_user_input`, so selected/custom replies appear in chat as user messages.
+- Fixed backend import/test blockers:
+  - added `_get_cycle_bounds(...)` helper export in `backend/admin/billing.py` and reused it in plan updates,
+  - restored validation constraints for billing payload models,
+  - restored Telegram compatibility surface in `integrations/telegram.py` (`TelegramAPIError`, `TelegramClient`, `TelegramConfig`) and implemented missing helper methods expected by tests (`validate_webhook_secret`, `handle_webhook_update`, `stream_draft_then_send`).
+
+### What's Working
+- Frontend build passes with the updated chat + ask-user-input behavior.
+- Admin billing tests pass including `_get_cycle_bounds` import and payload validation.
+- Telegram integration tests pass including API error handling and draft-stream flow.
+
+### What's NOT Working Yet
+- Full test suite still appears to stall on websocket conversation persistence tests in this environment (timed out on the targeted websocket test), requiring separate investigation.
+
+### Next Steps
+1. Debug websocket test hang in `tests/test_conversation_persistence.py::test_websocket_navigation_persists_user_and_assistant_messages`.
+2. Add frontend interaction tests for ask_user_input quick-reply/custom flow.
+3. Validate mobile UX manually on-device for the optimistic user bubble path.
+
+### Decisions Made
+- Kept ask_user_input as an inline chat card (tool-like flow) rather than modal/popup to avoid input-bar obstruction and match chat-native response patterns.
+
+### Blockers
+- Websocket persistence test timeout/hang (not an import error; likely async event sequencing issue).
+
+## Session 5.27 - April 2, 2026 (PR #132 follow-up: multi-word sub-agent mention routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed PR review issue about mention parsing failing for multi-word sub-agent display names.
+- Introduced canonical mention handles in `App.tsx` (`subAgentMentionHandle(...)`) derived from display names and normalized to no-space slug format.
+- Updated routing logic in `handleSend(...)` to match mentions against canonical handles (instead of display-name text with spaces), so selected mentions route reliably.
+- Updated chat mention picker input contract from plain `subAgentNames: string[]` to structured `subAgentMentions: { handle, label }[]` and render both handle + readable label in picker UI.
+- Mention insertion now writes `@<handle>` tokens only, preventing partial-token cleanup/routing mismatches.
+
+### What's Working
+- Mention token parsing and cleanup regex now consistently handle sub-agent mentions because tokens are canonical single-segment handles.
+- Frontend build passes with the new mention model and prop wiring.
+- Billing and Telegram focused backend tests remain green after this change.
+
+### What's NOT Working Yet
+- Full-suite websocket persistence timeout remains a separate known issue (unchanged in this pass).
+
+### Next Steps
+1. Add frontend unit tests for mention picker insertion and routing metadata (`target_subagents`).
+2. Add regression test for multi-word sub-agent display labels mapping to canonical handles.
+3. Continue websocket persistence timeout investigation separately.
+
+### Decisions Made
+- Chose canonical mention handles (`@research-pricing`) instead of parsing full display names with spaces to keep routing deterministic and regex-safe.
+
+### Blockers
+- None new in this pass.
+
+## Session 5.28 - April 2, 2026 (PR #134 review follow-up: reasoning budget parity)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed PR #134 review concern about frontend exposing `extended` reasoning while runtime budget mapping only recognized `low|medium|high`.
+- Updated `universal_navigator.run_universal_navigation(...)` reasoning budget map to include:
+  - `extended: 24000`
+  - `adaptive: 12000`
+- Added regression coverage in `tests/test_universal_navigator_system_prompt.py` to assert `reasoning_effort="extended"` forwards `reasoning_budget=24000` into provider stream kwargs.
+
+### What's Working
+- Extended reasoning mode is now behaviorally aligned with runtime budget mapping for providers that rely on numeric `reasoning_budget`.
+- New regression test passes.
+- Frontend production build remains green.
+
+### What's NOT Working Yet
+- Full-suite websocket persistence timeout remains a separate known issue (unchanged in this pass).
+
+### Next Steps
+1. Add a similar regression assertion for `adaptive` budget forwarding.
+2. Add provider-specific integration tests for Anthropic reasoning budget propagation.
+3. Continue websocket persistence timeout investigation separately.
+
+### Decisions Made
+- Chose explicit numeric mapping for `extended` and `adaptive` in universal navigator to keep frontend reasoning choices truthful and deterministic across providers.
+
+### Blockers
+- None new in this pass.
+
+## Session 5.29 - April 2, 2026 (PR #134 follow-up hardening: unique mention-safe handles)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Further hardened canonical sub-agent mention handles to avoid routing collisions across similarly named sub-agents.
+- Updated `subAgentMentionHandle(...)` to append a deterministic short sub-agent id suffix (`-<sub_id[:4]>`), yielding mention-safe unique handles such as `research-pricing-a1b2`.
+- This keeps routing token-safe (single `@token`) while preventing ambiguous matching between agents with similar two-word display labels.
+
+### What's Working
+- Frontend build passes with the updated unique handle format.
+- Reasoning budget regression tests still pass.
+
+### What's NOT Working Yet
+- Full-suite websocket persistence timeout remains a separate known issue (unchanged in this pass).
+
+### Next Steps
+1. Consider exposing copy-to-clipboard mention handle in sub-agent UI for quick insertion.
+2. Add frontend test coverage for duplicate display labels routing to different sub-agent ids.
+3. Continue websocket persistence timeout investigation separately.
+
+### Decisions Made
+- Prefer deterministic unique mention handles over purely label-derived handles to ensure correct routing under name collisions.
+
+### Blockers
+- None new in this pass.
+
+## Session 5.30 - April 2, 2026 (PR #134 conflict-resolution follow-up: DRY reasoning normalizer)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed code review warning about duplicated `_normalize_reasoning_effort` logic across `openai_provider.py` and `xai_provider.py`.
+- Extracted shared helper to `backend/providers/_utils.py`:
+  - `normalize_reasoning_effort(effort: str) -> str`
+- Updated both providers to import/use this shared utility and removed duplicated local normalizer functions.
+- Added regression tests in `tests/test_provider_reasoning_utils.py` covering:
+  - `extended -> high`
+  - `adaptive -> medium`
+  - safe defaults for empty/invalid values.
+
+### What's Working
+- Shared normalization logic is centralized and DRY.
+- Provider reasoning normalization behavior is unchanged functionally but now easier to maintain.
+- Focused provider + universal navigator tests pass.
+- Frontend build remains green.
+
+### What's NOT Working Yet
+- Full-suite websocket persistence timeout remains a separate known issue (unchanged in this pass).
+
+### Next Steps
+1. Optionally move additional provider shared helpers (message coercion, model-id helpers) into `_utils.py` as follow-up.
+2. Add provider-specific integration tests to assert normalized values are passed to SDK calls.
+3. Continue websocket persistence timeout investigation separately.
+
+### Decisions Made
+- Chose a small `_utils.py` module for shared provider helpers to keep imports clear and avoid circular dependencies.
+
+### Blockers
+- None new in this pass.

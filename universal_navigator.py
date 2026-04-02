@@ -153,6 +153,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "default_permission": "confirm",
     },
     {
+        "name": "exec_shell",
+        "description": "Run a shell command inside the current session workspace sandbox.",
+        "example": {"tool": "exec_shell", "command": "pytest -q", "cwd": ".", "timeout_seconds": 60},
+        "risk": "high",
+        "default_permission": "confirm",
+        "subagent_available": True,
+    },
+    {
         "name": "ask_user_input",
         "description": "Pause execution and ask the user a clarifying question.",
         "example": {"tool": "ask_user_input", "question": "Which repo should I modify?", "options": ["Repo A", "Repo B", "Let me tell you"]},
@@ -442,7 +450,7 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
 
     browser_tools_enabled = any(tool["name"] == "screenshot" for tool in available)
     github_tools_enabled = any(str(tool["name"]).startswith("github_") for tool in available)
-    local_workspace_enabled = any(tool["name"] in {"list_files", "read_file", "write_file", "exec_python", "exec_javascript"} for tool in available)
+    local_workspace_enabled = any(tool["name"] in {"list_files", "read_file", "write_file", "exec_python", "exec_javascript", "exec_shell"} for tool in available)
 
     rules: list[str] = [
         "Return exactly ONE JSON tool call per message and nothing else.",
@@ -668,6 +676,10 @@ class UniversalToolExecutor:
 
             if tool == "exec_javascript":
                 result = await self._run_code(tool_call, interpreter="node", suffix=".mjs")
+                return _json_result(result), None
+
+            if tool == "exec_shell":
+                result = await self._run_shell(tool_call)
                 return _json_result(result), None
 
             if tool == "ask_user_input":
@@ -1050,6 +1062,47 @@ class UniversalToolExecutor:
             "stderr": _truncate(stderr.decode("utf-8", errors="replace"), CODE_OUTPUT_LIMIT),
         }
 
+    async def _run_shell(self, tool_call: dict[str, Any]) -> dict[str, Any]:
+        """Execute a shell command in the session workspace."""
+        command = str(tool_call.get("command", "")).strip()
+        if not command:
+            raise RuntimeError("command is required")
+        cwd = str(tool_call.get("cwd", ".")).strip() or "."
+        cwd_path = resolve_session_path(self._session_id, cwd)
+        workdir = cwd_path if cwd_path.is_dir() else cwd_path.parent
+        workdir.mkdir(parents=True, exist_ok=True)
+        timeout = min(max(int(tool_call.get("timeout_seconds", 60)), 1), 180)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not any(key.upper().startswith(prefix) for prefix in EXEC_ENV_BLOCKED_PREFIXES)
+        }
+        env.setdefault("HOME", str(get_session_workspace_root(self._session_id)))
+        env.setdefault("CI", "1")
+        process = await asyncio.create_subprocess_exec(
+            "bash",
+            "-c",
+            command,
+            cwd=str(workdir),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise RuntimeError(f"shell command timed out after {timeout} seconds") from exc
+        return {
+            "ok": process.returncode == 0,
+            "cwd": str(workdir),
+            "command": command,
+            "return_code": process.returncode,
+            "stdout": _truncate(stdout.decode("utf-8", errors="replace"), CODE_OUTPUT_LIMIT),
+            "stderr": _truncate(stderr.decode("utf-8", errors="replace"), CODE_OUTPUT_LIMIT),
+        }
+
     def _summarize_text(self, content: str, *, max_sentences: int) -> str:
         """Create a small summary without calling the model again."""
         if not content:
@@ -1376,7 +1429,15 @@ async def run_universal_navigation(
             if enable_reasoning and on_step:
                 await on_step({"type": "reasoning_start", "step_id": thinking_step_id, "content": "[thinking]", "steering": []})
 
-            effort_budgets = {"low": 2000, "medium": 8000, "high": 16000}
+            effort_budgets = {
+                "low": 2000,
+                "medium": 8000,
+                "high": 16000,
+                "extended": 24000,
+                # Adaptive is a provider-level hint in some SDKs; use a sensible
+                # intermediate budget when a numeric budget is required.
+                "adaptive": 12000,
+            }
             reasoning_budget = effort_budgets.get(reasoning_effort, 8000)
             stream_kwargs: dict[str, Any] = {
                 "model": model,

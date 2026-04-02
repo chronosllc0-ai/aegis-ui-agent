@@ -229,6 +229,24 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
     onChange(integrations.map((i) => (i.id === id ? { ...i, ...patch } : i)))
   }
 
+  const requestFilesystemConsent = async (): Promise<boolean> => {
+    const warning = window.confirm(
+      'Enable File System access?\n\nAegis may read and write files you explicitly grant access to. Continue only on a trusted device.',
+    )
+    if (!warning) return false
+    const secondary = window.confirm(
+      'Final consent: granting filesystem access can expose sensitive data. Do you want to proceed?',
+    )
+    if (!secondary) return false
+    try {
+      const picker = (window as Window & { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker
+      if (picker) await picker()
+    } catch {
+      return false
+    }
+    return true
+  }
+
   const setBotError = (id: string, msg: string | null) => {
     setBotErrors((prev) => ({ ...prev, [id]: msg }))
   }
@@ -615,13 +633,22 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                 </div>
                 <button
                   type="button"
-                  onClick={() => updateIntegration(integration.id, { enabled: !integration.enabled, status: integration.enabled ? 'disabled' : 'connected' })}
+                  onClick={async () => {
+                    if (integration.id === 'filesystem' && !integration.enabled) {
+                      const ok = await requestFilesystemConsent()
+                      if (!ok) return
+                    }
+                    updateIntegration(integration.id, { enabled: !integration.enabled, status: integration.enabled ? 'disabled' : 'connected' })
+                  }}
                   className={`relative h-6 w-11 rounded-full transition-colors ${integration.enabled ? 'bg-blue-600' : 'bg-zinc-700'}`}
                 >
                   <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${integration.enabled ? 'left-[22px]' : 'left-0.5'}`} />
                 </button>
               </div>
             ))}
+            <div className='rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-xs text-amber-200'>
+              File System is <span className='font-semibold'>off by default</span>. Enabling it requires explicit consent because it can expose local data.
+            </div>
           </div>
         </section>
       )}

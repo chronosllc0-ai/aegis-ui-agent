@@ -3,7 +3,7 @@ import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig }
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
-export type ReasoningEffort = 'low' | 'medium' | 'high'
+export type ReasoningEffort = 'medium' | 'high' | 'extended' | 'adaptive'
 
 export type WorkflowTemplate = {
   id: string
@@ -41,6 +41,12 @@ export type AppSettings = {
   enableReasoning: boolean
   /** Reasoning effort level for models that support it (e.g. o3, grok-3-mini). */
   reasoningEffort: ReasoningEffort
+  /** Safety flag for split-surface UX (chat intent + browser execution telemetry). */
+  separateExecutionSurfaces: boolean
+  /** Show contextual handoff prompt when browsing starts while user is in chat mode. */
+  promptToSwitchOnBrowse: boolean
+  /** Automatically return from browser surface to chat when a task completes. */
+  autoReturnToChat: boolean
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -64,8 +70,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   workflowTemplates: [],
   toolPermissions: {},
   disabledTools: [],
-  enableReasoning: false,
+  enableReasoning: true,
   reasoningEffort: 'medium',
+  separateExecutionSurfaces: true,
+  promptToSwitchOnBrowse: true,
+  autoReturnToChat: true,
 }
 
 // Providers that require a user-supplied BYOK key to work
