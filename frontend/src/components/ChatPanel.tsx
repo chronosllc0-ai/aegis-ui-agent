@@ -40,6 +40,8 @@ export interface ChatPanelProps {
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
+  /** True when the agent is actively executing browser steps right now */
+  isBrowsing?: boolean
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -107,10 +109,68 @@ const RE_MODEL_RESPONSE  = /^Model response/i
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
 
+/**
+ * Browser-execution tool names that belong exclusively in the ActionLog.
+ * Non-browser tools (search, code, file ops, APIs, etc.) still surface in chat
+ * as collapsible ShellCards so the user has visibility into non-browser work.
+ */
+const BROWSER_TOOL_NAMES = new Set([
+  'navigate_browser', 'navigate', 'go_to_url', 'open_url', 'load_url',
+  'click_element', 'click', 'left_click', 'right_click', 'double_click',
+  'type_text', 'type', 'input_text', 'fill_input', 'clear_and_type',
+  'scroll_page', 'scroll', 'scroll_down', 'scroll_up', 'scroll_to_element',
+  'hover_element', 'hover', 'mouse_move',
+  'press_key', 'key_press', 'keyboard_press',
+  'take_screenshot', 'screenshot',
+  'extract_text', 'get_page_text', 'get_inner_text',
+  'get_element', 'find_element', 'wait_for_element', 'wait_for_selector',
+  'select_option', 'check_checkbox', 'uncheck_checkbox',
+  'get_page_html', 'get_dom', 'evaluate_js', 'execute_script',
+  'drag_and_drop', 'upload_file_to_browser',
+])
+
+/**
+ * Internal agent meta-tools that are pure housekeeping — never shown as
+ * cards in the chat panel. The isWorking shimmer already signals activity.
+ */
+const SILENT_TOOL_NAMES = new Set([
+  'thinking', 'think', 'internal_think',
+  'wait', 'sleep', 'pause', 'noop', 'no_op',
+  'set_next_step', 'plan_step', 'record_thought',
+])
+
+/**
+ * Returns true if this log entry should be hidden from the chat conversation.
+ *
+ * Rules:
+ *   1. Raw browser stepKinds (click / type / scroll) → ActionLog only.
+ *   2. Navigate entries with elapsedSeconds > 0 → ActionLog only.
+ *   3. Tool calls in BROWSER_TOOL_NAMES → ActionLog only.
+ *   4. Tool calls in SILENT_TOOL_NAMES → hidden entirely (internal housekeeping).
+ *
+ * Non-browser, non-silent tool calls (web_search, run_code, read_file…)
+ * pass through and render as ShellCards in chat.
+ */
+function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
+  if (entry.stepKind === 'click' || entry.stepKind === 'type' || entry.stepKind === 'scroll') return true
+  if (entry.stepKind === 'navigate' && entry.elapsedSeconds > 0) return true
+
+  if (RE_TOOL_CALL.test(msg)) {
+    const match = msg.match(/^\[([\w_]+)\]/)
+    const toolName = match?.[1]?.toLowerCase()
+    if (toolName && (BROWSER_TOOL_NAMES.has(toolName) || SILENT_TOOL_NAMES.has(toolName))) return true
+  }
+
+  return false
+}
+
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
     const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+
+    // ── Browser-execution steps: ActionLog only, never in chat ──────────────
+    if (isBrowserOnlyEntry(entry, msg)) continue
 
     if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
       const stepId = entry.stepId
@@ -931,7 +991,11 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
+  enableReasoning?: boolean
+  currentModelSupportsReasoning?: boolean
+  onToggleReasoning?: (enabled: boolean) => void
   modelChipLabel?: string
+  effortChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
 }
@@ -939,8 +1003,10 @@ interface InputBarCursorProps {
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
-  activeConnector, onRemoveConnector, hasAttachments,
+  activeConnector, onRemoveConnector, hasAttachments, enableReasoning,
+  currentModelSupportsReasoning, onToggleReasoning,
   modelChipLabel = 'GPT-5.4',
+  effortChipLabel = 'Standard',
   isLocalOnly = true,
   hasFullAccess = true,
 }: InputBarCursorProps) {
@@ -1009,7 +1075,28 @@ function InputBarCursor({
           Plan
         </button>
 
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
+        {modelChipLabel && (
+          <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
+        )}
+        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>{effortChipLabel}</span>
+        <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
+
+        {/* Think harder toggle — only for capable models */}
+        {currentModelSupportsReasoning && (
+          <button type='button'
+            onClick={() => onToggleReasoning?.(!enableReasoning)}
+            className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs font-medium transition-colors flex-shrink-0 ${
+              enableReasoning
+                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
+                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
+            }`}>
+            <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+              <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
+              <path d='M9 18h6' /><path d='M10 22h4' />
+            </svg>
+            Think
+          </button>
+        )}
 
         <div className='flex-1' />
 
@@ -1025,8 +1112,9 @@ function InputBarCursor({
       </div>
 
       <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
-        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◻ Local' : '◻ Remote'}</span>
-        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◉ Limited access'}</span>
+        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◉ Local' : '◻ Local'}</span>
+        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◻ Full access'}</span>
+        <span className='inline-flex items-center gap-1'>◉ Full access</span>
       </div>
     </div>
   )
@@ -1041,6 +1129,7 @@ export function ChatPanel({
   connectionStatus,
   onSwitchToBrowser,
   latestFrame,
+  isBrowsing = false,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
@@ -1168,7 +1257,9 @@ export function ChatPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allMessages.length, activeTaskId])
 
-  const showBrowsePill = isWorking && latestFrame
+  // Show the browsing banner when: the agent is actively browsing (isBrowsing prop),
+  // OR when there's already a live frame (backward-compat with old callers).
+  const showBrowseBanner = isBrowsing || (isWorking && Boolean(latestFrame))
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1268,20 +1359,58 @@ export function ChatPanel({
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
   const modelChipLabel = 'GPT-5.4'
+  const effortChipLabel = reasoningEffort ? `${reasoningEffort[0].toUpperCase()}${reasoningEffort.slice(1)} effort` : 'Standard'
   const isLocalOnly = true
   const hasFullAccess = true
 
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
 
-      {/* Browsing pill */}
-      {showBrowsePill && (
-        <div className='flex justify-center pt-2 px-4'>
-          <button type='button' onClick={onSwitchToBrowser}
-            className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-4 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/20 transition-colors shadow-md'>
-            <IcoGlobe className='h-3.5 w-3.5' />
-            Agent is browsing — Switch to Browser
-          </button>
+      {/* ── Browsing banner ────────────────────────────────────────────────── */}
+      {/* Sticky top banner that appears when the agent is executing browser   */}
+      {/* actions. Stays clean — does not flood the chat thread with log spam. */}
+      {showBrowseBanner && (
+        <div className='flex-shrink-0 border-b border-[#1e1e1e] bg-[#0d1626]/80 px-4 py-2.5 backdrop-blur-sm'>
+          <div className='flex items-center gap-3'>
+            {/* Live pulse dot */}
+            <span className='relative flex h-2.5 w-2.5 flex-shrink-0'>
+              <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60' />
+              <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500' />
+            </span>
+
+            {/* Label */}
+            <div className='flex-1 min-w-0'>
+              <span className='text-xs font-medium text-blue-300'>Agent is browsing</span>
+              <span className='mx-1.5 text-blue-500/50'>·</span>
+              <span className='text-xs text-zinc-500'>Results will appear here when done</span>
+            </div>
+
+            {/* CTA */}
+            <button
+              type='button'
+              onClick={onSwitchToBrowser}
+              className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300 transition-all hover:border-blue-400/50 hover:bg-blue-500/20 hover:text-blue-200 active:scale-95'
+            >
+              <IcoGlobe className='h-3 w-3' />
+              Watch live
+            </button>
+          </div>
+
+          {/* Thumbnail strip — shows latest frame as a tiny preview */}
+          {latestFrame && (
+            <button
+              type='button'
+              onClick={onSwitchToBrowser}
+              className='mt-2 block w-full overflow-hidden rounded-lg border border-[#2a2a2a] transition-opacity hover:opacity-80'
+              aria-label='Switch to browser view'
+            >
+              <img
+                src={latestFrame}
+                alt='Live browser preview'
+                className='h-16 w-full object-cover object-top'
+              />
+            </button>
+          )}
         </div>
       )}
 
@@ -1440,7 +1569,11 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
+          enableReasoning={enableReasoning}
+          currentModelSupportsReasoning={currentModelSupportsReasoning}
+          onToggleReasoning={onToggleReasoning}
           modelChipLabel={modelChipLabel}
+          effortChipLabel={effortChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
         />
