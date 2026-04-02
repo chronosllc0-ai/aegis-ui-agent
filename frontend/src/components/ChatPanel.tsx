@@ -1041,7 +1041,9 @@ function InputBarCursor({
           Plan
         </button>
 
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ GPT-5.4</span>
+        {currentModelMeta?.label && (
+          <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {currentModelMeta.label}</span>
+        )}
         <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>Extra High</span>
         <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
 
