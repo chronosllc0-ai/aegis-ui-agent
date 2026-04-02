@@ -2249,3 +2249,34 @@
 
 ### Blockers
 - None new in this pass.
+
+## Session 5.28 - April 2, 2026 (PR #134 review follow-up: reasoning budget parity)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed PR #134 review concern about frontend exposing `extended` reasoning while runtime budget mapping only recognized `low|medium|high`.
+- Updated `universal_navigator.run_universal_navigation(...)` reasoning budget map to include:
+  - `extended: 24000`
+  - `adaptive: 12000`
+- Added regression coverage in `tests/test_universal_navigator_system_prompt.py` to assert `reasoning_effort="extended"` forwards `reasoning_budget=24000` into provider stream kwargs.
+
+### What's Working
+- Extended reasoning mode is now behaviorally aligned with runtime budget mapping for providers that rely on numeric `reasoning_budget`.
+- New regression test passes.
+- Frontend production build remains green.
+
+### What's NOT Working Yet
+- Full-suite websocket persistence timeout remains a separate known issue (unchanged in this pass).
+
+### Next Steps
+1. Add a similar regression assertion for `adaptive` budget forwarding.
+2. Add provider-specific integration tests for Anthropic reasoning budget propagation.
+3. Continue websocket persistence timeout investigation separately.
+
+### Decisions Made
+- Chose explicit numeric mapping for `extended` and `adaptive` in universal navigator to keep frontend reasoning choices truthful and deterministic across providers.
+
+### Blockers
+- None new in this pass.
