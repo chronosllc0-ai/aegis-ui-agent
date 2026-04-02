@@ -399,7 +399,6 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
           )
         )}
       </div>
-      <p className='mt-0.5 text-[10px] text-zinc-600'>{msg.timestamp}</p>
     </div>
   )
 }
@@ -649,36 +648,25 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
-// ─── UserInputCard — Codex-style numbered options + always-visible text field ─
-// Mirrors Codex ask-questions UI: numbered list of selectable options, free-type
-// field always visible at the bottom (4th option becomes text input on click).
+// ─── UserInputCard — inline quick-reply + custom reply slot ───────────────────
 function UserInputCard({
   question, options, requestId, onRespond,
 }: { question: string; options: string[]; requestId: string; onRespond: (answer: string, requestId: string) => void }) {
-  const [selected, setSelected] = useState<number | null>(null)
+  const [customMode, setCustomMode] = useState(false)
   const [customText, setCustomText] = useState('')
   const [answered, setAnswered] = useState<string | null>(null)
 
-  const customOptionIndex = Math.max(options.length - 1, 0)
-  const handleSelect = (idx: number, opt: string) => {
-    setSelected(idx)
-    const isCustomSlot = idx === customOptionIndex
-    const isOtherOption = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
-    if (isCustomSlot || isOtherOption) return
+  const promptOptions = options.length > 0 ? options : ['Continue']
+  const customSlotLabel = 'Type custom reply'
+
+  const handleQuickReply = (opt: string) => {
+    setAnswered(opt)
+    onRespond(opt, requestId)
   }
 
-  const handleContinue = () => {
-    if (selected === null && !customText.trim()) return
-    let answer: string
-    if (selected === customOptionIndex && customText.trim()) {
-      answer = customText.trim()
-    } else if (customText.trim() && selected === customOptionIndex) {
-      answer = customText.trim()
-    } else if (selected !== null && options[selected]) {
-      answer = options[selected]
-    } else {
-      return
-    }
+  const handleCustomSend = () => {
+    const answer = customText.trim()
+    if (!answer) return
     setAnswered(answer)
     onRespond(answer, requestId)
   }
@@ -692,84 +680,60 @@ function UserInputCard({
   }
 
   return (
-    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
-      {/* Question header */}
-      <div className='px-4 pt-4 pb-3'>
-        <p className='text-sm font-medium leading-snug text-zinc-100'>{question}</p>
+    <div className='my-2 rounded-xl border border-[#2a2a2a] bg-[#151515]'>
+      <div className='border-b border-[#242424] px-3 py-2'>
+        <p className='text-xs font-medium text-zinc-200'>Asking question</p>
+        <p className='mt-1 text-sm leading-snug text-zinc-100'>{question}</p>
       </div>
 
-      {/* Numbered option rows */}
-      <div className='space-y-px border-t border-[#222]'>
-        {options.map((opt, idx) => {
-          const isOther = idx === customOptionIndex
-          const isSelected = selected === idx
-          if (isOther) {
-            return (
-              <div key={idx} className={`px-4 py-2.5 ${isSelected ? 'bg-[#252525]' : 'bg-transparent'}`}>
-                <div className='mb-1.5 flex items-center gap-3'>
-                  <span className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-semibold transition-colors ${
-                    isSelected ? 'border-zinc-400 bg-zinc-700 text-white' : 'border-zinc-700 text-zinc-600'
-                  }`}>
-                    {idx + 1}
-                  </span>
-                  <span className='flex-1 text-xs font-medium text-zinc-500'>{opt}</span>
-                </div>
-                <input
-                  type='text'
-                  value={customText}
-                  onFocus={() => setSelected(idx)}
-                  onChange={(e) => setCustomText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
-                  placeholder='Type your answer…'
-                  className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
-                />
-              </div>
-            )
-          }
-          return (
+      <div className='px-3 py-2'>
+        <div className='flex flex-wrap gap-2'>
+          {promptOptions.map((opt, idx) => (
             <button
-              key={idx}
+              key={`${opt}-${idx}`}
               type='button'
-              onClick={() => handleSelect(idx, opt)}
-              className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                isSelected
-                  ? 'bg-[#252525] text-zinc-100'
-                  : 'text-zinc-300 hover:bg-[#1e1e1e]'
-              }`}
+              onClick={() => handleQuickReply(opt)}
+              className='rounded-full border border-[#2f2f2f] bg-[#1d1d1d] px-3 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-[#252525]'
             >
-              <span className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-semibold transition-colors ${
-                isSelected ? 'border-zinc-400 bg-zinc-700 text-white' : 'border-zinc-700 text-zinc-600'
-              }`}>
-                {idx + 1}
-              </span>
-              <span className={`flex-1 text-xs font-medium ${isOther ? 'text-zinc-500' : ''}`}>{opt}</span>
-              {isSelected && (
-                <IcoCheck className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
-              )}
+              {idx + 1}. {opt}
             </button>
-          )
-        })}
+          ))}
+          <button
+            type='button'
+            onClick={() => setCustomMode((prev) => !prev)}
+            className={`rounded-full border px-3 py-1.5 text-xs ${
+              customMode
+                ? 'border-blue-400/60 bg-blue-500/10 text-blue-300'
+                : 'border-[#2f2f2f] bg-[#1d1d1d] text-zinc-200 hover:border-zinc-500 hover:bg-[#252525]'
+            }`}
+          >
+            {promptOptions.length + 1}. {customSlotLabel}
+          </button>
+        </div>
       </div>
 
-      {/* Footer: dismiss + continue */}
-      <div className='flex items-center justify-end gap-2 border-t border-[#222] px-4 py-3'>
-        <button
-          type='button'
-          onClick={() => onRespond('dismissed', requestId)}
-          className='px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors'
-        >
-          Dismiss
-        </button>
-        <button
-          type='button'
-          onClick={handleContinue}
-          disabled={selected === null || (selected === customOptionIndex && !customText.trim())}
-          className='flex items-center gap-1.5 rounded-xl bg-[#2a7ae2] px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-        >
-          Continue
-          <span className='text-[10px] opacity-60'>&#9166;</span>
-        </button>
-      </div>
+      {customMode && (
+        <div className='border-t border-[#242424] px-3 py-2'>
+          <div className='flex items-center gap-2'>
+            <input
+              type='text'
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCustomSend() }}
+              placeholder='Type your answer...'
+              className='flex-1 rounded-lg border border-[#2a2a2a] bg-[#101010] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-blue-500/60'
+            />
+            <button
+              type='button'
+              onClick={handleCustomSend}
+              disabled={!customText.trim()}
+              className='rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1156,17 +1120,27 @@ export function ChatPanel({
     prevServerLenRef.current = serverMessages.length
     if (!taskChanged && !serverArrived) return
     if (serverMessages.length > 0) {
-      setSentMessages(
-        serverMessages.map((m) => ({
-          id: m.id,
-          role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
-          text: m.content,
-          timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
-          attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
-            ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
-            : undefined,
-        }))
-      )
+      const serverMapped = serverMessages.map((m) => ({
+        id: m.id,
+        role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
+        text: m.content,
+        timestamp:
+          m.role === 'assistant'
+            ? undefined
+            : m.created_at
+              ? new Date(m.created_at).toLocaleTimeString()
+              : new Date().toLocaleTimeString(),
+        attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
+          ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
+          : undefined,
+      }))
+      const serverUserTexts = new Set(serverMapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+      setSentMessages((prev) => {
+        const optimisticLocalUsers = prev.filter(
+          (m) => m.role === 'user' && String(m.id).startsWith('local-') && !serverUserTexts.has((m.text ?? '').trim()),
+        )
+        return [...optimisticLocalUsers, ...serverMapped]
+      })
     } else if (taskChanged) {
       setSentMessages([])
     }
@@ -1360,6 +1334,19 @@ export function ChatPanel({
   const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onSend('approved', 'steer') }
   const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onSend('rejected', 'steer') }
 
+  const handleUserInputReply = (answer: string, requestId: string) => {
+    const trimmed = answer.trim()
+    if (!trimmed) return
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    setSentMessages((prev) => {
+      const next: ChatMessage[] = [...prev, { id: `local-${crypto.randomUUID()}`, role: 'user', text: trimmed, timestamp: now }]
+      saveMsgs(activeTaskId, next)
+      return next
+    })
+    onUserInputResponse?.(trimmed, requestId)
+    onSend(trimmed, 'steer', { task_label_source: 'chat', task_label: trimmed })
+  }
+
   const isDisabled = connectionStatus !== 'connected'
 
   // Personalised CTA — first name only
@@ -1451,7 +1438,7 @@ export function ChatPanel({
                 question={msg.question ?? msg.text}
                 options={msg.options ?? []}
                 requestId={msg.requestId ?? msg.id}
-                onRespond={(answer, reqId) => { onUserInputResponse?.(answer, reqId); onSend(answer, 'steer') }}
+                onRespond={(answer, reqId) => { handleUserInputReply(answer, reqId) }}
               />
             )
           }
