@@ -1,3 +1,105 @@
+## Session 5.37 - April 2, 2026 (Railway frontend build-break follow-up: undefined ChatPanel symbols)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hotfix pass
+
+### What Was Done
+- Investigated Railway build-log screenshots and traced the reported TypeScript compile failures to missing symbol references in `ChatPanel.tsx` (`currentModelMeta`, `reasoningEffort`, `isLocalOnly`, `hasFullAccess`), indicating composer UI values were referenced without reliable local declarations.
+- Hardened `InputBarCursor` by introducing explicit optional props for composer metadata (`modelChipLabel`, `effortChipLabel`, `isLocalOnly`, `hasFullAccess`) with safe defaults.
+- Updated composer chip/status rendering to consume those props rather than undeclared in-scope names.
+- Added concrete parent-level computed values in `ChatPanel` and passed them into `InputBarCursor`, ensuring all values used by the input bar are always declared in the component scope.
+- Re-ran frontend production build to verify the TypeScript failure path is resolved.
+
+### What's Working
+- `ChatPanel` now compiles with strongly defined composer metadata inputs and no unresolved symbol references.
+- Frontend production build succeeds locally after the fix.
+
+### What's NOT Working Yet
+- Railway deploy itself was not executed from this environment; confirmation on hosted infra still depends on a fresh deploy run.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Verify Build Logs no longer report TS2304 undefined-name errors from `ChatPanel.tsx`.
+3. If any residual build issues remain, capture the first error block (not the package-install scrollback) and patch iteratively.
+
+### Decisions Made
+- Kept the fix minimal and type-safe by wiring explicit props/defaults instead of relying on implicit free variables in JSX.
+
+### Blockers
+- Hosted verification requires Railway redeploy access.
+
+---
+
+## Session 5.36 - April 2, 2026 (Enable real sandbox shell command execution)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused runtime pass
+
+### What Was Done
+- Added a new universal runtime tool `exec_shell` so Aegis can execute real shell commands (for scripts/CLI workflows) inside the per-session workspace sandbox.
+- Implemented runtime execution handler `_run_shell(...)` in `universal_navigator.py` using async process execution (`bash -lc ...`) with bounded timeout, sanitized environment variable pass-through, and structured stdout/stderr/return-code output.
+- Wired `exec_shell` into the active tool dispatch path and local-workspace capability detection so the model can plan shell steps alongside file/code tools.
+- Extended sub-agent capabilities to include `exec_shell` plus existing code execution tools (`exec_python`, `exec_javascript`) so spawned sub-agents can also run commands/scripts in sandbox scope.
+- Updated sub-agent system prompt documentation to advertise the new runnable code/command tools.
+- Updated frontend Settings → Tools catalog to expose the new `Run Shell` permission toggle under Code Execution.
+
+### What's Working
+- The agent now has a first-class tool to run real shell commands for command/script tasks.
+- Sub-agents can use shell/python/javascript execution within the same session-sandbox boundary.
+- Tool permissions UI now includes `exec_shell` so users/admins can gate it like other high-risk execution tools.
+
+### What's NOT Working Yet
+- This pass did not add a terminal emulator stream transport; execution is currently command-result based (stdout/stderr snapshots after command completion).
+
+### Next Steps
+1. Add progressive stdout streaming events for long-running shell commands.
+2. Add command execution history persistence metadata (duration/resource usage) in task logs.
+3. Optionally add explicit command policy guardrails (denylist/allowlist) configurable from admin settings.
+
+### Decisions Made
+- Reused the existing session workspace sandbox and environment filtering model to keep shell execution consistent with current Python/JavaScript tool safety posture.
+- Kept `exec_shell` high-risk with default `confirm` permission.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend pass
+
+### What Was Done
+- Reworked the chat input composer to more closely match the provided reference style: larger rounded container, embedded send button, toolbar row with `+` and `Plan`, and a secondary status strip for environment/access context.
+- Added inline model/context chips in the composer row (`GPT-5.4`, `Extra High`, `IDE context`) to mirror the requested visual treatment.
+- Updated shell/tool run cards to better communicate sandboxed execution by adding explicit `sandbox`/`Sandboxed` badges on collapsed and expanded terminal views.
+- Improved shell-card run lifecycle behavior so cards auto-expand while a run is active and automatically collapse into one-line summary rows once execution finishes (click row to reopen details).
+- Refined thinking-stream behavior so the latest thinking message shows the shimmering `Thinking` state while work is active, with thought details still hidden behind click-to-expand dropdown behavior.
+
+### What's Working
+- Chat composer now presents the requested compact modern layout with prominent CTA controls and bottom status strip.
+- Terminal runs now read as sandboxed and fold back to concise timeline rows after completion, matching the requested interaction model.
+- Thinking indicator now visibly streams on the newest active thought while preserving explicit opt-in reveal for detailed reasoning text.
+
+### What's NOT Working Yet
+- This pass did not yet redesign the ask-user-input card, task summary card, or broader thread visual system (queued for next steps).
+- No browser screenshot artifact was captured in this environment for visual confirmation.
+
+### Next Steps
+1. Redesign `ask_user_input` card to match the reference interaction style exactly.
+2. Redesign summary/plan cards and unify thread spacing/typography to the same visual system.
+3. Add explicit backend/runtime metadata plumbing if shell cards should reflect real sandbox container IDs or tool-run provenance.
+
+### Decisions Made
+- Prioritized immediate chat-panel parity elements requested first (input bar, shell run lifecycle, thinking indicator) before touching ask-user-input and summary/thread redesign.
+- Kept behavior backward compatible: only presentation and local chat rendering logic changed in this pass.
+
+### Blockers
+- Exact pixel-level parity is limited by image clarity and absence of inspectable design source.
+
+---
+
 ## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
 
 **Agent:** GPT-5.3-Codex  
