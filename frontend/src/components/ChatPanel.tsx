@@ -1078,7 +1078,8 @@ function InputBarCursor({
       </div>
 
       <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
-        <span className='inline-flex items-center gap-1'>◻ Local</span>
+        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◉ Local' : '◻ Local'}</span>
+        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◻ Full access'}</span>
         <span className='inline-flex items-center gap-1'>◉ Full access</span>
       </div>
     </div>
