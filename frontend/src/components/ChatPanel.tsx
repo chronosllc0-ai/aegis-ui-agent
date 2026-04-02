@@ -492,25 +492,54 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
   )
 }
 
-// ─── ApprovalCard ─────────────────────────────────────────────────────────────
+// ─── ApprovalCard — permission-gate confirm/decline ──────────────────────────
+// Used for tool-permission actions and bot confirmations (Telegram, Slack, Discord).
+// Sends 'confirmed' or 'declined' as a prompt so the agent can proceed.
 function ApprovalCard({ msg, onApprove, onReject }: { msg: ChatMessage; onApprove: () => void; onReject: () => void }) {
-  return (
-    <div className='my-2 rounded-xl border border-amber-500/25 bg-[#1a1400] p-4 space-y-3'>
-      <div className='flex items-center gap-2'>
-        <span className='flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15'>
-          <IcoSparkle className='h-4 w-4 text-amber-400' />
-        </span>
-        <p className='text-xs font-semibold text-amber-300 uppercase tracking-wide'>Action requires approval</p>
+  const [status, setStatus] = useState<'pending' | 'confirmed' | 'declined'>('pending')
+
+  if (status !== 'pending') {
+    return (
+      <div className={`my-1.5 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+        status === 'confirmed' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-red-500/20 bg-red-500/5 text-red-400'
+      }`}>
+        {status === 'confirmed' ? <IcoCheck className='h-3.5 w-3.5 flex-shrink-0' /> : <IcoX className='h-3.5 w-3.5 flex-shrink-0' />}
+        <span className='font-medium'>{status === 'confirmed' ? 'Action confirmed' : 'Action declined'}</span>
+        <span className='text-zinc-500 truncate'>· {msg.text.slice(0, 60)}{msg.text.length > 60 ? '…' : ''}</span>
       </div>
-      <p className='text-sm text-zinc-300 leading-relaxed'>{msg.text}</p>
-      <div className='flex gap-2 pt-1'>
-        <button type='button' onClick={onApprove}
-          className='flex-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors'>
-          Approve
+    )
+  }
+
+  return (
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
+      {/* Header */}
+      <div className='flex items-center gap-2 border-b border-[#222] px-4 pt-4 pb-3'>
+        <span className='flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-amber-500/15'>
+          <IcoSparkle className='h-3.5 w-3.5 text-amber-400' />
+        </span>
+        <p className='text-xs font-semibold text-zinc-300'>Confirm action</p>
+      </div>
+
+      {/* Action content */}
+      <div className='px-4 py-3'>
+        <p className='text-sm leading-relaxed text-zinc-200'>{msg.text}</p>
+      </div>
+
+      {/* Buttons */}
+      <div className='flex items-center gap-2 border-t border-[#222] px-4 py-3'>
+        <button
+          type='button'
+          onClick={() => { setStatus('confirmed'); onApprove() }}
+          className='flex-1 rounded-xl bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-900 hover:bg-white transition-colors'
+        >
+          Confirm
         </button>
-        <button type='button' onClick={onReject}
-          className='rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors'>
-          Reject
+        <button
+          type='button'
+          onClick={() => { setStatus('declined'); onReject() }}
+          className='rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors'
+        >
+          Decline
         </button>
       </div>
     </div>
@@ -543,125 +572,245 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
-// ─── UserInputCard ────────────────────────────────────────────────────────────
+// ─── UserInputCard — Codex-style numbered options + always-visible text field ─
+// Mirrors Codex ask-questions UI: numbered list of selectable options, free-type
+// field always visible at the bottom (4th option becomes text input on click).
 function UserInputCard({
   question, options, requestId, onRespond,
 }: { question: string; options: string[]; requestId: string; onRespond: (answer: string, requestId: string) => void }) {
-  const [customMode, setCustomMode] = useState(false)
+  const [selected, setSelected] = useState<number | null>(null)
   const [customText, setCustomText] = useState('')
   const [answered, setAnswered] = useState<string | null>(null)
 
-  const handleOption = (opt: string) => {
-    if (opt === 'Let me tell you' || opt === 'No, let me choose') {
-      setCustomMode(true)
+  const handleSelect = (idx: number, opt: string) => {
+    setSelected(idx)
+    // Last option or "other" style options open free-text; all others auto-continue
+    const isOtherOption = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
+    if (!isOtherOption) {
+      // Send immediately on Continue click; just select for now
+    }
+  }
+
+  const handleContinue = () => {
+    if (selected === null && !customText.trim()) return
+    let answer: string
+    if (customText.trim()) {
+      answer = customText.trim()
+    } else if (selected !== null && options[selected]) {
+      answer = options[selected]
+    } else {
       return
     }
-    setAnswered(opt)
-    onRespond(opt, requestId)
+    setAnswered(answer)
+    onRespond(answer, requestId)
   }
 
   if (answered) {
     return (
-      <div className='my-2 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2'>
+      <div className='my-1.5 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2'>
         <p className='text-xs text-zinc-500'>You answered: <span className='text-zinc-300'>{answered}</span></p>
       </div>
     )
   }
 
   return (
-    <div className='my-2 rounded-xl border border-[#2a2a2a] bg-[#141414] p-4 space-y-3'>
-      <p className='text-sm font-medium text-zinc-200'>{question}</p>
-      {!customMode ? (
-        <div className='flex flex-wrap gap-2'>
-          {options.map((opt) => (
-            <button key={opt} type='button' onClick={() => handleOption(opt)}
-              className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${opt === 'Let me tell you'
-                ? 'border-zinc-600 bg-[#1a1a1a] text-zinc-400 hover:text-zinc-200'
-                : 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'}`}>
-              {opt}
-            </button>
-          ))}
-          {!options.includes('No, let me choose') && (
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
+      {/* Question header */}
+      <div className='px-4 pt-4 pb-3'>
+        <p className='text-sm font-medium leading-snug text-zinc-100'>{question}</p>
+      </div>
+
+      {/* Numbered option rows */}
+      <div className='space-y-px border-t border-[#222]'>
+        {options.map((opt, idx) => {
+          const isOther = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
+          const isSelected = selected === idx
+          return (
             <button
+              key={idx}
               type='button'
-              onClick={() => handleOption('No, let me choose')}
-              className='rounded-lg border border-zinc-600 bg-[#1a1a1a] px-3 py-1.5 text-xs font-medium text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+              onClick={() => handleSelect(idx, opt)}
+              className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                isSelected
+                  ? 'bg-[#252525] text-zinc-100'
+                  : 'text-zinc-300 hover:bg-[#1e1e1e]'
+              }`}
             >
-              No, let me choose
+              <span className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-semibold transition-colors ${
+                isSelected ? 'border-zinc-400 bg-zinc-700 text-white' : 'border-zinc-700 text-zinc-600'
+              }`}>
+                {idx + 1}
+              </span>
+              <span className={`flex-1 text-xs font-medium ${isOther ? 'text-zinc-500' : ''}`}>{opt}</span>
+              {isSelected && !isOther && (
+                <IcoCheck className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
+              )}
             </button>
-          )}
-        </div>
-      ) : (
-        <div className='flex gap-2'>
-          <input autoFocus type='text' value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) { setAnswered(customText.trim()); onRespond(customText.trim(), requestId) } }}
-            placeholder='Type your answer…'
-            className='flex-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-500/50' />
-          <button type='button'
-            onClick={() => { if (customText.trim()) { setAnswered(customText.trim()); onRespond(customText.trim(), requestId) } }}
-            className='rounded-xl bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500 transition-colors'>
-            Send
-          </button>
-        </div>
-      )}
+          )
+        })}
+      </div>
+
+      {/* Always-visible free-text field */}
+      <div className='border-t border-[#222] px-3 py-3'>
+        <input
+          type='text'
+          value={customText}
+          onChange={(e) => setCustomText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
+          placeholder='Or type your own answer…'
+          className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
+        />
+      </div>
+
+      {/* Footer: dismiss + continue */}
+      <div className='flex items-center justify-end gap-2 border-t border-[#222] px-4 py-3'>
+        <button
+          type='button'
+          onClick={() => onRespond('dismissed', requestId)}
+          className='px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors'
+        >
+          Dismiss
+        </button>
+        <button
+          type='button'
+          onClick={handleContinue}
+          disabled={selected === null && !customText.trim()}
+          className='flex items-center gap-1.5 rounded-xl bg-[#2a7ae2] px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+        >
+          Continue
+          <span className='text-[10px] opacity-60'>&#9166;</span>
+        </button>
+      </div>
     </div>
   )
 }
 
-// ─── TaskSummaryCard ──────────────────────────────────────────────────────────
+// ─── TaskSummaryCard — inline summary with expand/collapse for long plans ─────
 function TaskSummaryCard({ summary }: { summary: string }) {
   const [decision, setDecision] = useState<'pending' | 'implement' | 'discard'>('pending')
-  return (
-    <div className='my-2 rounded-xl border border-emerald-500/20 bg-[#0a1a0e] p-4 space-y-2'>
-      <div className='flex items-center gap-2'>
-        <span className='flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/15'>
-          <IcoCheck className='h-3.5 w-3.5 text-emerald-400' />
-        </span>
-        <p className='text-xs font-semibold text-emerald-300 uppercase tracking-wide'>Task Complete</p>
-      </div>
-      <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{summary}</div>
-      <div className='flex gap-2 pt-1'>
-        <button type='button' onClick={() => setDecision('implement')} className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500'>Implement</button>
-        <button type='button' onClick={() => setDecision('discard')} className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-500/20'>Discard</button>
-      </div>
-      {decision !== 'pending' && <p className='text-[11px] text-zinc-500'>Decision recorded: {decision}</p>}
-    </div>
-  )
-}
+  const [expanded, setExpanded] = useState(false)
+  const TRUNCATE_LEN = 380
+  const isLong = summary.length > TRUNCATE_LEN
+  const displayText = isLong && !expanded ? summary.slice(0, TRUNCATE_LEN) + '…' : summary
 
-// ─── PlanConfirmCard ──────────────────────────────────────────────────────────
-function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
-  plan: string; requestId: string;
-  onConfirm: (requestId: string) => void; onReject: (requestId: string) => void
-}) {
-  const [status, setStatus] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
-
-  if (status !== 'pending') {
+  if (decision !== 'pending') {
     return (
-      <div className={`my-1 rounded-xl border px-3 py-2 text-xs font-medium ${
-        status === 'confirmed' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300' : 'border-red-500/20 bg-red-500/5 text-red-300'
+      <div className={`my-1.5 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+        decision === 'implement' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-[#2a2a2a] bg-[#141414] text-zinc-500'
       }`}>
-        Plan {status === 'confirmed' ? 'confirmed' : 'rejected'}
+        {decision === 'implement' ? <IcoCheck className='h-3.5 w-3.5 flex-shrink-0' /> : <IcoX className='h-3.5 w-3.5 flex-shrink-0' />}
+        <span>{decision === 'implement' ? 'Plan accepted — implementing' : 'Plan declined'}</span>
       </div>
     )
   }
 
   return (
-    <div className='my-2 rounded-xl border border-amber-500/20 bg-[#1a1500] p-4 space-y-3'>
-      <div className='flex items-center gap-2'>
-        <IcoPlan className='h-4 w-4 text-amber-400' />
-        <p className='text-xs font-semibold text-amber-300 uppercase tracking-wide'>Plan ready — confirm to proceed</p>
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
+      {/* Header */}
+      <div className='flex items-center gap-2 border-b border-[#222] px-4 py-3'>
+        <span className='flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/15'>
+          <IcoCheck className='h-3.5 w-3.5 text-emerald-400' />
+        </span>
+        <p className='flex-1 text-xs font-semibold text-zinc-200'>Plan summary</p>
       </div>
-      <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{plan}</div>
-      <div className='flex gap-2 pt-1'>
-        <button type='button' onClick={() => { setStatus('confirmed'); onConfirm(requestId) }}
-          className='flex-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors'>
-          Confirm Plan
+
+      {/* Summary body */}
+      <div className='px-4 py-3'>
+        <div className='text-sm leading-relaxed text-zinc-300 whitespace-pre-wrap'>{displayText}</div>
+        {isLong && (
+          <button
+            type='button'
+            onClick={() => setExpanded((v) => !v)}
+            className='mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors'
+          >
+            {expanded ? 'Show less' : 'Show full plan'}
+          </button>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className='flex items-center justify-end gap-2 border-t border-[#222] px-4 py-3'>
+        <button
+          type='button'
+          onClick={() => setDecision('discard')}
+          className='px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors'
+        >
+          Decline
         </button>
-        <button type='button' onClick={() => { setStatus('rejected'); onReject(requestId) }}
-          className='rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors'>
+        <button
+          type='button'
+          onClick={() => setDecision('implement')}
+          className='flex items-center gap-1.5 rounded-xl bg-zinc-100 px-4 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-white transition-colors'
+        >
+          Implement
+          <span className='text-[10px] opacity-50'>&#9166;</span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── PlanConfirmCard — same layout as TaskSummaryCard but for pre-execution plans
+function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
+  plan: string; requestId: string;
+  onConfirm: (requestId: string) => void; onReject: (requestId: string) => void
+}) {
+  const [status, setStatus] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
+  const [expanded, setExpanded] = useState(false)
+  const TRUNCATE_LEN = 380
+  const isLong = plan.length > TRUNCATE_LEN
+  const displayText = isLong && !expanded ? plan.slice(0, TRUNCATE_LEN) + '…' : plan
+
+  if (status !== 'pending') {
+    return (
+      <div className={`my-1.5 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+        status === 'confirmed' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-[#2a2a2a] bg-[#141414] text-zinc-500'
+      }`}>
+        {status === 'confirmed' ? <IcoCheck className='h-3.5 w-3.5 flex-shrink-0' /> : <IcoX className='h-3.5 w-3.5 flex-shrink-0' />}
+        <span>Plan {status === 'confirmed' ? 'confirmed' : 'rejected'}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
+      {/* Header */}
+      <div className='flex items-center gap-2 border-b border-[#222] px-4 py-3'>
+        <IcoPlan className='h-4 w-4 flex-shrink-0 text-zinc-400' />
+        <p className='flex-1 text-xs font-semibold text-zinc-200'>Plan ready</p>
+        <span className='text-[10px] text-zinc-600'>Confirm to proceed</span>
+      </div>
+
+      {/* Plan body */}
+      <div className='px-4 py-3'>
+        <div className='text-sm leading-relaxed text-zinc-300 whitespace-pre-wrap'>{displayText}</div>
+        {isLong && (
+          <button
+            type='button'
+            onClick={() => setExpanded((v) => !v)}
+            className='mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors'
+          >
+            {expanded ? 'Show less' : 'Show full plan'}
+          </button>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className='flex items-center justify-end gap-2 border-t border-[#222] px-4 py-3'>
+        <button
+          type='button'
+          onClick={() => { setStatus('rejected'); onReject(requestId) }}
+          className='px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors'
+        >
           Reject
+        </button>
+        <button
+          type='button'
+          onClick={() => { setStatus('confirmed'); onConfirm(requestId) }}
+          className='flex items-center gap-1.5 rounded-xl bg-zinc-100 px-4 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-white transition-colors'
+        >
+          Confirm Plan
+          <span className='text-[10px] opacity-50'>&#9166;</span>
         </button>
       </div>
     </div>
