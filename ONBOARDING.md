@@ -1,3 +1,209 @@
+## Session 5.41 - April 2, 2026 (Taskbar/sub-agent UI refresh + card redesign pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused UI pass
+
+### What Was Done
+- Redesigned sidebar thread/task bar styling toward the reference look: lighter gradient sidebar, text-forward thread rows, and nested sub-agent thread rows showing agent name + task summary rather than heavy boxed cards.
+- Updated sub-agent panel behavior to focus on background-agent status list UX (name shimmer + live status + model tooltip + open thread action), removing inline message/stop controls from that bar.
+- Added File System consent flow in Connections tab:
+  - still off by default,
+  - explicit warning prompts before enabling,
+  - desktop directory picker consent request (where supported) before activation.
+- Added persistent filesystem data-access warning copy under built-in tools section.
+- Reworked `ask_user_input` card behavior so the final option behaves like a writable slot (inline input row) while keeping selectable options + continue flow.
+- Logged this pass in onboarding.
+
+### What's Working
+- Thread list is now less boxy and closer to title/letter style requested.
+- Background agents bar now behaves more like a compact status surface with expandable list and open-thread actions.
+- Filesystem toggle now has explicit user-consent prompts and warning copy.
+- ask-user-input card now supports inline writable option slot pattern.
+
+### What's NOT Working Yet
+- Full @mention-to-subagent tagging flow and cross-thread parent↔sub-agent messaging protocol still needs dedicated wiring.
+- Native host filesystem bridging remains browser-permission scoped (cannot bypass browser sandbox).
+
+### Next Steps
+1. Implement `@` mention picker in composer tied to active spawned sub-agent names.
+2. Add explicit parent/sub-agent thread routing and message-target API payloads.
+3. Iterate summary/approval card visual polish further against reference shots.
+
+### Decisions Made
+- Prioritized interactive parity and safety semantics first, then visual-only refinements.
+
+### Blockers
+- Browser security model limits direct filesystem access beyond user-granted handles.
+
+---
+
+## Session 5.40 - April 2, 2026 (PR review follow-up: shell startup safety + release-note documentation)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review warning in `universal_navigator.py` by switching shell execution from `bash -lc` to `bash -c` in `_run_shell(...)` to avoid login-shell startup behavior.
+- Addressed review suggestion about behavior-change communication by adding a new changelog entry (`v1.2.1`) documenting:
+  - reasoning controls relocation to Settings,
+  - `enableReasoning` default now on for new profiles,
+  - shell executor safety hardening.
+
+### What's Working
+- Shell tool now launches commands without login-shell rc sourcing path.
+- Release notes now explicitly communicate the reasoning-default behavior change for users/upgraders.
+
+### What's NOT Working Yet
+- Hosted release rollout verification remains pending product deployment.
+
+### Next Steps
+1. Deploy updated build and confirm changelog modal surfaces `v1.2.1` notes.
+2. Merge PR once reviewer confirms warning/suggestion are satisfied.
+
+### Decisions Made
+- Kept the fix minimal (`-lc` → `-c`) so execution semantics stay the same while reducing startup risk.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.39 - April 2, 2026 (Railway build-log follow-up verification for ChatPanel TS2304)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 verification + hotfix confirmation pass
+
+### What Was Done
+- Reviewed the new Railway screenshots showing `TS2304` unresolved names in `frontend/src/components/ChatPanel.tsx` (`reasoningEffort`, `enableReasoning`, `currentModelSupportsReasoning`, `onToggleReasoning`).
+- Verified current branch code no longer references those undefined symbols in the cited line regions.
+- Reproduced the Railway-style frontend stage locally with a fresh install (`npm ci` then `npm run build`) to validate that the failing TypeScript path is resolved.
+
+### What's Working
+- Frontend build now passes cleanly after fresh dependency install.
+- The specific TS2304 ChatPanel unresolved-symbol cluster from Railway screenshots is not reproducible on current head.
+
+### What's NOT Working Yet
+- Hosted Railway confirmation still depends on redeploying this latest commit.
+
+### Next Steps
+1. Redeploy current head to Railway.
+2. Confirm build logs no longer show `ChatPanel.tsx` TS2304 errors.
+
+### Decisions Made
+- Kept this pass as a strict verification pass (no additional code edits) because the current source already contains the fix.
+
+### Blockers
+- None in code; only hosted redeploy verification remaining.
+
+---
+
+## Session 5.38 - April 2, 2026 (Input bar simplification + move reasoning controls to Agent settings)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend pass
+
+### What Was Done
+- Simplified the chat input composer to keep only the requested controls in the action row (`+`, `Plan`, and send/stop), removing extra chips and the inline Think button.
+- Removed the “Think harder” control block from the plus-menu so reasoning controls are no longer mixed into the chat composer UI.
+- Added reasoning controls to **Settings → Agent → Provider & Model**:
+  - `Enable reasoning` toggle
+  - reasoning mode choices rendered only when the selected model supports reasoning
+  - default reasoning mode remains `medium` with support for `high`, `extended`, and `adaptive` based on model capability mapping.
+- Updated settings typing/defaults so reasoning is enabled by default and supports expanded effort values (`medium | high | extended | adaptive`).
+- Added model-aware helper `reasoningModesForModel(...)` to central model metadata logic.
+- Added provider-side normalization/mapping for extended reasoning modes to keep API compatibility:
+  - OpenAI/xAI normalize unsupported effort labels (`extended`/`adaptive`) to supported values.
+  - Google thinking budget mapping now includes `extended` and `adaptive` budgets.
+- Updated chat log parsing so `[thinking] ...` tool-like lines render as plain thinking accordion rows instead of shell cards.
+
+### What's Working
+- Input bar now matches the requested minimal control set.
+- Reasoning controls are centralized in Agent configuration where they belong.
+- Thinking traces are rendered as plain “Thinking” accordion rows with shimmer, not shell terminal cards.
+
+### What's NOT Working Yet
+- Visual QA on deployed Railway/mobile environment is still pending.
+
+### Next Steps
+1. Deploy and verify on Railway/mobile that reasoning controls appear only for reasoning-capable selected models.
+2. Optionally persist per-model preferred reasoning mode if you want automatic switching between providers/models.
+
+### Decisions Made
+- Kept reasoning as a settings-level capability rather than a per-message inline composer switch.
+- Implemented compatibility mapping in providers to avoid API rejections when UI offers extended/adaptive semantics.
+
+### Blockers
+- Hosted visual verification still requires redeploy.
+
+---
+
+## Session 5.37 - April 2, 2026 (Railway frontend build-break follow-up: undefined ChatPanel symbols)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hotfix pass
+
+### What Was Done
+- Investigated Railway build-log screenshots and traced the reported TypeScript compile failures to missing symbol references in `ChatPanel.tsx` (`currentModelMeta`, `reasoningEffort`, `isLocalOnly`, `hasFullAccess`), indicating composer UI values were referenced without reliable local declarations.
+- Hardened `InputBarCursor` by introducing explicit optional props for composer metadata (`modelChipLabel`, `effortChipLabel`, `isLocalOnly`, `hasFullAccess`) with safe defaults.
+- Updated composer chip/status rendering to consume those props rather than undeclared in-scope names.
+- Added concrete parent-level computed values in `ChatPanel` and passed them into `InputBarCursor`, ensuring all values used by the input bar are always declared in the component scope.
+- Re-ran frontend production build to verify the TypeScript failure path is resolved.
+
+### What's Working
+- `ChatPanel` now compiles with strongly defined composer metadata inputs and no unresolved symbol references.
+- Frontend production build succeeds locally after the fix.
+
+### What's NOT Working Yet
+- Railway deploy itself was not executed from this environment; confirmation on hosted infra still depends on a fresh deploy run.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Verify Build Logs no longer report TS2304 undefined-name errors from `ChatPanel.tsx`.
+3. If any residual build issues remain, capture the first error block (not the package-install scrollback) and patch iteratively.
+
+### Decisions Made
+- Kept the fix minimal and type-safe by wiring explicit props/defaults instead of relying on implicit free variables in JSX.
+
+### Blockers
+- Hosted verification requires Railway redeploy access.
+
+---
+
+## Session 5.36 - April 2, 2026 (Enable real sandbox shell command execution)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused runtime pass
+
+### What Was Done
+- Added a new universal runtime tool `exec_shell` so Aegis can execute real shell commands (for scripts/CLI workflows) inside the per-session workspace sandbox.
+- Implemented runtime execution handler `_run_shell(...)` in `universal_navigator.py` using async process execution (`bash -lc ...`) with bounded timeout, sanitized environment variable pass-through, and structured stdout/stderr/return-code output.
+- Wired `exec_shell` into the active tool dispatch path and local-workspace capability detection so the model can plan shell steps alongside file/code tools.
+- Extended sub-agent capabilities to include `exec_shell` plus existing code execution tools (`exec_python`, `exec_javascript`) so spawned sub-agents can also run commands/scripts in sandbox scope.
+- Updated sub-agent system prompt documentation to advertise the new runnable code/command tools.
+- Updated frontend Settings → Tools catalog to expose the new `Run Shell` permission toggle under Code Execution.
+
+### What's Working
+- The agent now has a first-class tool to run real shell commands for command/script tasks.
+- Sub-agents can use shell/python/javascript execution within the same session-sandbox boundary.
+- Tool permissions UI now includes `exec_shell` so users/admins can gate it like other high-risk execution tools.
+
+### What's NOT Working Yet
+- This pass did not add a terminal emulator stream transport; execution is currently command-result based (stdout/stderr snapshots after command completion).
+
+### Next Steps
+1. Add progressive stdout streaming events for long-running shell commands.
+2. Add command execution history persistence metadata (duration/resource usage) in task logs.
+3. Optionally add explicit command policy guardrails (denylist/allowlist) configurable from admin settings.
+
+### Decisions Made
+- Reused the existing session workspace sandbox and environment filtering model to keep shell execution consistent with current Python/JavaScript tool safety posture.
+- Kept `exec_shell` high-risk with default `confirm` permission.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
 
 **Agent:** GPT-5.3-Codex  

@@ -655,19 +655,20 @@ function UserInputCard({
   const [customText, setCustomText] = useState('')
   const [answered, setAnswered] = useState<string | null>(null)
 
+  const customOptionIndex = Math.max(options.length - 1, 0)
   const handleSelect = (idx: number, opt: string) => {
     setSelected(idx)
-    // Last option or "other" style options open free-text; all others auto-continue
+    const isCustomSlot = idx === customOptionIndex
     const isOtherOption = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
-    if (!isOtherOption) {
-      // Send immediately on Continue click; just select for now
-    }
+    if (isCustomSlot || isOtherOption) return
   }
 
   const handleContinue = () => {
     if (selected === null && !customText.trim()) return
     let answer: string
-    if (customText.trim()) {
+    if (selected === customOptionIndex && customText.trim()) {
+      answer = customText.trim()
+    } else if (customText.trim() && selected === customOptionIndex) {
       answer = customText.trim()
     } else if (selected !== null && options[selected]) {
       answer = options[selected]
@@ -696,8 +697,31 @@ function UserInputCard({
       {/* Numbered option rows */}
       <div className='space-y-px border-t border-[#222]'>
         {options.map((opt, idx) => {
-          const isOther = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
+          const isOther = idx === customOptionIndex
           const isSelected = selected === idx
+          if (isOther) {
+            return (
+              <div key={idx} className={`px-4 py-2.5 ${isSelected ? 'bg-[#252525]' : 'bg-transparent'}`}>
+                <div className='mb-1.5 flex items-center gap-3'>
+                  <span className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-semibold transition-colors ${
+                    isSelected ? 'border-zinc-400 bg-zinc-700 text-white' : 'border-zinc-700 text-zinc-600'
+                  }`}>
+                    {idx + 1}
+                  </span>
+                  <span className='flex-1 text-xs font-medium text-zinc-500'>{opt}</span>
+                </div>
+                <input
+                  type='text'
+                  value={customText}
+                  onFocus={() => setSelected(idx)}
+                  onChange={(e) => setCustomText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
+                  placeholder='Type your answer…'
+                  className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
+                />
+              </div>
+            )
+          }
           return (
             <button
               key={idx}
@@ -715,24 +739,12 @@ function UserInputCard({
                 {idx + 1}
               </span>
               <span className={`flex-1 text-xs font-medium ${isOther ? 'text-zinc-500' : ''}`}>{opt}</span>
-              {isSelected && !isOther && (
+              {isSelected && (
                 <IcoCheck className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
               )}
             </button>
           )
         })}
-      </div>
-
-      {/* Always-visible free-text field */}
-      <div className='border-t border-[#222] px-3 py-3'>
-        <input
-          type='text'
-          value={customText}
-          onChange={(e) => setCustomText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
-          placeholder='Or type your own answer…'
-          className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
-        />
       </div>
 
       {/* Footer: dismiss + continue */}
@@ -747,7 +759,7 @@ function UserInputCard({
         <button
           type='button'
           onClick={handleContinue}
-          disabled={selected === null && !customText.trim()}
+          disabled={selected === null || (selected === customOptionIndex && !customText.trim())}
           className='flex items-center gap-1.5 rounded-xl bg-[#2a7ae2] px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
         >
           Continue
