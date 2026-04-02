@@ -62,6 +62,8 @@ export interface ChatPanelProps {
     modelId: string
     isCompacting: boolean
   }
+  /** Display name of the logged-in user for personalised CTA */
+  userName?: string
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -452,19 +454,6 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
       contentRef.current.scrollTop = contentRef.current.scrollHeight
     }
   })
-
-  const isShellStyle = toolName === 'exec_python' || toolName === 'exec_javascript'
-  if (isShellStyle) {
-    return (
-      <div className='mb-2 overflow-hidden rounded-xl border border-[#2a2a2a] bg-black'>
-        <div className='flex items-center justify-between border-b border-[#2a2a2a] bg-[#111] px-3 py-1.5'>
-          <span className='font-mono text-[11px] text-zinc-300'>$ {toolLabel}</span>
-          <ToolStatusIcon status={toolStatus} />
-        </div>
-        <pre className='max-h-52 overflow-auto p-3 font-mono text-xs text-zinc-200 whitespace-pre-wrap break-words'>{msg.toolArgs ?? msg.text}</pre>
-      </div>
-    )
-  }
 
   return (
     <div className='my-0.5'>
@@ -954,6 +943,7 @@ export function ChatPanel({
   onChangeReasoningEffort,
   currentModelSupportsReasoning,
   contextSnapshot,
+  userName,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
