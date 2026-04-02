@@ -1020,6 +1020,10 @@ interface InputBarCursorProps {
   enableReasoning?: boolean
   currentModelSupportsReasoning?: boolean
   onToggleReasoning?: (enabled: boolean) => void
+  currentModelMeta?: { label: string }
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  isLocalOnly?: boolean
+  hasFullAccess?: boolean
 }
 
 function InputBarCursor({
@@ -1027,6 +1031,7 @@ function InputBarCursor({
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments, enableReasoning,
   currentModelSupportsReasoning, onToggleReasoning,
+  currentModelMeta, reasoningEffort, isLocalOnly, hasFullAccess,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
 
@@ -1596,6 +1601,7 @@ export function ChatPanel({
           enableReasoning={enableReasoning}
           currentModelSupportsReasoning={currentModelSupportsReasoning}
           onToggleReasoning={onToggleReasoning}
+          reasoningEffort={reasoningEffort}
         />
 
         {/* Hidden file input */}
