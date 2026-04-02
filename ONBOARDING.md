@@ -1,3 +1,42 @@
+## Session 5.42 - April 2, 2026 (Follow-up: @mentions + explicit sub-agent message routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused follow-up pass
+
+### What Was Done
+- Implemented composer `@` mention picker in `ChatPanel`:
+  - detects trailing `@query`,
+  - shows matching spawned sub-agent names,
+  - inserts selected mention token into the prompt.
+- Added mention-aware routing in `App.handleSend(...)`:
+  - extracts tagged sub-agent handles,
+  - forwards message copies to tagged sub-agents via `messageSubAgent(...)`,
+  - includes `target_subagents` metadata in parent-agent sends.
+- Added explicit sub-agent-thread direct messaging behavior:
+  - when user is currently in a sub-agent thread, sends route directly to that sub-agent instance instead of parent navigate/steer.
+- Standardized display-name derivation for sub-agents via shared `subAgentDisplayName(...)` helper and reused it in thread sidebar + mention source list.
+
+### What's Working
+- Users can now type `@` in chat composer and select spawned sub-agent names.
+- Parent-thread messages can fan out to tagged sub-agents.
+- Sub-agent thread context now behaves like a direct message channel to that sub-agent.
+
+### What's NOT Working Yet
+- Mention routing currently uses display-name matching; future pass should persist explicit handles/IDs for collision-proof tagging.
+
+### Next Steps
+1. Persist canonical mention handles per sub-agent in runtime events.
+2. Add UI badges indicating which sub-agents were targeted on each user message.
+3. Add integration tests for mention parse + routing semantics.
+
+### Decisions Made
+- Chose minimal invasive routing by extending existing `messageSubAgent(...)` path instead of introducing a new websocket action.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.41 - April 2, 2026 (Taskbar/sub-agent UI refresh + card redesign pass)
 
 **Agent:** GPT-5.3-Codex  

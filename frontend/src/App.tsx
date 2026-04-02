@@ -48,6 +48,9 @@ type TaskHistoryItem = {
   dateLabel: string
   instruction: string
 }
+function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
+  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
+}
 const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   profile: 'Profile',
@@ -556,6 +559,10 @@ function App() {
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
+    const mentionMatches = [...trimmed.matchAll(/@([a-zA-Z0-9._-]+)/g)].map((m) => m[1].toLowerCase())
+    const mentionedAgents = subAgents.filter((agent) => mentionMatches.includes(subAgentDisplayName(agent).toLowerCase()))
+    const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
+    const finalInstruction = cleanedInstruction || trimmed
 
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
@@ -563,18 +570,25 @@ function App() {
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: trimmed, metadata })
+      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: trimmed, metadata })
+      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
     const action = isWorking ? 'steer' : 'navigate'
-    send({ action, instruction: trimmed, metadata })
+    const activeSubAgent = subAgents.find((a) => a.sub_id === selectedTaskId)
+    if (activeSubAgent) {
+      void messageSubAgent(activeSubAgent.sub_id, finalInstruction)
+      return
+    }
+
+    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // ── Update browser tab title for steering state ────────────────
     if (action === 'steer') {
@@ -600,7 +614,7 @@ function App() {
         : `pending-${crypto.randomUUID()}`
       const now = new Date()
       const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      const newEntry = { id: taskId, title: trimmed, dateLabel, instruction: trimmed }
+      const newEntry = { id: taskId, title: finalInstruction, dateLabel, instruction: finalInstruction }
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
@@ -857,7 +871,7 @@ function App() {
                                 const nc = nameColors[aIdx % nameColors.length]
                                 const taskTitle = agent.instruction.split(' ').slice(0, 6).join(' ').slice(0, 36) || 'Sub-task'
                                 const isLive = agent.status === 'spawning' || agent.status === 'running'
-                                const shortName = agent.instruction.split(' ').slice(0, 2).join(' ').slice(0, 12) || `Agent ${aIdx + 1}`
+                                const shortName = subAgentDisplayName(agent).slice(0, 12) || `Agent ${aIdx + 1}`
                                 return (
                                   <button
                                     key={agent.sub_id}
@@ -1039,6 +1053,7 @@ function App() {
                   modelId: contextMeter.current.modelId,
                   isCompacting: contextMeter.isCompacting,
                 }}
+                subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */

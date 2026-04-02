@@ -66,6 +66,8 @@ export interface ChatPanelProps {
   }
   /** Display name of the logged-in user for personalised CTA */
   userName?: string
+  /** Mentionable sub-agent handles (used for @ picker in composer) */
+  subAgentNames?: string[]
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1127,6 +1129,7 @@ export function ChatPanel({
   reasoningMap,
   contextSnapshot,
   userName,
+  subAgentNames = [],
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1260,6 +1263,23 @@ export function ChatPanel({
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value)
     resizeTextarea()
+  }
+
+  const mentionQuery = useMemo(() => {
+    const match = input.match(/@([a-zA-Z0-9._-]*)$/)
+    return match ? match[1].toLowerCase() : null
+  }, [input])
+
+  const mentionOptions = useMemo(() => {
+    if (mentionQuery === null) return []
+    return subAgentNames
+      .filter((name) => name.toLowerCase().includes(mentionQuery))
+      .slice(0, 6)
+  }, [mentionQuery, subAgentNames])
+
+  const handleMentionPick = (name: string) => {
+    setInput((prev) => prev.replace(/@([a-zA-Z0-9._-]*)$/, `@${name} `))
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
   }
 
   const handleSend = () => {
@@ -1518,6 +1538,21 @@ export function ChatPanel({
 
       {/* Input area */}
       <div className='relative border-t border-[#1e1e1e] bg-[#111] px-3 py-3'>
+        {mentionOptions.length > 0 && (
+          <div className='mb-2 rounded-xl border border-[#2a2a2a] bg-[#141414] p-1.5'>
+            {mentionOptions.map((name) => (
+              <button
+                key={name}
+                type='button'
+                onClick={() => handleMentionPick(name)}
+                className='flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-xs text-zinc-300 hover:bg-[#1f1f1f]'
+              >
+                <span>@{name}</span>
+                <span className='text-zinc-600'>tag sub-agent</span>
+              </button>
+            ))}
+          </div>
+        )}
         {/* Plus menu */}
         {showPlusMenu && (
           <PlusMenu
