@@ -2140,3 +2140,43 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.25 - April 2, 2026 (Phase 2-4 Split-Surface UX: Handoff Prompt, Auto-Return, Feature Flags)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented phase 2 contextual handoff UX:
+  - Added a transition-based browse prompt in chat that appears when a task starts browsing while the user is in chat mode.
+  - Prompt is shown at most once per task id and can be dismissed.
+- Implemented phase 3 auto-return behavior:
+  - Added optional auto-switch from browser surface back to chat after task completion.
+  - Added completion notification when auto-return triggers.
+- Implemented phase 4 safety-net rollout controls:
+  - Added feature flags in settings (`separateExecutionSurfaces`, `promptToSwitchOnBrowse`, `autoReturnToChat`) with defaults enabled.
+  - Added Agent settings toggles for all three controls.
+- Updated shared docs changelog and README UX notes to reflect phase 2-4 behavior.
+
+### What's Working
+- Handoff prompt now triggers on idle→working transition (chat mode only) and is non-spammy per task.
+- Auto-return to chat works on working→idle transition when user is on browser surface and setting is enabled.
+- Safety flags allow turning split-surface UX off or tuning prompt/auto-return independently.
+- Frontend compiles cleanly.
+
+### What's NOT Working Yet
+- No dedicated UI integration test harness exists yet for multi-transition chat/browser state flows.
+
+### Next Steps
+1. Add integration tests for:
+   - handoff prompt appears once per task,
+   - dismiss behavior,
+   - auto-return enabled/disabled paths.
+2. Add telemetry counters for prompt shown, prompt dismissed, and auto-return triggered.
+3. Consider exposing a short in-product tooltip that explains these toggles under Agent settings.
+
+### Decisions Made
+- Implemented transition-based effects in `App.tsx` (instead of continuous prompt rendering) to avoid prompt fatigue and duplicate prompts.
+
+### Blockers
+- None in this pass.

@@ -52,9 +52,6 @@ type TaskHistoryItem = {
 function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
   return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
 }
-function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
-  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
-}
 const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   profile: 'Profile',
@@ -144,6 +141,9 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>('browser')
+  const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
+  const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
+  const prevIsWorkingRef = useRef(false)
   // Use case page routing
   const [activeUseCaseId, setActiveUseCaseId] = useState<string | null>(null)
   // draftInput reserved for future InputBar onChange wiring
@@ -232,6 +232,50 @@ function App() {
   useEffect(() => {
     setUrlInput(currentUrl)
   }, [currentUrl])
+
+  // Split-surface UX helpers:
+  // 1) Contextual handoff prompt when browsing starts while user is in chat mode.
+  // 2) Optional auto-return to chat when the task completes.
+  useEffect(() => {
+    const wasWorking = prevIsWorkingRef.current
+    const startedWorking = !wasWorking && isWorking
+    const finishedWorking = wasWorking && !isWorking
+    prevIsWorkingRef.current = isWorking
+
+    if (!settings.separateExecutionSurfaces) {
+      setShowBrowseHandoffPrompt(false)
+      return
+    }
+
+    if (startedWorking && appMode === 'chat' && settings.promptToSwitchOnBrowse) {
+      const activeTaskId = activeTaskIdRef.current
+      if (activeTaskId && !promptShownTaskIdsRef.current.has(activeTaskId)) {
+        promptShownTaskIdsRef.current.add(activeTaskId)
+        setShowBrowseHandoffPrompt(true)
+      }
+    }
+
+    if (finishedWorking) {
+      setShowBrowseHandoffPrompt(false)
+      if (appMode === 'browser' && settings.autoReturnToChat) {
+        setAppMode('chat')
+        addNotification({
+          type: 'info',
+          title: 'Task complete',
+          message: 'Browsing finished. Returned you to chat.',
+          source: 'websocket',
+        })
+      }
+    }
+  }, [
+    isWorking,
+    appMode,
+    settings.separateExecutionSurfaces,
+    settings.promptToSwitchOnBrowse,
+    settings.autoReturnToChat,
+    activeTaskIdRef,
+    addNotification,
+  ])
 
   // ── Browser tab title: Working… / Steering… / Aegis ──────────────
   const titleTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
@@ -1031,7 +1075,7 @@ function App() {
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
-                onSwitchToBrowser={() => setAppMode('browser')}
+                onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setAppMode('browser') }}
                 latestFrame={latestFrame}
                 isBrowsing={isBrowsing}
                 voiceActive={voiceActive}
@@ -1053,6 +1097,8 @@ function App() {
                   isCompacting: contextMeter.isCompacting,
                 }}
                 subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
+                browseHandoffPromptVisible={settings.separateExecutionSurfaces && showBrowseHandoffPrompt}
+                onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */

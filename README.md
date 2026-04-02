@@ -35,6 +35,10 @@ interacts with any web UI using multimodal vision and real-time browser automati
   - Tasks started from the browser panel keep the browser-provided label.
   - Tasks started from chat keep the chat-provided label.
   - Other panels do not overwrite an existing task label.
+- Split-surface navigation controls are feature-flagged in Agent settings:
+  - Prompt to switch to browser when browsing starts.
+  - Auto-return to chat after task completion.
+  - Master toggle for split chat/browser surfaces rollout.
 
 ---
 

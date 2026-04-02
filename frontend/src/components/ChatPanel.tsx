@@ -68,6 +68,8 @@ export interface ChatPanelProps {
   userName?: string
   /** Mentionable sub-agent handles (used for @ picker in composer) */
   subAgentNames?: string[]
+  browseHandoffPromptVisible?: boolean
+  onDismissBrowsePrompt?: () => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1130,6 +1132,8 @@ export function ChatPanel({
   contextSnapshot,
   userName,
   subAgentNames = [],
+  browseHandoffPromptVisible = false,
+  onDismissBrowsePrompt,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1244,9 +1248,7 @@ export function ChatPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allMessages.length, activeTaskId])
 
-  // Show the browsing banner when: the agent is actively browsing (isBrowsing prop),
-  // OR when there's already a live frame (backward-compat with old callers).
-  const showBrowseBanner = isBrowsing || (isWorking && Boolean(latestFrame))
+  const showBrowsePill = browseHandoffPromptVisible && isWorking && latestFrame
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1371,51 +1373,28 @@ export function ChatPanel({
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
 
-      {/* ── Browsing banner ────────────────────────────────────────────────── */}
-      {/* Sticky top banner that appears when the agent is executing browser   */}
-      {/* actions. Stays clean — does not flood the chat thread with log spam. */}
-      {showBrowseBanner && (
-        <div className='flex-shrink-0 border-b border-[#1e1e1e] bg-[#0d1626]/80 px-4 py-2.5 backdrop-blur-sm'>
-          <div className='flex items-center gap-3'>
-            {/* Live pulse dot */}
-            <span className='relative flex h-2.5 w-2.5 flex-shrink-0'>
-              <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60' />
-              <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500' />
-            </span>
-
-            {/* Label */}
-            <div className='flex-1 min-w-0'>
-              <span className='text-xs font-medium text-blue-300'>Agent is browsing</span>
-              <span className='mx-1.5 text-blue-500/50'>·</span>
-              <span className='text-xs text-zinc-500'>Results will appear here when done</span>
-            </div>
-
-            {/* CTA */}
+      {/* Browsing pill */}
+      {showBrowsePill && (
+        <div className='flex justify-center pt-2 px-4'>
+          <div className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 shadow-md'>
             <button
               type='button'
               onClick={onSwitchToBrowser}
-              className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300 transition-all hover:border-blue-400/50 hover:bg-blue-500/20 hover:text-blue-200 active:scale-95'
+              className='flex items-center gap-2 rounded-full px-1 py-0.5 text-xs font-medium text-blue-300 hover:text-blue-100 transition-colors'
             >
-              <IcoGlobe className='h-3 w-3' />
-              Watch live
+              <IcoGlobe className='h-3.5 w-3.5' />
+              Agent is browsing — Switch to Browser
+            </button>
+            <button
+              type='button'
+              onClick={onDismissBrowsePrompt}
+              className='rounded-full border border-blue-400/30 px-1.5 py-0.5 text-[10px] text-blue-200/80 hover:text-blue-100'
+              title='Dismiss'
+              aria-label='Dismiss browse switch prompt'
+            >
+              Dismiss
             </button>
           </div>
-
-          {/* Thumbnail strip — shows latest frame as a tiny preview */}
-          {latestFrame && (
-            <button
-              type='button'
-              onClick={onSwitchToBrowser}
-              className='mt-2 block w-full overflow-hidden rounded-lg border border-[#2a2a2a] transition-opacity hover:opacity-80'
-              aria-label='Switch to browser view'
-            >
-              <img
-                src={latestFrame}
-                alt='Live browser preview'
-                className='h-16 w-full object-cover object-top'
-              />
-            </button>
-          )}
         </div>
       )}
 

@@ -296,6 +296,7 @@ export const DOCS_PAGES: DocsPage[] = [
     related: ['faq', 'quickstart', 'deployment'],
     blocks: [
       { type: 'timeline', items: [
+        { date: '2026-04-02', title: 'Phase 2-4 split-surface UX shipped', description: 'Added transition-based \"switch to browser\" handoff prompt, optional auto-return to chat on completion, and safety feature flags in Agent settings for staged rollout.' },
         { date: '2026-04-02', title: 'Action Log signal cleanup + task label ownership', description: 'The browser Action Log now shows browser tool calls and task outcomes only. Non-browser tool calls remain in the chat stream. Task labels are now source-owned at creation (browser vs chat) to prevent cross-panel relabeling.' },
         { date: '2026-03-19', title: 'Public site and docs architecture defined', description: 'Aegis moved toward a story-led landing page, shared docs content, and a standalone docs portal.' },
         { date: '2026-03-18', title: 'Real sign-up and password auth flow', description: 'Auth moved from temporary sign-in handling to a real sign-up and password-verification flow backed by stored hashes.' },
