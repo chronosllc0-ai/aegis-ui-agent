@@ -130,27 +130,35 @@ const BROWSER_TOOL_NAMES = new Set([
 ])
 
 /**
- * Returns true if this log entry is a browser execution step that should
- * live only in the ActionLog, NOT in the chat conversation.
+ * Internal agent meta-tools that are pure housekeeping — never shown as
+ * cards in the chat panel. The isWorking shimmer already signals activity.
+ */
+const SILENT_TOOL_NAMES = new Set([
+  'thinking', 'think', 'internal_think',
+  'wait', 'sleep', 'pause', 'noop', 'no_op',
+  'set_next_step', 'plan_step', 'record_thought',
+])
+
+/**
+ * Returns true if this log entry should be hidden from the chat conversation.
  *
  * Rules:
- *   1. Raw browser stepKinds (click / type / scroll) are always browser-only.
- *   2. Navigate entries with elapsedSeconds > 0 are real navigations (not user msgs).
- *   3. Tool calls whose name is in BROWSER_TOOL_NAMES are browser-only.
+ *   1. Raw browser stepKinds (click / type / scroll) → ActionLog only.
+ *   2. Navigate entries with elapsedSeconds > 0 → ActionLog only.
+ *   3. Tool calls in BROWSER_TOOL_NAMES → ActionLog only.
+ *   4. Tool calls in SILENT_TOOL_NAMES → hidden entirely (internal housekeeping).
  *
- * Non-browser tool calls (web_search, run_code, read_file, send_email, etc.)
+ * Non-browser, non-silent tool calls (web_search, run_code, read_file…)
  * pass through and render as ShellCards in chat.
  */
 function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
-  // Raw browser step kinds (excluding navigate at t=0 which is the user message)
   if (entry.stepKind === 'click' || entry.stepKind === 'type' || entry.stepKind === 'scroll') return true
   if (entry.stepKind === 'navigate' && entry.elapsedSeconds > 0) return true
 
-  // Browser-specific tool call names
   if (RE_TOOL_CALL.test(msg)) {
     const match = msg.match(/^\[([\w_]+)\]/)
     const toolName = match?.[1]?.toLowerCase()
-    if (toolName && BROWSER_TOOL_NAMES.has(toolName)) return true
+    if (toolName && (BROWSER_TOOL_NAMES.has(toolName) || SILENT_TOOL_NAMES.has(toolName))) return true
   }
 
   return false
