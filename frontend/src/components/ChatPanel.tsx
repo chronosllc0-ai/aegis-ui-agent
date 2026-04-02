@@ -991,11 +991,7 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
-  enableReasoning?: boolean
-  currentModelSupportsReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
   modelChipLabel?: string
-  effortChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
 }
@@ -1003,10 +999,8 @@ interface InputBarCursorProps {
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
-  activeConnector, onRemoveConnector, hasAttachments, enableReasoning,
-  currentModelSupportsReasoning, onToggleReasoning,
+  activeConnector, onRemoveConnector, hasAttachments,
   modelChipLabel = 'GPT-5.4',
-  effortChipLabel = 'Standard',
   isLocalOnly = true,
   hasFullAccess = true,
 }: InputBarCursorProps) {
@@ -1075,28 +1069,7 @@ function InputBarCursor({
           Plan
         </button>
 
-        {modelChipLabel && (
-          <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
-        )}
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>{effortChipLabel}</span>
-        <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
-
-        {/* Think harder toggle — only for capable models */}
-        {currentModelSupportsReasoning && (
-          <button type='button'
-            onClick={() => onToggleReasoning?.(!enableReasoning)}
-            className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs font-medium transition-colors flex-shrink-0 ${
-              enableReasoning
-                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
-            }`}>
-            <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-              <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
-              <path d='M9 18h6' /><path d='M10 22h4' />
-            </svg>
-            Think
-          </button>
-        )}
+        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
 
         <div className='flex-1' />
 
@@ -1112,9 +1085,8 @@ function InputBarCursor({
       </div>
 
       <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
-        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◉ Local' : '◻ Local'}</span>
-        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◻ Full access'}</span>
-        <span className='inline-flex items-center gap-1'>◉ Full access</span>
+        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◻ Local' : '◻ Remote'}</span>
+        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◉ Limited access'}</span>
       </div>
     </div>
   )
@@ -1359,7 +1331,6 @@ export function ChatPanel({
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
   const modelChipLabel = 'GPT-5.4'
-  const effortChipLabel = reasoningEffort ? `${reasoningEffort[0].toUpperCase()}${reasoningEffort.slice(1)} effort` : 'Standard'
   const isLocalOnly = true
   const hasFullAccess = true
 
@@ -1569,11 +1540,7 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
-          enableReasoning={enableReasoning}
-          currentModelSupportsReasoning={currentModelSupportsReasoning}
-          onToggleReasoning={onToggleReasoning}
           modelChipLabel={modelChipLabel}
-          effortChipLabel={effortChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
         />

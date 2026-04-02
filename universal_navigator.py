@@ -1081,7 +1081,7 @@ class UniversalToolExecutor:
         env.setdefault("CI", "1")
         process = await asyncio.create_subprocess_exec(
             "bash",
-            "-lc",
+            "-c",
             command,
             cwd=str(workdir),
             env=env,
