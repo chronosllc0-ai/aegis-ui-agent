@@ -52,6 +52,9 @@ type TaskHistoryItem = {
 function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
   return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
 }
+function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
+  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
+}
 const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   profile: 'Profile',
@@ -1030,6 +1033,7 @@ function App() {
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => setAppMode('browser')}
                 latestFrame={latestFrame}
+                isBrowsing={isBrowsing}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
