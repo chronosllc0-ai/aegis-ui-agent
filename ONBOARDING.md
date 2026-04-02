@@ -1,3 +1,38 @@
+## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend pass
+
+### What Was Done
+- Reworked the chat input composer to more closely match the provided reference style: larger rounded container, embedded send button, toolbar row with `+` and `Plan`, and a secondary status strip for environment/access context.
+- Added inline model/context chips in the composer row (`GPT-5.4`, `Extra High`, `IDE context`) to mirror the requested visual treatment.
+- Updated shell/tool run cards to better communicate sandboxed execution by adding explicit `sandbox`/`Sandboxed` badges on collapsed and expanded terminal views.
+- Improved shell-card run lifecycle behavior so cards auto-expand while a run is active and automatically collapse into one-line summary rows once execution finishes (click row to reopen details).
+- Refined thinking-stream behavior so the latest thinking message shows the shimmering `Thinking` state while work is active, with thought details still hidden behind click-to-expand dropdown behavior.
+
+### What's Working
+- Chat composer now presents the requested compact modern layout with prominent CTA controls and bottom status strip.
+- Terminal runs now read as sandboxed and fold back to concise timeline rows after completion, matching the requested interaction model.
+- Thinking indicator now visibly streams on the newest active thought while preserving explicit opt-in reveal for detailed reasoning text.
+
+### What's NOT Working Yet
+- This pass did not yet redesign the ask-user-input card, task summary card, or broader thread visual system (queued for next steps).
+- No browser screenshot artifact was captured in this environment for visual confirmation.
+
+### Next Steps
+1. Redesign `ask_user_input` card to match the reference interaction style exactly.
+2. Redesign summary/plan cards and unify thread spacing/typography to the same visual system.
+3. Add explicit backend/runtime metadata plumbing if shell cards should reflect real sandbox container IDs or tool-run provenance.
+
+### Decisions Made
+- Prioritized immediate chat-panel parity elements requested first (input bar, shell run lifecycle, thinking indicator) before touching ask-user-input and summary/thread redesign.
+- Kept behavior backward compatible: only presentation and local chat rendering logic changed in this pass.
+
+### Blockers
+- Exact pixel-level parity is limited by image clarity and absence of inspectable design source.
+
+---
+
 ## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
 
 **Agent:** GPT-5.3-Codex  

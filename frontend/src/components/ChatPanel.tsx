@@ -403,11 +403,14 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
   const result    = msg.toolResult
   const status    = msg.toolStatus ?? 'in_progress'
 
-  // Auto-expand while running
+  // Auto-expand when run starts, then collapse to one-line summary when run ends.
   const prevRunning = useRef(isRunning)
-  if (prevRunning.current !== isRunning) {
+  useEffect(() => {
+    if (prevRunning.current === isRunning) return
+    if (isRunning) setExpanded(true)
+    if (!isRunning && prevRunning.current) setExpanded(false)
     prevRunning.current = isRunning
-  }
+  }, [isRunning])
 
   // Auto-scroll output while running
   useEffect(() => {
@@ -443,6 +446,9 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
         <span className='flex-1 truncate font-mono text-xs text-zinc-400'>
           {toolLabel}{command ? ` ${command}` : ''}
         </span>
+        <span className='rounded-md border border-[#2f2f2f] bg-[#171717] px-1.5 py-0.5 text-[10px] font-medium text-zinc-500'>
+          sandbox
+        </span>
         <IcoChevronRight className='h-3 w-3 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0' />
       </button>
     )
@@ -466,6 +472,9 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
         <IcoTerminal className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
         <span className='flex-1 truncate font-mono text-[11px] font-medium text-zinc-300'>
           Shell — {toolLabel}
+        </span>
+        <span className='rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300'>
+          Sandboxed
         </span>
         {isRunning && (
           <span className='flex-shrink-0 text-[10px] font-mono text-amber-400 animate-pulse'>running…</span>
@@ -1022,8 +1031,7 @@ function InputBarCursor({
   const canSend = input.trim().length > 0 || hasAttachments
 
   return (
-    /* Outer rounded card — matches Cursor's input box style */
-    <div className='rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] overflow-hidden'>
+    <div className='rounded-3xl border border-[#303030] bg-[#1a1a1a] shadow-[0_8px_30px_rgba(0,0,0,0.3)] overflow-hidden'>
 
       {/* Connector chip inside card */}
       {activeConnector && (
@@ -1039,19 +1047,37 @@ function InputBarCursor({
       )}
 
       {/* Textarea */}
-      <textarea
-        ref={textareaRef}
-        value={input}
-        onChange={onInputChange}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        disabled={isDisabled}
-        rows={1}
-        className='w-full resize-none bg-transparent px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none disabled:opacity-40 leading-6'
-        style={{ minHeight: '44px', maxHeight: '144px', overflow: 'hidden' }}
-      />
+      <div className='relative'>
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={onInputChange}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          disabled={isDisabled}
+          rows={1}
+          className='w-full resize-none bg-transparent px-4 pb-12 pt-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6'
+          style={{ minHeight: '70px', maxHeight: '160px', overflow: 'hidden' }}
+        />
+        {isWorking && !canSend ? (
+          <button type='button' onClick={onStop}
+            className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
+            aria-label='Stop task' title='Stop current task'>
+            <span className='relative flex h-4 w-4 items-center justify-center'>
+              <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
+              <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+            </span>
+          </button>
+        ) : (
+          <button type='button' onClick={onSend}
+            disabled={isDisabled || !canSend}
+            className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+            aria-label='Send message'>
+            <IcoArrowUp className='h-4 w-4' />
+          </button>
+        )}
+      </div>
 
-      {/* Toolbar row 1 — action buttons */}
       <div className='flex items-center gap-1.5 border-t border-[#242424] px-2.5 py-2'>
         {/* + button */}
         <button type='button' onClick={onPlusClick} disabled={isDisabled}
@@ -1066,6 +1092,12 @@ function InputBarCursor({
           <IcoPlan className='h-3.5 w-3.5' />
           Plan
         </button>
+
+        {currentModelMeta?.label && (
+          <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {currentModelMeta.label}</span>
+        )}
+        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>{reasoningEffort === 'high' ? 'High' : reasoningEffort === 'medium' ? 'Medium' : 'Low'}</span>
+        <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
 
         {/* Think harder toggle — only for capable models */}
         {currentModelSupportsReasoning && (
@@ -1095,24 +1127,12 @@ function InputBarCursor({
           <IcoMic className='h-3.5 w-3.5' />
         </button>
 
-        {/* Send / Stop */}
-        {isWorking && !canSend ? (
-          <button type='button' onClick={onStop}
-            className='flex h-7 w-7 items-center justify-center rounded-lg bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors flex-shrink-0'
-            aria-label='Stop task' title='Stop current task'>
-            <span className='relative flex h-4 w-4 items-center justify-center'>
-              <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
-              <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
-            </span>
-          </button>
-        ) : (
-          <button type='button' onClick={onSend}
-            disabled={isDisabled || !canSend}
-            className='flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0'
-            aria-label='Send message'>
-            <IcoArrowUp className='h-3.5 w-3.5' />
-          </button>
-        )}
+      </div>
+
+      <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
+        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◉ Local' : '◻ Local'}</span>
+        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◻ Full access'}</span>
+        <span className='inline-flex items-center gap-1'>◉ Full access</span>
       </div>
     </div>
   )
@@ -1248,6 +1268,12 @@ export function ChatPanel({
   }, [sentMessages.length])
 
   const allMessages = useMemo(() => [...sentMessages, ...baseMessages], [sentMessages, baseMessages])
+  const latestThinkingId = useMemo(() => {
+    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
+      if (allMessages[i].role === 'thinking') return allMessages[i].id
+    }
+    return null
+  }, [allMessages])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
@@ -1479,7 +1505,7 @@ export function ChatPanel({
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
             const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
-            const isStreaming = isWorking && reasoningText.length < 3
+            const isStreaming = isWorking && msg.id === latestThinkingId
             return (
               <div key={msg.id} className='px-1'>
                 <ThinkingRow stepId={stepId} reasoningText={reasoningText} isStreaming={isStreaming} />
