@@ -1044,7 +1044,7 @@ function InputBarCursor({
         {currentModelMeta?.label && (
           <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {currentModelMeta.label}</span>
         )}
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>Extra High</span>
+        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>{reasoningEffort === 'high' ? 'High' : reasoningEffort === 'medium' ? 'Medium' : 'Low'}</span>
         <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
 
         {/* Think harder toggle — only for capable models */}
