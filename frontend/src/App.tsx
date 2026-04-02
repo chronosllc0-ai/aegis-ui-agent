@@ -774,44 +774,71 @@ function App() {
           </button>
           <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
-          {/* ── Task list with independent scroll ── */}
-          <div className='min-h-0 flex-1 overflow-y-auto space-y-3 scrollbar-thin'>
+          {/* ── Task list — Codex-style text-only threads ── */}
+          <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
             {['Today', 'Yesterday'].map((group) => {
               const items = filteredHistory.filter((item) => item.dateLabel === group)
               if (!items.length) return null
               return (
-                <div key={group}>
-                  <p className='mb-1 text-[11px] uppercase tracking-wide text-zinc-500'>{group}</p>
-                  <div className='space-y-1'>
-                    {items.map((item) => (
-                      <div key={item.id} className='group relative'>
-                        <button type='button' onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }} className={`w-full rounded-lg border px-2 py-2 pr-7 text-left text-xs md:text-lg ${selectedTaskId === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#2a2a2a] bg-[#111] hover:border-zinc-600'}`}>
-                          <p className='truncate text-zinc-200'>{item.title}</p>
-                          <p className='truncate text-zinc-500'>{item.instruction}</p>
-                        </button>
-                        {subAgents.some((agent) => agent.parent_task_id === item.id) && (
-                          <div className='mt-1 ml-3 space-y-0.5 border-l border-[#2a2a2a] pl-2'>
-                            {subAgents
-                              .filter((agent) => agent.parent_task_id === item.id)
-                              .slice(0, 4)
-                              .map((agent) => (
-                                <div key={agent.sub_id} className='text-[10px] text-zinc-500'>
-                                  ↳ {agent.instruction.slice(0, 28)}{agent.instruction.length > 28 ? '…' : ''} · {agent.status}
-                                </div>
-                              ))}
+                <div key={group} className='mb-4'>
+                  <p className='mb-1 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>{group}</p>
+                  <div className='space-y-0'>
+                    {items.map((item) => {
+                      const agentsForTask = subAgents.filter((agent) => agent.parent_task_id === item.id)
+                      const isActive = selectedTaskId === item.id
+                      return (
+                        <div key={item.id}>
+                          {/* Parent thread row */}
+                          <div className='group relative flex items-center'>
+                            <button
+                              type='button'
+                              onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }}
+                              className={`flex-1 min-w-0 rounded-lg px-2 py-1.5 text-left transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#1e1e1e]'}`}
+                            >
+                              <p className={`truncate text-xs font-medium ${isActive ? 'text-zinc-100' : ''}`}>
+                                {item.title || item.instruction.slice(0, 40) || 'Untitled'}
+                              </p>
+                            </button>
+                            <button
+                              type='button'
+                              onClick={(e) => { e.stopPropagation(); onDeleteTask(item.id) }}
+                              className='mr-1 hidden rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300 group-hover:flex flex-shrink-0'
+                              aria-label='Delete task'
+                              title='Delete task'
+                            >
+                              {Icons.trash({ className: 'h-3 w-3' })}
+                            </button>
                           </div>
-                        )}
-                        <button
-                          type='button'
-                          onClick={(e) => { e.stopPropagation(); onDeleteTask(item.id) }}
-                          className='absolute right-1.5 top-1/2 -translate-y-1/2 hidden rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200 group-hover:flex'
-                          aria-label='Delete task'
-                          title='Delete task'
-                        >
-                          {Icons.trash({ className: 'h-3.5 w-3.5' })}
-                        </button>
-                      </div>
-                    ))}
+
+                          {/* Sub-agent child threads — nested under parent */}
+                          {agentsForTask.length > 0 && (
+                            <div className='ml-3 border-l border-[#252525] pl-2'>
+                              {agentsForTask.map((agent, aIdx) => {
+                                const nameColors = ['text-orange-400','text-green-400','text-sky-400','text-violet-400','text-rose-400']
+                                const nc = nameColors[aIdx % nameColors.length]
+                                const taskTitle = agent.instruction.split(' ').slice(0, 5).join(' ').slice(0, 30) || 'Sub-task'
+                                const isLive = agent.status === 'spawning' || agent.status === 'running'
+                                return (
+                                  <button
+                                    key={agent.sub_id}
+                                    type='button'
+                                    onClick={() => { setSelectedTaskId(agent.sub_id); setSidebarOpen(false) }}
+                                    className={`flex w-full items-baseline gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[#1e1e1e] ${selectedTaskId === agent.sub_id ? 'bg-[#1e1e1e]' : ''}`}
+                                  >
+                                    <span className='truncate text-[11px] text-zinc-500 flex-1'>
+                                      {taskTitle}{taskTitle.length < agent.instruction.length ? '…' : ''}
+                                    </span>
+                                    <span className={`text-[10px] font-semibold flex-shrink-0 ${nc} ${isLive ? 'agent-name-shimmer' : ''}`}>
+                                      {agent.instruction.split(' ').slice(0, 2).join(' ').slice(0, 12) || `Agent ${aIdx + 1}`}
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )
@@ -1011,12 +1038,17 @@ function App() {
           )}
 
           {!showSettings && !showAutomations && scopedSubAgents.length > 0 && (
-            <div className='flex justify-center px-4 pb-2'>
+            <div className='px-3 pb-2'>
               <SubAgentPanel
                 agents={scopedSubAgents}
                 steps={scopedSubAgentSteps}
                 onCancel={cancelSubAgent}
                 onMessage={messageSubAgent}
+                onOpenThread={(subId) => {
+                  // Switch to the sub-agent's task context by selecting its task id
+                  const agent = subAgents.find((a) => a.sub_id === subId)
+                  if (agent) setSelectedTaskId(agent.sub_id)
+                }}
               />
             </div>
           )}

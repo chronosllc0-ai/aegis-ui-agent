@@ -23,6 +23,25 @@
   animation: shimmer-sweep 1.8s ease-in-out infinite;
 }
 
+/* ── Agent name shimmer: colored streak across subagent name ─────────────── */
+.agent-name-shimmer {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+}
+.agent-name-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255,255,255,0.45) 50%,
+    transparent 70%
+  );
+  animation: shimmer-sweep 2.2s ease-in-out infinite;
+}
+
 /* ── Shell card: terminal-style output ──────────────────────────────────────── */
 @keyframes shell-cursor {
   0%, 100% { opacity: 1; }
