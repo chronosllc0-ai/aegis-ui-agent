@@ -2180,6 +2180,7 @@
 
 ### Blockers
 - None in this pass.
+<<<<<<< codex/redesign-chat-panel-input-bar-n1ro4s
 
 ## Session 5.26 - April 2, 2026 (Mobile bubble regression, ask_user_input inline UX, billing+telegram import fixes)
 
@@ -2218,3 +2219,5 @@
 
 ### Blockers
 - Websocket persistence test timeout/hang (not an import error; likely async event sequencing issue).
+=======
+>>>>>>> main
