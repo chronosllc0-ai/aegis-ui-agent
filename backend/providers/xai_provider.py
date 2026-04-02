@@ -24,6 +24,15 @@ XAI_MODELS = [
 XAI_REASONING_MODELS = {"grok-3-mini", "grok-3-mini-fast"}
 
 
+def _normalize_reasoning_effort(effort: str) -> str:
+    normalized = (effort or "medium").strip().lower()
+    if normalized == "extended":
+        return "high"
+    if normalized == "adaptive":
+        return "medium"
+    return normalized if normalized in {"low", "medium", "high"} else "medium"
+
+
 class XAIProvider(BaseProvider):
     """Adapter for the xAI (Grok) API — uses OpenAI-compatible endpoint."""
 
@@ -114,7 +123,7 @@ class XAIProvider(BaseProvider):
             "stream": True,
         }
         if model_name in XAI_REASONING_MODELS and enable_reasoning:
-            params["reasoning_effort"] = reasoning_effort
+            params["reasoning_effort"] = _normalize_reasoning_effort(reasoning_effort)
 
         response = await client.chat.completions.create(**params)
         async for chunk in response:

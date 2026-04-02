@@ -54,8 +54,8 @@ export interface ChatPanelProps {
   reasoningMap?: Record<string, string>
   enableReasoning?: boolean
   onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'low' | 'medium' | 'high'
-  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  reasoningEffort?: 'medium' | 'high' | 'extended' | 'adaptive'
+  onChangeReasoningEffort?: (effort: 'medium' | 'high' | 'extended' | 'adaptive') => void
   currentModelSupportsReasoning?: boolean
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
@@ -233,6 +233,10 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     if (isToolCall) {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
+      if (toolName.toLowerCase() === 'thinking') {
+        msgs.push({ id: entry.id, role: 'thinking', text: msg.replace(/^\[[\w_]+\]\s*/, '').trim() || 'Thinking', stepId: entry.stepId })
+        continue
+      }
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
       let argsDisplay = argsRaw
       let result: string | undefined
@@ -891,14 +895,9 @@ interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
   onConnector: (connector: ConnectorMeta) => void
   onClose: () => void
-  enableReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'low' | 'medium' | 'high'
-  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
-  modelSupportsReasoning?: boolean
 }
 
-function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleReasoning, reasoningEffort, onChangeReasoningEffort, modelSupportsReasoning }: PlusMenuProps) {
+function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [query, setQuery] = useState('')
 
@@ -938,39 +937,6 @@ function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleRea
             </button>
           ))}
         </div>
-
-        {modelSupportsReasoning && (
-          <>
-            <div className='mx-4 my-1 border-t border-[#2a2a2a]' />
-            <button type='button' onClick={() => onToggleReasoning?.(!enableReasoning)}
-              className='flex w-full items-center gap-4 rounded-xl px-3 py-2.5 text-left hover:bg-[#2a2a2a] transition-colors'>
-              <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
-                <svg className='h-5 w-5 text-zinc-200' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-                  <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
-                  <path d='M9 18h6' /><path d='M10 22h4' />
-                </svg>
-              </div>
-              <span className='flex-1 text-sm font-medium text-zinc-200'>Think harder</span>
-              {enableReasoning && (
-                <svg className='h-5 w-5 text-zinc-200 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round'>
-                  <path d='M20 6 9 17l-5-5' />
-                </svg>
-              )}
-            </button>
-            {enableReasoning && (
-              <div className='flex gap-1.5 px-3 pb-2'>
-                {(['low', 'medium', 'high'] as const).map((effort) => (
-                  <button key={effort} type='button' onClick={(e) => { e.stopPropagation(); onChangeReasoningEffort?.(effort) }}
-                    className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
-                      reasoningEffort === effort ? 'bg-violet-600 text-white' : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
-                    }`}>
-                    {effort}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
 
         {connectors.length > 0 && (
           <>
@@ -1175,11 +1141,6 @@ export function ChatPanel({
   onPlanConfirm,
   onPlanReject,
   reasoningMap,
-  enableReasoning,
-  onToggleReasoning,
-  reasoningEffort,
-  onChangeReasoningEffort,
-  currentModelSupportsReasoning,
   contextSnapshot,
   userName,
 }: ChatPanelProps) {
@@ -1580,11 +1541,6 @@ export function ChatPanel({
             onAttach={handleAttach}
             onConnector={handleConnectorSelect}
             onClose={() => setShowPlusMenu(false)}
-            enableReasoning={enableReasoning}
-            onToggleReasoning={onToggleReasoning}
-            reasoningEffort={reasoningEffort}
-            onChangeReasoningEffort={onChangeReasoningEffort}
-            modelSupportsReasoning={currentModelSupportsReasoning}
           />
         )}
 
