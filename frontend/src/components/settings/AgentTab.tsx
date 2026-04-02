@@ -1,5 +1,5 @@
 import { DEFAULT_SYSTEM_INSTRUCTION, type AppSettings } from '../../hooks/useSettings'
-import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
+import { PROVIDERS, providerById, providerForModel, modelInfo, reasoningModesForModel } from '../../lib/models'
 import { ToolsTab } from './ToolsTab'
 
 const PRESETS: Record<string, string> = {
@@ -21,6 +21,8 @@ type AgentTabProps = {
 export function AgentTab({ settings, onPatch }: AgentTabProps) {
   const currentProvider = providerById(settings.provider) ?? providerForModel(settings.model) ?? PROVIDERS[0]
   const currentModel = modelInfo(settings.model)
+  const supportsReasoning = Boolean(currentModel?.reasoning)
+  const reasoningModes = reasoningModesForModel(settings.model)
 
   return (
     <div className='space-y-6'>
@@ -109,6 +111,50 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         <p id='agent-model-description' className='text-xs text-zinc-400'>
           {currentModel?.description ?? 'Select a model for this session.'}
         </p>
+
+        {supportsReasoning && (
+          <div className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-3'>
+            <div className='flex items-center justify-between gap-3'>
+              <div>
+                <p className='text-xs font-semibold text-zinc-200'>Enable reasoning</p>
+                <p className='text-[11px] text-zinc-500'>Use model thinking for deeper multi-step planning.</p>
+              </div>
+              <button
+                type='button'
+                onClick={() => onPatch({ enableReasoning: !settings.enableReasoning })}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  settings.enableReasoning
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-[#2a2a2a] bg-[#181818] text-zinc-500'
+                }`}
+              >
+                {settings.enableReasoning ? 'On' : 'Off'}
+              </button>
+            </div>
+
+            {settings.enableReasoning && reasoningModes.length > 0 && (
+              <div className='mt-3'>
+                <p className='mb-1 text-[11px] font-medium text-zinc-400'>Reasoning control</p>
+                <div className='flex flex-wrap gap-1.5'>
+                  {reasoningModes.map((mode) => (
+                    <button
+                      key={mode}
+                      type='button'
+                      onClick={() => onPatch({ reasoningEffort: mode })}
+                      className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
+                        settings.reasoningEffort === mode
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-[#1a1a1a] text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className='space-y-2'>

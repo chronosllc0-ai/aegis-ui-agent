@@ -52,8 +52,8 @@ export interface ChatPanelProps {
   reasoningMap?: Record<string, string>
   enableReasoning?: boolean
   onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'low' | 'medium' | 'high'
-  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  reasoningEffort?: 'medium' | 'high' | 'extended' | 'adaptive'
+  onChangeReasoningEffort?: (effort: 'medium' | 'high' | 'extended' | 'adaptive') => void
   currentModelSupportsReasoning?: boolean
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
@@ -173,6 +173,10 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     if (isToolCall) {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
+      if (toolName.toLowerCase() === 'thinking') {
+        msgs.push({ id: entry.id, role: 'thinking', text: msg.replace(/^\[[\w_]+\]\s*/, '').trim() || 'Thinking', stepId: entry.stepId })
+        continue
+      }
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
       let argsDisplay = argsRaw
       let result: string | undefined
@@ -351,11 +355,14 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
   const result    = msg.toolResult
   const status    = msg.toolStatus ?? 'in_progress'
 
-  // Auto-expand while running
+  // Auto-expand when run starts, then collapse to one-line summary when run ends.
   const prevRunning = useRef(isRunning)
-  if (prevRunning.current !== isRunning) {
+  useEffect(() => {
+    if (prevRunning.current === isRunning) return
+    if (isRunning) setExpanded(true)
+    if (!isRunning && prevRunning.current) setExpanded(false)
     prevRunning.current = isRunning
-  }
+  }, [isRunning])
 
   // Auto-scroll output while running
   useEffect(() => {
@@ -391,6 +398,9 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
         <span className='flex-1 truncate font-mono text-xs text-zinc-400'>
           {toolLabel}{command ? ` ${command}` : ''}
         </span>
+        <span className='rounded-md border border-[#2f2f2f] bg-[#171717] px-1.5 py-0.5 text-[10px] font-medium text-zinc-500'>
+          sandbox
+        </span>
         <IcoChevronRight className='h-3 w-3 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0' />
       </button>
     )
@@ -414,6 +424,9 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
         <IcoTerminal className='h-3.5 w-3.5 flex-shrink-0 text-zinc-500' />
         <span className='flex-1 truncate font-mono text-[11px] font-medium text-zinc-300'>
           Shell — {toolLabel}
+        </span>
+        <span className='rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300'>
+          Sandboxed
         </span>
         {isRunning && (
           <span className='flex-shrink-0 text-[10px] font-mono text-amber-400 animate-pulse'>running…</span>
@@ -582,19 +595,20 @@ function UserInputCard({
   const [customText, setCustomText] = useState('')
   const [answered, setAnswered] = useState<string | null>(null)
 
+  const customOptionIndex = Math.max(options.length - 1, 0)
   const handleSelect = (idx: number, opt: string) => {
     setSelected(idx)
-    // Last option or "other" style options open free-text; all others auto-continue
+    const isCustomSlot = idx === customOptionIndex
     const isOtherOption = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
-    if (!isOtherOption) {
-      // Send immediately on Continue click; just select for now
-    }
+    if (isCustomSlot || isOtherOption) return
   }
 
   const handleContinue = () => {
     if (selected === null && !customText.trim()) return
     let answer: string
-    if (customText.trim()) {
+    if (selected === customOptionIndex && customText.trim()) {
+      answer = customText.trim()
+    } else if (customText.trim() && selected === customOptionIndex) {
       answer = customText.trim()
     } else if (selected !== null && options[selected]) {
       answer = options[selected]
@@ -623,8 +637,31 @@ function UserInputCard({
       {/* Numbered option rows */}
       <div className='space-y-px border-t border-[#222]'>
         {options.map((opt, idx) => {
-          const isOther = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
+          const isOther = idx === customOptionIndex
           const isSelected = selected === idx
+          if (isOther) {
+            return (
+              <div key={idx} className={`px-4 py-2.5 ${isSelected ? 'bg-[#252525]' : 'bg-transparent'}`}>
+                <div className='mb-1.5 flex items-center gap-3'>
+                  <span className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-semibold transition-colors ${
+                    isSelected ? 'border-zinc-400 bg-zinc-700 text-white' : 'border-zinc-700 text-zinc-600'
+                  }`}>
+                    {idx + 1}
+                  </span>
+                  <span className='flex-1 text-xs font-medium text-zinc-500'>{opt}</span>
+                </div>
+                <input
+                  type='text'
+                  value={customText}
+                  onFocus={() => setSelected(idx)}
+                  onChange={(e) => setCustomText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
+                  placeholder='Type your answer…'
+                  className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
+                />
+              </div>
+            )
+          }
           return (
             <button
               key={idx}
@@ -642,24 +679,12 @@ function UserInputCard({
                 {idx + 1}
               </span>
               <span className={`flex-1 text-xs font-medium ${isOther ? 'text-zinc-500' : ''}`}>{opt}</span>
-              {isSelected && !isOther && (
+              {isSelected && (
                 <IcoCheck className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
               )}
             </button>
           )
         })}
-      </div>
-
-      {/* Always-visible free-text field */}
-      <div className='border-t border-[#222] px-3 py-3'>
-        <input
-          type='text'
-          value={customText}
-          onChange={(e) => setCustomText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
-          placeholder='Or type your own answer…'
-          className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
-        />
       </div>
 
       {/* Footer: dismiss + continue */}
@@ -674,7 +699,7 @@ function UserInputCard({
         <button
           type='button'
           onClick={handleContinue}
-          disabled={selected === null && !customText.trim()}
+          disabled={selected === null || (selected === customOptionIndex && !customText.trim())}
           className='flex items-center gap-1.5 rounded-xl bg-[#2a7ae2] px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
         >
           Continue
@@ -822,14 +847,9 @@ interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
   onConnector: (connector: ConnectorMeta) => void
   onClose: () => void
-  enableReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'low' | 'medium' | 'high'
-  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
-  modelSupportsReasoning?: boolean
 }
 
-function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleReasoning, reasoningEffort, onChangeReasoningEffort, modelSupportsReasoning }: PlusMenuProps) {
+function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [query, setQuery] = useState('')
 
@@ -869,39 +889,6 @@ function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleRea
             </button>
           ))}
         </div>
-
-        {modelSupportsReasoning && (
-          <>
-            <div className='mx-4 my-1 border-t border-[#2a2a2a]' />
-            <button type='button' onClick={() => onToggleReasoning?.(!enableReasoning)}
-              className='flex w-full items-center gap-4 rounded-xl px-3 py-2.5 text-left hover:bg-[#2a2a2a] transition-colors'>
-              <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
-                <svg className='h-5 w-5 text-zinc-200' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-                  <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
-                  <path d='M9 18h6' /><path d='M10 22h4' />
-                </svg>
-              </div>
-              <span className='flex-1 text-sm font-medium text-zinc-200'>Think harder</span>
-              {enableReasoning && (
-                <svg className='h-5 w-5 text-zinc-200 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round'>
-                  <path d='M20 6 9 17l-5-5' />
-                </svg>
-              )}
-            </button>
-            {enableReasoning && (
-              <div className='flex gap-1.5 px-3 pb-2'>
-                {(['low', 'medium', 'high'] as const).map((effort) => (
-                  <button key={effort} type='button' onClick={(e) => { e.stopPropagation(); onChangeReasoningEffort?.(effort) }}
-                    className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
-                      reasoningEffort === effort ? 'bg-violet-600 text-white' : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
-                    }`}>
-                    {effort}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
 
         {connectors.length > 0 && (
           <>
@@ -956,22 +943,23 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
-  enableReasoning?: boolean
-  currentModelSupportsReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
+  modelChipLabel?: string
+  isLocalOnly?: boolean
+  hasFullAccess?: boolean
 }
 
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
-  activeConnector, onRemoveConnector, hasAttachments, enableReasoning,
-  currentModelSupportsReasoning, onToggleReasoning,
+  activeConnector, onRemoveConnector, hasAttachments,
+  modelChipLabel = 'GPT-5.4',
+  isLocalOnly = true,
+  hasFullAccess = true,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
 
   return (
-    /* Outer rounded card — matches Cursor's input box style */
-    <div className='rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] overflow-hidden'>
+    <div className='rounded-3xl border border-[#303030] bg-[#1a1a1a] shadow-[0_8px_30px_rgba(0,0,0,0.3)] overflow-hidden'>
 
       {/* Connector chip inside card */}
       {activeConnector && (
@@ -987,19 +975,37 @@ function InputBarCursor({
       )}
 
       {/* Textarea */}
-      <textarea
-        ref={textareaRef}
-        value={input}
-        onChange={onInputChange}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        disabled={isDisabled}
-        rows={1}
-        className='w-full resize-none bg-transparent px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none disabled:opacity-40 leading-6'
-        style={{ minHeight: '44px', maxHeight: '144px', overflow: 'hidden' }}
-      />
+      <div className='relative'>
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={onInputChange}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          disabled={isDisabled}
+          rows={1}
+          className='w-full resize-none bg-transparent px-4 pb-12 pt-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6'
+          style={{ minHeight: '70px', maxHeight: '160px', overflow: 'hidden' }}
+        />
+        {isWorking && !canSend ? (
+          <button type='button' onClick={onStop}
+            className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
+            aria-label='Stop task' title='Stop current task'>
+            <span className='relative flex h-4 w-4 items-center justify-center'>
+              <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
+              <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+            </span>
+          </button>
+        ) : (
+          <button type='button' onClick={onSend}
+            disabled={isDisabled || !canSend}
+            className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+            aria-label='Send message'>
+            <IcoArrowUp className='h-4 w-4' />
+          </button>
+        )}
+      </div>
 
-      {/* Toolbar row 1 — action buttons */}
       <div className='flex items-center gap-1.5 border-t border-[#242424] px-2.5 py-2'>
         {/* + button */}
         <button type='button' onClick={onPlusClick} disabled={isDisabled}
@@ -1015,22 +1021,7 @@ function InputBarCursor({
           Plan
         </button>
 
-        {/* Think harder toggle — only for capable models */}
-        {currentModelSupportsReasoning && (
-          <button type='button'
-            onClick={() => onToggleReasoning?.(!enableReasoning)}
-            className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs font-medium transition-colors flex-shrink-0 ${
-              enableReasoning
-                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
-            }`}>
-            <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-              <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
-              <path d='M9 18h6' /><path d='M10 22h4' />
-            </svg>
-            Think
-          </button>
-        )}
+        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
 
         <div className='flex-1' />
 
@@ -1043,24 +1034,11 @@ function InputBarCursor({
           <IcoMic className='h-3.5 w-3.5' />
         </button>
 
-        {/* Send / Stop */}
-        {isWorking && !canSend ? (
-          <button type='button' onClick={onStop}
-            className='flex h-7 w-7 items-center justify-center rounded-lg bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors flex-shrink-0'
-            aria-label='Stop task' title='Stop current task'>
-            <span className='relative flex h-4 w-4 items-center justify-center'>
-              <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
-              <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
-            </span>
-          </button>
-        ) : (
-          <button type='button' onClick={onSend}
-            disabled={isDisabled || !canSend}
-            className='flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0'
-            aria-label='Send message'>
-            <IcoArrowUp className='h-3.5 w-3.5' />
-          </button>
-        )}
+      </div>
+
+      <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
+        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◻ Local' : '◻ Remote'}</span>
+        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◉ Limited access'}</span>
       </div>
     </div>
   )
@@ -1086,11 +1064,6 @@ export function ChatPanel({
   onPlanConfirm,
   onPlanReject,
   reasoningMap,
-  enableReasoning,
-  onToggleReasoning,
-  reasoningEffort,
-  onChangeReasoningEffort,
-  currentModelSupportsReasoning,
   contextSnapshot,
   userName,
 }: ChatPanelProps) {
@@ -1195,6 +1168,12 @@ export function ChatPanel({
   }, [sentMessages.length])
 
   const allMessages = useMemo(() => [...sentMessages, ...baseMessages], [sentMessages, baseMessages])
+  const latestThinkingId = useMemo(() => {
+    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
+      if (allMessages[i].role === 'thinking') return allMessages[i].id
+    }
+    return null
+  }, [allMessages])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
@@ -1300,6 +1279,9 @@ export function ChatPanel({
   const firstName = userName ? userName.split(' ')[0] : null
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
+  const modelChipLabel = 'GPT-5.4'
+  const isLocalOnly = true
+  const hasFullAccess = true
 
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
@@ -1387,7 +1369,7 @@ export function ChatPanel({
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
             const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
-            const isStreaming = isWorking && reasoningText.length < 3
+            const isStreaming = isWorking && msg.id === latestThinkingId
             return (
               <div key={msg.id} className='px-1'>
                 <ThinkingRow stepId={stepId} reasoningText={reasoningText} isStreaming={isStreaming} />
@@ -1442,11 +1424,6 @@ export function ChatPanel({
             onAttach={handleAttach}
             onConnector={handleConnectorSelect}
             onClose={() => setShowPlusMenu(false)}
-            enableReasoning={enableReasoning}
-            onToggleReasoning={onToggleReasoning}
-            reasoningEffort={reasoningEffort}
-            onChangeReasoningEffort={onChangeReasoningEffort}
-            modelSupportsReasoning={currentModelSupportsReasoning}
           />
         )}
 
@@ -1475,9 +1452,9 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
-          enableReasoning={enableReasoning}
-          currentModelSupportsReasoning={currentModelSupportsReasoning}
-          onToggleReasoning={onToggleReasoning}
+          modelChipLabel={modelChipLabel}
+          isLocalOnly={isLocalOnly}
+          hasFullAccess={hasFullAccess}
         />
 
         {/* Hidden file input */}

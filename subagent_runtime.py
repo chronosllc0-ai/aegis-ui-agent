@@ -33,6 +33,9 @@ SUBAGENT_ALLOWED_TOOLS = frozenset({
     "memory_search",
     "memory_write",
     "memory_read",
+    "exec_python",
+    "exec_javascript",
+    "exec_shell",
     "web_search",
     "done",
     "error",
@@ -44,7 +47,7 @@ You are an Aegis sub-agent. You have been spawned by the main Aegis agent to com
 a focused sub-task. Work independently and efficiently.
 
 You have access to: browser control (screenshot, navigate, click, type, scroll), \
-web search, and memory tools.
+web search, memory tools, and sandboxed code/command execution.
 
 You do NOT have access to: messaging bots (Telegram, Slack, Discord), cron scheduling, \
 or cross-agent communication tools.
@@ -78,6 +81,15 @@ or cross-agent communication tools.
 
 {\"tool\": \"memory_write\", \"content\": \"...\", \"category\": \"general\"}
   → Stores a new memory.
+
+{\"tool\": \"exec_python\", \"code\": \"print('hello')\", \"cwd\": \".\"}
+  → Runs Python in the sub-agent sandbox workspace.
+
+{\"tool\": \"exec_javascript\", \"code\": \"console.log('hello')\", \"cwd\": \".\"}
+  → Runs JavaScript in the sub-agent sandbox workspace.
+
+{\"tool\": \"exec_shell\", \"command\": \"ls -la\", \"cwd\": \".\"}
+  → Runs shell commands in the sub-agent sandbox workspace.
 
 {\"tool\": \"done\", \"summary\": \"Task completed: ...\"}
   → Signals task completion. Always call this when finished.

@@ -3,7 +3,7 @@ import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig }
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
-export type ReasoningEffort = 'low' | 'medium' | 'high'
+export type ReasoningEffort = 'medium' | 'high' | 'extended' | 'adaptive'
 
 export type WorkflowTemplate = {
   id: string
@@ -64,7 +64,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   workflowTemplates: [],
   toolPermissions: {},
   disabledTools: [],
-  enableReasoning: false,
+  enableReasoning: true,
   reasoningEffort: 'medium',
 }
 
