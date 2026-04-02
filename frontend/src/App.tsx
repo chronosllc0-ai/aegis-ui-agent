@@ -47,6 +47,10 @@ type TaskHistoryItem = {
   title: string
   dateLabel: string
   instruction: string
+  labelSource?: 'browser' | 'chat' | 'system'
+}
+function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
+  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
 }
 function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
   return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
@@ -71,6 +75,25 @@ const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().repla
 // Rough token estimate for context tracking (≈4 chars per token)
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
+}
+
+const BROWSER_ACTION_LOG_TOOLS = new Set([
+  'screenshot',
+  'go_to_url',
+  'click',
+  'type_text',
+  'scroll',
+  'go_back',
+  'wait',
+  'extract_page',
+])
+
+function isBrowserActionLogEntry(entry: LogEntry): boolean {
+  if (entry.type === 'result' || entry.type === 'error' || entry.type === 'interrupt') return true
+  if (entry.stepKind === 'navigate' && entry.elapsedSeconds === 0) return true
+  const toolMatch = entry.message.match(/^\[([\w_]+)\]/)
+  if (!toolMatch?.[1]) return false
+  return BROWSER_ACTION_LOG_TOOLS.has(toolMatch[1].toLowerCase())
 }
 
 function App() {
@@ -395,7 +418,7 @@ function App() {
           let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
           if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
           else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
-          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '' })
+          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '', labelSource: 'system' })
         }
       }
       if (!toAdd.length) return prev
@@ -425,6 +448,11 @@ function App() {
   const filteredHistory = useMemo(
     () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
     [historySearch, taskHistory],
+  )
+
+  const taskLabels = useMemo(
+    () => Object.fromEntries(taskHistory.map((item) => [item.id, item.title])),
+    [taskHistory],
   )
 
   const scopedSubAgents = useMemo(() => {
@@ -518,43 +546,10 @@ function App() {
     return result
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
-  // ── Browser activity detection ──────────────────────────────────────────
-  // True when any log in the current task contains browser execution steps.
-  // Drives the "Agent is browsing" banner in ChatPanel and auto-mode switches.
-  const hasBrowserActivity = useMemo(
-    () => enrichedLogs.some(
-      (l) => l.stepKind === 'click' || l.stepKind === 'type' || l.stepKind === 'scroll' ||
-             (l.stepKind === 'navigate' && l.elapsedSeconds > 0),
-    ),
+  const actionLogEntries = useMemo(
+    () => enrichedLogs.filter((entry) => isBrowserActionLogEntry(entry)),
     [enrichedLogs],
   )
-
-  // isBrowsing: agent is actively running browser steps RIGHT NOW
-  const isBrowsing = isWorking && hasBrowserActivity
-
-  // ── Auto-return to chat when a browser task finishes ────────────────────
-  // When isWorking flips true→false and the task had browser activity,
-  // automatically switch the user back to chat so they see the summary card.
-  const prevIsWorkingRef = useRef(isWorking)
-  useEffect(() => {
-    const wasWorking = prevIsWorkingRef.current
-    prevIsWorkingRef.current = isWorking
-    if (wasWorking && !isWorking && hasBrowserActivity && appMode === 'browser') {
-      setAppMode('chat')
-    }
-  }, [isWorking, hasBrowserActivity, appMode])
-
-  // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
-  // If the agent needs user input mid-task and the user is watching the
-  // browser, jump them to chat so they see (and can answer) the question.
-  useEffect(() => {
-    if (!enrichedLogs.length || appMode !== 'browser') return
-    const last = enrichedLogs[enrichedLogs.length - 1]
-    if (last?.message?.includes('[ask_user_input]')) {
-      setAppMode('chat')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrichedLogs.length, appMode])
 
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
@@ -614,7 +609,11 @@ function App() {
         : `pending-${crypto.randomUUID()}`
       const now = new Date()
       const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      const newEntry = { id: taskId, title: finalInstruction, dateLabel, instruction: finalInstruction }
+      const labelSource = metadata?.task_label_source === 'browser' ? 'browser' : 'chat'
+      const lockedTitle = typeof metadata?.task_label === 'string' && metadata.task_label.trim()
+        ? metadata.task_label.trim()
+        : finalInstruction
+      const newEntry: TaskHistoryItem = { id: taskId, title: lockedTitle, dateLabel, instruction: finalInstruction, labelSource }
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
@@ -629,7 +628,7 @@ function App() {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, isWorking ? 'steer' : mode)
+    handleSend(normalized, isWorking ? 'steer' : mode, { task_label_source: 'browser', task_label: normalized })
   }
 
   const handleDecomposePlan = async (prompt: string) => {
@@ -1072,7 +1071,7 @@ function App() {
 
                 {/* Action log - stacked below the browser, full width on all screen sizes */}
                 <div className='h-40 min-h-0 shrink-0 sm:h-48'>
-                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
+                  <ActionLog entries={actionLogEntries} taskLabels={taskLabels} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
               </div>
             )}

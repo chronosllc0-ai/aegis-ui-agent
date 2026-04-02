@@ -1308,6 +1308,8 @@ export function ChatPanel({
           ? { id: activeConnector.id, name: activeConnector.name }
           : undefined,
         context_snapshot: contextSnapshot ?? undefined,
+        task_label_source: 'chat',
+        task_label: withContext || '(attachment)',
       })
     }
     setInput('')

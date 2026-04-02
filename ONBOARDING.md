@@ -2104,3 +2104,39 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.24 - April 2, 2026 (Action Log Browser-only Filtering + Task Label Source Ownership)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated browser Action Log behavior so it now renders only browser tool-call entries and task outcome events (result/error/interrupt), while preserving full logs for chat rendering.
+- Added browser-tool filtering in `frontend/src/App.tsx` via `isBrowserActionLogEntry(...)` with an explicit browser-tool allowlist.
+- Added task-label injection to Action Log groups by passing `taskLabels` from task history into `ActionLog`, so labels don’t depend on first log line ordering.
+- Added panel-origin label metadata on new task creation:
+  - Chat composer sends `task_label_source: "chat"` and `task_label`.
+  - Browser URL submit sends `task_label_source: "browser"` and `task_label`.
+  - Task history entries now persist `labelSource` for source ownership.
+- Updated shared docs content (`shared/docs/content.ts`) changelog and WebSocket reference notes to document the new Action Log behavior.
+- Updated root `README.md` with a “Clean action log” feature row and a UX note explaining source-owned task labels.
+
+### What's Working
+- Browser Action Log surface is now scoped to browser tool telemetry + task outcomes.
+- Chat panel still receives full execution/log stream (including non-browser tools).
+- Task titles render from history labels in Action Log groups, reducing missing/unstable labels.
+- Shared docs + README now reflect these UX/telemetry rules.
+
+### What's NOT Working Yet
+- No end-to-end UI test run was completed in this pass to validate all panel interactions under live session traffic.
+
+### Next Steps
+1. Add a focused frontend test for Action Log filtering (browser tools included, non-browser tools excluded).
+2. Add regression coverage for task label source ownership when starting tasks from chat vs browser URL bar.
+3. Validate on a live session that restored task history keeps Action Log group labels stable after refresh.
+
+### Decisions Made
+- Chose presentation-layer filtering for Action Log (in `App.tsx`) so non-browser tool logs remain available for chat and future observability surfaces.
+
+### Blockers
+- None in this pass.
