@@ -1020,6 +1020,10 @@ interface InputBarCursorProps {
   enableReasoning?: boolean
   currentModelSupportsReasoning?: boolean
   onToggleReasoning?: (enabled: boolean) => void
+  modelChipLabel?: string
+  effortChipLabel?: string
+  isLocalOnly?: boolean
+  hasFullAccess?: boolean
 }
 
 function InputBarCursor({
@@ -1027,6 +1031,10 @@ function InputBarCursor({
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments, enableReasoning,
   currentModelSupportsReasoning, onToggleReasoning,
+  modelChipLabel = 'GPT-5.4',
+  effortChipLabel = 'Standard',
+  isLocalOnly = true,
+  hasFullAccess = true,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
 
@@ -1381,6 +1389,10 @@ export function ChatPanel({
   const firstName = userName ? userName.split(' ')[0] : null
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
+  const modelChipLabel = 'GPT-5.4'
+  const effortChipLabel = reasoningEffort ? `${reasoningEffort[0].toUpperCase()}${reasoningEffort.slice(1)} effort` : 'Standard'
+  const isLocalOnly = true
+  const hasFullAccess = true
 
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
@@ -1596,6 +1608,10 @@ export function ChatPanel({
           enableReasoning={enableReasoning}
           currentModelSupportsReasoning={currentModelSupportsReasoning}
           onToggleReasoning={onToggleReasoning}
+          modelChipLabel={modelChipLabel}
+          effortChipLabel={effortChipLabel}
+          isLocalOnly={isLocalOnly}
+          hasFullAccess={hasFullAccess}
         />
 
         {/* Hidden file input */}
