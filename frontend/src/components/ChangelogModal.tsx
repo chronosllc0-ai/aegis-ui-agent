@@ -11,6 +11,15 @@ type ReleaseEntry = {
 // Add new releases at the top of this array
 const RELEASES: ReleaseEntry[] = [
   {
+    version: '1.2.1',
+    date: 'April 2026',
+    changes: [
+      { type: 'improve', text: 'Reasoning controls moved to Settings → Agent for supported models, with medium/high/extended/adaptive mode controls' },
+      { type: 'improve', text: 'Reasoning is now enabled by default for new settings profiles (default effort: medium)' },
+      { type: 'fix', text: 'Sandbox shell executor now runs via non-login shell mode for safer command startup behavior' },
+    ],
+  },
+  {
     version: '1.2.0',
     date: 'March 2026',
     changes: [
