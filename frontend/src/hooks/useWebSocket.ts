@@ -38,12 +38,14 @@ export type SubAgentInfo = {
   model: string
   status: 'spawning' | 'running' | 'completed' | 'failed' | 'cancelled'
   step_count: number
+  parent_task_id?: string
 }
 
 export type SubAgentStep = {
   sub_id: string
   step: { type: string; content: string }
   step_index: number
+  parent_task_id?: string
 }
 
 type WebSocketPayload = {
@@ -286,21 +288,23 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       }
       if (payload.type === 'subagent_spawned') {
         const agent = payload.data as unknown as SubAgentInfo
+        const parentTaskId = activeTaskIdRef.current
         setSubAgents((prev) => {
           const exists = prev.find((a) => a.sub_id === agent.sub_id)
           if (exists) return prev
-          return [...prev, { ...agent, status: 'spawning', step_count: 0 }]
+          return [...prev, { ...agent, status: 'spawning', step_count: 0, parent_task_id: parentTaskId }]
         })
         return
       }
       if (payload.type === 'subagent_step') {
         const { sub_id, step, step_index } = payload.data as unknown as SubAgentStep
+        const parentTaskId = activeTaskIdRef.current
         setSubAgentSteps((prev) => ({
           ...prev,
-          [sub_id]: [...(prev[sub_id] ?? []), { sub_id, step, step_index }],
+          [sub_id]: [...(prev[sub_id] ?? []), { sub_id, step, step_index, parent_task_id: parentTaskId }],
         }))
         setSubAgents((prev) =>
-          prev.map((a) => a.sub_id === sub_id ? { ...a, status: 'running', step_count: (step_index ?? 0) + 1 } : a)
+          prev.map((a) => a.sub_id === sub_id ? { ...a, status: 'running', step_count: (step_index ?? 0) + 1, parent_task_id: a.parent_task_id ?? parentTaskId } : a)
         )
         return
       }

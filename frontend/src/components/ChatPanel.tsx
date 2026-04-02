@@ -34,7 +34,7 @@ const IcoSparkle     = (p: SvgProps) => <Svg {...p}><path d='M12 3v1M12 20v1M3 1
 export interface ChatPanelProps {
   logs: LogEntry[]
   isWorking: boolean
-  onSend: (instruction: string, mode: SteeringMode) => void
+  onSend: (instruction: string, mode: SteeringMode, metadata?: Record<string, unknown>) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
@@ -55,8 +55,13 @@ export interface ChatPanelProps {
   reasoningEffort?: 'low' | 'medium' | 'high'
   onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
   currentModelSupportsReasoning?: boolean
-  /** User's display name for personalised CTA */
-  userName?: string
+  /** Current task context meter snapshot (persisted with outgoing user messages) */
+  contextSnapshot?: {
+    tokensUsed: number
+    contextLimit: number
+    modelId: string
+    isCompacting: boolean
+  }
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -314,21 +319,17 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
 function AssistantCard({ msg }: { msg: ChatMessage }) {
   const parts = useMemo(() => parseCodeBlocks(msg.text), [msg.text])
   return (
-    <div className='flex justify-start px-1 py-1'>
-      <div className='max-w-[85%] space-y-0.5'>
-        <div className='rounded-2xl rounded-tl-sm border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-3 overflow-hidden break-words' style={{ overflowWrap: 'anywhere' }}>
-          {parts.map((part, i) =>
-            part.type === 'code' ? (
-              <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
-            ) : (
-              <p key={i} className='text-sm leading-relaxed text-zinc-200 whitespace-pre-wrap'>{part.content}</p>
-            )
-          )}
-        </div>
-        {msg.timestamp && (
-          <p className='text-[10px] text-zinc-600 pl-1'>{msg.timestamp}</p>
+    <div className='mb-3 max-w-[92%]'>
+      <div className='min-w-0 text-sm md:text-xl text-zinc-200 break-words'>
+        {parts.map((part, i) =>
+          part.type === 'code' ? (
+            <CodeCard key={i} code={part.content} lang={part.lang ?? 'text'} />
+          ) : (
+            <span key={i} className='whitespace-pre-wrap'>{part.content}</span>
+          )
         )}
       </div>
+      <p className='mt-0.5 text-[10px] text-zinc-600'>{msg.timestamp}</p>
     </div>
   )
 }
@@ -452,6 +453,19 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
     }
   })
 
+  const isShellStyle = toolName === 'exec_python' || toolName === 'exec_javascript'
+  if (isShellStyle) {
+    return (
+      <div className='mb-2 overflow-hidden rounded-xl border border-[#2a2a2a] bg-black'>
+        <div className='flex items-center justify-between border-b border-[#2a2a2a] bg-[#111] px-3 py-1.5'>
+          <span className='font-mono text-[11px] text-zinc-300'>$ {toolLabel}</span>
+          <ToolStatusIcon status={toolStatus} />
+        </div>
+        <pre className='max-h-52 overflow-auto p-3 font-mono text-xs text-zinc-200 whitespace-pre-wrap break-words'>{msg.toolArgs ?? msg.text}</pre>
+      </div>
+    )
+  }
+
   return (
     <div className='my-0.5'>
       <button
@@ -549,7 +563,10 @@ function UserInputCard({
   const [answered, setAnswered] = useState<string | null>(null)
 
   const handleOption = (opt: string) => {
-    if (opt === 'Let me tell you') { setCustomMode(true); return }
+    if (opt === 'Let me tell you' || opt === 'No, let me choose') {
+      setCustomMode(true)
+      return
+    }
     setAnswered(opt)
     onRespond(opt, requestId)
   }
@@ -575,6 +592,15 @@ function UserInputCard({
               {opt}
             </button>
           ))}
+          {!options.includes('No, let me choose') && (
+            <button
+              type='button'
+              onClick={() => handleOption('No, let me choose')}
+              className='rounded-lg border border-zinc-600 bg-[#1a1a1a] px-3 py-1.5 text-xs font-medium text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+            >
+              No, let me choose
+            </button>
+          )}
         </div>
       ) : (
         <div className='flex gap-2'>
@@ -596,6 +622,7 @@ function UserInputCard({
 
 // ─── TaskSummaryCard ──────────────────────────────────────────────────────────
 function TaskSummaryCard({ summary }: { summary: string }) {
+  const [decision, setDecision] = useState<'pending' | 'implement' | 'discard'>('pending')
   return (
     <div className='my-2 rounded-xl border border-emerald-500/20 bg-[#0a1a0e] p-4 space-y-2'>
       <div className='flex items-center gap-2'>
@@ -605,6 +632,11 @@ function TaskSummaryCard({ summary }: { summary: string }) {
         <p className='text-xs font-semibold text-emerald-300 uppercase tracking-wide'>Task Complete</p>
       </div>
       <div className='text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap'>{summary}</div>
+      <div className='flex gap-2 pt-1'>
+        <button type='button' onClick={() => setDecision('implement')} className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500'>Implement</button>
+        <button type='button' onClick={() => setDecision('discard')} className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-500/20'>Discard</button>
+      </div>
+      {decision !== 'pending' && <p className='text-[11px] text-zinc-500'>Decision recorded: {decision}</p>}
     </div>
   )
 }
@@ -921,7 +953,7 @@ export function ChatPanel({
   reasoningEffort,
   onChangeReasoningEffort,
   currentModelSupportsReasoning,
-  userName,
+  contextSnapshot,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -944,12 +976,17 @@ export function ChatPanel({
     prevServerLenRef.current = serverMessages.length
     if (!taskChanged && !serverArrived) return
     if (serverMessages.length > 0) {
-      setSentMessages(serverMessages.map((m) => ({
-        id: m.id,
-        role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
-        text: m.content,
-        timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
-      })))
+      setSentMessages(
+        serverMessages.map((m) => ({
+          id: m.id,
+          role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
+          text: m.content,
+          timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+          attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
+            ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
+            : undefined,
+        }))
+      )
     } else if (taskChanged) {
       setSentMessages([])
     }
@@ -1064,7 +1101,13 @@ export function ChatPanel({
     if (withContext.startsWith('/plan ')) {
       onDecomposePlan(withContext.slice(6))
     } else {
-      onSend(withContext || '(attachment)', 'steer')
+      onSend(withContext || '(attachment)', 'steer', {
+        attachments: attachments.length > 0 ? attachments : undefined,
+        active_connector: activeConnector
+          ? { id: activeConnector.id, name: activeConnector.name }
+          : undefined,
+        context_snapshot: contextSnapshot ?? undefined,
+      })
     }
     setInput('')
     setAttachments([])
