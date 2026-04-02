@@ -77,6 +77,7 @@ const FILESYSTEM_TOOLS: ToolDef[] = [
 const CODE_TOOLS: ToolDef[] = [
   { id: 'exec_python',     name: 'Run Python',     description: 'Execute Python code in a sandbox',     risk: 'high',   defaultPermission: 'confirm' },
   { id: 'exec_javascript', name: 'Run JavaScript', description: 'Execute JS code in a sandbox',         risk: 'high',   defaultPermission: 'confirm' },
+  { id: 'exec_shell',      name: 'Run Shell',      description: 'Execute shell commands in a sandbox',  risk: 'high',   defaultPermission: 'confirm' },
 ]
 
 const TELEGRAM_TOOLS: ToolDef[] = [
@@ -226,7 +227,7 @@ const STATIC_TOOL_CATEGORIES: ToolCategory[] = [
     id: 'code-exec',
     label: 'Code Execution',
     icon: 'code-exec',
-    description: 'Run Python and JavaScript in a sandbox. On by default.',
+    description: 'Run Python, JavaScript, and shell commands in a sandbox. On by default.',
     canDisable: true,
     tools: CODE_TOOLS,
   },
