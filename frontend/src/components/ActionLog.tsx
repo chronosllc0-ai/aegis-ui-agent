@@ -5,6 +5,7 @@ import { Icons } from './icons'
 type ActionLogProps = {
   dataTour?: string
   entries: LogEntry[]
+  taskLabels?: Record<string, string>
   showWorkflow: boolean
   onToggleWorkflow: () => void
   onSaveWorkflow: () => void
@@ -27,7 +28,7 @@ const STATUS_CLASS: Record<LogEntry['status'], string> = {
   steered: 'text-amber-300 border-amber-500/30',
 }
 
-export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkflow, dataTour, reasoningMap }: ActionLogProps) {
+export function ActionLog({ entries, taskLabels, showWorkflow, onToggleWorkflow, onSaveWorkflow, dataTour, reasoningMap }: ActionLogProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [collapsedTasks, setCollapsedTasks] = useState<Record<string, boolean>>({})
 
@@ -57,7 +58,7 @@ export function ActionLog({ entries, showWorkflow, onToggleWorkflow, onSaveWorkf
       </div>
       <div ref={containerRef} className='h-[calc(100%-2.4rem)] overflow-y-auto font-mono text-xs md:text-lg'>
         {grouped.map(([taskId, taskEntries], idx) => {
-          const title = taskEntries[0]?.message ?? `Task ${idx + 1}`
+          const title = taskLabels?.[taskId] ?? taskEntries[0]?.message ?? `Task ${idx + 1}`
           const isTaskCollapsed = collapsedTasks[taskId] ?? false
           return (
             <div key={taskId} className='mb-2 rounded-md border border-[#2a2a2a] bg-[#111]'>
