@@ -515,6 +515,44 @@ function App() {
     return result
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
+  // ── Browser activity detection ──────────────────────────────────────────
+  // True when any log in the current task contains browser execution steps.
+  // Drives the "Agent is browsing" banner in ChatPanel and auto-mode switches.
+  const hasBrowserActivity = useMemo(
+    () => enrichedLogs.some(
+      (l) => l.stepKind === 'click' || l.stepKind === 'type' || l.stepKind === 'scroll' ||
+             (l.stepKind === 'navigate' && l.elapsedSeconds > 0),
+    ),
+    [enrichedLogs],
+  )
+
+  // isBrowsing: agent is actively running browser steps RIGHT NOW
+  const isBrowsing = isWorking && hasBrowserActivity
+
+  // ── Auto-return to chat when a browser task finishes ────────────────────
+  // When isWorking flips true→false and the task had browser activity,
+  // automatically switch the user back to chat so they see the summary card.
+  const prevIsWorkingRef = useRef(isWorking)
+  useEffect(() => {
+    const wasWorking = prevIsWorkingRef.current
+    prevIsWorkingRef.current = isWorking
+    if (wasWorking && !isWorking && hasBrowserActivity && appMode === 'browser') {
+      setAppMode('chat')
+    }
+  }, [isWorking, hasBrowserActivity, appMode])
+
+  // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
+  // If the agent needs user input mid-task and the user is watching the
+  // browser, jump them to chat so they see (and can answer) the question.
+  useEffect(() => {
+    if (!enrichedLogs.length || appMode !== 'browser') return
+    const last = enrichedLogs[enrichedLogs.length - 1]
+    if (last?.message?.includes('[ask_user_input]')) {
+      setAppMode('chat')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrichedLogs.length, appMode])
+
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
@@ -980,6 +1018,7 @@ function App() {
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => setAppMode('browser')}
                 latestFrame={latestFrame}
+                isBrowsing={isBrowsing}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}

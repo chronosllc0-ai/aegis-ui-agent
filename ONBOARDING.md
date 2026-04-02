@@ -1,38 +1,3 @@
-## Session 5.36 - April 2, 2026 (Enable real sandbox shell command execution)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused runtime pass
-
-### What Was Done
-- Added a new universal runtime tool `exec_shell` so Aegis can execute real shell commands (for scripts/CLI workflows) inside the per-session workspace sandbox.
-- Implemented runtime execution handler `_run_shell(...)` in `universal_navigator.py` using async process execution (`bash -lc ...`) with bounded timeout, sanitized environment variable pass-through, and structured stdout/stderr/return-code output.
-- Wired `exec_shell` into the active tool dispatch path and local-workspace capability detection so the model can plan shell steps alongside file/code tools.
-- Extended sub-agent capabilities to include `exec_shell` plus existing code execution tools (`exec_python`, `exec_javascript`) so spawned sub-agents can also run commands/scripts in sandbox scope.
-- Updated sub-agent system prompt documentation to advertise the new runnable code/command tools.
-- Updated frontend Settings → Tools catalog to expose the new `Run Shell` permission toggle under Code Execution.
-
-### What's Working
-- The agent now has a first-class tool to run real shell commands for command/script tasks.
-- Sub-agents can use shell/python/javascript execution within the same session-sandbox boundary.
-- Tool permissions UI now includes `exec_shell` so users/admins can gate it like other high-risk execution tools.
-
-### What's NOT Working Yet
-- This pass did not add a terminal emulator stream transport; execution is currently command-result based (stdout/stderr snapshots after command completion).
-
-### Next Steps
-1. Add progressive stdout streaming events for long-running shell commands.
-2. Add command execution history persistence metadata (duration/resource usage) in task logs.
-3. Optionally add explicit command policy guardrails (denylist/allowlist) configurable from admin settings.
-
-### Decisions Made
-- Reused the existing session workspace sandbox and environment filtering model to keep shell execution consistent with current Python/JavaScript tool safety posture.
-- Kept `exec_shell` high-risk with default `confirm` permission.
-
-### Blockers
-- None.
-
----
-
 ## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
 
 **Agent:** GPT-5.3-Codex  
