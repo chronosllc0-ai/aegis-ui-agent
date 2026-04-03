@@ -198,7 +198,7 @@ class PolicyScanner:
         max_score = 0.0
 
         for label, pattern, weight in cls._PATTERNS:
-            if re.search(pattern, lowered):
+            if re.search(pattern, lowered, flags=re.DOTALL):
                 flags.append({"label": label, "pattern": pattern, "weight": weight})
                 max_score = max(max_score, weight)
 
