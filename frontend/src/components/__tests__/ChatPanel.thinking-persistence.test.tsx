@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+qqimport { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type React from 'react'
 
@@ -87,5 +87,18 @@ describe('ChatPanel thinking persistence', () => {
     saveThinking('task-a', 'step-1', 'completed')
     rerender(<ChatPanel {...baseProps({ activeTaskId: 'task-a', reasoningMap: { 'step-1': 'done reasoning' }, isWorking: false })} />)
     expect(screen.getByText('Thought')).toBeInTheDocument()
+  })
+
+  it('persists thinking accordion open state per task', () => {
+    saveThinking('task-a', 'step-open', 'streaming')
+    render(<ChatPanel {...baseProps({ activeTaskId: 'task-a', reasoningMap: { 'step-open': 'expanded text' } })} />)
+
+    for (const chip of screen.getAllByText('Thinking')) {
+      fireEvent.click(chip)
+    }
+
+    const openIds = JSON.parse(localStorage.getItem('aegis.chat.ui.task-a.openThinkingIds') ?? '[]') as string[]
+    expect(openIds).toContain('step-open')
+    expect(screen.getByText('expanded text')).toBeInTheDocument()
   })
 })

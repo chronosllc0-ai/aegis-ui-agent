@@ -1,60 +1,29 @@
-## Session 5.46 - April 3, 2026 (browser-primitives-only Action Log filter hardening)
+## Session 5.45 - April 3, 2026 (Railway TS6133 follow-up verification + guard test)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused frontend filtering + regression-test pass
+**Duration:** ~1 targeted frontend verification pass
 
 ### What Was Done
-- Added a centralized browser-primitive filter helper in `frontend/src/lib/actionLogFilter.ts` with a strict tool allowlist + exact `^[\w_]` bracket-tool parsing semantics (`^\[([\w_]+)\]`).
-- Switched `App.tsx` Action Log derivation to use the shared helper so non-tool text, non-browser tools, chat-origin navigate rows (`elapsedSeconds === 0`), and non-step entry types (`result/error/interrupt/reasoning*`) are excluded by default.
-- Updated `ActionLog.tsx` task-title selection to remove first-message fallback text and use only `taskLabels[taskId]` or stable generated fallback (`Task N`).
-- Added mixed-stream regression coverage in `frontend/src/components/__tests__/ActionLog.browser-primitives-only.test.tsx` to ensure only browser primitive rows render and prompt/non-browser rows stay out of Action Log.
+- Investigated Railway build failure screenshot (`TS6133: 'setThinkingOpen' is declared but its value is never read`) and verified current `ChatPanel` no longer declares `setThinkingOpen`; active state setter is `setOpenThinkingIds` and is used in hydration/toggle flows.
+- Added a regression test to cover task-scoped thinking accordion UI persistence (`aegis.chat.ui.<taskId>.openThinkingIds`) by toggling a thinking row and asserting localStorage persistence + expanded content render.
+- Re-ran frontend test suite and production build to confirm no TypeScript unused-local failures in current source.
 
 ### What's Working
-- Action Log now enforces hard browser-primitives-only semantics regardless of mixed websocket stream content.
-- Task headers in Action Log are deterministic and no longer mirror runtime row text from first log entry.
+- Frontend tests now include explicit coverage for open/closed thinking-row persistence behavior.
+- Local build passes (`npm run build`) with no `TS6133` error in `ChatPanel.tsx`.
 
 ### What's NOT Working Yet
-- This pass did not add end-to-end browser automation tests; coverage is component/helper level via Vitest.
+- Railway build verification still depends on redeploying the latest commit hash (screenshot appears to reference an older failed deployment snapshot).
 
 ### Next Steps
-1. Reuse `actionLogFilter.ts` in any future log export/download feature to keep semantics consistent.
-2. Extend allowlist intentionally when backend introduces new browser primitive aliases.
+1. Trigger Railway redeploy using latest commit.
+2. Confirm build logs no longer report `setThinkingOpen` TS6133.
 
 ### Decisions Made
-- Kept the action-log include policy explicit and deny-by-default so new non-browser tools do not leak into UI without intentional allowlist updates.
+- Added a focused guard test instead of introducing additional UI logic churn since current production code path already uses the setter correctly.
 
 ### Blockers
-- None.
-
----
-
-## Session 5.45 - April 3, 2026 (conversation title promotion + placeholder-safe frontend merges)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 backend/frontend consistency + regression-test pass
-
-### What Was Done
-- Added canonical placeholder-title helpers in `backend/conversation_service.py` and implemented first-user-message transactional title promotion.
-- Updated websocket conversation logging flow in `main.py` to forward `task_label` metadata and a title candidate into persistence so title promotion occurs atomically with message insert (no post-commit rename query).
-- Added shared frontend title utilities (`normalizeTitle`, `isPlaceholderTitle`, and merge helpers) and applied them in `useConversations` + `App.tsx` so placeholder server titles no longer clobber richer local task titles.
-- Added backend regression test `tests/test_conversation_title_promotion.py` and frontend regression test `frontend/src/App.task-title-merge.test.tsx`.
-
-### What's Working
-- First user message now promotes placeholder conversation titles inside the same DB transaction as message persistence.
-- Frontend task sidebar keeps richer optimistic/local labels while backend title is still placeholder, then upgrades when a real promoted title arrives.
-
-### What's NOT Working Yet
-- Full browser-level E2E harness for sidebar update animation/UX timing is still not present; behavior is covered with unit/integration regressions.
-
-### Next Steps
-1. Add a browser E2E that opens a fresh task thread and verifies sidebar title transitions exactly once in a rendered app session.
-2. Consider sharing the title utility semantics with any additional task-list surfaces beyond the sidebar.
-
-### Decisions Made
-- Kept placeholder semantics centralized in one frontend utility and one backend module to reduce drift (`new task`, `untitled`, empty).
-
-### Blockers
-- None.
+- None in code; only hosted redeploy confirmation remains.
 
 ---
 
