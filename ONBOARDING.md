@@ -1,3 +1,35 @@
+## Session 5.43 - April 3, 2026 (ask_user_input reply routing + dedupe + regressions)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend test pass
+
+### What Was Done
+- Updated `ChatPanel` ask-user-input reply handling to keep optimistic local bubble insertion while removing generic steer send from `handleUserInputReply(...)`.
+- Added optimistic reply metadata (`source: "ask_user_input"`, `request_id`) on local user bubbles and tightened merge behavior to treat those optimistic messages as dedupe candidates when equivalent server user bubbles arrive.
+- Wired `ChatPanel` to use the dedicated `onUserInputResponse(answer, requestId)` callback and updated `App.tsx` to send direct websocket payloads with `action: "user_input_response"` (not routed via `handleSend`/steering).
+- Added frontend regression test for ask-user-input card response flow (single callback call + single local user bubble).
+- Added backend websocket regression tests ensuring `user_input_response` resumes exactly one pending prompt, continues the paused task once, and logs unknown/expired request IDs at debug level.
+
+### What's Working
+- ask-user-input responses now route directly to pending prompt futures without kicking off a new steer/navigate path.
+- Optimistic ask-user-input local replies no longer double-render once server user messages hydrate.
+- Backend and frontend regression coverage added for the ask-user-input resume path.
+
+### What's NOT Working Yet
+- No additional browser E2E harness was introduced in this pass beyond websocket integration + frontend component tests.
+
+### Next Steps
+1. Add a full browser-level E2E spec (Playwright UI test) once frontend test harness scope expands.
+2. Extend dedupe metadata to all optimistic message classes (not just ask-user-input) if similar hydration duplication is observed.
+
+### Decisions Made
+- Kept `onUserInputResponse` optional in props for backward compatibility, but all ask-user-input replies now use this callback path as the only transport.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.42 - April 2, 2026 (Follow-up: @mentions + explicit sub-agent message routing)
 
 **Agent:** GPT-5.3-Codex  

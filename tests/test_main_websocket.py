@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,9 @@ import main
 
 
 class _StubExecutor:
+    def __init__(self) -> None:
+        self.page = type("PageStub", (), {"url": "https://example.com"})()
+
     async def ensure_browser(self) -> None:
         return None
 
@@ -38,6 +42,26 @@ class _StubOrchestrator:
                     "screenshot": None,
                 }
             )
+        return {"status": "completed", "session_id": session_id, "instruction": instruction}
+
+
+class _UserInputOrchestrator:
+    """Stub orchestrator that pauses once for ask_user_input, then continues once."""
+
+    def __init__(self) -> None:
+        self.executor = _StubExecutor()
+        self.execute_calls = 0
+        self.responses: list[str] = []
+
+    async def execute_task(self, session_id: str, instruction: str, on_step=None, on_user_input=None, **kwargs):
+        self.execute_calls += 1
+        if on_step:
+            await on_step({"type": "message", "content": "before-user-input"})
+        if on_user_input:
+            response = await on_user_input("Proceed with which option?", ["Alpha", "Beta"])
+            self.responses.append(response)
+            if on_step:
+                await on_step({"type": "message", "content": f"after-user-input:{response}"})
         return {"status": "completed", "session_id": session_id, "instruction": instruction}
 
 
@@ -134,3 +158,47 @@ def test_initialize_database_falls_back_to_sqlite_for_local_postgres_driver_fail
     finally:
         main.db_ready = previous_db_ready
         main.db_init_error = previous_db_error
+
+
+def test_websocket_user_input_response_resumes_single_pending_prompt_without_extra_task() -> None:
+    """user_input_response should resolve one pending prompt and not start a second execute_task call."""
+    orchestrator = _UserInputOrchestrator()
+    main.orchestrator = orchestrator
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()  # initial frame
+        ws.send_json({"action": "navigate", "instruction": "test user input flow"})
+
+        before_step = ws.receive_json()
+        user_input_request = ws.receive_json()
+        request_id = user_input_request["data"]["request_id"]
+        ws.send_json({"action": "user_input_response", "request_id": request_id, "response": "Alpha"})
+
+        after_step = ws.receive_json()
+        result = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert before_step["type"] == "step"
+    assert before_step["data"]["content"] == "before-user-input"
+    assert user_input_request["type"] == "step"
+    assert user_input_request["data"]["type"] == "user_input_request"
+    assert after_step["type"] == "step"
+    assert after_step["data"]["content"] == "after-user-input:Alpha"
+    assert result["type"] == "result"
+    assert orchestrator.responses == ["Alpha"]
+    assert orchestrator.execute_calls == 1
+
+
+def test_websocket_user_input_response_logs_unknown_request_id(caplog) -> None:
+    """Expired/unknown request IDs should be debug logged without side effects."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with caplog.at_level(logging.DEBUG):
+        with client.websocket_connect("/ws/navigate") as ws:
+            _ = ws.receive_json()
+            ws.send_json({"action": "user_input_response", "request_id": "missing-request", "response": "ignored"})
+            ws.send_json({"action": "stop"})
+
+    assert "unknown/expired request_id=missing-request" in caplog.text

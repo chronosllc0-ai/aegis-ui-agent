@@ -78,6 +78,7 @@ interface ChatMessage {
   role: ChatRole
   text: string
   timestamp?: string
+  metadata?: Record<string, unknown>
   toolName?: string
   toolArgs?: string
   toolResult?: string
@@ -381,7 +382,7 @@ function GeneratingCanvas({ label }: { label: string }) {
 // ─── UserBubble — dark style (no blue) ────────────────────────────────────────
 function UserBubble({ msg }: { msg: ChatMessage }) {
   return (
-    <div className='flex justify-end px-1 py-1'>
+    <div className='flex justify-end px-1 py-1' data-testid='user-bubble'>
       <div className='max-w-[82%] space-y-1.5'>
         {msg.attachments?.map((att, i) =>
           att.type.startsWith('image/') ? (
@@ -1230,7 +1231,19 @@ export function ChatPanel({
   }, [sentMessages.length])
 
   const allMessages = useMemo(() => {
-    const seenUserTexts = new Set(sentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+    const baseUserTexts = new Set(
+      baseMessages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.text.trim())
+        .filter(Boolean),
+    )
+    const mergedSentMessages = sentMessages.filter((m) => {
+      if (m.role !== 'user') return true
+      if ((m.metadata as { source?: string } | undefined)?.source !== 'ask_user_input') return true
+      return !baseUserTexts.has(m.text.trim())
+    })
+
+    const seenUserTexts = new Set(mergedSentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
     const dedupedBase = baseMessages.filter((m) => {
       if (m.role !== 'user') return true
       const key = m.text.trim()
@@ -1239,7 +1252,7 @@ export function ChatPanel({
       seenUserTexts.add(key)
       return true
     })
-    return [...sentMessages, ...dedupedBase]
+    return [...mergedSentMessages, ...dedupedBase]
   }, [sentMessages, baseMessages])
   const latestThinkingId = useMemo(() => {
     for (let i = allMessages.length - 1; i >= 0; i -= 1) {
@@ -1370,12 +1383,20 @@ export function ChatPanel({
     if (!trimmed) return
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     setSentMessages((prev) => {
-      const next: ChatMessage[] = [...prev, { id: `local-${crypto.randomUUID()}`, role: 'user', text: trimmed, timestamp: now }]
+      const next: ChatMessage[] = [
+        ...prev,
+        {
+          id: `local-${crypto.randomUUID()}`,
+          role: 'user',
+          text: trimmed,
+          timestamp: now,
+          metadata: { source: 'ask_user_input', request_id: requestId },
+        },
+      ]
       saveMsgs(activeTaskId, next)
       return next
     })
     onUserInputResponse?.(trimmed, requestId)
-    onSend(trimmed, 'steer', { task_label_source: 'chat', task_label: trimmed })
   }
 
   const isDisabled = connectionStatus !== 'connected'
