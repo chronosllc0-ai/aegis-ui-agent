@@ -572,7 +572,11 @@ class SkillService:
             if not (vt_ok and policy_ok):
                 continue
 
-            payload = json.loads(version.metadata_json or "{}")
+            try:
+                payload = json.loads(version.metadata_json or "{}")
+            except json.JSONDecodeError:
+                logger.warning("Skipping skill %s with corrupted metadata_json", skill.id)
+                continue
             active.append(
                 {
                     "skill_id": skill.id,
