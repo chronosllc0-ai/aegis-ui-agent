@@ -238,10 +238,7 @@ async def submit_user_skill(
             actor_type="user",
         )
         await session.commit()
-    except ValueError as exc:
-        logger.warning("Scan phase failed for skill %s: %s", skill.id, exc)
-        await session.rollback()
-        scan_status = "failed"
+    except ValueError:
         await session.rollback()
         scan_status = "failed"
 

@@ -30,9 +30,6 @@ logger = logging.getLogger(__name__)
 class VirusTotalScanner:
     """Thin VT client with timeout/retry and a simple circuit breaker."""
 
-    # NOTE: Process-local circuit breaker state. In multi-worker deployments,
-    # each worker maintains independent state. Consider Redis/DB-backed state
-    # for cross-worker coordination.
     _consecutive_failures = 0
     _opened_until: datetime | None = None
     _lock = asyncio.Lock()
@@ -106,6 +103,7 @@ class VirusTotalScanner:
                     upload_response.raise_for_status()
                     analysis_id = upload_response.json().get("data", {}).get("id")
                     final_status = "queued"
+                    poll_json: dict[str, Any] | None = None
                     if analysis_id:
                         for _ in range(settings.VIRUSTOTAL_MAX_POLLS):
                             poll_response = await client.get(
@@ -127,13 +125,14 @@ class VirusTotalScanner:
                                 "max_polls": settings.VIRUSTOTAL_MAX_POLLS,
                                 "last_status": final_status,
                             },
-                            "report_url": None,
-                            "scanned_at": datetime.now(timezone.utc),
-                        }
-                    # Use the completed poll response directly instead of re-fetching
-                    raw = poll_json
-                file_report.raise_for_status()
-                raw = file_report.json()
+                                "report_url": None,
+                                "scanned_at": datetime.now(timezone.utc),
+                            }
+                    # Use the completed poll response directly instead of re-fetching.
+                    raw = poll_json or {}
+                else:
+                    file_report.raise_for_status()
+                    raw = file_report.json()
         except (httpx.RequestError, httpx.HTTPStatusError, OSError) as exc:
             await cls._register_failure()
             logger.warning("VirusTotal scan failed: %s", exc)
@@ -149,7 +148,7 @@ class VirusTotalScanner:
         await cls._register_success()
 
         attributes = raw.get("data", {}).get("attributes", {})
-        stats = attributes.get("last_analysis_stats", {})
+        stats = attributes.get("last_analysis_stats") or attributes.get("stats", {})
         malicious = int(stats.get("malicious", 0))
         suspicious = int(stats.get("suspicious", 0))
         harmless = int(stats.get("harmless", 0))
@@ -198,7 +197,7 @@ class PolicyScanner:
         max_score = 0.0
 
         for label, pattern, weight in cls._PATTERNS:
-            if re.search(pattern, lowered, flags=re.DOTALL):
+            if re.search(pattern, lowered, flags=re.IGNORECASE | re.DOTALL):
                 flags.append({"label": label, "pattern": pattern, "weight": weight})
                 max_score = max(max_score, weight)
 
@@ -368,13 +367,12 @@ class SkillService:
         elif max_score >= 0.4:
             risk = "medium"
 
+        vt_attempted = vt_result["verdict"] != "skipped"
         from_status = skill.status
         target_status = "pending_review"
-        vt_attempted = settings.VIRUSTOTAL_API_KEY and vt_result["verdict"] != "skipped"
         if vt_attempted and vt_result["verdict"] == "error":
             target_status = "pending_scan"
-        elif vt_result["verdict"] == "error" and policy_result["verdict"] == "error":
-            target_status = "pending_scan"
+        elif vt_result["verdict"] == "skipped" and policy_result["verdict"] == "error":
             target_status = "pending_scan"
         skill.status = target_status
         skill.risk_label = risk
@@ -575,8 +573,7 @@ class SkillService:
                         "Skill %s is runtime-compliant with skipped VT scan because VIRUSTOTAL_REQUIRED=false",
                         skill.id,
                     )
-            policy_scan = by_engine.get("policy")
-            policy_ok = policy_scan is not None and policy_scan.verdict in {"pass", "warn"}
+            policy_ok = by_engine.get("policy") and by_engine["policy"].verdict in {"pass", "warn"}
             if not (vt_ok and policy_ok):
                 continue
 

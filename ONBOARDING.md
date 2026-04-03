@@ -1,3 +1,38 @@
+## Session 5.51 - April 3, 2026 (PR follow-up: VT upload-path status handling cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused scanner-flow correctness pass
+
+### What Was Done
+- Updated `VirusTotalScanner.scan_content(...)` upload/poll path in `backend/skills/service.py`:
+  - removed post-poll re-fetch behavior for 404→upload flow,
+  - now uses completed `poll_json` as `raw` for the upload path,
+  - guarded `file_report.raise_for_status()` under the non-upload (`else`) path to avoid raising on the original 404 response after successful polling.
+- Improved VT stats extraction fallback to support both file-report (`last_analysis_stats`) and analysis payload (`stats`) shapes.
+- Simplified scan transition gate in `run_scans_for_skill(...)`:
+  - `pending_scan` when VT was attempted and returned `error`,
+  - also `pending_scan` when VT is skipped and policy scanner returns `error`.
+- Re-validated user submit rollback/status branch in `backend/skills/router.py`; no duplicate rollback lines exist in current branch.
+
+### What's Working
+- Upload path no longer invalidates successful poll completion by raising on stale 404 `file_report`.
+- Status transition logic is now explicit for VT-attempted error and VT-skipped + policy-error cases.
+
+### What's NOT Working Yet
+- VT analysis payload can vary across API versions; broader schema normalization can still be improved in a future hardening pass.
+
+### Next Steps
+1. Add focused unit tests for VT upload path parsing (`stats` fallback) and transition branching.
+2. Add integration smoke with mocked VT API fixture for 404→upload→completed-analysis flow.
+
+### Decisions Made
+- Chose completed poll payload as source of truth for upload path to avoid redundant network roundtrip and stale-status risk.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.50 - April 3, 2026 (PR review polish: submit scan_status response correctness)
 
 **Agent:** GPT-5.3-Codex  
