@@ -1,3 +1,53 @@
+## Session 5.47 - April 3, 2026 (skills governance pipeline: model + APIs + scanners)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend governance implementation pass
+
+### What Was Done
+- Added a full versioned/auditable skill governance data model in `backend/database.py`:
+  - `skills`,
+  - `skill_versions` (immutable),
+  - `skill_scan_results`,
+  - `skill_reviews`,
+  - `skill_publish_events`.
+- Implemented skill workflow services in `backend/skills/service.py`:
+  - VirusTotal scanner flow with hash lookup/upload/poll support, timeout and simple circuit breaker behavior,
+  - prompt/policy scanner with rule-based forbidden-pattern detection and severity scoring,
+  - state-machine transitions across scan/review decisions,
+  - NEW badge expiration handling (`new_until`), visibility-target listing, and runtime active/compliance filtering.
+- Added API routes in `backend/skills/router.py` for:
+  - Admin: create/upload, scan, review queue, review decision,
+  - User: global listing, hub listing, submit, mine,
+  - Runtime: active skill fetch with compliance enforcement.
+- Wired skills routes into FastAPI app in `main.py`.
+- Added VirusTotal environment settings to `config.py` and `.env.example`.
+- Added tests in `tests/test_skills_service.py` for policy scan detection and review transition behavior.
+
+### What's Working
+- End-to-end backend shape now supports the requested dual publish targets (`global` vs `hub`) with separate review decisions.
+- Immutable version rows + publish event trail are persisted for auditability.
+- Runtime active endpoint returns only approved + scan-compliant skills.
+- Added tests pass for new scanner/transition logic.
+
+### What's NOT Working Yet
+- No dedicated background worker cron was added for nightly NEW-flag expiry; current implementation expires at read time.
+- VirusTotal scan path is implemented but not integration-tested against live VT API in this pass.
+- Admin frontend CTA buttons are not yet implemented; API response now exposes CTA decision mapping.
+
+### Next Steps
+1. Add admin UI moderation screen with explicit **Approve to Global** and **Approve to Hub** buttons.
+2. Add async job/queue scheduling for scan polling + nightly NEW flag cleanup.
+3. Add API integration tests for `/api/admin/skills/*` and `/api/skills/*` endpoints with auth fixtures.
+
+### Decisions Made
+- Chose read-time NEW-expiry enforcement now to avoid blocking on scheduler complexity while preserving correct runtime behavior.
+- Kept skill content storage as `inline://` metadata payload for now, with `storage_url` field ready for object storage migration.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.46 - April 3, 2026 (Plan mode first-class composer behavior)
 
 **Agent:** GPT-5.3-Codex  
