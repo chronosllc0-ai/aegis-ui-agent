@@ -253,7 +253,7 @@ async def submit_user_skill(
         await session.rollback()
         scan_ok = False
 
-    scan_ok = True
+    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed" if scan_ok else "failed"}
     try:
         await SkillService.run_scans_for_skill(
             session,
