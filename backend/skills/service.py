@@ -130,7 +130,8 @@ class VirusTotalScanner:
                             "report_url": None,
                             "scanned_at": datetime.now(timezone.utc),
                         }
-                    file_report = await client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
+                    # Use the completed poll response directly instead of re-fetching
+                    raw = poll_json
                 file_report.raise_for_status()
                 raw = file_report.json()
         except (httpx.RequestError, httpx.HTTPStatusError, OSError) as exc:
