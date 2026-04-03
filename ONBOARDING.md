@@ -1,3 +1,44 @@
+## Session 5.46 - April 3, 2026 (Plan mode first-class composer behavior)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend behavior + test pass
+
+### What Was Done
+- Implemented first-class plan intent behavior in `ChatPanel` composer via explicit `planIntent` state (instead of injecting `/plan ` into the textarea).
+- Added a reusable parser/normalizer helper `resolveComposerSubmission(...)` that determines submission mode (`normal` vs `plan`) and strips slash command tokens from visible user bubble text.
+- Updated send pipeline behavior:
+  - typed `/plan ...` now routes through `onDecomposePlan(...)` and shows clean bubble text without the slash token,
+  - plan-intent mode (`Plan` clicked on empty composer) sends the next prompt through decompose flow,
+  - non-plan messages continue through normal `onSend(...)` flow unchanged.
+- Updated Plan button UX:
+  - empty composer click toggles visual plan intent state,
+  - non-empty composer click immediately submits as plan request.
+- Added/updated component tests:
+  - parser unit cases for slash + intent + normal modes,
+  - UI coverage ensuring no `/plan` token injection into composer,
+  - UI coverage ensuring slash command text is cleaned in the user bubble.
+
+### What's Working
+- Plan mode now behaves like an explicit composer mode rather than slash text injection.
+- Manual slash command path and button-intent path both route to plan decomposition.
+- Existing normal send path behavior remains intact.
+- Targeted ChatPanel Vitest suite passes.
+
+### What's NOT Working Yet
+- No additional E2E browser test was added in this pass (coverage is component/unit level).
+
+### Next Steps
+1. Add an integration/E2E test covering full plan card appearance after decompose API response.
+2. Consider subtle composer hint text while `planIntent` is active (optional UX polish).
+
+### Decisions Made
+- Kept external `onSend(...)` behavior unchanged for non-plan submissions to preserve compatibility across non-chat channels.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.45 - April 3, 2026 (Railway TS6133 follow-up verification + guard test)
 
 **Agent:** GPT-5.3-Codex  

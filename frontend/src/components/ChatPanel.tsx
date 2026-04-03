@@ -131,6 +131,18 @@ interface AttachedFile {
   dataUrl: string
 }
 
+type ComposerSubmissionMode = 'normal' | 'plan'
+
+export function resolveComposerSubmission(input: string, planIntent: boolean): { mode: ComposerSubmissionMode; text: string } {
+  const trimmed = input.trim()
+  if (!trimmed) return { mode: 'normal', text: '' }
+  if (trimmed.startsWith('/plan')) {
+    return { mode: 'plan', text: trimmed.slice('/plan'.length).trim() }
+  }
+  if (planIntent) return { mode: 'plan', text: trimmed }
+  return { mode: 'normal', text: trimmed }
+}
+
 const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
 const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
 
@@ -1040,6 +1052,7 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
+  planIntent?: boolean
   modelChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
@@ -1049,6 +1062,7 @@ function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments,
+  planIntent = false,
   modelChipLabel = 'GPT-5.4',
   isLocalOnly = true,
   hasFullAccess = true,
@@ -1113,7 +1127,12 @@ function InputBarCursor({
 
         {/* Plan button */}
         <button type='button' onClick={onPlanClick} disabled={isDisabled}
-          className='flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium'>
+          aria-pressed={planIntent}
+          className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium ${
+            planIntent
+              ? 'bg-blue-500/15 text-blue-300'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
+          }`}>
           <IcoPlan className='h-3.5 w-3.5' />
           Plan
         </button>
@@ -1168,6 +1187,7 @@ export function ChatPanel({
   onDismissBrowsePrompt,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [planIntent, setPlanIntent] = useState(false)
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
 
   // ── Conversation persistence ──────────────────────────────────────────────
@@ -1435,10 +1455,12 @@ export function ChatPanel({
     window.setTimeout(() => textareaRef.current?.focus(), 0)
   }
 
-  const handleSend = () => {
+  const handleSend = (forcePlan = false) => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
-    const withContext = activeConnector ? `[${activeConnector.name}] ${trimmed}` : trimmed
+    const parsed = resolveComposerSubmission(trimmed, forcePlan || planIntent)
+    const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
+    const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const localMsg: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
@@ -1452,8 +1474,8 @@ export function ChatPanel({
       saveMsgs(activeTaskId, next)
       return next
     })
-    if (withContext.startsWith('/plan ')) {
-      onDecomposePlan(withContext.slice(6))
+    if (parsed.mode === 'plan' && withContext) {
+      onDecomposePlan(withContext)
     } else {
       onSend(withContext || '(attachment)', 'steer', {
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -1466,6 +1488,7 @@ export function ChatPanel({
       })
     }
     setInput('')
+    setPlanIntent(false)
     setAttachments([])
     setActiveConnector(null)
     if (textareaRef.current) { textareaRef.current.style.height = 'auto' }
@@ -1477,8 +1500,11 @@ export function ChatPanel({
 
   const handlePlanClick = () => {
     const prompt = input.trim()
-    if (prompt) { onDecomposePlan(prompt); setInput('') }
-    else setInput('/plan ')
+    if (prompt) {
+      handleSend(true)
+    } else {
+      setPlanIntent((prev) => !prev)
+    }
     textareaRef.current?.focus()
   }
 
@@ -1802,6 +1828,7 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
+          planIntent={planIntent}
           modelChipLabel={modelChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
