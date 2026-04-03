@@ -38,7 +38,7 @@ from backend.planner.router import planner_router
 from backend.research.router import research_router
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
-from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
+from backend.conversation_service import append_message, get_or_create_conversation
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
@@ -802,6 +802,7 @@ async def _log_web_message(
     *,
     title: str | None = None,
     metadata: dict[str, Any] | None = None,
+    title_candidate: str | None = None,
 ) -> None:
     """Persist a websocket message to the conversations DB and emit conversation_id to client."""
     if not runtime.user_uid:
@@ -816,7 +817,14 @@ async def _log_web_message(
                 title=title,
             )
             runtime.conversation_id = conv.id
-            await append_message(db, conv.id, role, content, metadata=metadata)
+            await append_message(
+                db,
+                conv.id,
+                role,
+                content,
+                metadata=metadata,
+                title_candidate=title_candidate,
+            )
             break
     except Exception:  # noqa: BLE001
         logger.warning("Failed to persist web message to DB for session %s", session_id)
@@ -1074,6 +1082,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             instruction = str(data.get("instruction", "")).strip()
             raw_metadata = data.get("metadata")
             client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
+            task_label = str(client_metadata.get("task_label", "")).strip() if client_metadata else ""
+            title_candidate = task_label or instruction
 
             if action == "navigate":
                 if runtime.task_running:
@@ -1085,7 +1095,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "navigate", "client": client_metadata or {}},
+                    title_candidate=title_candidate,
+                    metadata={
+                        "source": "websocket",
+                        "action": "navigate",
+                        "task_label": task_label,
+                        "client": client_metadata or {},
+                    },
                 )
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})

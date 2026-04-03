@@ -103,6 +103,12 @@ interface ChatMessage {
   stepId?: string
 }
 
+type ThreadUiState = {
+  collapsedToolIds: string[]
+  answeredUserInputIds: string[]
+  openThinkingIds: string[]
+}
+
 function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
   if (!Array.isArray(rawOptions)) return []
   return rawOptions
@@ -465,10 +471,11 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
 interface ShellCardProps {
   msg: ChatMessage
   isRunning?: boolean
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
 }
 
-function ShellCard({ msg, isRunning }: ShellCardProps) {
-  const [expanded, setExpanded] = useState(isRunning ?? false)
+function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProps) {
   const outputRef = useRef<HTMLPreElement>(null)
 
   const toolLabel = (msg.toolName ?? 'shell').replace(/_/g, ' ')
@@ -480,10 +487,10 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
   const prevRunning = useRef(isRunning)
   useEffect(() => {
     if (prevRunning.current === isRunning) return
-    if (isRunning) setExpanded(true)
-    if (!isRunning && prevRunning.current) setExpanded(false)
+    if (isRunning) onExpandedChange(true)
+    if (!isRunning && prevRunning.current) onExpandedChange(false)
     prevRunning.current = isRunning
-  }, [isRunning])
+  }, [isRunning, onExpandedChange])
 
   // Auto-scroll output while running
   useEffect(() => {
@@ -509,7 +516,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
     return (
       <button
         type='button'
-        onClick={() => setExpanded(true)}
+        onClick={() => onExpandedChange(true)}
         className='flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-[#1a1a1a] group'
       >
         {statusDot}
@@ -533,7 +540,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
       {/* Terminal header bar */}
       <button
         type='button'
-        onClick={() => setExpanded(false)}
+        onClick={() => onExpandedChange(false)}
         className='flex w-full items-center gap-2.5 border-b border-[#1e1e1e] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
       >
         {/* Traffic-light dots */}
@@ -709,31 +716,34 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
 
 // ─── UserInputCard — inline quick-reply + custom reply slot ───────────────────
 function UserInputCard({
-  question, options, requestId, onRespond,
-}: { question: string; options: string[]; requestId: string; onRespond: (answer: string, requestId: string) => void }) {
+  question, options, requestId, answered, onRespond,
+}: {
+  question: string
+  options: string[]
+  requestId: string
+  answered: boolean
+  onRespond: (answer: string, requestId: string) => void
+}) {
   const [customMode, setCustomMode] = useState(false)
   const [customText, setCustomText] = useState('')
-  const [answered, setAnswered] = useState<string | null>(null)
 
   const promptOptions = options.length > 0 ? options : ['Continue']
   const customSlotLabel = 'Type your own answer'
 
   const handleQuickReply = (opt: string) => {
-    setAnswered(opt)
     onRespond(opt, requestId)
   }
 
   const handleCustomSend = () => {
     const answer = customText.trim()
     if (!answer) return
-    setAnswered(answer)
     onRespond(answer, requestId)
   }
 
   if (answered) {
     return (
       <div className='my-1.5 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2'>
-        <p className='text-xs text-zinc-500'>You answered: <span className='text-zinc-300'>{answered}</span></p>
+        <p className='text-xs text-zinc-500'>You answered this question.</p>
       </div>
     )
   }
@@ -1162,23 +1172,51 @@ export function ChatPanel({
 
   // ── Conversation persistence ──────────────────────────────────────────────
   const CHAT_KEY = (id: string) => `aegis.chat.${id}`
+  const uiKey = (taskId: string | null | undefined) => `aegis.chat.ui.${taskId ?? 'none'}`
+  const emptyThreadUiState = (): ThreadUiState => ({
+    collapsedToolIds: [],
+    answeredUserInputIds: [],
+    openThinkingIds: [],
+  })
   const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
     if (!id) return
     try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
   }
 
   const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
-  const prevTaskIdRef    = useRef(activeTaskId)
-  const prevServerLenRef = useRef(0)
+  const [threadUi, setThreadUi] = useState<ThreadUiState>(emptyThreadUiState)
+  const [threadReady, setThreadReady] = useState(false)
+
+  const serverThreadSignature = useMemo(() => {
+    const id = activeTaskId ?? 'no-task'
+    const msgSig = serverMessages
+      .map((m) => `${m.id}:${m.role}:${m.created_at ?? ''}:${m.content}`)
+      .join('|')
+    return `${id}::${msgSig}`
+  }, [activeTaskId, serverMessages])
 
   useEffect(() => {
-    const taskChanged   = prevTaskIdRef.current !== activeTaskId
-    const serverArrived = prevServerLenRef.current === 0 && serverMessages.length > 0
-    prevTaskIdRef.current    = activeTaskId
-    prevServerLenRef.current = serverMessages.length
-    if (!taskChanged && !serverArrived) return
+    try {
+      const raw = localStorage.getItem(uiKey(activeTaskId))
+      if (raw) setThreadUi(JSON.parse(raw) as ThreadUiState)
+      else setThreadUi(emptyThreadUiState())
+    } catch {
+      setThreadUi(emptyThreadUiState())
+    }
+  }, [activeTaskId])
+
+  useEffect(() => {
+    if (!activeTaskId) return
+    try {
+      localStorage.setItem(uiKey(activeTaskId), JSON.stringify(threadUi))
+    } catch {
+      // ignore localStorage quota/read-only errors
+    }
+  }, [activeTaskId, threadUi])
+
+  useEffect(() => {
     if (serverMessages.length > 0) {
-      const serverMapped = serverMessages.map((m) => ({
+      const mapped = serverMessages.map((m) => ({
         id: m.id,
         role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
         text: m.content,
@@ -1192,18 +1230,22 @@ export function ChatPanel({
           ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
           : undefined,
       }))
-      const serverUserTexts = new Set(serverMapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+      const serverUserTexts = new Set(mapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
       setSentMessages((prev) => {
-        const optimisticLocalUsers = prev.filter(
+        const optimistic = prev.filter(
           (m) => m.role === 'user' && String(m.id).startsWith('local-') && !serverUserTexts.has((m.text ?? '').trim()),
         )
-        return [...optimisticLocalUsers, ...serverMapped]
+        return [...optimistic, ...mapped]
       })
-    } else if (taskChanged) {
+    } else {
       setSentMessages([])
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId, serverMessages.length])
+  }, [serverThreadSignature, serverMessages])
+
+  useEffect(() => {
+    setThreadReady(false)
+    queueMicrotask(() => setThreadReady(true))
+  }, [serverThreadSignature])
 
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
@@ -1468,6 +1510,28 @@ export function ChatPanel({
 
   const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onSend('approved', 'steer') }
   const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onSend('rejected', 'steer') }
+  const setToolCollapsed = useCallback((toolId: string, collapsed: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.collapsedToolIds)
+      if (collapsed) next.add(toolId)
+      else next.delete(toolId)
+      return { ...prev, collapsedToolIds: Array.from(next) }
+    })
+  }, [])
+  const setUserInputAnswered = useCallback((requestId: string) => {
+    setThreadUi((prev) => {
+      if (prev.answeredUserInputIds.includes(requestId)) return prev
+      return { ...prev, answeredUserInputIds: [...prev.answeredUserInputIds, requestId] }
+    })
+  }, [])
+  const setThinkingOpen = useCallback((thinkingId: string, open: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.openThinkingIds)
+      if (open) next.add(thinkingId)
+      else next.delete(thinkingId)
+      return { ...prev, openThinkingIds: Array.from(next) }
+    })
+  }, [])
 
   const handleUserInputReply = (answer: string, requestId: string) => {
     const trimmed = answer.trim()
@@ -1487,6 +1551,7 @@ export function ChatPanel({
       saveMsgs(activeTaskId, next)
       return next
     })
+    setUserInputAnswered(requestId)
     onUserInputResponse?.(trimmed, requestId)
   }
 
@@ -1545,8 +1610,11 @@ export function ChatPanel({
 
       {/* Messages */}
       <div className='flex-1 overflow-y-auto px-3 py-3 space-y-0.5'>
+        {!threadReady && (
+          <div className='flex-1 px-3 py-3 text-xs text-zinc-500'>Loading thread…</div>
+        )}
 
-        {allMessages.length === 0 && (
+        {threadReady && allMessages.length === 0 && (
           <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-4'>
             <div className='flex h-12 w-12 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
               <IcoMessage className='h-5 w-5 text-zinc-500' />
@@ -1566,14 +1634,23 @@ export function ChatPanel({
           </div>
         )}
 
-        {allMessages.map((msg) => {
+        {threadReady && allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
 
           // Tool calls → ShellCard (collapsed accordion by default when done, open while running)
           if (msg.role === 'tool') {
             const isLive = isWorking && msg.toolStatus === 'in_progress'
-            return <ShellCard key={msg.id} msg={msg} isRunning={isLive} />
+            const collapsed = threadUi.collapsedToolIds.includes(msg.id)
+            return (
+              <ShellCard
+                key={msg.id}
+                msg={msg}
+                isRunning={isLive}
+                expanded={isLive || !collapsed}
+                onExpandedChange={(expanded) => setToolCollapsed(msg.id, !expanded)}
+              />
+            )
           }
 
           if (msg.role === 'approval') {
@@ -1596,6 +1673,7 @@ export function ChatPanel({
                 question={msg.question ?? msg.text}
                 options={msg.options ?? []}
                 requestId={msg.requestId ?? msg.id}
+                answered={threadUi.answeredUserInputIds.includes(msg.requestId ?? msg.id)}
                 onRespond={(answer, reqId) => { handleUserInputReply(answer, reqId) }}
               />
             )
@@ -1638,7 +1716,7 @@ export function ChatPanel({
         })}
 
         {/* Agent working indicator — shows when no explicit thinking card yet */}
-        {isWorking && !allMessages.some((m) => m.role === 'thinking' || m.role === 'tool') && (
+        {threadReady && isWorking && !allMessages.some((m) => m.role === 'thinking' || m.role === 'tool') && (
           <div className='flex items-center gap-2 px-3 py-2'>
             <span
               className='thinking-shimmer rounded-md bg-[#1e1e2e] px-2.5 py-0.5 text-xs font-semibold text-violet-300 border border-violet-500/20'

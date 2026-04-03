@@ -61,7 +61,7 @@ export function ActionLog({ entries, taskLabels, showWorkflow, onToggleWorkflow,
       </div>
       <div ref={containerRef} className='h-[calc(100%-2.4rem)] overflow-y-auto font-mono text-xs md:text-lg'>
         {grouped.map(([taskId, taskEntries], idx) => {
-          const title = taskLabels?.[taskId] ?? taskEntries[0]?.message ?? `Task ${idx + 1}`
+          const title = taskLabels?.[taskId] ?? `Task ${idx + 1}`
           const isTaskCollapsed = collapsedTasks[taskId] ?? false
           return (
             <div key={taskId} className='mb-2 rounded-md border border-[#2a2a2a] bg-[#111]'>

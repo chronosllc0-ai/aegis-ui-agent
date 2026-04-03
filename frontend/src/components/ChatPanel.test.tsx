@@ -18,7 +18,7 @@ function makeAskUserInputLog(): LogEntry {
 }
 
 describe('ChatPanel ask_user_input reply flow', () => {
-  it('creates one local user bubble and invokes user_input_response callback exactly once', () => {
+  it('creates one local user bubble and invokes user_input_response callback exactly once', async () => {
     const onUserInputResponse = vi.fn()
 
     render(
@@ -36,6 +36,7 @@ describe('ChatPanel ask_user_input reply flow', () => {
       />,
     )
 
+    await screen.findByText('Choose a path')
     fireEvent.click(screen.getByRole('button', { name: /type your own answer/i }))
     const customInput = screen.getByPlaceholderText('Type your answer...')
     fireEvent.change(customInput, { target: { value: 'Custom answer from user' } })

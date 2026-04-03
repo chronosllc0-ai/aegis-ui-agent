@@ -37,6 +37,8 @@ import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
+import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
+import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
@@ -73,26 +75,6 @@ const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().repla
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
-
-const BROWSER_ACTION_LOG_TOOLS = new Set([
-  'screenshot',
-  'go_to_url',
-  'click',
-  'type_text',
-  'scroll',
-  'go_back',
-  'wait',
-  'extract_page',
-])
-
-function isBrowserActionLogEntry(entry: LogEntry): boolean {
-  if (entry.type === 'result' || entry.type === 'error' || entry.type === 'interrupt') return true
-  if (entry.stepKind === 'navigate' && entry.elapsedSeconds === 0) return true
-  const toolMatch = entry.message.match(/^\[([\w_]+)\]/)
-  if (!toolMatch?.[1]) return false
-  return BROWSER_ACTION_LOG_TOOLS.has(toolMatch[1].toLowerCase())
-}
-
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
@@ -441,8 +423,9 @@ function App() {
     if (!activeConversationId) return
     const taskId = activeTaskIdRef.current
     taskToConvRef.current.set(taskId, activeConversationId)
-    onNewConversationId(activeConversationId, undefined)
-  }, [activeConversationId, activeTaskIdRef, onNewConversationId])
+    const localTask = taskHistory.find((item) => item.id === taskId)
+    onNewConversationId(activeConversationId, localTask?.title)
+  }, [activeConversationId, activeTaskIdRef, onNewConversationId, taskHistory])
 
   // When the selected task changes, load messages from server for that conversation
   // ── Seed taskHistory from server conversations so history survives refresh ──
@@ -451,26 +434,47 @@ function App() {
   useEffect(() => {
     if (!conversations.length) return
     setTaskHistory((prev) => {
-      const existingIds = new Set(prev.map((t) => t.id))
-      const toAdd: TaskHistoryItem[] = []
+      const byId = new Map(prev.map((item) => [item.id, item]))
+      const next = [...prev]
+
       for (const conv of conversations) {
-        if (!existingIds.has(conv.id)) {
-          const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
-          const today = new Date()
-          const yesterday = new Date(today)
-          yesterday.setDate(today.getDate() - 1)
-          let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
-          if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
-          else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
-          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '', labelSource: 'system' })
+        const existing = byId.get(conv.id)
+        if (existing) {
+          const mergedTitle = mergeTitlePreferMeaningful(
+            existing.title,
+            conv.title,
+            existing.instruction || existing.title,
+          )
+          if (mergedTitle !== existing.title) {
+            const idx = next.findIndex((item) => item.id === conv.id)
+            if (idx >= 0) next[idx] = { ...next[idx], title: mergedTitle }
+          }
+          continue
         }
+
+        const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
+        const today = new Date()
+        const yesterday = new Date(today)
+        yesterday.setDate(today.getDate() - 1)
+        let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
+        else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
+
+        const fallbackInstruction = deriveTitleFromInstruction(conv.title)
+        next.unshift({
+          id: conv.id,
+          title: mergeTitlePreferMeaningful(undefined, conv.title, fallbackInstruction),
+          dateLabel,
+          instruction: isPlaceholderTitle(conv.title) ? fallbackInstruction : (conv.title ?? ''),
+          labelSource: 'system',
+        })
       }
-      if (!toAdd.length) return prev
-      const merged = [...toAdd, ...prev].slice(0, 200) // keep max 200
+
+      const merged = next.slice(0, 200)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(merged)) } catch { /* quota */ }
       return merged
     })
-  }, [conversations])
+  }, [authUser?.uid, conversations])
 
   useEffect(() => {
     if (!selectedTaskId) { setServerMessages([]); return }
@@ -591,7 +595,7 @@ function App() {
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
   const actionLogEntries = useMemo(
-    () => enrichedLogs.filter((entry) => isBrowserActionLogEntry(entry)),
+    () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
 
