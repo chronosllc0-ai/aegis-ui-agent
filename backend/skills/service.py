@@ -557,7 +557,8 @@ class SkillService:
                 select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id)
             )
             by_engine = {scan.engine: scan for scan in scans.scalars().all()}
-            vt_verdict = by_engine.get("virustotal").verdict if by_engine.get("virustotal") else None
+            vt_scan = by_engine.get("virustotal")
+            vt_verdict = vt_scan.verdict if vt_scan else None
             if settings.VIRUSTOTAL_REQUIRED:
                 vt_ok = vt_verdict in {"pass", "warn"}
             else:
