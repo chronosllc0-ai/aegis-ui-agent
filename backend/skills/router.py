@@ -175,14 +175,22 @@ async def review_admin_skill(
 
 
 @skills_router.get("/api/skills/global")
-async def list_global_skills(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def list_global_skills(
+    current_user: User = Depends(_get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
     """List skills approved for global/settings catalog visibility."""
+    _ = current_user
     return {"ok": True, "skills": await SkillService.list_visibility(session, visibility="global")}
 
 
 @skills_router.get("/api/skills/hub")
-async def list_hub_skills(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def list_hub_skills(
+    current_user: User = Depends(_get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
     """List skills approved for marketplace hub visibility."""
+    _ = current_user
     return {"ok": True, "skills": await SkillService.list_visibility(session, visibility="hub")}
 
 
@@ -255,5 +263,5 @@ async def list_active_skills(
     if current_user.uid != user_id and current_user.role not in {"admin", "superadmin"}:
         raise HTTPException(status_code=403, detail="Not authorized for requested user_id")
 
-    skills = await SkillService.list_active_skills(session, user_id=user_id)
+    skills = await SkillService.list_active_skills(session, requested_for_user_id=user_id)
     return {"ok": True, "skills": skills}

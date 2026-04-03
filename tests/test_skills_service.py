@@ -39,10 +39,10 @@ def test_policy_scanner_flags_high_risk_patterns() -> None:
 
 
 def test_skill_service_review_transition_sets_visibility_and_new_flag(tmp_path) -> None:
-    asyncio.run(_init_db(tmp_path))
-    asyncio.run(_seed_user())
-
     async def _run() -> None:
+        await _init_db(tmp_path)
+        await _seed_user()
+
         async for session in get_session():
             skill = await SkillService.create_skill_with_version(
                 session,
@@ -71,9 +71,6 @@ def test_skill_service_review_transition_sets_visibility_and_new_flag(tmp_path) 
             assert updated.new_until is not None
             break
 
-    asyncio.run(_run())
-
-    async def _verify() -> None:
         async for session in get_session():
             rows = await session.execute(select(Skill))
             persisted = rows.scalars().first()
@@ -81,4 +78,4 @@ def test_skill_service_review_transition_sets_visibility_and_new_flag(tmp_path) 
             assert persisted.status == "approved_marketplace"
             break
 
-    asyncio.run(_verify())
+    asyncio.run(_run())

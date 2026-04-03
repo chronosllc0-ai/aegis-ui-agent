@@ -32,12 +32,28 @@ class VirusTotalScanner:
 
     _consecutive_failures = 0
     _opened_until: datetime | None = None
+    _lock = asyncio.Lock()
 
     @classmethod
     def _is_open(cls) -> bool:
         if cls._opened_until is None:
             return False
         return datetime.now(timezone.utc) < cls._opened_until
+
+    @classmethod
+    async def _register_failure(cls) -> None:
+        """Increment breaker failure count and open circuit when threshold is exceeded."""
+        async with cls._lock:
+            cls._consecutive_failures += 1
+            if cls._consecutive_failures >= 3:
+                cls._opened_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    @classmethod
+    async def _register_success(cls) -> None:
+        """Reset breaker state after a successful VT interaction."""
+        async with cls._lock:
+            cls._consecutive_failures = 0
+            cls._opened_until = None
 
     @classmethod
     async def scan_content(cls, *, file_name: str, content: bytes) -> dict[str, Any]:
@@ -86,6 +102,7 @@ class VirusTotalScanner:
                     )
                     upload_response.raise_for_status()
                     analysis_id = upload_response.json().get("data", {}).get("id")
+                    final_status = "queued"
                     if analysis_id:
                         for _ in range(settings.VIRUSTOTAL_MAX_POLLS):
                             poll_response = await client.get(
@@ -93,17 +110,28 @@ class VirusTotalScanner:
                             )
                             poll_response.raise_for_status()
                             poll_json = poll_response.json()
-                            status = poll_json.get("data", {}).get("attributes", {}).get("status")
-                            if status == "completed":
+                            final_status = poll_json.get("data", {}).get("attributes", {}).get("status", "queued")
+                            if final_status == "completed":
                                 break
                             await asyncio.sleep(settings.VIRUSTOTAL_POLL_INTERVAL_SECONDS)
+                    if final_status != "completed":
+                        return {
+                            "engine": "virustotal",
+                            "verdict": "error",
+                            "score": 1.0,
+                            "raw_json": {
+                                "reason": "analysis_timeout",
+                                "max_polls": settings.VIRUSTOTAL_MAX_POLLS,
+                                "last_status": final_status,
+                            },
+                            "report_url": None,
+                            "scanned_at": datetime.now(timezone.utc),
+                        }
                     file_report = await client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
                 file_report.raise_for_status()
                 raw = file_report.json()
         except Exception as exc:  # noqa: BLE001
-            cls._consecutive_failures += 1
-            if cls._consecutive_failures >= 3:
-                cls._opened_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+            await cls._register_failure()
             logger.warning("VirusTotal scan failed: %s", exc)
             return {
                 "engine": "virustotal",
@@ -114,8 +142,7 @@ class VirusTotalScanner:
                 "scanned_at": datetime.now(timezone.utc),
             }
 
-        cls._consecutive_failures = 0
-        cls._opened_until = None
+        await cls._register_success()
 
         attributes = raw.get("data", {}).get("attributes", {})
         stats = attributes.get("last_analysis_stats", {})
@@ -167,7 +194,7 @@ class PolicyScanner:
         max_score = 0.0
 
         for label, pattern, weight in cls._PATTERNS:
-            if re.search(pattern, lowered):
+            if re.search(pattern, lowered, flags=re.IGNORECASE | re.DOTALL):
                 flags.append({"label": label, "pattern": pattern, "weight": weight})
                 max_score = max(max_score, weight)
 
@@ -213,30 +240,43 @@ class SkillService:
         now = SkillService._now()
         normalized_slug = slug.strip().lower()
         existing = await session.execute(select(Skill).where(Skill.slug == normalized_slug))
-        if existing.scalar_one_or_none() is not None:
-            raise ValueError("Skill slug already exists")
-
-        skill = Skill(
-            slug=normalized_slug,
-            name=name,
-            description=description,
-            owner_user_id=owner_user_id,
-            owner_type=owner_type,
-            status=status,
-            visibility="private",
-            risk_label="medium",
-            is_new=False,
-            new_until=None,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(skill)
-        await session.flush()
+        skill = existing.scalar_one_or_none()
+        from_status = "draft"
+        if skill is None:
+            skill = Skill(
+                slug=normalized_slug,
+                name=name,
+                description=description,
+                owner_user_id=owner_user_id,
+                owner_type=owner_type,
+                status=status,
+                visibility="private",
+                risk_label="medium",
+                is_new=False,
+                new_until=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(skill)
+            await session.flush()
+        else:
+            if skill.owner_user_id != owner_user_id:
+                raise ValueError("Skill slug already exists")
+            from_status = skill.status
+            skill.name = name
+            skill.description = description
+            skill.status = status
+            skill.visibility = "private"
+            skill.is_new = False
+            skill.new_until = None
+            skill.updated_at = now
 
         content_sha256 = hashlib.sha256(skill_markdown.encode("utf-8")).hexdigest()
+        latest_version = await SkillService.latest_version(session, skill.id)
+        next_version = (latest_version.version + 1) if latest_version else 1
         version = SkillVersion(
             skill_id=skill.id,
-            version=1,
+            version=next_version,
             content_sha256=content_sha256,
             storage_url=f"inline://skill_versions/{content_sha256}",
             metadata_json=json.dumps({"metadata": metadata_json, "skill_md": skill_markdown}),
@@ -249,7 +289,7 @@ class SkillService:
         event = SkillPublishEvent(
             skill_id=skill.id,
             skill_version_id=version.id,
-            from_status="draft",
+            from_status=from_status,
             to_status=status,
             actor_id=submitted_by,
             actor_type=owner_type,
@@ -321,7 +361,10 @@ class SkillService:
             risk = "medium"
 
         from_status = skill.status
-        skill.status = "pending_review"
+        target_status = "pending_review"
+        if vt_result["verdict"] == "error" and policy_result["verdict"] == "error":
+            target_status = "pending_scan"
+        skill.status = target_status
         skill.risk_label = risk
         skill.updated_at = now
 
@@ -330,10 +373,10 @@ class SkillService:
                 skill_id=skill.id,
                 skill_version_id=version.id,
                 from_status=from_status,
-                to_status="pending_review",
+                to_status=target_status,
                 actor_id=actor_id,
                 actor_type=actor_type,
-                reason="scan_completed",
+                reason="scan_completed" if target_status == "pending_review" else "scan_failed_retry_required",
                 created_at=now,
             )
         )
@@ -489,8 +532,8 @@ class SkillService:
         return rows.scalars().all()
 
     @staticmethod
-    async def list_active_skills(session: AsyncSession, *, user_id: str) -> list[dict[str, Any]]:
-        """Return active, compliant skills for runtime injection."""
+    async def list_active_skills(session: AsyncSession, *, requested_for_user_id: str) -> list[dict[str, Any]]:
+        """Return globally active, compliant skills for runtime injection."""
         await SkillService.expire_new_flags(session)
         rows = await session.execute(
             select(Skill).where(
@@ -527,7 +570,7 @@ class SkillService:
                         "owner_user_id": skill.owner_user_id,
                         "visibility": skill.visibility,
                         "approved_status": skill.status,
-                        "for_user_id": user_id,
+                        "for_user_id": requested_for_user_id,
                     },
                     "skill_md": payload.get("skill_md", ""),
                 }

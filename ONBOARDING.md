@@ -1,3 +1,42 @@
+## Session 5.48 - April 3, 2026 (PR review hardening for skill governance pipeline)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend hardening/refinement pass
+
+### What Was Done
+- Addressed review feedback in `backend/skills/service.py`:
+  - VirusTotal poll loop now returns an explicit `error` verdict when analysis does not reach `completed` within `VIRUSTOTAL_MAX_POLLS` (instead of proceeding with potentially stale data).
+  - Added lock-guarded circuit breaker state updates (`asyncio.Lock`) for `_consecutive_failures` / `_opened_until` mutation safety under concurrent requests.
+  - Updated scan transition behavior so skills are only moved to `pending_review` when scans produce usable output; if both scanners return `error`, skill remains `pending_scan` for retry.
+  - Upgraded version handling so re-submitting an existing owned slug now creates immutable `skill_versions` with incrementing version numbers (`latest + 1`) rather than hardcoding `version=1`.
+- Addressed API review feedback in `backend/skills/router.py`:
+  - Added authenticated-user dependency to `/api/skills/global` and `/api/skills/hub`.
+  - Clarified runtime active-skill semantics by renaming service argument to `requested_for_user_id` while preserving external API contract `?user_id=...`.
+- Addressed testing feedback in `tests/test_skills_service.py`:
+  - Consolidated multiple `asyncio.run(...)` calls into a single event-loop execution in the transition test.
+
+### What's Working
+- VT timeout behavior now fails safely rather than allowing indeterminate scan status to flow through.
+- Concurrent scan failures now update breaker state through a lock-protected path.
+- Revisions to existing skill slugs now produce incremented immutable versions for the same owner.
+- Global/hub catalogs now require authentication.
+
+### What's NOT Working Yet
+- Circuit breaker state is still process-local; cross-worker shared breaker coordination (Redis/DB) is still a future enhancement.
+
+### Next Steps
+1. Add shared-store circuit breaker state for multi-worker deployments.
+2. Add API tests for authenticated `/api/skills/global` and `/api/skills/hub`.
+3. Add tests for VT timeout path and dual-error transition (`pending_scan` retry state).
+
+### Decisions Made
+- Kept process-local breaker implementation for now (hackathon-appropriate), but made it concurrency-safe within worker process boundaries.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.47 - April 3, 2026 (skills governance pipeline: model + APIs + scanners)
 
 **Agent:** GPT-5.3-Codex  
