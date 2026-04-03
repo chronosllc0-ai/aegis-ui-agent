@@ -21,11 +21,13 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.providers.base import BaseProvider, ChatMessage
+from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
 from backend.session_workspace import (
     ensure_session_workspace,
     get_session_files_root,
@@ -438,7 +440,118 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
     return available
 
 
-async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subagent: bool) -> str:
+def _normalize_skill_content(content: str) -> str:
+    """Trim and sanitize control characters in runtime skill content."""
+    normalized = "".join(char for char in content if char in {"\n", "\t"} or ord(char) >= 32)
+    return normalized.strip()
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate prompt tokens with a lightweight character heuristic."""
+    return max(1, len(text) // 4)
+
+
+def _assemble_runtime_skills_section(
+    runtime_skills: list[RuntimeSkill],
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build runtime skill prompt section using priority-based token budgeting."""
+    budget = max(int(_app_settings.SKILLS_MAX_TOKENS), 0)
+    min_priority = _app_settings.SKILLS_MIN_PRIORITY
+    now = datetime.now(timezone.utc)
+    sorted_skills = sorted(
+        runtime_skills,
+        key=lambda item: (
+            item.priority,
+            getattr(item, "created_at", None) or now,
+            item.version_id,
+        ),
+        reverse=True,
+    )
+
+    included: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    chunks: list[str] = []
+    used_tokens = 0
+    budget_exceeded = False
+    for skill in sorted_skills:
+        if min_priority is not None and skill.priority < min_priority:
+            excluded.append({"skill_id": skill.skill_id, "reason": "below_min_priority"})
+            continue
+
+        content = _normalize_skill_content(skill.content)
+        if not content:
+            excluded.append({"skill_id": skill.skill_id, "reason": "empty_or_malformed"})
+            continue
+
+        header = (
+            f"[skill:{skill.skill_id}@{skill.version_id} source={skill.source} priority={skill.priority}]"
+        )
+        chunk = f"{header}\n{content}\n"
+        estimated_tokens = _estimate_tokens(chunk)
+        if budget and used_tokens + estimated_tokens > budget:
+            excluded.append({"skill_id": skill.skill_id, "reason": "budget_exceeded"})
+            budget_exceeded = True
+            continue
+        used_tokens += estimated_tokens
+        chunks.append(chunk)
+        included.append(
+            {
+                "skill_id": skill.skill_id,
+                "version": skill.version_id,
+                "source": skill.source,
+                "priority": skill.priority,
+            }
+        )
+
+    if not chunks:
+        return "", included, excluded
+
+    body = "\n".join(chunks).strip()
+    if budget_exceeded:
+        body = f"{body}\n... [truncated due to skills token budget]"
+    return f"\n\n### Active Skills (read-only directives)\n{body}\n", included, excluded
+
+
+async def _load_runtime_skills(
+    *,
+    session_id: str,
+    user_uid: str | None,
+    settings: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load and prepare runtime skills section. Fail-open unless configured otherwise."""
+    if not user_uid:
+        return "", [], []
+
+    correlation_id = str(settings.get("correlation_id") or settings.get("request_id") or session_id)
+    try:
+        from backend.database import _session_factory
+
+        if _session_factory is None:
+            return "", [], []
+
+        async with _session_factory() as db:
+            runtime_skills = await get_active_runtime_skills(db, user_uid, session_id)
+    except SQLAlchemyError as exc:
+        logger.warning("Runtime skills unavailable (correlation_id=%s): %s", correlation_id, exc)
+        if _app_settings.SKILLS_FAIL_CLOSED:
+            raise
+        return "", [], []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Runtime skills loader failed (correlation_id=%s): %s", correlation_id, exc)
+        if _app_settings.SKILLS_FAIL_CLOSED:
+            raise
+        return "", [], []
+
+    return _assemble_runtime_skills_section(runtime_skills)
+
+
+async def _build_system_prompt(
+    *,
+    session_id: str,
+    settings: dict[str, Any],
+    is_subagent: bool,
+    runtime_skills_section: str = "",
+) -> str:
     """Build the current system prompt from enabled tools and user instruction."""
     workspace_root = get_session_workspace_root(session_id)
     files_root = get_session_files_root(session_id)
@@ -534,6 +647,7 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
         "workspace, memory, automation, and GitHub repo-engineering tools while respecting runtime policy gates.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
         f"Rules:\n{chr(10).join(f'{index + 1}. {rule}' for index, rule in enumerate(rules))}"
+        f"{runtime_skills_section}"
         f"{custom_block}"
     )
 
@@ -1370,7 +1484,27 @@ async def run_universal_navigation(
         on_message_subagent=on_message_subagent,
         is_subagent=is_subagent,
     )
-    system_prompt = await _build_system_prompt(session_id=session_id, settings=resolved_settings, is_subagent=is_subagent)
+    runtime_skills_section, included_skills, excluded_skills = await _load_runtime_skills(
+        session_id=session_id,
+        user_uid=user_uid,
+        settings=resolved_settings,
+    )
+    skills_loaded_event = {
+        "type": "skills_loaded",
+        "task_id": session_id,
+        "skills": included_skills,
+        "excluded": excluded_skills,
+    }
+    logger.info("skills_loaded %s", json.dumps(skills_loaded_event, ensure_ascii=False))
+    if on_workflow_step:
+        await on_workflow_step(skills_loaded_event)
+
+    system_prompt = await _build_system_prompt(
+        session_id=session_id,
+        settings=resolved_settings,
+        is_subagent=is_subagent,
+        runtime_skills_section=runtime_skills_section,
+    )
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []
     parent_step_id: str | None = None

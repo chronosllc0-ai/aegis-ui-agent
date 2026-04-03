@@ -2579,3 +2579,43 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.27 - April 3, 2026 (Runtime Skill Loader + Prompt Injection + Provenance Logging)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/skills/runtime_loader.py` with a dedicated `RuntimeSkill` dataclass and runtime skill-loading policy gate that only returns skills with approved status, latest version, resolved scans/review, and not disabled for the active user/session context.
+- Added runtime skill prompt assembly in `universal_navigator.py` including:
+  - control-char sanitization,
+  - priority-based ordering,
+  - token-budget enforcement via `len(text)/4` heuristic,
+  - explicit truncation marker when the budget is exceeded.
+- Added runtime-skill config knobs in `config.py`:
+  - `SKILLS_MAX_TOKENS`
+  - `SKILLS_MIN_PRIORITY`
+  - `SKILLS_FAIL_CLOSED`
+- Wired one-time runtime skill loading into `run_universal_navigation(...)` startup and appended the `### Active Skills (read-only directives)` section to the system prompt once per run.
+- Added structured provenance logging/event emission at task start with `type: skills_loaded`, including `skills[]` and `excluded[]` metadata.
+- Preserved existing tool safety path (`_tool_requires_confirmation` / `_confirm_if_needed`) unchanged.
+
+### What's Working
+- Runtime skills are now injected once at task startup through the system prompt build path.
+- Budget truncation behavior is deterministic by priority order and emits an explicit truncation marker.
+- Skills provenance is emitted to logs and the workflow event callback.
+- High-risk tool confirmation is still enforced even if an injected skill directive attempts to bypass it.
+
+### What's NOT Working Yet
+- There is no dedicated DB-backed assignment model yet for per-user/per-session disablement beyond metadata-driven disable flags.
+
+### Next Steps
+1. Add explicit relational tables for user/session skill assignment & disable rules (instead of metadata-only checks).
+2. Extend runtime loader API to return first-class exclusion reasons alongside active skills for richer observability.
+3. Add admin UI visibility for runtime loaded/excluded skills per task.
+
+### Decisions Made
+- Implemented fail-open runtime behavior by default (`SKILLS_FAIL_CLOSED=False`) to prioritize task availability; fail-closed can be enabled by config.
+
+### Blockers
+- None in this pass.
