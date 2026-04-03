@@ -30,16 +30,16 @@ logger = logging.getLogger(__name__)
 class VirusTotalScanner:
     """Thin VT client with timeout/retry and a simple circuit breaker."""
 
+    # NOTE: Process-local circuit breaker state. In multi-worker deployments,
+    # each worker maintains independent state. Consider Redis/DB-backed state
+    # for cross-worker coordination.
     _consecutive_failures = 0
     _opened_until: datetime | None = None
     _lock = asyncio.Lock()
 
     @classmethod
-    @classmethod
     def _is_open(cls) -> bool:
         if cls._opened_until is None:
-            return False
-        return datetime.now(timezone.utc) < cls._opened_until  # NOTE: not lock-guarded; safe only in single-worker
             return False
         return datetime.now(timezone.utc) < cls._opened_until
 
@@ -130,7 +130,8 @@ class VirusTotalScanner:
                             "report_url": None,
                             "scanned_at": datetime.now(timezone.utc),
                         }
-                    file_report = await client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
+                    # Use the completed poll response directly instead of re-fetching
+                    raw = poll_json
                 file_report.raise_for_status()
                 raw = file_report.json()
         except (httpx.RequestError, httpx.HTTPStatusError, OSError) as exc:
@@ -264,7 +265,7 @@ class SkillService:
             await session.flush()
         else:
             if skill.owner_user_id != owner_user_id:
-                raise ValueError("Skill slug is already owned by another user")
+                raise ValueError("Skill slug already exists")
             from_status = skill.status
             skill.name = name
             skill.description = description
@@ -369,7 +370,11 @@ class SkillService:
 
         from_status = skill.status
         target_status = "pending_review"
-        if vt_result["verdict"] == "error" and policy_result["verdict"] == "error":
+        vt_attempted = settings.VIRUSTOTAL_API_KEY and vt_result["verdict"] != "skipped"
+        if vt_attempted and vt_result["verdict"] == "error":
+            target_status = "pending_scan"
+        elif vt_result["verdict"] == "error" and policy_result["verdict"] == "error":
+            target_status = "pending_scan"
             target_status = "pending_scan"
         skill.status = target_status
         skill.risk_label = risk
@@ -560,8 +565,7 @@ class SkillService:
                 select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id)
             )
             by_engine = {scan.engine: scan for scan in scans.scalars().all()}
-            vt_scan = by_engine.get("virustotal")
-            vt_verdict = vt_scan.verdict if vt_scan else None
+            vt_verdict = by_engine.get("virustotal").verdict if by_engine.get("virustotal") else None
             if settings.VIRUSTOTAL_REQUIRED:
                 vt_ok = vt_verdict in {"pass", "warn"}
             else:
@@ -571,15 +575,12 @@ class SkillService:
                         "Skill %s is runtime-compliant with skipped VT scan because VIRUSTOTAL_REQUIRED=false",
                         skill.id,
                     )
-            policy_ok = by_engine.get("policy") and by_engine["policy"].verdict in {"pass", "warn"}
+            policy_scan = by_engine.get("policy")
+            policy_ok = policy_scan is not None and policy_scan.verdict in {"pass", "warn"}
             if not (vt_ok and policy_ok):
                 continue
 
-            try:
-                payload = json.loads(version.metadata_json or "{}")
-            except json.JSONDecodeError:
-                logger.warning("Skipping skill %s with corrupted metadata_json", skill.id)
-                continue
+            payload = json.loads(version.metadata_json or "{}")
             active.append(
                 {
                     "skill_id": skill.id,

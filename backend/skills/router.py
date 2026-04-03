@@ -229,6 +229,7 @@ async def submit_user_skill(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     await session.commit()
+    scan_status = "completed"
     try:
         await SkillService.run_scans_for_skill(
             session,
@@ -237,36 +238,18 @@ async def submit_user_skill(
             actor_type="user",
         )
         await session.commit()
-    except ValueError:
+    except ValueError as exc:
+        logger.warning("Scan phase failed for skill %s: %s", skill.id, exc)
         await session.rollback()
-
-    scan_ok = True
-    try:
-        await SkillService.run_scans_for_skill(
-            session,
-            skill_id=skill.id,
-            actor_id=current_user.uid,
-            actor_type="user",
-        )
-        await session.commit()
-    except ValueError:
+        scan_status = "failed"
         await session.rollback()
-        scan_ok = False
+        scan_status = "failed"
 
-    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed" if scan_ok else "failed"}
-    try:
-        await SkillService.run_scans_for_skill(
-            session,
-            skill_id=skill.id,
-            actor_id=current_user.uid,
-            actor_type="user",
-        )
-        await session.commit()
-    except ValueError:
-        await session.rollback()
-        scan_ok = False
-
-    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed" if scan_ok else "failed"}
+    return {
+        "ok": True,
+        "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status},
+        "scan_status": scan_status,
+    }
 
 
 @skills_router.get("/api/skills/mine")

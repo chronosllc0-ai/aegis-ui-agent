@@ -1,3 +1,33 @@
+## Session 5.50 - April 3, 2026 (PR review polish: submit scan_status response correctness)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted API response consistency pass
+
+### What Was Done
+- Updated `POST /api/skills/submit` response behavior in `backend/skills/router.py` to report the real scan outcome using an explicit `scan_status` field:
+  - `scan_status = "completed"` when follow-up scan commit succeeds,
+  - `scan_status = "failed"` when scan phase raises `ValueError` and transaction rolls back.
+- Preserved two-phase submission semantics (submission commit is not rolled back by scan-phase failures), while making response payload truthful for clients.
+- Re-verified `backend/skills/service.py` `VirusTotalScanner._is_open(...)` shape is clean and contains no duplicate decorator/dead-return code in current branch.
+
+### What's Working
+- `/api/skills/submit` now returns accurate post-submit scan state for UI/client handling.
+
+### What's NOT Working Yet
+- Scan phase remains synchronous in-request; async background execution remains a planned follow-up.
+
+### Next Steps
+1. Add endpoint test coverage for `scan_status` success/failure branches.
+2. Move scan phase to background worker for better request latency.
+
+### Decisions Made
+- Kept scan failure surfacing as payload state (not HTTP error) to preserve successful submission creation semantics.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.49 - April 3, 2026 (PR review fixes: JSON hardening + VT compliance gating)
 
 **Agent:** GPT-5.3-Codex  
