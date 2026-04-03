@@ -6,6 +6,7 @@ type ScreenViewProps = {
   isWorking: boolean
   steeringFlashKey: number
   onExampleClick: (prompt: string) => void
+  lastClickCoords?: { x: number; y: number } | null
 }
 
 const EXAMPLES = [
@@ -15,8 +16,16 @@ const EXAMPLES = [
   'Go to Wikipedia and summarize the article on quantum computing',
 ]
 
-export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour }: ScreenViewProps) {
+export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour, lastClickCoords }: ScreenViewProps) {
   const [displayFrame, setDisplayFrame] = useState('')
+  const [clickAnim, setClickAnim] = useState<{ x: number; y: number; key: number } | null>(null)
+
+  useEffect(() => {
+    if (!lastClickCoords) return
+    setClickAnim({ ...lastClickCoords, key: Date.now() })
+    const t = window.setTimeout(() => setClickAnim(null), 1500)
+    return () => window.clearTimeout(t)
+  }, [lastClickCoords])
 
   useEffect(() => {
     if (!frameSrc) return
@@ -34,9 +43,31 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
 
   return (
     <section data-tour={dataTour} className='relative h-full min-h-0 overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
-      <div className='absolute inset-x-0 top-0 z-20 h-0.5 bg-zinc-800'>
-        <div className={`h-full bg-blue-500 transition-all ${isWorking ? 'w-full animate-pulse' : 'w-0'}`} />
-      </div>
+      {/* 4-corner activity indicators */}
+      {isWorking && (
+        <>
+          {/* Top-left */}
+          <div className='absolute top-0 left-0 z-20 h-8 w-8 pointer-events-none'>
+            <div className='absolute top-0 left-0 h-2 w-8 bg-blue-500 animate-pulse rounded-tl-2xl' />
+            <div className='absolute top-0 left-0 h-8 w-2 bg-blue-500 animate-pulse rounded-tl-2xl' />
+          </div>
+          {/* Top-right */}
+          <div className='absolute top-0 right-0 z-20 h-8 w-8 pointer-events-none'>
+            <div className='absolute top-0 right-0 h-2 w-8 bg-blue-500 animate-pulse rounded-tr-2xl' />
+            <div className='absolute top-0 right-0 h-8 w-2 bg-blue-500 animate-pulse rounded-tr-2xl' />
+          </div>
+          {/* Bottom-left */}
+          <div className='absolute bottom-0 left-0 z-20 h-8 w-8 pointer-events-none'>
+            <div className='absolute bottom-0 left-0 h-2 w-8 bg-blue-500 animate-pulse rounded-bl-2xl' />
+            <div className='absolute bottom-0 left-0 h-8 w-2 bg-blue-500 animate-pulse rounded-bl-2xl' />
+          </div>
+          {/* Bottom-right */}
+          <div className='absolute bottom-0 right-0 z-20 h-8 w-8 pointer-events-none'>
+            <div className='absolute bottom-0 right-0 h-2 w-8 bg-blue-500 animate-pulse rounded-br-2xl' />
+            <div className='absolute bottom-0 right-0 h-8 w-2 bg-blue-500 animate-pulse rounded-br-2xl' />
+          </div>
+        </>
+      )}
       {steeringFlashKey > 0 && (
         <div
           key={steeringFlashKey}
@@ -46,10 +77,25 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
         </div>
       )}
       {hasFrame ? (
-        <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-contain' />
+        <>
+          <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-cover' />
+          {clickAnim && (
+            <div
+              key={clickAnim.key}
+              className='absolute z-30 pointer-events-none'
+              style={{
+                left: `${(clickAnim.x / 1280) * 100}%`,
+                top: `${(clickAnim.y / 720) * 100}%`,
+                transform: 'translate(-50%, -50%)',
+              }}
+            >
+              <div className='h-6 w-6 animate-ping rounded-full border-2 border-blue-400 bg-blue-400/20' />
+            </div>
+          )}
+        </>
       ) : (
         <div className='flex min-h-full w-full flex-col items-center justify-start px-3 py-5 text-center sm:px-6 sm:py-8 md:justify-center'>
-          <img src='/shield.svg' alt='Aegis logo' className='mb-3 h-10 w-10 opacity-90 sm:mb-5 sm:h-16 sm:w-16' />
+          <img src='/aegis-shield.png' alt='Aegis logo' className='mb-3 h-10 w-10 sm:mb-5 sm:h-16 sm:w-16 object-contain' />
           <h2 className='text-xl font-semibold sm:text-2xl md:text-3xl'>Tell me what to do</h2>
           <p className='mb-4 mt-1.5 max-w-xl text-xs text-zinc-400 sm:mb-8 sm:mt-2 sm:text-sm'>Aegis can operate any UI with visual understanding. Start with a natural language instruction or choose an example below.</p>
           <div className='grid w-full max-w-3xl gap-2 sm:gap-3 sm:grid-cols-2'>

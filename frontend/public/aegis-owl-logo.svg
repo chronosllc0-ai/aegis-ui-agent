@@ -1,0 +1,92 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#glow)">
+
+    <!-- Ear tufts left -->
+    <path d="M226 102L168 28"/>
+    <path d="M240 96L200 36"/>
+
+    <!-- Ear tufts right -->
+    <path d="M286 102L344 28"/>
+    <path d="M272 96L312 36"/>
+
+    <!-- Head circle -->
+    <circle cx="256" cy="183" r="90"/>
+
+    <!-- Eyes — angular fierce diamonds -->
+    <path d="M207 178L225 164L236 180L218 193Z" fill="#FFFFFF" stroke-width="16"/>
+    <path d="M276 178L294 164L305 180L287 193Z" fill="#FFFFFF" stroke-width="16"/>
+
+    <!-- Beak -->
+    <path d="M242 212L256 232L270 212"/>
+
+    <!-- LEFT WING — upper feather bank -->
+    <path d="M173 168C148 150 112 128 70 100"/>
+    <path d="M70 100C48 86 22 76 6 78"/>
+    <path d="M83 126C58 112 34 106 14 110"/>
+    <path d="M100 150C74 142 52 141 32 149"/>
+
+    <!-- LEFT WING — lower feather bank -->
+    <path d="M168 218C145 214 110 210 68 206"/>
+    <path d="M68 206C46 203 24 202 8 204"/>
+    <path d="M165 258C142 263 110 276 76 296"/>
+    <path d="M76 296C53 310 32 332 16 360"/>
+    <path d="M158 292C136 308 108 334 78 364"/>
+
+    <!-- RIGHT WING — upper feather bank -->
+    <path d="M339 168C364 150 400 128 442 100"/>
+    <path d="M442 100C464 86 490 76 506 78"/>
+    <path d="M429 126C454 112 478 106 498 110"/>
+    <path d="M412 150C438 142 460 141 480 149"/>
+
+    <!-- RIGHT WING — lower feather bank -->
+    <path d="M344 218C367 214 402 210 444 206"/>
+    <path d="M444 206C466 203 488 202 504 204"/>
+    <path d="M347 258C370 263 402 276 436 296"/>
+    <path d="M436 296C459 310 480 332 496 360"/>
+    <path d="M354 292C376 308 404 334 434 364"/>
+
+    <!-- Shield — outer -->
+    <path d="M216 266Q202 266 202 280V362Q202 392 256 420Q310 392 310 362V280Q310 266 296 266Z"/>
+
+    <!-- Shield — inner -->
+    <path d="M228 282Q220 282 220 292V350Q220 372 256 390Q292 372 292 350V292Q292 282 284 282Z"/>
+
+    <!-- Left talons -->
+    <path d="M218 420L193 450"/>
+    <path d="M222 420L212 457"/>
+    <path d="M230 420L230 458"/>
+    <path d="M238 420L256 452"/>
+
+    <!-- Right talons -->
+    <path d="M274 420L256 452"/>
+    <path d="M282 420L282 458"/>
+    <path d="M290 420L300 457"/>
+    <path d="M294 420L319 450"/>
+
+    <!-- Circuit board traces — left perch -->
+    <path d="M38 468L182 468"/>
+    <circle cx="182" cy="468" r="9" fill="#FFFFFF" stroke="none"/>
+    <path d="M38 468L38 482"/>
+    <path d="M38 482L122 482"/>
+    <circle cx="122" cy="482" r="9" fill="#FFFFFF" stroke="none"/>
+
+    <!-- Circuit board traces — right perch -->
+    <path d="M312 468L474 468"/>
+    <circle cx="312" cy="468" r="9" fill="#FFFFFF" stroke="none"/>
+    <circle cx="474" cy="468" r="9" fill="#FFFFFF" stroke="none"/>
+    <path d="M402 468L402 482"/>
+    <path d="M402 482L474 482"/>
+
+  </g>
+</svg>

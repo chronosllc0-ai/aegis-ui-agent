@@ -12,6 +12,8 @@ import { UsageTab } from './UsageTab'
 import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
+import { MemoryTab } from './MemoryTab'
+import { ObservabilityTab } from './ObservabilityTab'
 import { AdminPanel } from '../admin/AdminPanel'
 
 type SettingsPageProps = {
@@ -19,13 +21,14 @@ type SettingsPageProps = {
   onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
   initialTab?: SettingsTab
   isAdmin?: boolean
+  onTabChange?: (tab: SettingsTab) => void
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support', 'Admin'] as const
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
-export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false }: SettingsPageProps) {
+export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false, onTabChange }: SettingsPageProps) {
   const { settings, patchSettings } = useSettingsContext()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
@@ -53,6 +56,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
 
   const selectTab = (tab: SettingsTab) => {
     setActiveTab(tab)
+    onTabChange?.(tab)
     setSidebarOpen(false) // collapse sidebar on mobile after selecting
   }
 
@@ -102,7 +106,15 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
                 activeTab === tab ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
               } ${tab === 'Admin' ? 'mt-2 border-t border-[#2a2a2a] pt-3 text-red-400 hover:bg-red-500/10' : ''}`}
             >
-              {tab === 'Admin' ? '⚙ Admin' : tab}
+              {tab === 'Admin' ? (
+                <span className='flex items-center gap-1.5'>
+                  <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-3.5 w-3.5'>
+                    <path d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z'/>
+                    <circle cx='12' cy='12' r='3'/>
+                  </svg>
+                  Admin
+                </span>
+              ) : tab}
             </button>
           ))}
         </div>
@@ -117,7 +129,11 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         {activeTab === 'Credits' && <CreditsTab />}
         {activeTab === 'Invoices' && <InvoiceTab />}
         {activeTab === 'Connections' && (
-          <ConnectionsTab integrations={settings.integrations} onChange={(integrations) => onPatch({ integrations })} isAdmin={isAdmin} />
+          <ConnectionsTab
+            integrations={settings.integrations}
+            onChange={(integrations) => onPatch({ integrations })}
+            isAdmin={isAdmin}
+          />
         )}
         {activeTab === 'Workflows' && (
           <WorkflowsTab
@@ -126,6 +142,8 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
             onRun={(instruction) => onRunWorkflow(instruction, 'steer')}
           />
         )}
+        {activeTab === 'Memory' && <MemoryTab />}
+        {activeTab === 'Observability' && <ObservabilityTab />}
         {activeTab === 'Support' && <SupportTab />}
         {activeTab === 'Admin' && isAdmin && <AdminPanel />}
       </div>

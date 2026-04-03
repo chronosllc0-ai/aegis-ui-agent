@@ -20,16 +20,30 @@ class SlackOAuthConnector(BaseConnector):
     oauth_authorize_url = "https://slack.com/oauth/v2/authorize"
     oauth_token_url = "https://slack.com/api/oauth.v2.access"
     default_scopes = [
-        "channels:read",
-        "channels:history",
+        # Messaging
+        "app_mentions:read",
+        "assistant:write",
         "chat:write",
-        "users:read",
-        "files:read",
-        "search:read",
-        "groups:read",
+        "chat:write.customize",
+        # Channels
+        "channels:history",
+        "channels:join",
+        "channels:read",
+        # Groups / DMs
         "groups:history",
-        "im:read",
+        "groups:read",
         "im:history",
+        "im:read",
+        # Users & reactions
+        "emoji:read",
+        "reactions:read",
+        "reactions:write",
+        "users:read",
+        # Files & search
+        "files:read",
+        "files:write",
+        # NOTE: search:read.files and search:read.im are NOT valid Slack scopes;
+        # the correct scope for search is search:read (user token only).
     ]
 
     def get_authorize_url(self, redirect_uri: str, state: str, scopes: list[str] | None = None) -> str:
@@ -40,8 +54,10 @@ class SlackOAuthConnector(BaseConnector):
             "state": state,
             "scope": ",".join(scopes or self.default_scopes),
         }
-        # Slack uses user_scope for user-token actions
-        params["user_scope"] = "search:read,files:read"
+        # Slack search requires a user token — search:read is a user scope only.
+        # "chat:write" is included here for user-token DM capability.
+        # "chat:write.public" must NOT appear in user_scope (it's bot-only).
+        params["user_scope"] = "search:read,chat:write,emoji:read"
         return f"{self.oauth_authorize_url}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, redirect_uri: str) -> OAuthTokens:

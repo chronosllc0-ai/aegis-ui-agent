@@ -11,6 +11,18 @@ type ReleaseEntry = {
 // Add new releases at the top of this array
 const RELEASES: ReleaseEntry[] = [
   {
+    version: '1.2.0',
+    date: 'March 2026',
+    changes: [
+      { type: 'new', text: 'Sub-agent orchestration - Aegis can now spawn and coordinate multiple AI sub-agents to tackle complex multi-step tasks in parallel' },
+      { type: 'new', text: 'Cross-device chat persistence - conversation history now synced to the server DB and available on any device after login' },
+      { type: 'new', text: 'Connector OAuth overhaul - Notion, Google Drive, Slack integrations with robust token refresh and error handling' },
+      { type: 'fix', text: 'Notion OAuth invalid_grant - workspace_id/workspace_name now passed correctly in token exchange' },
+      { type: 'fix', text: 'Gemini Live voice model updated to gemini-3.1-flash-live-preview' },
+      { type: 'improve', text: 'Action log and chat fonts scaled up on desktop for better readability' },
+    ],
+  },
+  {
     version: '1.1.0',
     date: 'March 2026',
     changes: [
@@ -87,6 +99,10 @@ export function ChangelogModal({ onClose }: { onClose: () => void }) {
                   </li>
                 ))}
               </ul>
+              {/* TODO: Add showcase images/videos for this release */}
+              <div className='mt-4 rounded-xl border border-dashed border-[#2a2a2a] bg-[#0a0a0a] flex items-center justify-center h-32 text-zinc-600 text-xs'>
+                📸 Add screenshots or video for v{release.version} here
+              </div>
             </div>
           ))}
         </div>
@@ -107,9 +123,67 @@ export function ChangelogModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+export function SubAgentModal({ onClose, onTryNow }: { onClose: () => void; onTryNow: () => void }) {
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm'>
+      <div className='relative w-full max-w-md rounded-2xl border border-[#2a2a2a] bg-[#0f0f0f] shadow-2xl'>
+        {/* Header */}
+        <div className='flex items-center justify-between border-b border-[#2a2a2a] px-5 py-4'>
+          <h2 className='text-base font-semibold text-zinc-100'>🧠 Aegis can now orchestrate sub-agents</h2>
+          <button
+            type='button'
+            onClick={onClose}
+            className='rounded-lg border border-[#2a2a2a] p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+          >
+            {Icons.close({ className: 'h-4 w-4' })}
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className='px-5 py-4'>
+          <p className='text-sm text-zinc-300 leading-relaxed'>
+            Aegis can now break complex tasks into parallel workstreams, spawning specialized sub-agents for research, coding, browsing, and data analysis - all coordinated in real time.
+          </p>
+
+          {/* Video placeholder */}
+          <div className='my-4 rounded-xl border border-dashed border-[#2a2a2a] bg-[#0a0a0a] flex items-center justify-center h-40 text-zinc-600 text-xs'>
+            ▶ Add demo video here
+          </div>
+
+          {/* Capabilities list */}
+          <ul className='space-y-2 text-sm text-zinc-300'>
+            <li>🔍 Parallel web research across multiple sources</li>
+            <li>💻 Code generation + testing in sandboxed environments</li>
+            <li>📊 Data aggregation, analysis, and visualization</li>
+            <li>🌐 Multi-site browsing and form automation</li>
+          </ul>
+        </div>
+
+        {/* Footer */}
+        <div className='flex flex-col items-center gap-2 border-t border-[#2a2a2a] px-5 py-4'>
+          <button
+            type='button'
+            onClick={onTryNow}
+            className='w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500'
+          >
+            Try it now →
+          </button>
+          <button
+            type='button'
+            onClick={onClose}
+            className='text-xs text-zinc-500 hover:text-zinc-300'
+          >
+            Maybe later
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Hook to manage changelog visibility
 export function useChangelog() {
-  const appVersion = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? '1.1.0'
+  const appVersion = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? '1.2.0'
   const storageKey = 'aegis_last_version'
   const lastSeen = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
   const [show, setShow] = useState<boolean>(!!appVersion && appVersion !== lastSeen)

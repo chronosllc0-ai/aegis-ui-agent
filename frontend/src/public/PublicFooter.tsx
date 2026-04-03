@@ -1,5 +1,4 @@
-import { CHRONOS_LOGO_URL } from '../lib/models'
-import { navigateTo, PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
+import { PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
 
 type PublicFooterProps = {
   onGoHome: () => void
@@ -13,19 +12,19 @@ const FOOTER_GROUPS = [
   {
     title: 'Product',
     links: [
-      { label: 'Overview', slug: 'home' },
-      { label: 'Quickstart', slug: 'quickstart' },
-      { label: 'Live sessions', slug: 'live-sessions' },
-      { label: 'Integrations', slug: 'integrations' },
+      { label: 'Features', slug: '#features' },
+      { label: 'Use cases', slug: '#use-cases' },
+      { label: 'Pricing', slug: '#pricing' },
+      { label: 'FAQ', slug: '#faq' },
     ],
   },
   {
     title: 'Docs',
     links: [
       { label: 'Docs home', slug: 'docs-home' },
+      { label: 'Quickstart', slug: 'quickstart' },
       { label: 'API reference', slug: 'api-auth-reference' },
       { label: 'Tutorials', slug: 'first-live-run' },
-      { label: 'FAQ', slug: 'faq' },
     ],
   },
   {
@@ -33,8 +32,8 @@ const FOOTER_GROUPS = [
     links: [
       { label: 'Authentication', slug: 'authentication' },
       { label: 'Provider keys', slug: 'provider-keys' },
-      { label: 'Workflows', slug: 'workflow-templates' },
       { label: 'Deployment', slug: 'deployment' },
+      { label: 'Changelog', slug: 'changelog' },
     ],
   },
 ]
@@ -45,7 +44,7 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
       <div className='mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 lg:grid-cols-[1.2fr_2fr]'>
         <div>
           <button type='button' onClick={onGoHome} className='flex items-center gap-3 text-left'>
-            <img src={CHRONOS_LOGO_URL} alt='Chronos AI' className='chronos-spin h-10 w-10 rounded-full' />
+            <img src='/aegis-shield.png' alt='Aegis logo' className='h-10 w-10' />
             <div>
               <p className='text-lg font-semibold text-white'>Aegis</p>
               <p className='text-sm text-zinc-400'>by Chronos AI</p>
@@ -90,6 +89,9 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
                   if (link.slug === 'docs-home') {
                     return <button key={link.label} type='button' onClick={onGoDocsHome} className='text-left transition hover:text-white'>{link.label}</button>
                   }
+                  if (link.slug.startsWith('#')) {
+                    return <a key={link.label} href={`/${link.slug}`} className='text-left transition hover:text-white'>{link.label}</a>
+                  }
                   return <button key={link.label} type='button' onClick={() => onGoDoc(link.slug)} className='text-left transition hover:text-white'>{link.label}</button>
                 })}
               </div>
@@ -103,20 +105,18 @@ export function PublicFooter({ onGoHome, onGoAuth, onGoDocsHome, onGoDoc, docsPo
         <div className='mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs text-zinc-600'>
           <span>© {new Date().getFullYear()} Chronos AI. All rights reserved.</span>
           <div className='flex gap-5'>
-            <button
-              type='button'
-              onClick={() => navigateTo(PRIVACY_PATH)}
+            <a
+              href={PRIVACY_PATH}
               className='transition hover:text-zinc-300'
             >
               Privacy Policy
-            </button>
-            <button
-              type='button'
-              onClick={() => navigateTo(TERMS_PATH)}
+            </a>
+            <a
+              href={TERMS_PATH}
               className='transition hover:text-zinc-300'
             >
               Terms of Service
-            </button>
+            </a>
           </div>
         </div>
       </div>

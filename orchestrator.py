@@ -147,8 +147,11 @@ class AgentOrchestrator:
             if not api_key:
                 return None  # no platform key configured
             from backend.providers import get_provider
-            provider_instance = get_provider("openrouter", api_key, default_model=model_id or "nvidia/nemotron-3-super:free")
-            return "chronos", provider_instance, model_id
+            # Strip display-only ":free" suffix — OpenRouter's free tier is controlled by
+            # the API key; the real model ID never includes ":free" in the slug.
+            api_model_id = model_id.split(":")[0] if model_id and ":" in model_id else model_id
+            provider_instance = get_provider("openrouter", api_key, default_model=api_model_id or "nvidia/nemotron-3-super-120b-a12b")
+            return "chronos", provider_instance, api_model_id
 
         # Try to get the user's stored BYOK key first
         api_key: str | None = None
@@ -170,6 +173,7 @@ class AgentOrchestrator:
                 "anthropic": settings.ANTHROPIC_API_KEY,
                 "xai": settings.XAI_API_KEY,
                 "openrouter": settings.OPENROUTER_API_KEY,
+                "fireworks": settings.FIREWORKS_API_KEY,
             }
             api_key = env_keys.get(provider_name, "").strip()
 
@@ -191,6 +195,11 @@ class AgentOrchestrator:
         settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         user_uid: str | None = None,
+        on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+        on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
+        on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
+        on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+        is_subagent: bool = False,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction.
 
@@ -216,17 +225,30 @@ class AgentOrchestrator:
             _, provider_instance, model_id = resolved
             logger.info("Using universal navigator for provider=%s model=%s", provider_name, model_id)
 
+            enable_reasoning = bool((settings or {}).get("enable_reasoning", False))
+            reasoning_effort = str((settings or {}).get("reasoning_effort", "medium"))
+
             from universal_navigator import run_universal_navigation
             return await run_universal_navigation(
                 provider=provider_instance,
                 model=model_id,
                 executor=self.executor,
+                session_id=session_id,
                 instruction=instruction,
+                settings=settings,
                 on_step=on_step,
                 on_frame=on_frame,
                 cancel_event=cancel_event,
                 steering_context=steering_context,
                 on_workflow_step=on_workflow_step,
+                on_user_input=on_user_input,
+                user_uid=user_uid,
+                enable_reasoning=enable_reasoning,
+                reasoning_effort=reasoning_effort,
+                on_reasoning_delta=on_reasoning_delta,
+                on_spawn_subagent=on_spawn_subagent,
+                on_message_subagent=on_message_subagent,
+                is_subagent=is_subagent,
             )
 
         # ── Gemini / ADK path (original) ───────────────────────────────

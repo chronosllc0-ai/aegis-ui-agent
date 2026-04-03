@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { GITHUB_PAT_INTEGRATION_ID, maskSecret, renderIntegrationIcon, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 import { apiUrl } from '../../lib/api'
 
 type IntegrationsTabProps = {
@@ -14,6 +14,8 @@ const STATUS_DOT: Record<IntegrationConfig['status'], string> = {
   error: 'bg-red-400',
   disabled: 'bg-zinc-500',
 }
+
+const BOT_INTEGRATION_IDS: readonly string[] = ['telegram', 'slack', 'discord', GITHUB_PAT_INTEGRATION_ID]
 
 export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps) {
   const [form, setForm] = useState<CustomServerForm>(EMPTY_FORM)
@@ -140,7 +142,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     setBusyId(integration.id)
     setIntegrationError(integration.id, null)
     try {
-      const data = await postJson(`/api/integrations/github/register/${integration.id}`, payload)
+      const data = await postJson(`/api/integrations/${integration.id}/register/${integration.id}`, payload)
       const connected = Boolean(data?.connection?.connected)
       updateIntegration(integration.id, { status: connected ? 'connected' : 'error', enabled: connected })
       if (!connected) setIntegrationError(integration.id, 'Connection failed.')
@@ -204,7 +206,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
     setBusyId(integration.id)
     setIntegrationError(integration.id, null)
     try {
-      const data = await postJson(`/api/integrations/github/${integration.id}/test`, {})
+      const data = await postJson(`/api/integrations/${integration.id}/${integration.id}/test`, {})
       const ok = Boolean(data?.ok)
       updateIntegration(integration.id, { status: ok ? 'connected' : 'error' })
       if (!ok) setIntegrationError(integration.id, 'GitHub test failed.')
@@ -234,7 +236,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
       await connectDiscord(integration)
       return
     }
-    if (integration.id === 'github') {
+    if (integration.id === GITHUB_PAT_INTEGRATION_ID) {
       await connectGithub(integration)
       return
     }
@@ -265,14 +267,14 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
         <h3 className='mb-2 text-sm font-semibold'>Connected Integrations</h3>
         <div className='space-y-2'>
           {integrations.map((integration) => {
-            const isConfigurable = ['telegram', 'slack', 'discord', 'github'].includes(integration.id)
+            const isConfigurable = BOT_INTEGRATION_IDS.includes(integration.id)
             const isBusy = busyId === integration.id
-            const canTest = ['telegram', 'slack', 'discord', 'github'].includes(integration.id)
+            const canTest = BOT_INTEGRATION_IDS.includes(integration.id)
             const handleTest = () => {
               if (integration.id === 'telegram') return testTelegram(integration)
               if (integration.id === 'slack') return testSlack(integration)
               if (integration.id === 'discord') return testDiscord(integration)
-              if (integration.id === 'github') return testGithub(integration)
+              if (integration.id === GITHUB_PAT_INTEGRATION_ID) return testGithub(integration)
               return undefined
             }
             return (
@@ -479,7 +481,7 @@ export function IntegrationsTab({ integrations, onChange }: IntegrationsTabProps
                   </div>
                 </div>
               )}
-                {expandedId === integration.id && integration.id === 'github' && (
+                {expandedId === integration.id && integration.id === GITHUB_PAT_INTEGRATION_ID && (
                 <div className='mt-3 grid gap-2 text-xs'>
                   <input
                     placeholder='Personal access token or installation token'

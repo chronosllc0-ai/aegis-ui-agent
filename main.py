@@ -28,11 +28,16 @@ from backend.admin import admin_router
 from backend import database
 from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
+from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
+from backend.memory.router import memory_router
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
+from backend.research.router import research_router
+from backend.tasks.router import task_router as tasks_router
+from backend.tasks.worker import BackgroundWorker
 from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -46,6 +51,7 @@ from integrations.slack_connector import SlackIntegration
 from integrations.telegram import TelegramIntegration
 from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
+from backend.session_workspace import cleanup_session_workspace
 
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -76,12 +82,16 @@ else:
 
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(artifact_router)
 app.include_router(automation_router)
 app.include_router(connector_router)
 app.include_router(gallery_router)
+app.include_router(memory_router)
 app.include_router(payments_router)
 app.include_router(planner_router)
 app.include_router(executor_router)
+app.include_router(research_router)
+app.include_router(tasks_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
@@ -89,6 +99,7 @@ key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 db_init_task: asyncio.Task[None] | None = None
 db_init_error: str | None = None
 db_ready = False
+background_worker = BackgroundWorker(max_concurrent=3, poll_interval=5.0)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -182,6 +193,7 @@ async def startup_event() -> None:
         db_init_task = asyncio.create_task(_initialize_database())
 
     start_scheduler()
+    await background_worker.start()
 
 
 @app.on_event("shutdown")
@@ -195,6 +207,7 @@ async def shutdown_event() -> None:
             await db_init_task
         except asyncio.CancelledError:
             logger.info("Database initialization task cancelled during shutdown")
+    await background_worker.stop()
 
 
 # ── Auth helper ───────────────────────────────────────────────────────
@@ -336,6 +349,11 @@ class SessionRuntime:
         self.settings: dict[str, Any] = {}
         self.conversation_id: str | None = None
         self.user_uid: str | None = None
+        # Pending user-input futures keyed by request_id
+        self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
+        # Sub-agent manager — created lazily on first spawn
+        from subagent_runtime import SubAgentManager
+        self.subagent_manager: SubAgentManager = SubAgentManager()
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -578,12 +596,124 @@ async def health() -> dict[str, str]:
     }
 
 
+# ── Conversation persistence API ─────────────────────────────────────
+
+@app.get("/api/conversations")
+async def list_conversations(
+    request: Request,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return all conversations for the authenticated user (most recent first)."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    from sqlalchemy import select as sa_select, desc as sa_desc
+    from backend.database import Conversation as ConvModel
+    stmt = (
+        sa_select(ConvModel)
+        .where(ConvModel.user_id == uid, ConvModel.platform == "web")
+        .order_by(sa_desc(ConvModel.updated_at))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "ok": True,
+        "conversations": [
+            {
+                "id": c.id,
+                "title": c.title,
+                "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            }
+            for c in rows
+        ],
+    }
+
+
+@app.get("/api/conversations/{conversation_id}/messages")
+async def get_conversation_messages(
+    conversation_id: str,
+    request: Request,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return all messages for a conversation, oldest first. Only accessible by owner."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    import json as _json
+    from sqlalchemy import select as sa_select
+    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    # Ownership check
+    conv = (await db.execute(sa_select(ConvModel).where(ConvModel.id == conversation_id))).scalar_one_or_none()
+    if not conv or conv.user_id != uid:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    stmt = (
+        sa_select(MsgModel)
+        .where(MsgModel.conversation_id == conversation_id)
+        .order_by(MsgModel.created_at)
+        .limit(limit)
+    )
+    msgs = (await db.execute(stmt)).scalars().all()
+    return {
+        "ok": True,
+        "conversation": {
+            "id": conv.id,
+            "title": conv.title,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        },
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "metadata": _json.loads(m.metadata_json) if m.metadata_json else None,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in msgs
+        ],
+    }
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Soft-delete a conversation (sets status=archived)."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    from sqlalchemy import select as sa_select
+    from backend.database import Conversation as ConvModel
+    conv = (await db.execute(sa_select(ConvModel).where(ConvModel.id == conversation_id))).scalar_one_or_none()
+    if not conv or conv.user_id != uid:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv.status = "archived"
+    await db.commit()
+    return {"ok": True}
+
+
 # ── WebSocket helpers ─────────────────────────────────────────────────
 
 
-async def _send_step(websocket: WebSocket, step: dict[str, Any]) -> None:
+async def _send_step(
+    websocket: WebSocket,
+    step: dict[str, Any],
+    *,
+    runtime: "SessionRuntime | None" = None,
+    session_id: str | None = None,
+) -> None:
     """Send step payload to frontend."""
     await websocket.send_json({"type": "step", "data": step})
+    if runtime and session_id:
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            str(step.get("content") or step.get("type") or "Step update"),
+            metadata={"source": "websocket", "action": "step", "step": step},
+        )
 
 
 async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
@@ -608,9 +738,23 @@ async def _send_initial_frame(websocket: WebSocket) -> None:
         logger.warning("Initial frame capture failed: %s", exc)
 
 
-async def _send_workflow_step(websocket: WebSocket, workflow_step: dict[str, Any]) -> None:
+async def _send_workflow_step(
+    websocket: WebSocket,
+    workflow_step: dict[str, Any],
+    *,
+    runtime: "SessionRuntime | None" = None,
+    session_id: str | None = None,
+) -> None:
     """Send workflow graph step payload to frontend."""
     await websocket.send_json({"type": "workflow_step", "data": workflow_step})
+    if runtime and session_id:
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            str(workflow_step.get("description") or workflow_step.get("action") or "Workflow step update"),
+            metadata={"source": "websocket", "action": "workflow_step", "workflow_step": workflow_step},
+        )
 
 
 async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice") -> None:
@@ -618,7 +762,15 @@ async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice
     await websocket.send_json({"type": "transcript", "data": {"text": text, "source": source}})
 
 
-async def _send_context_update(websocket: WebSocket, tokens_used: int, context_limit: int, compacting: bool = False) -> None:
+async def _send_context_update(
+    websocket: WebSocket,
+    tokens_used: int,
+    context_limit: int,
+    compacting: bool = False,
+    *,
+    runtime: "SessionRuntime | None" = None,
+    session_id: str | None = None,
+) -> None:
     """Push a context-window usage update to the frontend meter."""
     await websocket.send_json({
         "type": "context_update",
@@ -626,6 +778,48 @@ async def _send_context_update(websocket: WebSocket, tokens_used: int, context_l
         "context_limit": context_limit,
         "compacting": compacting,
     })
+    if runtime and session_id:
+        await _log_web_message(
+            runtime,
+            session_id,
+            "assistant",
+            f"Context usage {tokens_used}/{context_limit}",
+            metadata={
+                "source": "websocket",
+                "action": "context_update",
+                "tokens_used": tokens_used,
+                "context_limit": context_limit,
+                "compacting": compacting,
+            },
+        )
+
+
+async def _log_web_message(
+    runtime: "SessionRuntime",
+    session_id: str,
+    role: str,
+    content: str,
+    *,
+    title: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Persist a websocket message to the conversations DB and emit conversation_id to client."""
+    if not runtime.user_uid:
+        return
+    try:
+        async for db in get_session():
+            conv = await get_or_create_conversation(
+                db,
+                user_id=runtime.user_uid,
+                platform="web",
+                platform_chat_id=session_id,
+                title=title,
+            )
+            runtime.conversation_id = conv.id
+            await append_message(db, conv.id, role, content, metadata=metadata)
+            break
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to persist web message to DB for session %s", session_id)
 
 
 async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str | None) -> None:
@@ -675,6 +869,8 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
             "type": "queue",
             "content": f"Starting queued task: {queued_instruction}",
         },
+        runtime=runtime,
+        session_id=session_id,
     )
     await _log_web_message(
         runtime,
@@ -694,9 +890,75 @@ async def _run_navigation_task(
     instruction: str,
 ) -> None:
     """Execute a single navigation task and optionally schedule one queued follow-up."""
-    callback: Callable[[dict[str, Any]], Awaitable[None]] = lambda step: _send_step(websocket, step)
+    callback: Callable[[dict[str, Any]], Awaitable[None]] = lambda step: _send_step(
+        websocket,
+        step,
+        runtime=runtime,
+        session_id=session_id,
+    )
     runtime.task_running = True
     runtime.cancel_event.clear()
+
+    async def _on_user_input(question: str, options: list[str]) -> str:
+        """Send a user_input_request WS message and await the user's response."""
+        import uuid as _uuid
+        request_id = str(_uuid.uuid4())
+        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        runtime.pending_user_inputs[request_id] = fut
+        try:
+            await websocket.send_json({
+                "type": "step",
+                "data": {
+                    "type": "user_input_request",
+                    "content": f"[ask_user_input] {question}",
+                    "question": question,
+                    "options": options,
+                    "request_id": request_id,
+                },
+            })
+            return await asyncio.wait_for(fut, timeout=300.0)
+        except asyncio.TimeoutError:
+            return "No response (timed out)."
+        finally:
+            runtime.pending_user_inputs.pop(request_id, None)
+
+    async def _on_reasoning_delta(step_id: str, delta_text: str) -> None:
+        await websocket.send_json({
+            "type": "reasoning_delta",
+            "data": {
+                "step_id": step_id,
+                "delta": delta_text,
+            },
+        })
+
+    async def _on_spawn_subagent(sub_instruction: str, sub_model: str) -> str:
+        """Spawn a sub-agent on behalf of the main agent and return its sub_id."""
+        effective_model = sub_model or str(runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b")).strip()
+
+        async def _sub_send(msg: dict[str, Any]) -> None:
+            try:
+                await websocket.send_json(msg)
+            except Exception:  # noqa: BLE001
+                pass
+
+        sub_id = await runtime.subagent_manager.spawn(
+            instruction=sub_instruction,
+            model=effective_model,
+            parent_user_uid=runtime.user_uid,
+            orchestrator=_get_orchestrator(),
+            parent_settings=runtime.settings,
+            send_to_parent=_sub_send,
+            on_user_input=None,
+        )
+        # Send updated agent list to frontend
+        await websocket.send_json({
+            "type": "subagent_list",
+            "data": {"agents": runtime.subagent_manager.list_agents()},
+        })
+        return sub_id
+
+    async def _on_message_subagent(sub_id: str, message: str) -> bool:
+        return await runtime.subagent_manager.send_message(sub_id, message)
 
     try:
         result = await _get_orchestrator().execute_task(
@@ -707,8 +969,17 @@ async def _run_navigation_task(
             cancel_event=runtime.cancel_event,
             steering_context=runtime.steering_context,
             settings=runtime.settings,
-            on_workflow_step=lambda step: _send_workflow_step(websocket, step),
+            on_workflow_step=lambda step: _send_workflow_step(
+                websocket,
+                step,
+                runtime=runtime,
+                session_id=session_id,
+            ),
             user_uid=runtime.user_uid,
+            on_user_input=_on_user_input,
+            on_reasoning_delta=_on_reasoning_delta,
+            on_spawn_subagent=_on_spawn_subagent,
+            on_message_subagent=_on_message_subagent,
         )
         result_status = result.get("status") if isinstance(result, dict) else "completed"
 
@@ -720,7 +991,7 @@ async def _run_navigation_task(
         ):
             input_tokens = result.get("input_tokens", 0)
             output_tokens = result.get("output_tokens", 0)
-            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super:free")
+            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b:free")
             if input_tokens or output_tokens:
                 try:
                     async for _db_session in get_session():
@@ -801,6 +1072,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             data = await websocket.receive_json()
             action = data.get("action")
             instruction = str(data.get("instruction", "")).strip()
+            raw_metadata = data.get("metadata")
+            client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
 
             if action == "navigate":
                 if runtime.task_running:
@@ -812,22 +1085,34 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "navigate"},
+                    metadata={"source": "websocket", "action": "navigate", "client": client_metadata or {}},
                 )
+                if runtime.conversation_id:
+                    await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "steer":
                 runtime.steering_context.append(instruction)
-                await _send_step(websocket, {"type": "steer", "content": f"Steering note added: {instruction}"})
+                await _send_step(
+                    websocket,
+                    {"type": "steer", "content": f"Steering note added: {instruction}"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
                 await _log_web_message(
                     runtime,
                     session_id,
                     "user",
                     instruction,
-                    metadata={"source": "websocket", "action": "steer"},
+                    metadata={"source": "websocket", "action": "steer", "client": client_metadata or {}},
                 )
             elif action == "interrupt":
                 runtime.cancel_event.set()
-                await _send_step(websocket, {"type": "interrupt", "content": "Task interrupted"})
+                await _send_step(
+                    websocket,
+                    {"type": "interrupt", "content": "Task interrupted"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
                 if runtime.current_task is not None and not runtime.current_task.done():
                     try:
                         await runtime.current_task
@@ -841,12 +1126,25 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "interrupt"},
+                    metadata={"source": "websocket", "action": "interrupt", "client": client_metadata or {}},
                 )
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "queue":
                 runtime.queued_instructions.append(instruction)
-                await _send_step(websocket, {"type": "queue", "content": f"Queued instruction: {instruction}"})
+                await _send_step(
+                    websocket,
+                    {"type": "queue", "content": f"Queued instruction: {instruction}"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
+                await _log_web_message(
+                    runtime,
+                    session_id,
+                    "user",
+                    instruction,
+                    title=instruction[:200],
+                    metadata={"source": "websocket", "action": "queue", "client": client_metadata or {}},
+                )
             elif action == "dequeue":
                 raw_index = data.get("index", -1)
                 try:
@@ -857,7 +1155,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
 
                 if 0 <= index < len(runtime.queued_instructions):
                     removed = runtime.queued_instructions.pop(index)
-                    await _send_step(websocket, {"type": "queue", "content": f"Removed queued instruction: {removed}"})
+                    await _send_step(
+                        websocket,
+                        {"type": "queue", "content": f"Removed queued instruction: {removed}"},
+                        runtime=runtime,
+                        session_id=session_id,
+                    )
                 else:
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid queue index"}})
             elif action == "config":
@@ -866,7 +1169,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
                 runtime.settings = candidate_settings
-                await _send_step(websocket, {"type": "config", "content": "Session settings updated"})
+                await _send_step(
+                    websocket,
+                    {"type": "config", "content": "Session settings updated"},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
             elif action == "audio_chunk":
                 transcript = await live_manager.process_audio(session_id, data.get("audio"))
                 if transcript:
@@ -890,9 +1198,86 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                             metadata={"source": "voice", "action": "navigate"},
                         )
                         _start_navigation_task(websocket, runtime, session_id, transcript)
+            elif action == "user_input_response":
+                request_id = str(data.get("request_id", ""))
+                response_text = str(data.get("response", ""))
+                fut = runtime.pending_user_inputs.get(request_id)
+                if fut and not fut.done():
+                    fut.set_result(response_text)
+                else:
+                    logger.debug("user_input_response for unknown/expired request_id=%s", request_id)
             elif action == "ping":
                 # Client keepalive ping — just ignore silently (server already handles ws-level pings)
                 pass
+            elif action == "spawn_subagent":
+                # ── Spawn a sub-agent ──────────────────────────────────
+                sub_instruction = str(data.get("instruction", "")).strip()
+                sub_model = str(data.get("model", runtime.settings.get("model", ""))).strip()
+                if not sub_instruction:
+                    await websocket.send_json({"type": "error", "data": {"message": "spawn_subagent: instruction is required"}})
+                    continue
+                if not sub_model:
+                    sub_model = str(runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b")).strip()
+
+                async def _sub_send(msg: dict[str, Any], _ws: "WebSocket" = websocket) -> None:
+                    try:
+                        await _ws.send_json(msg)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                sub_id = await runtime.subagent_manager.spawn(
+                    instruction=sub_instruction,
+                    model=sub_model,
+                    parent_user_uid=runtime.user_uid,
+                    orchestrator=_get_orchestrator(),
+                    parent_settings=runtime.settings,
+                    send_to_parent=_sub_send,
+                    on_user_input=None,  # sub-agents don't forward user-input to parent for now
+                )
+                await websocket.send_json({
+                    "type": "subagent_spawned",
+                    "data": {
+                        "sub_id": sub_id,
+                        "instruction": sub_instruction,
+                        "model": sub_model,
+                    },
+                })
+                # Also send updated agent count
+                await websocket.send_json({
+                    "type": "subagent_list",
+                    "data": {"agents": runtime.subagent_manager.list_agents()},
+                })
+            elif action == "message_subagent":
+                # ── Steer a running sub-agent ──────────────────────────
+                sub_id = str(data.get("sub_id", "")).strip()
+                sub_message = str(data.get("message", "")).strip()
+                if not sub_id or not sub_message:
+                    await websocket.send_json({"type": "error", "data": {"message": "message_subagent: sub_id and message are required"}})
+                    continue
+                ok = await runtime.subagent_manager.send_message(sub_id, sub_message)
+                if not ok:
+                    await websocket.send_json({"type": "error", "data": {"message": f"Sub-agent {sub_id} not found or not running"}})
+            elif action == "cancel_subagent":
+                # ── Cancel a specific sub-agent ────────────────────────
+                sub_id = str(data.get("sub_id", "")).strip()
+                if not sub_id:
+                    await websocket.send_json({"type": "error", "data": {"message": "cancel_subagent: sub_id is required"}})
+                    continue
+                ok = await runtime.subagent_manager.cancel(sub_id)
+                await websocket.send_json({
+                    "type": "subagent_cancelled",
+                    "data": {"sub_id": sub_id, "found": ok},
+                })
+                await websocket.send_json({
+                    "type": "subagent_list",
+                    "data": {"agents": runtime.subagent_manager.list_agents()},
+                })
+            elif action == "list_subagents":
+                # ── List all sub-agents for this session ───────────────
+                await websocket.send_json({
+                    "type": "subagent_list",
+                    "data": {"agents": runtime.subagent_manager.list_agents()},
+                })
             elif action == "stop":
                 runtime.cancel_event.set()
                 break
@@ -908,8 +1293,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 await runtime.current_task
             except asyncio.CancelledError:
                 logger.info("Cancelled active websocket task during shutdown for session %s", session_id)
+        # Cancel all sub-agents when parent disconnects
+        await runtime.subagent_manager.cancel_all()
+        logger.info("All sub-agents cancelled for session %s", session_id)
         if runtime.user_uid:
             _user_runtimes.pop(runtime.user_uid, None)
+        await cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
 
 
@@ -1146,19 +1535,25 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
+@app.post("/api/integrations/github-pat/register/{integration_id}")
 async def register_github_integration(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    repo_permissions = payload.get("repo_permissions", {}) or {}
+    if not isinstance(repo_permissions, dict):
+        repo_permissions = {}
     config = {
         "token": str(payload.get("token", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
         "app_id": str(payload.get("app_id", "")).strip(),
+        "repo_permissions": repo_permissions,
     }
     integration = GitHubIntegration()
     connection = await integration.connect(config)
     github_registry.upsert(integration_id, integration, config)
-    return {"connection": connection}
+    return {"connection": connection, "tools": integration.list_tools()}
 
 
 @app.post("/api/integrations/github/{integration_id}/test")
+@app.post("/api/integrations/github-pat/{integration_id}/test")
 async def test_github_integration(integration_id: str) -> dict[str, Any]:
     integration = github_registry.get_github(integration_id)
     if not integration:
@@ -1167,6 +1562,7 @@ async def test_github_integration(integration_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/integrations/github/{integration_id}/webhook")
+@app.post("/api/integrations/github-pat/{integration_id}/webhook")
 async def github_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Receive GitHub webhook events (push, PR, issue, etc.)."""
     integration = github_registry.get_github(integration_id)
@@ -1390,6 +1786,7 @@ async def _run_navigation_task_from_bot(
         reply = f"❌ Task failed: {exc}"
     finally:
         runtime.task_running = False
+        await cleanup_session_workspace(f"bot_{owner_uid}")
     # Send result back to bot
     if platform == "telegram":
         integration = telegram_registry.get_telegram(integration_id)
@@ -1432,6 +1829,7 @@ async def _handle_slash_command(
             "/model — current model\n"
             "/models — list & switch model\n"
             "/stream start|stop — live screenshots\n"
+            "/reason on|off|low|medium|high|stream|status — reasoning mode\n"
             "/help — this message"
         )
 
@@ -1532,6 +1930,39 @@ async def _handle_slash_command(
         else:
             return "Usage: /stream start|stop"
 
+    if cmd == "reason":
+        sub = arg.lower().strip()
+        if not runtime:
+            return "⚪ No active session."
+        if sub in ("on", "true", "1"):
+            runtime.settings["enable_reasoning"] = True
+            return "🧠 Reasoning enabled (effort: medium). Agent will think before each step."
+        elif sub in ("off", "false", "0"):
+            runtime.settings["enable_reasoning"] = False
+            return "⭕ Reasoning disabled."
+        elif sub in ("low", "medium", "high"):
+            runtime.settings["enable_reasoning"] = True
+            runtime.settings["reasoning_effort"] = sub
+            return f"🧠 Reasoning enabled with effort: *{sub}*."
+        elif sub == "stream":
+            runtime.settings["enable_reasoning"] = True
+            runtime.settings["stream_reasoning"] = True
+            return "🧠 Reasoning enabled with live streaming. You'll receive thinking updates in real-time."
+        elif sub == "status":
+            enabled = runtime.settings.get("enable_reasoning", False)
+            effort = runtime.settings.get("reasoning_effort", "medium")
+            streaming = runtime.settings.get("stream_reasoning", False)
+            status = "enabled" if enabled else "disabled"
+            return f"🧠 Reasoning: *{status}* | effort: {effort} | stream: {'on' if streaming else 'off'}"
+        else:
+            return (
+                "Usage: /reason <on|off|low|medium|high|stream|status>\n"
+                "  on/off — enable or disable reasoning\n"
+                "  low/medium/high — set effort level\n"
+                "  stream — enable with live streaming to this chat\n"
+                "  status — show current settings"
+            )
+
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
 
 
@@ -1563,18 +1994,46 @@ async def save_bot_config(platform: str, integration_id: str, payload: dict[str,
 if FRONTEND_DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
 
+    FRONTEND_SPA_ROUTES = {"", "app", "automations", "settings", "admin"}
+    FRONTEND_SPA_PREFIX_ROUTES = ("app/", "automations/", "settings/", "admin/", "use-case/", "docs/")
+    FRONTEND_STATIC_PAGES = {
+        "about": "about.html",
+        "services": "services.html",
+        "blog": "blog.html",
+        "contact": "contact.html",
+        "docs": "docs.html",
+        "auth": "auth.html",
+        "privacy": "privacy.html",
+        "terms": "terms.html",
+        "portfolio": "portfolio.html",
+        "pricing": "pricing.html",
+    }
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str) -> FileResponse:
-        """Serve compiled frontend files in production."""
-        candidate = (FRONTEND_DIST_DIR / full_path).resolve()
+        """Serve compiled frontend files in production with explicit 404 handling."""
+        normalized = full_path.strip("/")
+        first_segment = normalized.split("/", 1)[0] if normalized else ""
+
+        static_page = FRONTEND_STATIC_PAGES.get(first_segment)
+        if normalized == first_segment and static_page:
+            static_candidate = FRONTEND_DIST_DIR / static_page
+            if static_candidate.exists():
+                return FileResponse(static_candidate)
+
+        candidate = (FRONTEND_DIST_DIR / normalized).resolve()
         try:
             candidate.relative_to(FRONTEND_DIST_DIR.resolve())
         except ValueError:
+            return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)
+
+        if normalized and candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+
+        if normalized in FRONTEND_SPA_ROUTES or any(normalized.startswith(prefix) for prefix in FRONTEND_SPA_PREFIX_ROUTES):
             return FileResponse(FRONTEND_DIST_DIR / "index.html")
 
-        if full_path and candidate.exists() and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST_DIR / "index.html")
+        return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)
 
 
 if __name__ == "__main__":

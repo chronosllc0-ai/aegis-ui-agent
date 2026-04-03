@@ -1,3 +1,304 @@
+## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend pass
+
+### What Was Done
+- Reworked the chat input composer to more closely match the provided reference style: larger rounded container, embedded send button, toolbar row with `+` and `Plan`, and a secondary status strip for environment/access context.
+- Added inline model/context chips in the composer row (`GPT-5.4`, `Extra High`, `IDE context`) to mirror the requested visual treatment.
+- Updated shell/tool run cards to better communicate sandboxed execution by adding explicit `sandbox`/`Sandboxed` badges on collapsed and expanded terminal views.
+- Improved shell-card run lifecycle behavior so cards auto-expand while a run is active and automatically collapse into one-line summary rows once execution finishes (click row to reopen details).
+- Refined thinking-stream behavior so the latest thinking message shows the shimmering `Thinking` state while work is active, with thought details still hidden behind click-to-expand dropdown behavior.
+
+### What's Working
+- Chat composer now presents the requested compact modern layout with prominent CTA controls and bottom status strip.
+- Terminal runs now read as sandboxed and fold back to concise timeline rows after completion, matching the requested interaction model.
+- Thinking indicator now visibly streams on the newest active thought while preserving explicit opt-in reveal for detailed reasoning text.
+
+### What's NOT Working Yet
+- This pass did not yet redesign the ask-user-input card, task summary card, or broader thread visual system (queued for next steps).
+- No browser screenshot artifact was captured in this environment for visual confirmation.
+
+### Next Steps
+1. Redesign `ask_user_input` card to match the reference interaction style exactly.
+2. Redesign summary/plan cards and unify thread spacing/typography to the same visual system.
+3. Add explicit backend/runtime metadata plumbing if shell cards should reflect real sandbox container IDs or tool-run provenance.
+
+### Decisions Made
+- Prioritized immediate chat-panel parity elements requested first (input bar, shell run lifecycle, thinking indicator) before touching ask-user-input and summary/thread redesign.
+- Kept behavior backward compatible: only presentation and local chat rendering logic changed in this pass.
+
+### Blockers
+- Exact pixel-level parity is limited by image clarity and absence of inspectable design source.
+
+---
+
+## Session 5.34 - April 1, 2026 (PR #100 review fix: marquee reduced-motion accessibility)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short follow-up pass
+
+### What Was Done
+- Addressed PR #100 code review warning about continuous marquee animation not respecting reduced-motion accessibility settings.
+- Added a `prefers-reduced-motion: reduce` media query in `frontend/src/index.css` to disable `.animate-marquee` animation for users who opt out of motion effects at the OS/browser level.
+
+### What's Working
+- Provider marquee now remains animated for standard motion preferences but is disabled for reduced-motion users, improving vestibular accessibility and compliance with expected motion-safe behavior.
+
+### What's NOT Working Yet
+- I did not run a live browser accessibility audit tool in this environment; verification here is code-level plus build validation.
+
+### Next Steps
+1. Run a quick manual browser check with reduced motion enabled to confirm cards stop animating.
+2. Optionally add a lint/accessibility check for motion preferences in frontend QA.
+
+### Decisions Made
+- Used the minimal CSS-only fix scoped to `.animate-marquee` so behavior changes only where needed.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.33 - April 1, 2026 (Cloud Run timeout increase for long-running tasks)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 short follow-up pass
+
+### What Was Done
+- Updated `infrastructure/deploy.sh` to increase backend Cloud Run request timeout from `300` seconds to a configurable timeout env var defaulting to `3600` seconds.
+- Added `BACKEND_TIMEOUT="${BACKEND_TIMEOUT:-3600}"` near deploy config setup.
+- Wired the backend deploy command to use `--timeout "$BACKEND_TIMEOUT"` instead of the previous hardcoded value.
+- Added deploy output logging to print the active backend timeout value before deployment starts.
+
+### What's Working
+- Default backend timeout for Cloud Run deploys via `infrastructure/deploy.sh` is now `3600s` (1 hour), which is significantly longer than the previous 5-minute cap and better aligned with long-running agent tasks.
+- Timeout can now be overridden per deploy (`BACKEND_TIMEOUT=... ./infrastructure/deploy.sh`) without editing source.
+
+### What's NOT Working Yet
+- I did not run an actual `gcloud run deploy` from this environment, so live Cloud Run acceptance verification is still pending.
+
+### Next Steps
+1. Run deployment using `infrastructure/deploy.sh`.
+2. Confirm deployed backend revision shows timeout `3600s` in Cloud Run revision settings.
+3. For workloads that exceed HTTP request limits, route those jobs to background task execution and polling/webhook status updates.
+
+### Decisions Made
+- Implemented timeout as an environment-configurable value with a safe long-running default to avoid future hardcoded edits.
+
+### Blockers
+- Live verification requires GCP project credentials/access.
+
+---
+
+## Session 5.32 - April 1, 2026 (Railway frontend build fix + landing hero refresh)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Investigated the reported Railway build failure and confirmed the TypeScript compile break shown in the logs (`frontend/src/components/settings/ObservabilityTab.tsx(46,9): error TS1005: 'try' expected`).
+- Fixed `ObservabilityTab` fetch/load flow by repairing the malformed nested `try/catch` block and restoring proper response handling (`response.ok` check + parsed task assignment).
+- Updated the landing hero description paragraph to the new product copy provided in the request.
+- Updated the hero demo panel (`VideoPlaceholder`) to show the provided dual-phone bezel image (`/og-image.png`) when no video source is configured, with a small overlay CTA strip.
+- Updated the provider highlight cards section under the hero video to continuously animate from right to left using the existing marquee animation utility class.
+- Switched brand logo usage back to the owl mark by repointing `CHRONOS_LOGO_URL` to `/aegis-owl-logo.svg`, and removed circular spin styling in public header/footer + legal page footer logos so the owl renders cleanly.
+- Ran a frontend production build to verify TypeScript + Vite now compile successfully.
+
+### What's Working
+- Railway-blocking frontend TypeScript syntax issue in `ObservabilityTab` is fixed locally; `npm run build` now succeeds.
+- Hero messaging now matches the requested updated long-form description.
+- Hero demo module now displays the two-phone bezel artwork by default.
+- Provider cards below hero now auto-scroll right-to-left.
+- Owl logo is restored across shared brand surfaces using the central logo constant.
+
+### What's NOT Working Yet
+- I could not trigger or observe a live Railway redeploy from this environment, so hosted verification is pending.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Confirm build phase passes and deployment reaches healthy.
+3. Verify hero section visually in production (copy, scrolling provider cards, bezel image, owl logo).
+
+### Decisions Made
+- Kept the marquee implementation CSS-driven and lightweight by duplicating provider cards for seamless looping.
+- Reused existing `frontend/public/og-image.png` for the requested bezel artwork to avoid introducing a new asset path.
+
+### Blockers
+- Final production verification depends on Railway environment access.
+
+---
+
+## Session 5.31 - March 31, 2026 (Railway production crash fix: artifact download response model)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hotfix pass
+
+### What Was Done
+- Investigated the Railway deploy failure logs from production (`Mar 31, 2026`), which showed startup crash during FastAPI route registration.
+- Traced the crash to `backend/artifacts/router.py` at the download route using a return annotation union (`FileResponse | RedirectResponse`) that FastAPI tried to treat as a response model.
+- Fixed `GET /api/artifacts/{artifact_id}/download` by disabling response-model generation (`response_model=None`) and changing the function return annotation to `Response`, while preserving the existing runtime behavior (302 redirect for presigned URLs, file stream fallback for local files).
+- Added the missing `Response` import to keep types explicit and startup-safe.
+- Ran import/compile checks to confirm the application now starts without the previous `FastAPIError: Invalid args for response field` failure.
+
+### What's Working
+- Application import/startup no longer crashes on the artifact download route definition.
+- Railway-style healthcheck failures caused by this FastAPI response-field error should be resolved once redeployed.
+- Existing artifact download semantics remain unchanged (redirect when remote URL exists, otherwise return file).
+
+### What's NOT Working Yet
+- I could not run a live Railway redeploy from this environment, so final verification on the hosted service is still pending.
+
+### Next Steps
+1. Trigger a new Railway production deploy.
+2. Confirm `/health` passes and the replica becomes healthy.
+3. Open an artifact download URL in production to verify both redirect and direct file paths still work.
+
+### Decisions Made
+- Used `response_model=None` on this mixed-response endpoint to avoid FastAPI trying to build a Pydantic model from response classes.
+- Kept the route contract and URL surface unchanged to minimize hotfix risk.
+
+### Blockers
+- Live Railway deployment verification requires project environment access.
+
+---
+
+## Session 5.30 - March 31, 2026 (Secure GitHub repo workflow runtime + session workspaces)
+
+**Agent:** Viktor  
+**Duration:** ~1 larger architecture pass
+
+### What Was Done
+- Read `AGENTS.md` and `ONBOARDING.md` before continuing work, per project instructions.
+- Added `backend/session_workspace.py` to provision per-session ephemeral workspaces under `/tmp/aegis-session-workspaces` with dedicated `files/` and `repos/` roots, traversal protection, and explicit cleanup helpers.
+- Added `backend/github_repo_workspace.py` to support authenticated GitHub repo-engineering flows with the connected GitHub PAT: list repos/issues/PRs, create issues/comments, read repo files, clone repos locally, create/reset branches, inspect status/diff, commit, push, and open pull requests.
+- Configured the GitHub repo workflow to use session-scoped `GIT_ASKPASS`, `GH_TOKEN` / `GITHUB_TOKEN`, and a workspace-scoped `gh` config directory so credentials stay inside the session runtime.
+- Fixed the generated askpass script to use POSIX-safe shell syntax.
+- Reworked `universal_navigator.py` so the universal runtime now builds its tool manifest from session settings, honors `disabled_tools`, `tool_permissions`, and connected integrations, threads through `system_instruction`, and exposes the full local-file / code-execution / GitHub repo workflow tool set only when allowed.
+- Ensured sub-agents remain ephemeral/in-memory only and do not inherit the GitHub repo tool surface.
+- Updated `orchestrator.py` to pass `session_id` and `settings` into the universal runtime so settings actually control runtime behavior.
+- Updated disconnect teardown in `main.py` so session workspaces are cleaned up after websocket sessions and bot-triggered runs.
+- Updated frontend settings metadata so the GitHub PAT tool list includes the new repo workflow tools, removed the stale `extract_data` tool from the Browser UI catalog, and strengthened the default/system preset instruction flow so preset clicks keep the secure GitHub workflow guidance instead of wiping it out.
+- Expanded the runtime Docker image dependencies to include `git`, `gh`, `nodejs`, and `npm`, which are required for local repo workflows plus JavaScript execution.
+
+### What's Working
+- A connected GitHub PAT can now unlock a real local repo workflow in the universal runtime instead of only REST issue/PR helpers.
+- The agent can clone into a session-scoped workspace, create a working branch, inspect/edit files locally, run Python or JavaScript verification inside the same session, inspect git status/diff, commit, push, and open a pull request.
+- Tool exposure now follows settings more closely: disabled tools disappear, connected integrations gate their tool families, and destructive tools can require approval.
+- Session workspaces are ephemeral and cleaned up on disconnect, matching the project rule that temporary agent work should not persist beyond the active session.
+- Frontend production build passes after these changes.
+- Targeted frontend ESLint on the touched settings files is down to pre-existing `react-hooks/exhaustive-deps` warnings in `ToolsTab.tsx`; no errors remain in the changed files I touched for this pass.
+
+### What's NOT Working Yet
+- I did not complete a live end-to-end run against a real connected GitHub PAT/repository in this environment.
+- I could not run the Python test suite here because `pytest` is not installed in the repo runtime environment.
+- The broader GitHub workflow PR is intentionally a hybrid architecture (`git` + GitHub REST + `gh pr create`), not a full GitHub CLI parity layer for every operation.
+- `ToolsTab.tsx` still has pre-existing hook dependency warnings that were already present in the file structure.
+
+### Next Steps
+1. Run a live manual verification with a connected GitHub PAT: clone a repo, make a small edit, commit, push, and open a PR from the UI/runtime path.
+2. Install/restore `pytest` in the repo environment and add targeted tests around session workspace cleanup plus GitHub repo workflow helpers.
+3. Merge the GitHub PAT gating PR first, then merge the follow-up repo workflow PR.
+
+### Decisions Made
+- Kept the repo-engineering flow session-scoped and ephemeral rather than persisting local repo state in the database.
+- Kept GitHub tool exposure gated behind the connected PAT integration exactly like other gated connectors.
+- Used `gh` specifically for pull-request creation while keeping clone/branch/status/diff/commit/push on standard `git`, which fits the current backend architecture without requiring a full CLI abstraction rewrite.
+- Removed the stale `extract_data` Browser tool entry from the frontend settings catalog because it was not implemented in runtime.
+
+### Blockers
+- The main remaining blocker is live PAT-backed end-to-end verification in a connected environment.
+
+---
+
+## Session 5.29 - March 31, 2026 (GitHub PAT integration split + mobile action log polish)
+
+**Agent:** Viktor  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Read `AGENTS.md` and `ONBOARDING.md` before touching the repo, per project instructions.
+- Split the existing GitHub bot configuration into a dedicated *GitHub PAT* integration in the frontend catalog by introducing the canonical integration id `github-pat`.
+- Updated integration normalization/merge logic so older stored `github` configs are migrated forward to `github-pat` instead of disappearing from user settings.
+- Updated `IntegrationsTab`, `ConnectionsTab`, and `ToolsTab` so the PAT connection appears as its own integration, its tools are gated by that connection, and the UI points users to *Connections* for setup.
+- Added backend route aliases in `main.py` for `github-pat` register/test/webhook while keeping legacy `/api/integrations/github/*` routes working.
+- Reduced the mobile Action Log height in `frontend/src/App.tsx` from `h-48` to `h-40` while preserving the previous height on `sm+` screens.
+- Verified the frontend with a successful production build (`npm run build`).
+- Committed the change on `feat/github-pat-integration`, pushed the branch, and opened PR #87.
+
+### What's Working
+- GitHub PAT now exists as a first-class integration entry rather than being implied only by the Tools UI.
+- Existing saved frontend settings using legacy `github` ids should normalize into the new `github-pat` entry.
+- GitHub bot tools in the Tools tab now lock/unlock against the dedicated PAT integration id.
+- Mobile view gives slightly more room to the main browser area by shrinking the Action Log on small screens.
+- Frontend production build passes successfully after the changes.
+
+### What's NOT Working Yet
+- I have *not* completed a live end-to-end browser check against a running backend yet.
+- I did not run the Python test suite in this environment because `pytest` is not currently available in the repo runtime here.
+- Full frontend lint still has pre-existing repo issues outside this change set (for example `react-refresh/only-export-components`, existing hook-effect violations, and unrelated `ChatPanel` lint findings already present on the branch baseline).
+- This PR is *not* a full GitHub CLI (`gh`) executor integration. It remains a PAT-backed direct REST integration with a limited GitHub tool surface; the PR fixes identity/gating, not GitHub CLI parity.
+
+### Next Steps
+1. Run a live UI verification pass: connect a GitHub PAT in Settings, confirm the tool category unlocks, and verify the mobile Action Log layout visually.
+2. Add or install the repo's Python test runner tooling, then run a targeted integration/API test pass for the GitHub PAT aliases.
+3. Review and merge PR #87 (`feat/github-pat-integration`) once UI verification is complete.
+
+### Decisions Made
+- Kept backward compatibility by preserving legacy backend GitHub routes and adding `github-pat` aliases instead of replacing them.
+- Migrated legacy frontend `github` ids to `github-pat` during normalization so existing local settings remain usable.
+- Kept the GitHub brand icon while renaming the integration label to *GitHub PAT* for clarity.
+
+### Blockers
+- No code blocker right now; only missing final live verification + repo test tooling in this environment.
+
+---
+
+## Session 4.4 — March 30, 2026 (Google userinfo fallback error handling)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Hardened Google OAuth callback fallback parsing to avoid uncaught failures when `userinfo` is unavailable or non-JSON.
+- Added `userinfo_resp.raise_for_status()` before JSON parsing in the Google fallback flow.
+- Wrapped fallback with explicit handling for OAuth transport/status errors and JSON decoding errors, returning a controlled HTTP 400 instead of surfacing server 500s.
+
+### What's Working
+- Google fallback path now fails gracefully with `{"detail":"Google OAuth failed"}` for invalid JSON, non-2xx userinfo responses, and fallback OAuth errors.
+
+### What's NOT Working Yet
+- Live production verification still requires redeploy + provider-side log check.
+
+### Next Steps
+1. Redeploy backend and run Google login once against production.
+2. Confirm no callback 500s appear in Railway logs for malformed/failed userinfo responses.
+
+---
+
+## Session 4.3 — March 30, 2026 (Google OAuth callback hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused pass
+
+### What Was Done
+- Fixed Google OAuth callback token exchange to always include the exact callback `redirect_uri` value used during login initiation.
+- Hardened Google profile extraction by falling back to the Google `userinfo` endpoint when ID token parsing fails.
+- Added a guard that fails gracefully when Google user data is missing the `sub` claim.
+
+### What's Working
+- Google callback now supports environments where ID token parsing intermittently fails while access token retrieval succeeds.
+- Redirect URI consistency is enforced in callback exchange, reducing `invalid_grant` / mismatch risk.
+
+### What's NOT Working Yet
+- End-to-end verification against live Railway/Google credentials is still required in the deployment environment.
+
+### Next Steps
+1. Redeploy backend and retry Google sign-in from production.
+2. Inspect Railway logs for any remaining provider-side OAuth errors.
+
+---
+
 ## Session 5.28 - March 27, 2026 (Phase 9 Crosscheck + AgentActivityFeed / usePlanExecution Wiring)
 
 **Agent:** Viktor  
@@ -1469,3 +1770,92 @@
 
 ### Blockers
 - No browser screenshot tool available in this runtime.
+
+## Session 5.21 - April 1, 2026 (Hero Demo Modal Image-Only Update)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated `frontend/src/components/VideoPlaceholder.tsx` to render the added hero preview image (`/og-image.png`) as an image-only demo modal state.
+- Removed the fallback overlay CTA row and play-style visual indicator block from the hero demo module.
+- Simplified the component API by removing the optional video source behavior so the hero now consistently presents a static image modal.
+
+### What's Working
+- Hero demo section now displays only the provided image artwork, with no video controls/indicators.
+- Frontend production build passes after the component simplification.
+
+### What's NOT Working Yet
+- Browser screenshot artifact still could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. If desired, replace `/og-image.png` with a dedicated high-resolution hero asset filename for clearer intent.
+2. Capture visual QA screenshot once browser screenshot tooling is available.
+
+### Decisions Made
+- Kept the existing `/og-image.png` path as the canonical hero demo image to match current repo assets.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
+
+## Session 5.22 - April 1, 2026 (Railway Build Fix: Logo Constant Cleanup + TS Compile Errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Fixed frontend TypeScript build break in `frontend/src/lib/models.ts` by removing the conflicting `CHRONOS_LOGO_URL` import and wiring the Chronos provider icon to the locally exported constant (`iconUrl: CHRONOS_LOGO_URL`).
+- Removed unused `AEGIS_LOGO_URL` imports from legal/public components where they were declared but never read (`PrivacyPage`, `TermsPage`, `PublicHeader`, `PublicFooter`).
+- Replaced unresolved `CHRONOS_LOGO_URL` references in those same components with direct static image path usage (`'/aegis-owl-logo.svg'`) to eliminate missing symbol errors.
+- Fixed `frontend/src/components/VideoPlaceholder.tsx` TypeScript errors by defining a typed props object with optional `src` and using it in the component signature.
+
+### What's Working
+- `frontend` production build now succeeds (`npm run build`) with TypeScript + Vite completing successfully.
+- Railway-reported compile errors for `AEGIS_LOGO_URL`, `CHRONOS_LOGO_URL`, `CHRONOS_LOGO_URL_VALUE`, and undefined `src` in `VideoPlaceholder` are resolved.
+
+### What's NOT Working Yet
+- Vite still reports a non-blocking large-chunk warning (>500 kB bundle), but this does not fail production build.
+- Browser screenshot artifact could not be captured in this environment because browser screenshot tooling is unavailable.
+
+### Next Steps
+1. Redeploy on Railway to confirm this commit clears the failed build in production.
+2. Optionally split large frontend bundles to address the Vite chunk-size warning.
+
+### Decisions Made
+- Used local static logo asset path (`/aegis-owl-logo.svg`) in UI surfaces that only need a fixed image, avoiding fragile cross-module constant imports for legal/public pages.
+
+### Blockers
+- No browser screenshot tool available in this runtime.
+
+## Session 5.23 - April 1, 2026 (Backend Prompt Builder Removal + Global/User Instruction Policy)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Removed the failing backend prompt-builder injection call in `universal_navigator.py` by deleting the undefined `_build_tool_handbook(...)` dependency from system prompt construction.
+- Kept the system prompt pipeline aligned to instruction layering:
+  1) admin-managed global system instruction (authoritative), and
+  2) optional user system instruction appended only when present.
+- Added a regression test `tests/test_universal_navigator_system_prompt.py` that verifies:
+  - global system instruction is always present,
+  - user runtime instruction is included only when provided,
+  - no user instruction section appears when unset.
+
+### What's Working
+- Prompt generation no longer references `_build_tool_handbook`, preventing runtime `NameError` failures during task execution.
+- Instruction precedence now cleanly follows global-first with optional user-additive behavior.
+- New regression test passes locally.
+
+### What's NOT Working Yet
+- Full-suite test status was not re-run in this pass; only focused regression coverage was executed.
+
+### Next Steps
+1. Run full backend/frontend CI test suite to ensure no unrelated regressions.
+2. Consider adding an API-level test around run settings to validate end-to-end prompt composition for admin+user instructions.
+
+### Decisions Made
+- Chose to remove prompt-builder dependency entirely and rely on deterministic instruction layering (global baseline + optional user additive) for reliability and policy clarity.
+
+### Blockers
+- None in this pass.

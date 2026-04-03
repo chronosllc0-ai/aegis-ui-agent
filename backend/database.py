@@ -425,6 +425,40 @@ class OAuthAppCredential(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class OAuthPendingState(Base):
+    """Short-lived CSRF state token for OAuth flows.
+
+    Stored in the DB instead of (or in addition to) the session cookie so that
+    the state survives cross-site redirects where SameSite=Lax blocks cookie
+    transmission (e.g. Notion's OAuth server redirects through api.notion.com).
+    Expires after 10 minutes.
+    """
+
+    __tablename__ = "oauth_pending_states"
+
+    state_token = Column(String(64), primary_key=True)
+    connector_id = Column(String(50), nullable=False)
+    user_id = Column(String(255), nullable=True)          # None for unauthenticated installs
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlatformSetting(Base):
+    """Key-value store for platform-wide admin-controlled settings.
+
+    Currently used for:
+      - ``aegis_global_system_instruction``: injected at the top of every
+        agent system prompt (authoritative, users cannot override).
+    """
+
+    __tablename__ = "platform_settings"
+
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    updated_by = Column(String(255), nullable=True)  # admin uid who last changed it
+
+
 class ScheduledTask(Base):
     """A user-defined cron job that runs an agent prompt on a schedule."""
 
@@ -445,6 +479,104 @@ class ScheduledTask(Base):
     run_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class MemoryEntry(Base):
+    """A persistent memory fragment for a user."""
+
+    __tablename__ = "memory_entries"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    category = Column(String(50), default="general")
+    source = Column(String(50), default="conversation")
+    source_conversation_id = Column(String(255), nullable=True)
+    embedding = Column(Text, nullable=True)
+    embedding_model = Column(String(100), nullable=True)
+    importance = Column(Float, default=0.5)
+    access_count = Column(Integer, default=0)
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    is_pinned = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class Artifact(Base):
+    """A generated artifact from task execution."""
+
+    __tablename__ = "artifacts"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=True)
+    plan_id = Column(String(255), nullable=True)
+    step_id = Column(String(255), nullable=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    artifact_type = Column(String(50), nullable=False)
+    mime_type = Column(String(200), nullable=False)
+    filename = Column(String(500), nullable=False)
+    file_size = Column(Integer, default=0)
+    storage_path = Column(Text, nullable=False)
+    content_preview = Column(Text)
+    metadata_json = Column(Text)
+    is_pinned = Column(Boolean, default=False)
+    download_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResearchSession(Base):
+    """A deep research session with iterative search and synthesis."""
+
+    __tablename__ = "research_sessions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    conversation_id = Column(String(255), ForeignKey("conversations.id"), nullable=True)
+    topic = Column(Text, nullable=False)
+    status = Column(String(20), default="planning")
+    research_plan = Column(Text)
+    sources_json = Column(Text)
+    findings_json = Column(Text)
+    report_artifact_id = Column(String(255), nullable=True)
+    total_sources = Column(Integer, default=0)
+    total_queries = Column(Integer, default=0)
+    queries_completed = Column(Integer, default=0)
+    tokens_used = Column(Integer, default=0)
+    credits_used = Column(Float, default=0.0)
+    error_message = Column(Text)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class BackgroundTask(Base):
+    """A queued or running background task."""
+
+    __tablename__ = "background_tasks"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    task_type = Column(String(50), nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    status = Column(String(20), default="queued", index=True)
+    priority = Column(Integer, default=5)
+    payload_json = Column(Text, nullable=False)
+    result_json = Column(Text)
+    error_message = Column(Text)
+    progress_pct = Column(Integer, default=0)
+    progress_message = Column(String(500))
+    max_retries = Column(Integer, default=3)
+    retry_count = Column(Integer, default=0)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    notification_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 def _ensure_scheduled_tasks_table(sync_conn) -> None:

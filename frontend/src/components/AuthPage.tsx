@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiUrl } from '../lib/api'
 import { getStandaloneDocUrl } from '../lib/site'
 import { navigateTo, PRIVACY_PATH, TERMS_PATH } from '../lib/routes'
-import { EntrySlider, type EntrySlide } from './EntrySlider'
 import { Icons } from './icons'
 import { useToast } from '../hooks/useToast'
 import { PublicHeader } from '../public/PublicHeader'
 import { PasswordInput } from './PasswordInput'
 import { PasswordStrength, usePasswordCriteria } from './PasswordStrength'
+import { VideoPlaceholder } from './VideoPlaceholder'
 
 const GOOGLE_ICON_URL = 'https://i.postimg.cc/2SwWrKwz/download_1.jpg'
 const GITHUB_ICON_URL = 'https://i.postimg.cc/BZXzgmHC/download_27.png'
@@ -26,54 +26,6 @@ type AuthPageProps = {
   onOpenDocsHome: () => void
   onOpenDoc: (slug: string) => void
 }
-
-const AUTH_SLIDES: EntrySlide[] = [
-  {
-    id: 'path',
-    eyebrow: 'First session path',
-    title: 'Sign in, connect a model, and run the first task without guesswork.',
-    description:
-      'The auth surface should do more than collect credentials. It should explain the next two or three moves clearly so the first run feels intentional.',
-    bullets: [
-      'Choose a sign-in method that matches the environment',
-      'Connect provider keys if you are using BYOK',
-      'Start from the quickstart or tutorial if you need a guided first run',
-    ],
-    statLabel: 'Onboarding',
-    statValue: 'Auth -> Settings -> Live session',
-    icon: (className) => Icons.user({ className }),
-  },
-  {
-    id: 'proof',
-    eyebrow: 'Product proof',
-    title: 'The operator shell is built for live supervision, not blind fire-and-forget automation.',
-    description:
-      'Aegis keeps the frame, action log, workflow view, and transcripts visible while the session is running. That makes it easier to trust, redirect, and reuse successful work.',
-    bullets: [
-      'Real-time frame and action log updates',
-      'Workflow capture after a successful run',
-      'Steer, interrupt, and queue controls inside the session',
-    ],
-    statLabel: 'Operator mode',
-    statValue: 'Live + visible',
-    icon: (className) => Icons.workflows({ className }),
-  },
-  {
-    id: 'docs',
-    eyebrow: 'Docs assist',
-    title: 'Need setup help? The relevant docs are one click away.',
-    description:
-      'Quickstart, auth details, provider-key setup, and deployment notes should be available directly from auth so the user never feels stuck at the gate.',
-    bullets: [
-      'Read the auth guide without leaving the main app domain',
-      'Jump to tutorials for a guided first-run path',
-      'Open the standalone docs portal for deeper browsing',
-    ],
-    statLabel: 'Docs links',
-    statValue: 'Embedded + standalone',
-    icon: (className) => Icons.globe({ className }),
-  },
-]
 
 /* ── Email-exists debounced check ─────────────────────────────────── */
 
@@ -227,7 +179,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
       <div className='mx-auto grid w-full max-w-7xl gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-18'>
         <section className='rounded-2xl border border-white/8 bg-[#0c1018] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.32)] sm:rounded-[32px] sm:p-7'>
           <div className='flex items-center gap-3'>
-            <img src='/shield.svg' alt='Aegis logo' className='h-11 w-11' />
+            <img src='/aegis-shield.png' alt='Aegis logo' className='h-11 w-11 object-contain' />
             <div>
               <p className='text-lg font-semibold text-white'>Aegis</p>
               <p className='text-sm text-zinc-400'>Sign in or create an account to start a live navigation session.</p>
@@ -336,7 +288,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
             />
 
-            {/* password strength indicator — only during signup */}
+            {/* password strength indicator - only during signup */}
             {mode === 'signup' && <PasswordStrength password={password} />}
 
             {mode === 'signup' && (
@@ -419,7 +371,7 @@ export function AuthPage({ onAuthenticated, onBack, onOpenDocsHome, onOpenDoc }:
           </div>
         </section>
 
-        <EntrySlider slides={AUTH_SLIDES} className='self-start lg:sticky lg:top-28' />
+        <VideoPlaceholder className='self-start lg:sticky lg:top-28' />
       </div>
     </main>
   )

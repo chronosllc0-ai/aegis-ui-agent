@@ -23,6 +23,8 @@ OPENAI_MODELS = [
     "o3",
 ]
 
+OPENAI_REASONING_MODELS = {"o3", "o4-mini"}
+
 
 class OpenAIProvider(BaseProvider):
     """Adapter for the OpenAI chat completions API."""
@@ -47,6 +49,7 @@ class OpenAIProvider(BaseProvider):
             streaming=True,
             vision=True,
             function_calling=True,
+            reasoning=True,
             max_context_tokens=128_000,
         )
 
@@ -113,24 +116,37 @@ class OpenAIProvider(BaseProvider):
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        enable_reasoning: bool = False,
+        reasoning_effort: str = "medium",
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
         model_name = model or self.default_model
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=self._build_messages(messages),
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
-            **kwargs,
-        )
+
+        # o-series models use reasoning_effort instead of temperature
+        params: dict[str, Any] = {
+            "model": model_name,
+            "messages": self._build_messages(messages),
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if model_name in OPENAI_REASONING_MODELS and enable_reasoning:
+            params["reasoning_effort"] = reasoning_effort
+        else:
+            params["temperature"] = temperature
+
+        response = await client.chat.completions.create(**params)
         async for chunk in response:
             delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                yield StreamChunk(delta=delta.content, finish_reason=chunk.choices[0].finish_reason)
-            elif delta:
-                yield StreamChunk(delta="", finish_reason=chunk.choices[0].finish_reason)
+            if delta:
+                # o-series models stream reasoning tokens in delta.reasoning
+                reasoning_text = getattr(delta, "reasoning", None)
+                if reasoning_text:
+                    yield StreamChunk(delta="", reasoning_delta=reasoning_text)
+                if delta.content:
+                    yield StreamChunk(delta=delta.content, finish_reason=chunk.choices[0].finish_reason)
+                elif not reasoning_text:
+                    yield StreamChunk(delta="", finish_reason=chunk.choices[0].finish_reason)
 
     def validate_api_key(self, api_key: str) -> bool:
         return bool(api_key and api_key.startswith("sk-"))

@@ -209,24 +209,14 @@ export function InputBar({
 
       <SuggestionChips onSelectSuggestion={(id) => void handleSuggestionSelect(id)} onOpenGallery={() => setGalleryOpen(true)} />
 
-      {/* Main input row — matches Codex layout: [+] [Plan] [textarea] [↑] */}
+      {/* Main input row - [Plan] [textarea] [↑] */}
       <div className='flex items-end gap-1.5 sm:gap-2'>
-        {/* + button (future: attachment) */}
-        <button
-          type='button'
-          title='Attach file (coming soon)'
-          disabled
-          className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#2a2a2a] text-zinc-500 cursor-not-allowed opacity-50 sm:h-10 sm:w-10'
-        >
-          <span className='text-lg font-light leading-none'>+</span>
-        </button>
-
-        {/* Plan toggle — inline, no popup */}
+        {/* Plan toggle - inline, no popup */}
         {onDecomposePlan && (
           <button
             type='button'
             onClick={() => setPlanMode((p) => !p)}
-            title={planMode ? 'Disable plan mode' : 'Enable plan mode — sends /plan command'}
+            title={planMode ? 'Disable plan mode' : 'Enable plan mode - sends /plan command'}
             className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold tracking-wide transition sm:px-4 sm:py-2 sm:text-sm ${
               planMode
                 ? 'border-blue-500 bg-blue-500/10 text-blue-300'
@@ -308,6 +298,13 @@ export function InputBar({
       )}
 
       {/* Prompt gallery modal */}
+      {galleryOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
+          <div className='h-[85vh] w-full max-w-6xl'>
+            <PromptGallery onSelectTemplate={handleTemplateSelect} onClose={() => setGalleryOpen(false)} />
+          </div>
+        </div>
+      )}
       {galleryOpen && (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
           <div className='h-[85vh] w-full max-w-6xl'>

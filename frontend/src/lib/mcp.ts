@@ -7,7 +7,6 @@ export type AuthType = 'none' | 'api_key' | 'oauth'
 export type IntegrationStatus = 'connected' | 'error' | 'disabled'
 export type IntegrationIcon = 'web-search' | 'filesystem' | 'code-exec' | 'telegram' | 'slack' | 'discord' | 'github' | 'custom'
 
-
 export type IntegrationConfig = {
   id: string
   name: string
@@ -30,6 +29,8 @@ export type CustomServerForm = {
   apiKey: string
 }
 
+export const GITHUB_PAT_INTEGRATION_ID = 'github-pat'
+
 /* react-icons map used as fallback for generic tool icons */
 const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
   'web-search': FaGlobe,
@@ -42,11 +43,12 @@ const INTEGRATION_ICON_MAP: Record<IntegrationIcon, IconType> = {
   custom: FaPlus,
 }
 
-/* Hosted brand images — used for platform icons so the correct logo always shows */
+/* Hosted brand images - used for platform icons so the correct logo always shows */
 const PLATFORM_IMAGE_URL: Record<string, string> = {
   telegram: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
   discord: 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.svg',
   slack: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+  github: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
 }
 
 const LEGACY_INTEGRATION_ICON_MAP: Record<string, IntegrationIcon> = {
@@ -131,10 +133,10 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
     tools: ['discord_get_messages', 'discord_send_message', 'discord_list_channels', 'discord_send_file'],
   },
   {
-    id: 'github',
-    name: 'GitHub',
+    id: GITHUB_PAT_INTEGRATION_ID,
+    name: 'GitHub PAT',
     icon: 'github',
-    description: 'GitHub repos, issues, PRs, and webhook events.',
+    description: 'GitHub repos, issues, PRs, and webhook events via a personal access token.',
     enabled: false,
     status: 'disabled',
     settings: {
@@ -142,12 +144,42 @@ export const DEFAULT_INTEGRATIONS: IntegrationConfig[] = [
       webhook_secret: '',
       app_id: '',
     },
-    tools: ['github_list_repos', 'github_get_issues', 'github_create_issue', 'github_get_pull_requests', 'github_create_comment', 'github_get_file', 'github_webhook_event'],
+    tools: ['github_list_repos', 'github_get_issues', 'github_create_issue', 'github_get_pull_requests', 'github_create_comment', 'github_get_file', 'github_clone_repo', 'github_create_branch', 'github_repo_status', 'github_repo_diff', 'github_commit_changes', 'github_push_branch', 'github_create_pull_request', 'github_webhook_event'],
   },
 ]
 
 function isIntegrationIcon(value: string): value is IntegrationIcon {
   return value in INTEGRATION_ICON_MAP
+}
+
+function canonicalIntegrationId(id: string): string {
+  return id === 'github' ? GITHUB_PAT_INTEGRATION_ID : id
+}
+
+function integrationIconFallback(id: string): IntegrationIcon {
+  switch (canonicalIntegrationId(id)) {
+    case 'telegram':
+      return 'telegram'
+    case 'discord':
+      return 'discord'
+    case 'slack':
+      return 'slack'
+    case GITHUB_PAT_INTEGRATION_ID:
+      return 'github'
+    default:
+      return 'custom'
+  }
+}
+
+function mergeIntegrationSettings(
+  defaults: Record<string, string> | undefined,
+  current: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!defaults && !current) return undefined
+  return {
+    ...(defaults ?? {}),
+    ...(current ?? {}),
+  }
 }
 
 export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon = 'custom'): IntegrationIcon {
@@ -157,21 +189,45 @@ export function normalizeIntegrationIcon(icon: string, fallback: IntegrationIcon
 }
 
 export function normalizeIntegrationConfig(integration: IntegrationConfig): IntegrationConfig {
+  const normalizedId = canonicalIntegrationId(integration.id)
+  const defaults = DEFAULT_INTEGRATIONS.find((entry) => entry.id === normalizedId)
+
   return {
+    ...defaults,
     ...integration,
-    icon: normalizeIntegrationIcon(
-      integration.icon,
-      integration.id === 'telegram'
-        ? 'telegram'
-        : integration.id === 'discord'
-          ? 'discord'
-          : integration.id === 'slack'
-            ? 'slack'
-            : integration.id === 'github'
-              ? 'github'
-              : 'custom',
-    ),
+    id: normalizedId,
+    name: integration.name || defaults?.name || normalizedId,
+    description: integration.description || defaults?.description || '',
+    icon: normalizeIntegrationIcon(integration.icon, defaults?.icon ?? integrationIconFallback(normalizedId)),
+    settings: mergeIntegrationSettings(defaults?.settings, integration.settings),
+    tools: Array.isArray(integration.tools) && integration.tools.length > 0 ? integration.tools : (defaults?.tools ?? []),
   }
+}
+
+export function mergeIntegrationCatalog(storedIntegrations: IntegrationConfig[] | undefined): IntegrationConfig[] {
+  const stored = Array.isArray(storedIntegrations)
+    ? storedIntegrations.map((integration) => normalizeIntegrationConfig(integration))
+    : []
+
+  const storedById = new Map(stored.map((integration) => [integration.id, integration]))
+  const defaultIds = new Set(DEFAULT_INTEGRATIONS.map((integration) => integration.id))
+
+  const mergedDefaults = DEFAULT_INTEGRATIONS.map((integration) => {
+    const normalizedDefault = normalizeIntegrationConfig(integration)
+    const storedMatch = storedById.get(normalizedDefault.id)
+
+    if (!storedMatch) return normalizedDefault
+
+    return normalizeIntegrationConfig({
+      ...normalizedDefault,
+      ...storedMatch,
+      settings: mergeIntegrationSettings(normalizedDefault.settings, storedMatch.settings),
+      tools: storedMatch.tools.length > 0 ? storedMatch.tools : normalizedDefault.tools,
+    })
+  })
+
+  const customIntegrations = stored.filter((integration) => !defaultIds.has(integration.id))
+  return [...mergedDefaults, ...customIntegrations]
 }
 
 export function renderIntegrationIcon(icon: string, className = 'h-4 w-4') {

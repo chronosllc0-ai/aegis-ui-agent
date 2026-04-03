@@ -50,6 +50,13 @@ PROVIDER_CATALOGUE: dict[str, dict[str, Any]] = {
         "key_prefix": "sk-or-",
         "default_model": "openai/gpt-5.4",
     },
+    "fireworks": {
+        "module": "backend.providers.fireworks_provider",
+        "class": "FireworksProvider",
+        "display_name": "Fireworks AI",
+        "key_prefix": "",
+        "default_model": "accounts/fireworks/models/kimi-k2p5",
+    },
 }
 
 

@@ -1,11 +1,16 @@
-import type { AppSettings } from '../../hooks/useSettings'
+import { DEFAULT_SYSTEM_INSTRUCTION, type AppSettings } from '../../hooks/useSettings'
 import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
+import { ToolsTab } from './ToolsTab'
 
 const PRESETS: Record<string, string> = {
   Professional: 'Respond clearly and professionally with concise rationale.',
   Casual: 'Use friendly and conversational language with practical guidance.',
   Technical: 'Prioritize precise technical details and implementation tradeoffs.',
   Creative: 'Offer imaginative solutions and exploratory suggestions.',
+}
+
+function presetInstruction(styleInstruction: string): string {
+  return `${DEFAULT_SYSTEM_INSTRUCTION} ${styleInstruction}`
 }
 
 type AgentTabProps = {
@@ -22,8 +27,12 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
       <section className='space-y-3'>
         <h3 className='text-sm font-semibold'>Personality</h3>
         <label htmlFor='agent-system-instruction' className='text-xs font-medium text-zinc-400'>
-          System instruction
+          Runtime instructions
         </label>
+        <p className='text-xs text-zinc-500'>
+          These instructions are added to your session and guide how Aegis responds to you. Global
+          operator instructions set by the platform admin always apply and take precedence.
+        </p>
         <textarea
           id='agent-system-instruction'
           value={settings.systemInstruction}
@@ -32,7 +41,7 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         />
         <div className='flex gap-2'>
           {Object.entries(PRESETS).map(([name, prompt]) => (
-            <button key={name} type='button' onClick={() => onPatch({ personalityPreset: name, systemInstruction: prompt })} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs'>
+            <button key={name} type='button' onClick={() => onPatch({ personalityPreset: name, systemInstruction: presetInstruction(prompt) })} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs'>
               {name}
             </button>
           ))}
@@ -107,6 +116,14 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         <Toggle label='Auto-screenshot' checked={settings.autoScreenshot} onToggle={(value) => onPatch({ autoScreenshot: value })} />
         <Toggle label='Verbose logging' checked={settings.verboseLogging} onToggle={(value) => onPatch({ verboseLogging: value })} />
         <Toggle label='Confirm destructive actions' checked={settings.confirmDestructiveActions} onToggle={(value) => onPatch({ confirmDestructiveActions: value })} />
+      </section>
+
+      <section className='space-y-3'>
+        <div>
+          <h3 className='text-sm font-semibold'>Tools & Permissions</h3>
+          <p className='mt-1 text-xs text-zinc-500'>Control which tools Aegis can use and whether each requires your approval before running.</p>
+        </div>
+        <ToolsTab settings={settings} onPatch={onPatch} />
       </section>
     </div>
   )

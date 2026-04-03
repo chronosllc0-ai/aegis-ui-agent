@@ -31,3 +31,6 @@ google-adk>=0.1.0,<2.0.0
 # Browser automation
 playwright>=1.49.0
 Pillow>=11.0.0
+
+# AWS S3 file storage
+boto3>=1.35.0

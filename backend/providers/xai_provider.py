@@ -21,6 +21,8 @@ XAI_MODELS = [
     "grok-2-vision-1212",
 ]
 
+XAI_REASONING_MODELS = {"grok-3-mini", "grok-3-mini-fast"}
+
 
 class XAIProvider(BaseProvider):
     """Adapter for the xAI (Grok) API — uses OpenAI-compatible endpoint."""
@@ -45,6 +47,7 @@ class XAIProvider(BaseProvider):
             streaming=True,
             vision=True,
             function_calling=True,
+            reasoning=True,
             max_context_tokens=256_000,
         )
 
@@ -96,22 +99,34 @@ class XAIProvider(BaseProvider):
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        enable_reasoning: bool = False,
+        reasoning_effort: str = "medium",
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
         model_name = model or self.default_model
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=self._build_messages(messages),
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
-        )
+
+        params: dict[str, Any] = {
+            "model": model_name,
+            "messages": self._build_messages(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if model_name in XAI_REASONING_MODELS and enable_reasoning:
+            params["reasoning_effort"] = reasoning_effort
+
+        response = await client.chat.completions.create(**params)
         async for chunk in response:
             if chunk.choices:
                 delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    yield StreamChunk(delta=delta.content, finish_reason=chunk.choices[0].finish_reason)
+                if delta:
+                    # xAI returns reasoning tokens in reasoning_content field
+                    reasoning_text = getattr(delta, "reasoning_content", None)
+                    if reasoning_text:
+                        yield StreamChunk(delta="", reasoning_delta=reasoning_text, finish_reason=chunk.choices[0].finish_reason)
+                    elif delta.content:
+                        yield StreamChunk(delta=delta.content, finish_reason=chunk.choices[0].finish_reason)
 
     def validate_api_key(self, api_key: str) -> bool:
         return bool(api_key and api_key.startswith("xai-"))

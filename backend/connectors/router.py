@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.connectors import CONNECTOR_CATALOGUE, get_connector, list_connectors
-from backend.database import UserConnection, get_session
+from backend.database import OAuthPendingState, UserConnection, get_session
 from backend.key_management import KeyManager
 from config import settings
 
@@ -170,12 +170,13 @@ async def slack_marketplace_install(request: Request) -> RedirectResponse:
 async def authorize_connector(
     connector_id: str,
     request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Generate and return the OAuth2 authorization URL.
 
     The frontend will redirect the user to this URL.
     """
-    _get_current_user(request)
+    user = _get_current_user(request)
 
     if connector_id not in CONNECTOR_CATALOGUE:
         raise HTTPException(status_code=404, detail=f"Unknown connector: {connector_id}")
@@ -185,9 +186,28 @@ async def authorize_connector(
     # Generate state token (CSRF protection)
     state = secrets.token_urlsafe(32)
 
-    # Store state in session for verification on callback
+    # Store state in BOTH session cookie AND DB.
+    # DB storage is the reliable fallback for providers (like Notion) that redirect
+    # through their own domain, which causes SameSite=Lax to block cookie transmission.
     request.session["oauth_state"] = state
     request.session["oauth_connector"] = connector_id
+
+    # Best-effort DB write: if the DB is unavailable, the session cookie is still the
+    # primary path and most providers will work fine. Notion (and similar cross-domain
+    # redirecters) will fall back to the error flow in that case — preferable to a 500.
+    try:
+        expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+        pending = OAuthPendingState(
+            state_token=state,
+            connector_id=connector_id,
+            user_id=user.get("uid"),
+            expires_at=expires,
+        )
+        session.add(pending)
+        await session.commit()
+    except Exception as exc:
+        logger.warning("Could not persist OAuth pending state to DB (session-only fallback): %s", exc)
+        await session.rollback()
 
     url = connector.get_authorize_url(
         redirect_uri=_callback_uri(),
@@ -217,21 +237,45 @@ async def oauth_callback(
 
     if error:
         logger.warning("OAuth callback error: %s", error)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error={error}")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error={error}")
 
     if not code:
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=no_code")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=no_code")
 
-    # Verify state (CSRF protection)
-    expected_state = request.session.get("oauth_state", "")
+    # Verify state (CSRF protection).
+    # Try session cookie first (fastest path). If the cookie was lost (e.g. Notion
+    # redirects through api.notion.com which strips SameSite=Lax cookies), fall back
+    # to the DB-stored pending state written during /authorize.
+    session_state = request.session.get("oauth_state", "")
     connector_id = request.session.get("oauth_connector", "")
 
-    if not expected_state or state != expected_state:
-        logger.warning("OAuth state mismatch: expected=%s got=%s", expected_state, state)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=state_mismatch")
+    if session_state and state == session_state:
+        # Fast path: cookie survived the redirect
+        pass
+    else:
+        # Slow path: look up state in DB (handles cross-domain OAuth providers)
+        db_result = await session.execute(
+            select(OAuthPendingState).where(OAuthPendingState.state_token == state)
+        )
+        pending = db_result.scalar_one_or_none()
 
-    if connector_id not in CONNECTOR_CATALOGUE:
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=unknown_connector")
+        if not pending:
+            logger.warning("OAuth state not found in DB: state=%s", state)
+            return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=state_mismatch")
+
+        if pending.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+            logger.warning("OAuth state expired for connector=%s", pending.connector_id)
+            await session.delete(pending)
+            await session.commit()
+            return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=state_mismatch")
+
+        connector_id = pending.connector_id
+        # Clean up used state token
+        await session.delete(pending)
+        await session.commit()
+
+    if not connector_id or connector_id not in CONNECTOR_CATALOGUE:
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_error=unknown_connector")
 
     # Get authenticated user
     user = _get_current_user(request)
@@ -239,7 +283,29 @@ async def oauth_callback(
 
     try:
         connector = get_connector(connector_id)
-        tokens = await connector.exchange_code(code, _callback_uri())
+        # Guard: if credentials aren't configured the exchange will fail with an
+        # unhelpful HTTP 401. Surface a clearer error immediately.
+        if not connector._client_id or not connector._client_secret:
+            logger.error(
+                "OAuth exchange aborted for %s: client_id or client_secret not configured. "
+                "Set %s_CONNECTOR_CLIENT_ID / %s_CONNECTOR_CLIENT_SECRET env vars or add "
+                "credentials via Settings → Connections.",
+                connector_id, connector_id.upper(), connector_id.upper(),
+            )
+            return RedirectResponse(
+                f"{frontend_url}/?settings=Connections&connector_error=credentials_not_configured"
+            )
+        # Notion public integrations send workspace_id / workspace_name as extra
+        # callback query params and require them in the token exchange body as
+        # external_account. Pass them through when present.
+        exchange_kwargs: dict = {}
+        if connector_id == "notion":
+            ws_id = request.query_params.get("workspace_id", "")
+            ws_name = request.query_params.get("workspace_name", "")
+            if ws_id:
+                exchange_kwargs["workspace_id"] = ws_id
+                exchange_kwargs["workspace_name"] = ws_name
+        tokens = await connector.exchange_code(code, _callback_uri(), **exchange_kwargs)
 
         # Get user info from the connected account
         account_info = await connector.get_user_info(tokens.access_token)
@@ -292,16 +358,38 @@ async def oauth_callback(
 
         await session.commit()
 
-        # Clean up session
+        # Clean up session cookie state
         request.session.pop("oauth_state", None)
         request.session.pop("oauth_connector", None)
+        # Clean up DB state (may already be deleted in slow-path above, ignore if missing)
+        try:
+            db_pending = await session.execute(
+                select(OAuthPendingState).where(OAuthPendingState.state_token == state)
+            )
+            leftover = db_pending.scalar_one_or_none()
+            if leftover:
+                await session.delete(leftover)
+                await session.commit()
+        except Exception:
+            pass
 
         logger.info("Connected %s for user %s", connector_id, uid)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_connected={connector_id}")
+        return RedirectResponse(f"{frontend_url}/?settings=Connections&connector_connected={connector_id}")
 
     except Exception as exc:
-        logger.exception("OAuth exchange failed for %s", connector_id)
-        return RedirectResponse(f"{frontend_url}/?settings=Integrations&connector_error=exchange_failed")
+        # Log the real HTTP body if it's an httpx error so Railway logs show why
+        detail = str(exc)
+        if hasattr(exc, "response") and exc.response is not None:  # type: ignore[union-attr]
+            try:
+                detail = f"HTTP {exc.response.status_code}: {exc.response.text[:400]}"  # type: ignore[union-attr]
+            except Exception:
+                pass
+        logger.error("OAuth exchange failed for %s: %s", connector_id, detail, exc_info=True)
+        from urllib.parse import quote
+        safe_detail = quote(detail[:120], safe="")
+        return RedirectResponse(
+            f"{frontend_url}/?settings=Connections&connector_error=exchange_failed&connector_error_detail={safe_detail}"
+        )
 
 
 # ── Disconnect ────────────────────────────────────────────────────────

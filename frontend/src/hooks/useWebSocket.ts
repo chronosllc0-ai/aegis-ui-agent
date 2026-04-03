@@ -7,10 +7,11 @@ export type LogEntry = {
   taskId: string
   message: string
   timestamp: string
-  type: 'step' | 'result' | 'error' | 'interrupt'
+  type: 'step' | 'result' | 'error' | 'interrupt' | 'reasoning_start' | 'reasoning'
   status: 'in_progress' | 'completed' | 'failed' | 'steered'
   stepKind: 'analyze' | 'click' | 'type' | 'scroll' | 'navigate' | 'other'
   elapsedSeconds: number
+  stepId?: string           // links reasoning to its step
 }
 
 export type TranscriptEntry = {
@@ -31,8 +32,24 @@ export type WorkflowStep = {
   screenshot: string | null
 }
 
+export type SubAgentInfo = {
+  sub_id: string
+  instruction: string
+  model: string
+  status: 'spawning' | 'running' | 'completed' | 'failed' | 'cancelled'
+  step_count: number
+  parent_task_id?: string
+}
+
+export type SubAgentStep = {
+  sub_id: string
+  step: { type: string; content: string }
+  step_index: number
+  parent_task_id?: string
+}
+
 type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update'
+  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -55,6 +72,13 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
   const [currentUrl, setCurrentUrl] = useState('about:blank')
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
+  // Server-assigned conversation ID for the active session - used to load history from DB
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  // Maps step_id → accumulated reasoning text
+  const [reasoningMap, setReasoningMap] = useState<Record<string, string>>({})
+  // Sub-agents
+  const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([])
+  const [subAgentSteps, setSubAgentSteps] = useState<Record<string, SubAgentStep[]>>({})
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
@@ -143,6 +167,11 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       const payload = JSON.parse(event.data) as WebSocketPayload
       const taskId = activeTaskIdRef.current
 
+      if (payload.type === 'conversation_id') {
+        const convId = String(payload.data?.conversation_id ?? '')
+        if (convId) setActiveConversationId(convId)
+        return
+      }
       if (payload.type === 'step') {
         const stepType = String(payload.data?.type ?? '').toLowerCase()
         const nonExecutionStepTypes = new Set(['queue', 'steer', 'config'])
@@ -212,6 +241,92 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         onUsageMessage?.(payload as unknown as Record<string, unknown>)
         return
       }
+      if (payload.type === 'reasoning_start') {
+        const stepId = String(payload.data?.step_id ?? '')
+        if (stepId) {
+          setReasoningMap((prev) => ({ ...prev, [stepId]: '' }))
+          appendLog({
+            message: '[thinking]',
+            taskId,
+            type: 'reasoning_start',
+            status: 'in_progress',
+            stepId,
+          })
+        }
+        return
+      }
+      if (payload.type === 'reasoning_delta') {
+        const stepId = String(payload.data?.step_id ?? '')
+        const delta = String(payload.data?.delta ?? '')
+        if (stepId && delta) {
+          setReasoningMap((prev) => ({
+            ...prev,
+            [stepId]: (prev[stepId] ?? '') + delta,
+          }))
+        }
+        return
+      }
+      if (payload.type === 'reasoning') {
+        // Full reasoning result - update log entry status
+        const stepId = String(payload.data?.step_id ?? '')
+        const content = String(payload.data?.content ?? '')
+        if (stepId) {
+          setLogs((prev) =>
+            prev.map((e) =>
+              e.stepId === stepId
+                ? { ...e, type: 'reasoning', status: 'completed', message: content }
+                : e,
+            ),
+          )
+        }
+        return
+      }
+      if (payload.type === 'subagent_list') {
+        const agents = (payload.data?.agents ?? []) as SubAgentInfo[]
+        setSubAgents(agents)
+        return
+      }
+      if (payload.type === 'subagent_spawned') {
+        const agent = payload.data as unknown as SubAgentInfo
+        const parentTaskId = activeTaskIdRef.current
+        setSubAgents((prev) => {
+          const exists = prev.find((a) => a.sub_id === agent.sub_id)
+          if (exists) return prev
+          return [...prev, { ...agent, status: 'spawning', step_count: 0, parent_task_id: parentTaskId }]
+        })
+        return
+      }
+      if (payload.type === 'subagent_step') {
+        const { sub_id, step, step_index } = payload.data as unknown as SubAgentStep
+        const parentTaskId = activeTaskIdRef.current
+        setSubAgentSteps((prev) => ({
+          ...prev,
+          [sub_id]: [...(prev[sub_id] ?? []), { sub_id, step, step_index, parent_task_id: parentTaskId }],
+        }))
+        setSubAgents((prev) =>
+          prev.map((a) => a.sub_id === sub_id ? { ...a, status: 'running', step_count: (step_index ?? 0) + 1, parent_task_id: a.parent_task_id ?? parentTaskId } : a)
+        )
+        return
+      }
+      if (payload.type === 'subagent_completed') {
+        const { sub_id, status } = payload.data as { sub_id: string; status: string; step_count: number }
+        setSubAgents((prev) =>
+          prev.map((a) => a.sub_id === sub_id ? { ...a, status: status as SubAgentInfo['status'] } : a)
+        )
+        return
+      }
+      if (payload.type === 'subagent_error') {
+        const { sub_id } = payload.data as { sub_id: string; message: string }
+        setSubAgents((prev) =>
+          prev.map((a) => a.sub_id === sub_id ? { ...a, status: 'failed' } : a)
+        )
+        return
+      }
+      if (payload.type === 'subagent_cancelled') {
+        const { sub_id } = payload.data as { sub_id: string }
+        setSubAgents((prev) => prev.filter((a) => a.sub_id !== sub_id))
+        return
+      }
       if (payload.type === 'error') {
         setIsWorking(false)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
@@ -271,10 +386,10 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         lastNotConnectedAtRef.current = now
         const statusMsg =
           wsRef.current === null
-            ? 'WebSocket not connected — check your network and try refreshing.'
+            ? 'WebSocket not connected - check your network and try refreshing.'
             : wsRef.current.readyState === WebSocket.CONNECTING
-              ? 'WebSocket still connecting — please wait a moment and try again.'
-              : 'WebSocket disconnected — reconnecting automatically…'
+              ? 'WebSocket still connecting - please wait a moment and try again.'
+              : 'WebSocket disconnected - reconnecting automatically…'
         appendLog({ message: statusMsg, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
       }
       return false
@@ -297,8 +412,35 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     setIsWorking(false)
     setWorkflowSteps([])
     setTranscripts([])
+    setReasoningMap({})
+    setSubAgents([])
+    setSubAgentSteps({})
     activeTaskIdRef.current = 'idle'
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState }
+  const spawnSubAgent = useCallback((instruction: string, model: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'spawn_subagent', instruction, model }))
+      return true
+    }
+    return false
+  }, [])
+
+  const messageSubAgent = useCallback((sub_id: string, message: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'message_subagent', sub_id, message }))
+      return true
+    }
+    return false
+  }, [])
+
+  const cancelSubAgent = useCallback((sub_id: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'cancel_subagent', sub_id }))
+      return true
+    }
+    return false
+  }, [])
+
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

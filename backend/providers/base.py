@@ -35,6 +35,7 @@ class StreamChunk:
 
     delta: str
     finish_reason: str | None = None
+    reasoning_delta: str | None = None
     raw: Any = None
 
 
@@ -46,6 +47,7 @@ class ProviderCapabilities:
     streaming: bool = True
     vision: bool = False
     function_calling: bool = False
+    reasoning: bool = False
     max_context_tokens: int = 128_000
 
 

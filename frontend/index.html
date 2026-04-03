@@ -2,13 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/shield.svg" />
+    <link rel="icon" type="image/png" href="/aegis-logo.png" />
     <!-- Prevent zoom/shake on mobile; maximum-scale=1 locks the viewport -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <!-- Primary SEO -->
-    <title>Aegis: AI Agent Platform | Automate Any UI with Natural Language</title>
-    <meta name="description" content="Aegis is an AI agent platform that lets you automate any website or app using natural language. Powered by GPT-4o, Claude, Grok, and more. Start free." />
+    <title>Aegis - Your AI Coworker That Actually Ships | Chronos AI</title>
+    <meta name="description" content="Aegis is an AI coworker that browses, codes, researches, files PRs, and runs recurring tasks end to end from one workspace." />
     <meta name="keywords" content="AI agent, browser automation, natural language automation, GPT-4o, Claude, Grok, AI workflow, web automation, Aegis, Chronos AI" />
     <meta name="author" content="Chronos AI" />
     <meta name="robots" content="index, follow" />
@@ -35,9 +35,49 @@
     <!-- Theme / PWA hints -->
     <meta name="theme-color" content="#0d1117" />
     <meta name="application-name" content="Aegis" />
+
+    <!-- JSON-LD structured data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Aegis",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "description": "AI coworker that browses, codes, researches, files PRs, and schedules tasks end to end.",
+      "url": "https://mohex.org/",
+      "creator": {
+        "@type": "Organization",
+        "name": "Chronos AI",
+        "url": "https://mohex.org/"
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>Aegis: AI-powered universal UI navigator</h1>
+        <p>Aegis helps teams browse, code, research, file pull requests, send messages, and schedule recurring operations from one platform.</p>
+        <nav>
+          <a href="/about">About</a>
+          <a href="/services">Services</a>
+          <a href="/blog">Blog</a>
+          <a href="/contact">Contact</a>
+          <a href="/docs">Docs</a>
+          <a href="/auth">Sign in</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </main>
+    </noscript>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -20,10 +20,14 @@ class NotionConnector(BaseConnector):
     display_name = "Notion"
     oauth_authorize_url = "https://api.notion.com/v1/oauth/authorize"
     oauth_token_url = "https://api.notion.com/v1/oauth/token"
-    default_scopes = []  # Notion uses "owner" + integration capabilities, not granular scopes
+    default_scopes = []  # Notion does NOT use scope strings — capabilities are set in the Notion developer portal
 
     def get_authorize_url(self, redirect_uri: str, state: str, scopes: list[str] | None = None) -> str:
         from urllib.parse import urlencode
+        # NOTE: Do NOT include a "scope" parameter in the Notion authorize URL.
+        # Notion OAuth uses integration capabilities configured in the Notion developer portal
+        # (read content, write content, read comments, etc.) — NOT scope query strings.
+        # Adding a "scope" param causes an invalid_scope_requested error.
         params = {
             "client_id": self._client_id,
             "redirect_uri": redirect_uri,
@@ -33,13 +37,27 @@ class NotionConnector(BaseConnector):
         }
         return f"{self.oauth_authorize_url}?{urlencode(params)}"
 
-    async def exchange_code(self, code: str, redirect_uri: str) -> OAuthTokens:
+    async def exchange_code(
+        self,
+        code: str,
+        redirect_uri: str,
+        workspace_id: str | None = None,
+        workspace_name: str | None = None,
+    ) -> OAuthTokens:
         import base64
         credentials = base64.b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
+        body: dict = {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri}
+        # Notion public integrations require external_account in the token exchange.
+        # The workspace_id and workspace_name come back as query params in the OAuth callback.
+        if workspace_id:
+            body["external_account"] = {
+                "key": workspace_id,
+                "name": workspace_name or workspace_id,
+            }
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 self.oauth_token_url,
-                json={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+                json=body,
                 headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/json"},
             )
             resp.raise_for_status()

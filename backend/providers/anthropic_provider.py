@@ -18,6 +18,10 @@ ANTHROPIC_MODELS = [
     "claude-3.5-sonnet-20241022",
 ]
 
+ANTHROPIC_REASONING_MODELS = {
+    "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "claude-sonnet-4-20250514"
+}
+
 
 class AnthropicProvider(BaseProvider):
     """Adapter for the Anthropic Messages API."""
@@ -42,6 +46,7 @@ class AnthropicProvider(BaseProvider):
             streaming=True,
             vision=True,
             function_calling=True,
+            reasoning=True,
             max_context_tokens=1_000_000,
         )
 
@@ -119,6 +124,8 @@ class AnthropicProvider(BaseProvider):
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        enable_reasoning: bool = False,
+        reasoning_budget: int = 8000,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
@@ -128,13 +135,44 @@ class AnthropicProvider(BaseProvider):
             "model": model_name,
             "messages": msgs,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
         if system:
             params["system"] = system
-        async with client.messages.stream(**params, **kwargs) as stream:
-            async for text in stream.text_stream:
-                yield StreamChunk(delta=text)
+
+        if enable_reasoning and model_name in ANTHROPIC_REASONING_MODELS:
+            # Extended thinking requires temperature=1 and the interleaved-thinking beta header
+            params["thinking"] = {"type": "enabled", "budget_tokens": reasoning_budget}
+            params["temperature"] = 1  # required for extended thinking
+            try:
+                async with client.messages.stream(
+                    **params,
+                    extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+                ) as stream_obj:
+                    async for event in stream_obj:
+                        event_type = getattr(event, "type", "")
+                        if event_type == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            delta_type = getattr(delta, "type", "")
+                            if delta_type == "thinking_delta":
+                                thinking_text = getattr(delta, "thinking", "")
+                                if thinking_text:
+                                    yield StreamChunk(delta="", reasoning_delta=thinking_text)
+                            elif delta_type == "text_delta":
+                                text = getattr(delta, "text", "")
+                                if text:
+                                    yield StreamChunk(delta=text)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Extended thinking stream failed, falling back to normal: %s", exc)
+                params.pop("thinking", None)
+                params["temperature"] = temperature
+                async with client.messages.stream(**params) as stream_obj:
+                    async for text in stream_obj.text_stream:
+                        yield StreamChunk(delta=text)
+        else:
+            params["temperature"] = temperature
+            async with client.messages.stream(**params, **kwargs) as stream_obj:
+                async for text in stream_obj.text_stream:
+                    yield StreamChunk(delta=text)
 
     def validate_api_key(self, api_key: str) -> bool:
         return bool(api_key and api_key.startswith("sk-ant-"))
