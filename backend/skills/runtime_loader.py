@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 import json
 import logging
 from typing import Literal
 
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import Skill, SkillReview, SkillScanResult, SkillVersion
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 APPROVED_STATUSES = {"approved_internal", "approved_marketplace"}
 _APPROVED_REVIEW_DECISIONS = {"approve_internal", "approve_marketplace"}
+MAX_RUNTIME_SKILLS = 100
 
 
 @dataclass
@@ -30,6 +31,7 @@ class RuntimeSkill:
     source: Literal["global", "hub", "user"]
     priority: int
     content: str
+    created_at: datetime | None = None
 
 
 async def get_active_runtime_skills(session: AsyncSession, user_id: str, session_id: str) -> list[RuntimeSkill]:
@@ -38,12 +40,58 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
         select(Skill)
         .where(Skill.status.in_(APPROVED_STATUSES))
         .order_by(desc(Skill.updated_at), desc(Skill.created_at))
+        .limit(MAX_RUNTIME_SKILLS)
     )
+    skills = rows.scalars().all()
+    if not skills:
+        return []
+
+    skill_ids = [skill.id for skill in skills]
+    latest_version_subquery = (
+        select(
+            SkillVersion.skill_id.label("skill_id"),
+            func.max(SkillVersion.version).label("max_version"),
+        )
+        .where(SkillVersion.skill_id.in_(skill_ids))
+        .group_by(SkillVersion.skill_id)
+        .subquery()
+    )
+    version_rows = await session.execute(
+        select(SkillVersion).join(
+            latest_version_subquery,
+            and_(
+                SkillVersion.skill_id == latest_version_subquery.c.skill_id,
+                SkillVersion.version == latest_version_subquery.c.max_version,
+            ),
+        )
+    )
+    versions_by_skill_id: dict[str, SkillVersion] = {version.skill_id: version for version in version_rows.scalars().all()}
+    version_ids = [version.id for version in versions_by_skill_id.values()]
+
+    reviews_by_version_id: dict[str, SkillReview] = {}
+    scans_by_version_id: dict[str, dict[str, SkillScanResult]] = {}
+    if version_ids:
+        review_rows = await session.execute(
+            select(SkillReview)
+            .where(SkillReview.skill_version_id.in_(version_ids))
+            .order_by(desc(SkillReview.reviewed_at), desc(SkillReview.created_at))
+        )
+        for review in review_rows.scalars().all():
+            reviews_by_version_id.setdefault(review.skill_version_id, review)
+
+        scan_rows = await session.execute(
+            select(SkillScanResult)
+            .where(SkillScanResult.skill_version_id.in_(version_ids))
+            .order_by(desc(SkillScanResult.scanned_at), desc(SkillScanResult.created_at))
+        )
+        for scan in scan_rows.scalars().all():
+            by_engine = scans_by_version_id.setdefault(scan.skill_version_id, {})
+            by_engine.setdefault(scan.engine, scan)
 
     active: list[RuntimeSkill] = []
 
-    for skill in rows.scalars().all():
-        version = await _latest_version(session, skill.id)
+    for skill in skills:
+        version = versions_by_skill_id.get(skill.id)
         if version is None:
             logger.warning("Runtime skill %s excluded: missing_latest_version", skill.id)
             continue
@@ -56,7 +104,10 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
         if _is_disabled(metadata, user_id=user_id, session_id=session_id):
             continue
 
-        if not await _is_security_resolved(session, version.id):
+        if not _is_security_resolved(
+            review=reviews_by_version_id.get(version.id),
+            scans_by_engine=scans_by_version_id.get(version.id, {}),
+        ):
             logger.warning("Runtime skill %s excluded: unresolved_scan_or_review", skill.id)
             continue
 
@@ -68,20 +119,11 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
                 source=_resolve_source(skill.visibility, owner_user_id=skill.owner_user_id, user_id=user_id),
                 priority=_extract_priority(metadata),
                 content=str(metadata.get("skill_md") or "").strip(),
+                created_at=version.created_at,
             )
         )
 
     return active
-
-
-async def _latest_version(session: AsyncSession, skill_id: str) -> SkillVersion | None:
-    row = await session.execute(
-        select(SkillVersion)
-        .where(SkillVersion.skill_id == skill_id)
-        .order_by(desc(SkillVersion.version), desc(SkillVersion.created_at))
-        .limit(1)
-    )
-    return row.scalar_one_or_none()
 
 
 def _parse_metadata(raw: str) -> dict[str, object] | None:
@@ -133,25 +175,19 @@ def _resolve_source(visibility: str, *, owner_user_id: str, user_id: str) -> Lit
     return "hub"
 
 
-async def _is_security_resolved(session: AsyncSession, skill_version_id: str) -> bool:
-    review_row = await session.execute(
-        select(SkillReview)
-        .where(SkillReview.skill_version_id == skill_version_id)
-        .order_by(desc(SkillReview.reviewed_at), desc(SkillReview.created_at))
-        .limit(1)
-    )
-    review = review_row.scalar_one_or_none()
+def _is_security_resolved(
+    *,
+    review: SkillReview | None,
+    scans_by_engine: dict[str, SkillScanResult],
+) -> bool:
     if review is None or review.decision not in _APPROVED_REVIEW_DECISIONS:
         return False
 
-    scan_rows = await session.execute(select(SkillScanResult).where(SkillScanResult.skill_version_id == skill_version_id))
-    scans = {scan.engine: scan for scan in scan_rows.scalars().all()}
-
-    policy = scans.get("policy")
+    policy = scans_by_engine.get("policy")
     if policy is None or policy.verdict not in {"pass", "warn"}:
         return False
 
-    vt = scans.get("virustotal")
+    vt = scans_by_engine.get("virustotal")
     if settings.VIRUSTOTAL_REQUIRED:
         if vt is None or vt.verdict not in {"pass", "warn"}:
             return False

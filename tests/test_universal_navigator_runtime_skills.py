@@ -56,6 +56,17 @@ def test_budget_truncation_by_priority_is_deterministic(monkeypatch) -> None:
     assert any(item["reason"] == "budget_exceeded" for item in excluded)
 
 
+def test_zero_budget_excludes_all_skills(monkeypatch) -> None:
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 0)
+    skills = [
+        RuntimeSkill(skill_id="s1", version_id="v1", name="s1", source="global", priority=10, content="abc"),
+    ]
+    section, included, excluded = universal_navigator._assemble_runtime_skills_section(skills)
+    assert section == ""
+    assert included == []
+    assert excluded == [{"skill_id": "s1", "reason": "budget_exceeded"}]
+
+
 def test_run_startup_includes_skill_section_once(monkeypatch) -> None:
     async def _run() -> None:
         provider = _ScriptedProvider(['{"tool":"done","summary":"ok"}'])

@@ -2619,3 +2619,39 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.28 - April 3, 2026 (PR Review Follow-up: runtime skills perf + edge-case fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed code review feedback on runtime skill loading performance by removing per-skill scan/review DB lookups and switching to batched fetching:
+  - batched latest version resolution,
+  - batched review resolution,
+  - batched scan resolution.
+- Added a cap to the runtime skill catalog query (`MAX_RUNTIME_SKILLS=100`) to avoid unbounded in-memory loading during prompt assembly.
+- Extended `RuntimeSkill` with optional `created_at` and updated prompt skill sorting to use real recency metadata (priority desc, then created_at, then version id).
+- Fixed token-budget edge case where `SKILLS_MAX_TOKENS=0` previously behaved as unbounded; now zero budget excludes all skills.
+- Tightened skill-content sanitization to exclude DEL (`0x7F`) in addition to other control-character handling.
+- Added regression coverage for the zero-budget behavior.
+
+### What's Working
+- Runtime loader avoids the previous N+1 query behavior and resolves security metadata in bulk.
+- Prompt inclusion ordering now has a meaningful recency tie-breaker.
+- Zero-budget behavior now correctly excludes all runtime skills.
+- Targeted tests pass including the new edge-case test.
+
+### What's NOT Working Yet
+- Loader exclusion reasons from DB-level filtering (e.g., malformed metadata, unresolved review) are logged but not yet surfaced as a first-class return payload from `get_active_runtime_skills`.
+
+### Next Steps
+1. Expand runtime loader return type to include structured exclusion reasons directly (not only active skills).
+2. Add integration coverage that asserts batched loader behavior at scale (mock/spy query counts).
+3. Consider moving `MAX_RUNTIME_SKILLS` to env config for deployment-level tuning.
+
+### Decisions Made
+- Kept the loader API contract stable (`list[RuntimeSkill]`) for now and handled review suggestions with internal batching + limit to minimize broader API churn.
+
+### Blockers
+- None in this pass.

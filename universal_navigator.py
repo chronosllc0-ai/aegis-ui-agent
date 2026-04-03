@@ -442,7 +442,7 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
 
 def _normalize_skill_content(content: str) -> str:
     """Trim and sanitize control characters in runtime skill content."""
-    normalized = "".join(char for char in content if char in {"\n", "\t"} or ord(char) >= 32)
+    normalized = "".join(char for char in content if char in {"\n", "\t"} or (ord(char) >= 32 and ord(char) != 127))
     return normalized.strip()
 
 
@@ -457,12 +457,12 @@ def _assemble_runtime_skills_section(
     """Build runtime skill prompt section using priority-based token budgeting."""
     budget = max(int(_app_settings.SKILLS_MAX_TOKENS), 0)
     min_priority = _app_settings.SKILLS_MIN_PRIORITY
-    now = datetime.now(timezone.utc)
+    baseline = datetime.min.replace(tzinfo=timezone.utc)
     sorted_skills = sorted(
         runtime_skills,
         key=lambda item: (
             item.priority,
-            getattr(item, "created_at", None) or now,
+            item.created_at or baseline,
             item.version_id,
         ),
         reverse=True,
@@ -488,7 +488,7 @@ def _assemble_runtime_skills_section(
         )
         chunk = f"{header}\n{content}\n"
         estimated_tokens = _estimate_tokens(chunk)
-        if budget and used_tokens + estimated_tokens > budget:
+        if used_tokens + estimated_tokens > budget:
             excluded.append({"skill_id": skill.skill_id, "reason": "budget_exceeded"})
             budget_exceeded = True
             continue
