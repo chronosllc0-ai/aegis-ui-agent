@@ -1,3 +1,33 @@
+## Session 5.45 - April 3, 2026 (conversation title promotion + placeholder-safe frontend merges)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend/frontend consistency + regression-test pass
+
+### What Was Done
+- Added canonical placeholder-title helpers in `backend/conversation_service.py` and implemented first-user-message transactional title promotion.
+- Updated websocket conversation logging flow in `main.py` to forward `task_label` metadata and a title candidate into persistence so title promotion occurs atomically with message insert (no post-commit rename query).
+- Added shared frontend title utilities (`normalizeTitle`, `isPlaceholderTitle`, and merge helpers) and applied them in `useConversations` + `App.tsx` so placeholder server titles no longer clobber richer local task titles.
+- Added backend regression test `tests/test_conversation_title_promotion.py` and frontend regression test `frontend/src/App.task-title-merge.test.tsx`.
+
+### What's Working
+- First user message now promotes placeholder conversation titles inside the same DB transaction as message persistence.
+- Frontend task sidebar keeps richer optimistic/local labels while backend title is still placeholder, then upgrades when a real promoted title arrives.
+
+### What's NOT Working Yet
+- Full browser-level E2E harness for sidebar update animation/UX timing is still not present; behavior is covered with unit/integration regressions.
+
+### Next Steps
+1. Add a browser E2E that opens a fresh task thread and verifies sidebar title transitions exactly once in a rendered app session.
+2. Consider sharing the title utility semantics with any additional task-list surfaces beyond the sidebar.
+
+### Decisions Made
+- Kept placeholder semantics centralized in one frontend utility and one backend module to reduce drift (`new task`, `untitled`, empty).
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.44 - April 3, 2026 (structured thinking persistence + hydration regressions)
 
 **Agent:** GPT-5.3-Codex  
