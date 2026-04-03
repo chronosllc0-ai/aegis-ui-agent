@@ -240,7 +240,7 @@ async def submit_user_skill(
     except ValueError:
         await session.rollback()
 
-    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "failed"}
+    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed"}
 
 
 @skills_router.get("/api/skills/mine")
