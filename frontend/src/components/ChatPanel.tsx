@@ -40,8 +40,6 @@ export interface ChatPanelProps {
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
-  /** True when the agent is actively executing browser steps right now */
-  isBrowsing?: boolean
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -91,6 +89,22 @@ interface ChatMessage {
   options?: string[]
   requestId?: string
   stepId?: string
+}
+
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  return rawOptions
+    .map((opt) => {
+      if (typeof opt === 'string') return opt.trim()
+      if (opt && typeof opt === 'object') {
+        const record = opt as Record<string, unknown>
+        const label = typeof record.label === 'string' ? record.label.trim() : ''
+        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+        return label || fallback
+      }
+      return ''
+    })
+    .filter((opt) => opt.length > 0)
 }
 
 interface AttachedFile {
@@ -188,7 +202,14 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
         const parsed = JSON.parse(jsonStr)
-        msgs.push({ id: entry.id, role: 'user_input', text: parsed.question ?? jsonStr, question: parsed.question, options: parsed.options ?? [], requestId: parsed.request_id })
+        msgs.push({
+          id: entry.id,
+          role: 'user_input',
+          text: parsed.question ?? jsonStr,
+          question: parsed.question,
+          options: normalizeAskUserInputOptions(parsed.options),
+          requestId: parsed.request_id,
+        })
       } catch {
         msgs.push({ id: entry.id, role: 'user_input', text: msg.replace('[ask_user_input]', '').trim(), options: [] })
       }
@@ -231,7 +252,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
     if (isModelResponse) {
-      msgs.push({ id: entry.id, role: 'assistant', text: displayText, timestamp: entry.timestamp })
+      msgs.push({ id: entry.id, role: 'assistant', text: displayText })
       continue
     }
     if (isToolCall) {
@@ -262,7 +283,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     }
     if (isStepText || entry.type === 'result' || entry.type === 'error') {
       const role: ChatRole = isUser ? 'user' : 'assistant'
-      msgs.push({ id: entry.id, role, text: displayText, timestamp: entry.timestamp })
+      msgs.push({ id: entry.id, role, text: displayText, timestamp: role === 'user' ? entry.timestamp : undefined })
       continue
     }
   }
@@ -657,7 +678,7 @@ function UserInputCard({
   const [answered, setAnswered] = useState<string | null>(null)
 
   const promptOptions = options.length > 0 ? options : ['Continue']
-  const customSlotLabel = 'Type custom reply'
+  const customSlotLabel = 'Type your own answer'
 
   const handleQuickReply = (opt: string) => {
     setAnswered(opt)
@@ -1081,7 +1102,6 @@ export function ChatPanel({
   connectionStatus,
   onSwitchToBrowser,
   latestFrame,
-  isBrowsing = false,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
@@ -1203,13 +1223,24 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
-  const baseMessages = useMemo(() => logsToMessages(logs).filter((m) => m.role !== 'user'), [logs])
+  const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
     if (sentMessages.length > 500) setSentMessages((prev) => prev.slice(-500))
   }, [sentMessages.length])
 
-  const allMessages = useMemo(() => [...sentMessages, ...baseMessages], [sentMessages, baseMessages])
+  const allMessages = useMemo(() => {
+    const seenUserTexts = new Set(sentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+    const dedupedBase = baseMessages.filter((m) => {
+      if (m.role !== 'user') return true
+      const key = m.text.trim()
+      if (!key) return true
+      if (seenUserTexts.has(key)) return false
+      seenUserTexts.add(key)
+      return true
+    })
+    return [...sentMessages, ...dedupedBase]
+  }, [sentMessages, baseMessages])
   const latestThinkingId = useMemo(() => {
     for (let i = allMessages.length - 1; i >= 0; i -= 1) {
       if (allMessages[i].role === 'thinking') return allMessages[i].id

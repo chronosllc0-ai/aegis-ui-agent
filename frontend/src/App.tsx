@@ -1077,7 +1077,6 @@ function App() {
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setAppMode('browser') }}
                 latestFrame={latestFrame}
-                isBrowsing={isBrowsing}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
