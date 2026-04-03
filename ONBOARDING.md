@@ -1833,6 +1833,37 @@
 ### Blockers
 - None in this pass.
 
+## Session 5.27 - April 3, 2026 (Railway build failure triage for `isBrowsing` TypeScript errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Triaged Railway production build failure screenshot and confirmed the failing errors were:
+  - `src/App.tsx(...): Cannot find name 'isBrowsing'`
+  - `src/components/ChatPanel.tsx(...): 'isBrowsing' is declared but its value is never read`
+- Verified repository source no longer contains any `isBrowsing` references in frontend code.
+- Re-ran local frontend production build to validate the exact Docker-stage command used by Railway (`npm run build`) now succeeds.
+- Confirmed no merge-conflict markers remain in repo after prior cleanup.
+
+### What's Working
+- Frontend TypeScript + Vite production build completes successfully with current branch code.
+- The `isBrowsing` compile blockers from the screenshot are resolved in source.
+
+### What's NOT Working Yet
+- Full container-image parity check with Railway could not be executed in this environment because Docker CLI is unavailable.
+
+### Next Steps
+1. Redeploy Railway from latest commit containing the `isBrowsing` removal patch.
+2. If Railway still fails, clear build cache and force rebuild from scratch.
+3. Add a CI gate that runs `cd frontend && npm run build` on every PR to prevent regression.
+
+### Decisions Made
+- Treat this as a stale-deploy artifact (older commit) unless a fresh rebuild on the latest SHA reproduces.
+
+### Blockers
+- Local runtime lacks Docker binary, so direct `docker build` verification was not possible.
+
 ---
 ## Session 3.6 — March 16, 2026 (Final Pass: Live Wiring + Demo Data Removal)
 
