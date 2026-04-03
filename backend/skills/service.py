@@ -571,7 +571,8 @@ class SkillService:
                         "Skill %s is runtime-compliant with skipped VT scan because VIRUSTOTAL_REQUIRED=false",
                         skill.id,
                     )
-            policy_ok = by_engine.get("policy") and by_engine["policy"].verdict in {"pass", "warn"}
+            policy_scan = by_engine.get("policy")
+            policy_ok = policy_scan is not None and policy_scan.verdict in {"pass", "warn"}
             if not (vt_ok and policy_ok):
                 continue
 
