@@ -1,3 +1,41 @@
+## Session 5.44 - April 3, 2026 (thread hydration signature hardening + per-thread chat UI state persistence)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend resilience pass
+
+### What Was Done
+- Replaced fragile chat hydration trigger (`serverMessages.length`) with a stable `serverThreadSignature` in `ChatPanel` keyed by task/thread id and server message identity/content, then moved hydration to depend on that signature.
+- Reworked hydration behavior to always remap server payloads on thread changes (including equal-length A/B switches), while preserving only optimistic local user messages not yet confirmed by the active thread payload.
+- Added per-thread UI-only persistence (`aegis.chat.ui.<taskId>`) for:
+  - collapsed tool cards,
+  - answered `ask_user_input` cards,
+  - open thinking rows.
+- Converted `ShellCard`, `ThinkingRow`, and `UserInputCard` to controlled-by-parent state flows so UI restoration can happen deterministically after thread switches.
+- Added a thread readiness gate to prevent visual jump/flicker during thread switch hydration (`Loading thread…` guard).
+- Added a regression spec covering A→B→A same-length thread switching with state restoration checks and stale-row prevention.
+- Updated the existing ask-user-input component test to wait for post-hydration UI readiness before interacting.
+
+### What's Working
+- Thread switches now rehydrate deterministically even when server message counts are identical.
+- Per-thread ephemeral UI state now round-trips via localStorage and restores correctly when returning to a previous thread.
+- A/B/A regression path is covered in frontend component tests and passes.
+
+### What's NOT Working Yet
+- This pass did not add end-to-end browser automation coverage for the same scenario (component-level regression only).
+
+### Next Steps
+1. Add E2E coverage for multi-thread switching and UI-state restoration in the browser flow.
+2. Consider persisting additional per-thread ephemeral state (e.g., expanded plan cards) if needed for continuity.
+
+### Decisions Made
+- Kept `collapsedToolIds` as the persisted shell-card control primitive and made chat row components controlled to centralize restore behavior in `ChatPanel`.
+- Introduced a lightweight loading guard during thread switches to prioritize consistency over transient flicker.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.43 - April 3, 2026 (ask_user_input reply routing + dedupe + regressions)
 
 **Agent:** GPT-5.3-Codex  
