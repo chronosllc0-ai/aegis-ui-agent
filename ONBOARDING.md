@@ -1,3 +1,33 @@
+## Session 5.46 - April 3, 2026 (browser-primitives-only Action Log filter hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend filtering + regression-test pass
+
+### What Was Done
+- Added a centralized browser-primitive filter helper in `frontend/src/lib/actionLogFilter.ts` with a strict tool allowlist + exact `^[\w_]` bracket-tool parsing semantics (`^\[([\w_]+)\]`).
+- Switched `App.tsx` Action Log derivation to use the shared helper so non-tool text, non-browser tools, chat-origin navigate rows (`elapsedSeconds === 0`), and non-step entry types (`result/error/interrupt/reasoning*`) are excluded by default.
+- Updated `ActionLog.tsx` task-title selection to remove first-message fallback text and use only `taskLabels[taskId]` or stable generated fallback (`Task N`).
+- Added mixed-stream regression coverage in `frontend/src/components/__tests__/ActionLog.browser-primitives-only.test.tsx` to ensure only browser primitive rows render and prompt/non-browser rows stay out of Action Log.
+
+### What's Working
+- Action Log now enforces hard browser-primitives-only semantics regardless of mixed websocket stream content.
+- Task headers in Action Log are deterministic and no longer mirror runtime row text from first log entry.
+
+### What's NOT Working Yet
+- This pass did not add end-to-end browser automation tests; coverage is component/helper level via Vitest.
+
+### Next Steps
+1. Reuse `actionLogFilter.ts` in any future log export/download feature to keep semantics consistent.
+2. Extend allowlist intentionally when backend introduces new browser primitive aliases.
+
+### Decisions Made
+- Kept the action-log include policy explicit and deny-by-default so new non-browser tools do not leak into UI without intentional allowlist updates.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.45 - April 3, 2026 (conversation title promotion + placeholder-safe frontend merges)
 
 **Agent:** GPT-5.3-Codex  

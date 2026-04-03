@@ -38,6 +38,7 @@ import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
+import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
@@ -74,26 +75,6 @@ const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().repla
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
-
-const BROWSER_ACTION_LOG_TOOLS = new Set([
-  'screenshot',
-  'go_to_url',
-  'click',
-  'type_text',
-  'scroll',
-  'go_back',
-  'wait',
-  'extract_page',
-])
-
-function isBrowserActionLogEntry(entry: LogEntry): boolean {
-  if (entry.type === 'result' || entry.type === 'error' || entry.type === 'interrupt') return true
-  if (entry.stepKind === 'navigate' && entry.elapsedSeconds === 0) return true
-  const toolMatch = entry.message.match(/^\[([\w_]+)\]/)
-  if (!toolMatch?.[1]) return false
-  return BROWSER_ACTION_LOG_TOOLS.has(toolMatch[1].toLowerCase())
-}
-
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
@@ -614,7 +595,7 @@ function App() {
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
   const actionLogEntries = useMemo(
-    () => enrichedLogs.filter((entry) => isBrowserActionLogEntry(entry)),
+    () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
 
