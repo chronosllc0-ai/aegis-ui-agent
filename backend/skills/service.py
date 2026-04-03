@@ -261,7 +261,7 @@ class SkillService:
             await session.flush()
         else:
             if skill.owner_user_id != owner_user_id:
-                raise ValueError("Skill slug already exists")
+                raise ValueError("Skill slug is already owned by another user")
             from_status = skill.status
             skill.name = name
             skill.description = description
