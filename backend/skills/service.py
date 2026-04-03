@@ -40,7 +40,6 @@ class VirusTotalScanner:
         if cls._opened_until is None:
             return False
         return datetime.now(timezone.utc) < cls._opened_until  # NOTE: not lock-guarded; safe only in single-worker
-        if cls._opened_until is None:
             return False
         return datetime.now(timezone.utc) < cls._opened_until
 
