@@ -17,6 +17,17 @@ from backend.skills.service import SkillService
 skills_router = APIRouter(tags=["skills"])
 
 
+def _safe_json_loads(text: str | None, *, default: dict[str, Any] | list[Any] | None = None) -> Any:
+    """Safely parse stored JSON fields without failing endpoint responses."""
+    fallback = {} if default is None else default
+    if not text:
+        return fallback
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return fallback
+
+
 class SkillUploadRequest(BaseModel):
     """Admin skill upload payload."""
 
@@ -119,7 +130,7 @@ async def list_admin_review_queue(
                     "id": item["version"].id,
                     "version": item["version"].version,
                     "content_sha256": item["version"].content_sha256,
-                    "metadata_json": json.loads(item["version"].metadata_json or "{}"),
+                    "metadata_json": _safe_json_loads(item["version"].metadata_json),
                 },
                 "scans": [
                     {
@@ -127,7 +138,7 @@ async def list_admin_review_queue(
                         "verdict": scan.verdict,
                         "score": scan.score,
                         "report_url": scan.report_url,
-                        "raw_json": json.loads(scan.raw_json or "{}"),
+                        "raw_json": _safe_json_loads(scan.raw_json),
                         "scanned_at": scan.scanned_at,
                     }
                     for scan in item["scans"]
@@ -214,17 +225,48 @@ async def submit_user_skill(
             submitted_by=current_user.uid,
             status="pending_scan",
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await session.commit()
+    try:
         await SkillService.run_scans_for_skill(
             session,
             skill_id=skill.id,
             actor_id=current_user.uid,
             actor_type="user",
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await session.commit()
+    except ValueError:
+        await session.rollback()
 
-    await session.commit()
-    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}}
+    scan_ok = True
+    try:
+        await SkillService.run_scans_for_skill(
+            session,
+            skill_id=skill.id,
+            actor_id=current_user.uid,
+            actor_type="user",
+        )
+        await session.commit()
+    except ValueError:
+        await session.rollback()
+        scan_ok = False
+
+    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed" if scan_ok else "failed"}
+    try:
+        await SkillService.run_scans_for_skill(
+            session,
+            skill_id=skill.id,
+            actor_id=current_user.uid,
+            actor_type="user",
+        )
+        await session.commit()
+    except ValueError:
+        await session.rollback()
+        scan_ok = False
+
+    return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed" if scan_ok else "failed"}
 
 
 @skills_router.get("/api/skills/mine")

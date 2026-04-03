@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     VIRUSTOTAL_MAX_FILE_BYTES: int = 1048576
     VIRUSTOTAL_POLL_INTERVAL_SECONDS: int = 5
     VIRUSTOTAL_MAX_POLLS: int = 12
+    VIRUSTOTAL_REQUIRED: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

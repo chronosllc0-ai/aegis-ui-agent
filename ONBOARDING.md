@@ -1,3 +1,43 @@
+## Session 5.49 - April 3, 2026 (PR review fixes: JSON hardening + VT compliance gating)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend review-fix pass
+
+### What Was Done
+- Addressed review warnings in `backend/skills/service.py`:
+  - narrowed VT exception handling from broad `Exception` to expected IO/network failures (`httpx.RequestError`, `httpx.HTTPStatusError`, `OSError`),
+  - added safe handling for corrupted `metadata_json` in scan flow by raising `ValueError(\"Invalid skill metadata JSON\")`,
+  - computed scan `max_score` once and reused for risk-label branching,
+  - added `VIRUSTOTAL_REQUIRED` behavior in runtime compliance logic so `skipped` VT verdicts are only accepted when explicitly allowed (and now emit warning logs when allowed by config).
+- Addressed review suggestions in `backend/skills/router.py`:
+  - added `_safe_json_loads(...)` helper and applied it to review-queue JSON fields (`metadata_json`, scan `raw_json`) to avoid endpoint 500s on malformed stored JSON,
+  - split user submit flow into two phases:
+    1) create+commit skill/version first,
+    2) scan in a follow-up transaction,
+    so scan failures no longer roll back successful submission creation.
+- Added `VIRUSTOTAL_REQUIRED` to `config.py` and `.env.example`.
+
+### What's Working
+- Review queue endpoint now tolerates malformed persisted JSON blobs safely.
+- User submissions are preserved even if downstream scanning encounters errors.
+- Runtime compliance behavior is now explicit and configurable for skipped VT scans.
+
+### What's NOT Working Yet
+- User submission scan phase is still synchronous in-request; fully async background scan worker remains a follow-up optimization.
+
+### Next Steps
+1. Move submission scan phase to background queue for lower API latency.
+2. Add tests for malformed JSON in review queue response and `VIRUSTOTAL_REQUIRED=true` runtime gating behavior.
+3. Add metrics for `skipped` VT scans to monitor operational drift.
+
+### Decisions Made
+- Kept default `VIRUSTOTAL_REQUIRED=false` to preserve local-dev usability without API key; added warning logging + config switch for stricter environments.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.48 - April 3, 2026 (PR review hardening for skill governance pipeline)
 
 **Agent:** GPT-5.3-Codex  

@@ -79,3 +79,48 @@ def test_skill_service_review_transition_sets_visibility_and_new_flag(tmp_path) 
             break
 
     asyncio.run(_run())
+
+
+def test_run_scans_for_skill_rejects_invalid_metadata_json(tmp_path) -> None:
+    async def _run() -> None:
+        await _init_db(tmp_path)
+        await _seed_user()
+
+        async for session in get_session():
+            skill = await SkillService.create_skill_with_version(
+                session,
+                slug="broken-json-skill",
+                name="Broken Skill",
+                description="desc",
+                owner_user_id="admin-1",
+                owner_type="admin",
+                metadata_json={"category": "ops"},
+                skill_markdown="# Skill\nDo safe things.",
+                submitted_by="admin-1",
+                status="pending_scan",
+            )
+            await session.commit()
+            break
+
+        async for session in get_session():
+            version = await SkillService.latest_version(session, skill.id)
+            assert version is not None
+            version.metadata_json = "{invalid-json"
+            await session.commit()
+            break
+
+        async for session in get_session():
+            try:
+                await SkillService.run_scans_for_skill(
+                    session,
+                    skill_id=skill.id,
+                    actor_id="admin-1",
+                    actor_type="admin",
+                )
+            except ValueError as exc:
+                assert str(exc) == "Invalid skill metadata JSON"
+            else:
+                raise AssertionError("Expected invalid metadata JSON ValueError")
+            break
+
+    asyncio.run(_run())

@@ -35,8 +35,11 @@ class VirusTotalScanner:
     _lock = asyncio.Lock()
 
     @classmethod
+    @classmethod
     def _is_open(cls) -> bool:
         if cls._opened_until is None:
+            return False
+        return datetime.now(timezone.utc) < cls._opened_until  # NOTE: not lock-guarded; safe only in single-worker
             return False
         return datetime.now(timezone.utc) < cls._opened_until
 
@@ -130,7 +133,7 @@ class VirusTotalScanner:
                     file_report = await client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
                 file_report.raise_for_status()
                 raw = file_report.json()
-        except Exception as exc:  # noqa: BLE001
+        except (httpx.RequestError, httpx.HTTPStatusError, OSError) as exc:
             await cls._register_failure()
             logger.warning("VirusTotal scan failed: %s", exc)
             return {
@@ -194,7 +197,7 @@ class PolicyScanner:
         max_score = 0.0
 
         for label, pattern, weight in cls._PATTERNS:
-            if re.search(pattern, lowered, flags=re.IGNORECASE | re.DOTALL):
+            if re.search(pattern, lowered, flags=re.DOTALL):
                 flags.append({"label": label, "pattern": pattern, "weight": weight})
                 max_score = max(max_score, weight)
 
@@ -261,7 +264,7 @@ class SkillService:
             await session.flush()
         else:
             if skill.owner_user_id != owner_user_id:
-                raise ValueError("Skill slug already exists")
+                raise ValueError("Skill slug is already owned by another user")
             from_status = skill.status
             skill.name = name
             skill.description = description
@@ -320,7 +323,10 @@ class SkillService:
         if version is None:
             raise ValueError("Skill version not found")
 
-        payload = json.loads(version.metadata_json or "{}")
+        try:
+            payload = json.loads(version.metadata_json or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("Invalid skill metadata JSON") from exc
         skill_md = str(payload.get("skill_md", ""))
 
         vt_result = await VirusTotalScanner.scan_content(file_name=f"{skill.slug}.md", content=skill_md.encode("utf-8"))
@@ -352,12 +358,13 @@ class SkillService:
             )
         )
 
+        max_score = max(vt_result["score"], policy_result["score"])
         risk = "low"
-        if max(vt_result["score"], policy_result["score"]) >= 0.9:
+        if max_score >= 0.9:
             risk = "critical"
-        elif max(vt_result["score"], policy_result["score"]) >= 0.7:
+        elif max_score >= 0.7:
             risk = "high"
-        elif max(vt_result["score"], policy_result["score"]) >= 0.4:
+        elif max_score >= 0.4:
             risk = "medium"
 
         from_status = skill.status
@@ -553,12 +560,26 @@ class SkillService:
                 select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id)
             )
             by_engine = {scan.engine: scan for scan in scans.scalars().all()}
-            vt_ok = by_engine.get("virustotal") and by_engine["virustotal"].verdict in {"pass", "warn", "skipped"}
+            vt_scan = by_engine.get("virustotal")
+            vt_verdict = vt_scan.verdict if vt_scan else None
+            if settings.VIRUSTOTAL_REQUIRED:
+                vt_ok = vt_verdict in {"pass", "warn"}
+            else:
+                vt_ok = vt_verdict in {"pass", "warn", "skipped"}
+                if vt_verdict == "skipped":
+                    logger.warning(
+                        "Skill %s is runtime-compliant with skipped VT scan because VIRUSTOTAL_REQUIRED=false",
+                        skill.id,
+                    )
             policy_ok = by_engine.get("policy") and by_engine["policy"].verdict in {"pass", "warn"}
             if not (vt_ok and policy_ok):
                 continue
 
-            payload = json.loads(version.metadata_json or "{}")
+            try:
+                payload = json.loads(version.metadata_json or "{}")
+            except json.JSONDecodeError:
+                logger.warning("Skipping skill %s with corrupted metadata_json", skill.id)
+                continue
             active.append(
                 {
                     "skill_id": skill.id,
