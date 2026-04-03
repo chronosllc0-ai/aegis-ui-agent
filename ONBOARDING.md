@@ -1,3 +1,132 @@
+## Session 5.49 - April 3, 2026 (PR review fixes: JSON hardening + VT compliance gating)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend review-fix pass
+
+### What Was Done
+- Addressed review warnings in `backend/skills/service.py`:
+  - narrowed VT exception handling from broad `Exception` to expected IO/network failures (`httpx.RequestError`, `httpx.HTTPStatusError`, `OSError`),
+  - added safe handling for corrupted `metadata_json` in scan flow by raising `ValueError(\"Invalid skill metadata JSON\")`,
+  - computed scan `max_score` once and reused for risk-label branching,
+  - added `VIRUSTOTAL_REQUIRED` behavior in runtime compliance logic so `skipped` VT verdicts are only accepted when explicitly allowed (and now emit warning logs when allowed by config).
+- Addressed review suggestions in `backend/skills/router.py`:
+  - added `_safe_json_loads(...)` helper and applied it to review-queue JSON fields (`metadata_json`, scan `raw_json`) to avoid endpoint 500s on malformed stored JSON,
+  - split user submit flow into two phases:
+    1) create+commit skill/version first,
+    2) scan in a follow-up transaction,
+    so scan failures no longer roll back successful submission creation.
+- Added `VIRUSTOTAL_REQUIRED` to `config.py` and `.env.example`.
+
+### What's Working
+- Review queue endpoint now tolerates malformed persisted JSON blobs safely.
+- User submissions are preserved even if downstream scanning encounters errors.
+- Runtime compliance behavior is now explicit and configurable for skipped VT scans.
+
+### What's NOT Working Yet
+- User submission scan phase is still synchronous in-request; fully async background scan worker remains a follow-up optimization.
+
+### Next Steps
+1. Move submission scan phase to background queue for lower API latency.
+2. Add tests for malformed JSON in review queue response and `VIRUSTOTAL_REQUIRED=true` runtime gating behavior.
+3. Add metrics for `skipped` VT scans to monitor operational drift.
+
+### Decisions Made
+- Kept default `VIRUSTOTAL_REQUIRED=false` to preserve local-dev usability without API key; added warning logging + config switch for stricter environments.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.48 - April 3, 2026 (PR review hardening for skill governance pipeline)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend hardening/refinement pass
+
+### What Was Done
+- Addressed review feedback in `backend/skills/service.py`:
+  - VirusTotal poll loop now returns an explicit `error` verdict when analysis does not reach `completed` within `VIRUSTOTAL_MAX_POLLS` (instead of proceeding with potentially stale data).
+  - Added lock-guarded circuit breaker state updates (`asyncio.Lock`) for `_consecutive_failures` / `_opened_until` mutation safety under concurrent requests.
+  - Updated scan transition behavior so skills are only moved to `pending_review` when scans produce usable output; if both scanners return `error`, skill remains `pending_scan` for retry.
+  - Upgraded version handling so re-submitting an existing owned slug now creates immutable `skill_versions` with incrementing version numbers (`latest + 1`) rather than hardcoding `version=1`.
+- Addressed API review feedback in `backend/skills/router.py`:
+  - Added authenticated-user dependency to `/api/skills/global` and `/api/skills/hub`.
+  - Clarified runtime active-skill semantics by renaming service argument to `requested_for_user_id` while preserving external API contract `?user_id=...`.
+- Addressed testing feedback in `tests/test_skills_service.py`:
+  - Consolidated multiple `asyncio.run(...)` calls into a single event-loop execution in the transition test.
+
+### What's Working
+- VT timeout behavior now fails safely rather than allowing indeterminate scan status to flow through.
+- Concurrent scan failures now update breaker state through a lock-protected path.
+- Revisions to existing skill slugs now produce incremented immutable versions for the same owner.
+- Global/hub catalogs now require authentication.
+
+### What's NOT Working Yet
+- Circuit breaker state is still process-local; cross-worker shared breaker coordination (Redis/DB) is still a future enhancement.
+
+### Next Steps
+1. Add shared-store circuit breaker state for multi-worker deployments.
+2. Add API tests for authenticated `/api/skills/global` and `/api/skills/hub`.
+3. Add tests for VT timeout path and dual-error transition (`pending_scan` retry state).
+
+### Decisions Made
+- Kept process-local breaker implementation for now (hackathon-appropriate), but made it concurrency-safe within worker process boundaries.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.47 - April 3, 2026 (skills governance pipeline: model + APIs + scanners)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend governance implementation pass
+
+### What Was Done
+- Added a full versioned/auditable skill governance data model in `backend/database.py`:
+  - `skills`,
+  - `skill_versions` (immutable),
+  - `skill_scan_results`,
+  - `skill_reviews`,
+  - `skill_publish_events`.
+- Implemented skill workflow services in `backend/skills/service.py`:
+  - VirusTotal scanner flow with hash lookup/upload/poll support, timeout and simple circuit breaker behavior,
+  - prompt/policy scanner with rule-based forbidden-pattern detection and severity scoring,
+  - state-machine transitions across scan/review decisions,
+  - NEW badge expiration handling (`new_until`), visibility-target listing, and runtime active/compliance filtering.
+- Added API routes in `backend/skills/router.py` for:
+  - Admin: create/upload, scan, review queue, review decision,
+  - User: global listing, hub listing, submit, mine,
+  - Runtime: active skill fetch with compliance enforcement.
+- Wired skills routes into FastAPI app in `main.py`.
+- Added VirusTotal environment settings to `config.py` and `.env.example`.
+- Added tests in `tests/test_skills_service.py` for policy scan detection and review transition behavior.
+
+### What's Working
+- End-to-end backend shape now supports the requested dual publish targets (`global` vs `hub`) with separate review decisions.
+- Immutable version rows + publish event trail are persisted for auditability.
+- Runtime active endpoint returns only approved + scan-compliant skills.
+- Added tests pass for new scanner/transition logic.
+
+### What's NOT Working Yet
+- No dedicated background worker cron was added for nightly NEW-flag expiry; current implementation expires at read time.
+- VirusTotal scan path is implemented but not integration-tested against live VT API in this pass.
+- Admin frontend CTA buttons are not yet implemented; API response now exposes CTA decision mapping.
+
+### Next Steps
+1. Add admin UI moderation screen with explicit **Approve to Global** and **Approve to Hub** buttons.
+2. Add async job/queue scheduling for scan polling + nightly NEW flag cleanup.
+3. Add API integration tests for `/api/admin/skills/*` and `/api/skills/*` endpoints with auth fixtures.
+
+### Decisions Made
+- Chose read-time NEW-expiry enforcement now to avoid blocking on scheduler complexity while preserving correct runtime behavior.
+- Kept skill content storage as `inline://` metadata payload for now, with `storage_url` field ready for object storage migration.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.46 - April 3, 2026 (Plan mode first-class composer behavior)
 
 **Agent:** GPT-5.3-Codex  
