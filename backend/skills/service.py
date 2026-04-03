@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 class VirusTotalScanner:
     """Thin VT client with timeout/retry and a simple circuit breaker."""
 
+    # NOTE: Process-local circuit breaker state. In multi-worker deployments,
+    # each worker maintains independent state. Consider Redis/DB-backed state
+    # for cross-worker coordination.
     _consecutive_failures = 0
     _opened_until: datetime | None = None
     _lock = asyncio.Lock()
