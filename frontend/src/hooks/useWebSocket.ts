@@ -48,10 +48,62 @@ export type SubAgentStep = {
   parent_task_id?: string
 }
 
+type ThinkingState = 'streaming' | 'completed'
+
+export interface PersistedThinkingMessage {
+  id: string
+  role: 'thinking'
+  taskId: string
+  stepId: string
+  status: ThinkingState
+  text: string
+  updatedAt: string
+}
+
 type WebSocketPayload = {
   type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list'
   data?: Record<string, unknown>
   [key: string]: unknown
+}
+
+const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
+
+function readPersistedThinking(taskId: string): PersistedThinkingMessage[] {
+  if (!taskId || typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(THINKING_KEY(taskId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is PersistedThinkingMessage => {
+        const candidate = item as Partial<PersistedThinkingMessage>
+        return Boolean(
+          candidate
+          && candidate.role === 'thinking'
+          && typeof candidate.taskId === 'string'
+          && typeof candidate.stepId === 'string'
+          && typeof candidate.id === 'string',
+        )
+      })
+      .map((item) => ({
+        ...item,
+        status: item.status === 'completed' ? 'completed' : 'streaming',
+        text: typeof item.text === 'string' ? item.text : '',
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }))
+  } catch {
+    return []
+  }
+}
+
+function persistThinking(taskId: string, messages: PersistedThinkingMessage[]): void {
+  if (!taskId || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(THINKING_KEY(taskId), JSON.stringify(messages))
+  } catch {
+    // Ignore localStorage quota/sandbox issues.
+  }
 }
 
 function guessStepKind(message: string): LogEntry['stepKind'] {
@@ -191,6 +243,16 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       }
       if (payload.type === 'result') {
         setIsWorking(false)
+        const persisted = readPersistedThinking(taskId)
+        if (persisted.length > 0) {
+          const nowIso = new Date().toISOString()
+          const next = persisted.map((item) => (
+            item.status === 'streaming'
+              ? { ...item, status: 'completed' as const, updatedAt: nowIso }
+              : item
+          ))
+          persistThinking(taskId, next)
+        }
         const status = String(payload.data?.status ?? 'completed')
         const failed = status !== 'completed' && status !== 'interrupted'
         appendLog({
@@ -245,6 +307,22 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
           setReasoningMap((prev) => ({ ...prev, [stepId]: '' }))
+          const nowIso = new Date().toISOString()
+          const persisted = readPersistedThinking(taskId)
+          const nextEntry: PersistedThinkingMessage = {
+            id: `thinking-${taskId}-${stepId}`,
+            role: 'thinking',
+            taskId,
+            stepId,
+            status: 'streaming',
+            text: '',
+            updatedAt: nowIso,
+          }
+          const next = [
+            ...persisted.filter((item) => item.stepId !== stepId),
+            nextEntry,
+          ]
+          persistThinking(taskId, next)
           appendLog({
             message: '[thinking]',
             taskId,
@@ -263,6 +341,30 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
             ...prev,
             [stepId]: (prev[stepId] ?? '') + delta,
           }))
+          const nowIso = new Date().toISOString()
+          const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
+          const nextEntry: PersistedThinkingMessage = existing
+            ? {
+                ...existing,
+                status: existing.status === 'completed' ? 'completed' : 'streaming',
+                text: `${existing.text}${delta}`,
+                updatedAt: nowIso,
+              }
+            : {
+                id: `thinking-${taskId}-${stepId}`,
+                role: 'thinking',
+                taskId,
+                stepId,
+                status: 'streaming',
+                text: delta,
+                updatedAt: nowIso,
+              }
+          const next = [
+            ...persisted.filter((item) => item.stepId !== stepId),
+            nextEntry,
+          ]
+          persistThinking(taskId, next)
         }
         return
       }
@@ -271,6 +373,25 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         const stepId = String(payload.data?.step_id ?? '')
         const content = String(payload.data?.content ?? '')
         if (stepId) {
+          const nowIso = new Date().toISOString()
+          const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
+          const nextEntry: PersistedThinkingMessage = existing
+            ? { ...existing, text: content || existing.text, status: 'completed', updatedAt: nowIso }
+            : {
+                id: `thinking-${taskId}-${stepId}`,
+                role: 'thinking',
+                taskId,
+                stepId,
+                status: 'completed',
+                text: content,
+                updatedAt: nowIso,
+              }
+          const next = [
+            ...persisted.filter((item) => item.stepId !== stepId),
+            nextEntry,
+          ]
+          persistThinking(taskId, next)
           setLogs((prev) =>
             prev.map((e) =>
               e.stepId === stepId

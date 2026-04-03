@@ -1,3 +1,39 @@
+## Session 5.44 - April 3, 2026 (structured thinking persistence + hydration regressions)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend persistence + test pass
+
+### What Was Done
+- Added structured persisted thinking model usage in chat rendering flow, including task-scoped hydration from `aegis.reasoning.<taskId>` and deterministic `thinking-<taskId>-<stepId>` identities.
+- Removed chat derivation of thinking rows from raw log token text and replaced malformed `[thinking]` tool fallback with structured placeholder thinking rows (no raw token rendering).
+- Implemented task-scoped thinking cache persistence in `useWebSocket`:
+  - `reasoning_start` seeds streaming rows and persists immediately,
+  - `reasoning_delta` appends text snapshots and persists,
+  - `result` marks all streaming rows for task as completed,
+  - `reasoning` final payload now persists completed content snapshots.
+- Added optional persisted thinking accordion UI state per task via `aegis.chat.ui.<taskId>.openThinkingIds`.
+- Added regression tests covering reasoning cache persistence and chat-panel restoration/visual-state behavior on thread switches and refresh simulation.
+
+### What's Working
+- Revisiting a task/thread now restores purple thinking rows from local cache instead of relying on transient raw logs.
+- Streaming/completed thought status now persists across refreshes and task switches.
+- No literal `[thinking]` token text is surfaced in chat UI.
+
+### What's NOT Working Yet
+- No full browser E2E was added in this pass; coverage is unit/component-level via Vitest.
+
+### Next Steps
+1. Extend persisted reasoning hydration to server-backed task archives if/when reasoning snapshots are stored remotely.
+2. Add E2E test proving task switch + refresh behavior in a full running app session.
+
+### Decisions Made
+- Kept `reasoningMap` as live runtime cache only; persisted local storage snapshot is now the source of truth for thought-row reconstruction.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.43 - April 3, 2026 (ask_user_input reply routing + dedupe + regressions)
 
 **Agent:** GPT-5.3-Codex  
