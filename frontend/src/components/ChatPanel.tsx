@@ -72,6 +72,17 @@ export interface ChatPanelProps {
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
 type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'thinking'
+type ThinkingState = 'streaming' | 'completed'
+
+interface PersistedThinkingMessage {
+  id: string
+  role: 'thinking'
+  taskId: string
+  stepId: string
+  status: ThinkingState
+  text: string
+  updatedAt: string
+}
 
 interface ChatMessage {
   id: string
@@ -118,6 +129,33 @@ interface AttachedFile {
   name: string
   type: string
   dataUrl: string
+}
+
+const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
+const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
+
+function readPersistedThinking(taskId: string | null | undefined): PersistedThinkingMessage[] {
+  if (!taskId) return []
+  try {
+    const raw = localStorage.getItem(THINKING_KEY(taskId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is PersistedThinkingMessage => {
+        const candidate = item as Partial<PersistedThinkingMessage>
+        return Boolean(candidate && candidate.role === 'thinking' && typeof candidate.stepId === 'string')
+      })
+      .map((item) => ({
+        ...item,
+        status: (item.status === 'completed' ? 'completed' : 'streaming') as ThinkingState,
+        text: typeof item.text === 'string' ? item.text : '',
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+  } catch {
+    return []
+  }
 }
 
 // ─── Live connector type ───────────────────────────────────────────────────────
@@ -197,14 +235,6 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
 
-    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
-      const stepId = entry.stepId
-      if (stepId && !msgs.find((m) => m.role === 'thinking' && m.stepId === stepId)) {
-        msgs.push({ id: `thinking-${stepId}`, role: 'thinking', text: msg, stepId })
-      }
-      continue
-    }
-
     if (msg.includes('[ask_user_input]')) {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
@@ -266,7 +296,13 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
       if (toolName.toLowerCase() === 'thinking') {
-        msgs.push({ id: entry.id, role: 'thinking', text: msg.replace(/^\[[\w_]+\]\s*/, '').trim() || 'Thinking', stepId: entry.stepId })
+        msgs.push({
+          id: entry.id,
+          role: 'thinking',
+          text: '',
+          stepId: entry.stepId,
+          metadata: { placeholder: true },
+        })
         continue
       }
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
@@ -549,10 +585,10 @@ interface ThinkingRowProps {
   reasoningText: string
   isStreaming: boolean
   open: boolean
-  onOpenChange: (open: boolean) => void
+  onToggle: () => void
 }
 
-function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onOpenChange }: ThinkingRowProps) {
+function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onToggle }: ThinkingRowProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -565,7 +601,7 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onOpen
     <div className='my-0.5'>
       <button
         type='button'
-        onClick={() => onOpenChange(!open)}
+        onClick={onToggle}
         className='flex items-center gap-2 rounded-xl px-3 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
       >
         {isStreaming ? (
@@ -1267,11 +1303,70 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
+  const [thinkingMessages, setThinkingMessages] = useState<PersistedThinkingMessage[]>([])
+  const [openThinkingIds, setOpenThinkingIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    setThinkingMessages(readPersistedThinking(activeTaskId))
+    if (!activeTaskId) {
+      setOpenThinkingIds(new Set())
+      return
+    }
+    try {
+      const raw = localStorage.getItem(OPEN_THINKING_KEY(activeTaskId))
+      const parsed = raw ? JSON.parse(raw) : []
+      const openIds = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+      setOpenThinkingIds(new Set(openIds))
+    } catch {
+      setOpenThinkingIds(new Set())
+    }
+  }, [activeTaskId])
+
+  useEffect(() => {
+    const persisted = readPersistedThinking(activeTaskId)
+    if (!activeTaskId) {
+      setThinkingMessages(persisted)
+      return
+    }
+    const runtimeRows = Object.entries(reasoningMap ?? {}).map(([stepId, text]) => ({
+      id: `thinking-${activeTaskId}-${stepId}`,
+      role: 'thinking' as const,
+      taskId: activeTaskId,
+      stepId,
+      status: 'streaming' as const,
+      text,
+      updatedAt: new Date().toISOString(),
+    }))
+    const byStep = new Map<string, PersistedThinkingMessage>()
+    for (const item of persisted) byStep.set(item.stepId, item)
+    for (const item of runtimeRows) {
+      const existing = byStep.get(item.stepId)
+      byStep.set(item.stepId, {
+        ...item,
+        text: item.text || existing?.text || '',
+        status: existing?.status ?? item.status,
+        updatedAt: existing?.updatedAt ?? item.updatedAt,
+      })
+    }
+    const merged = Array.from(byStep.values()).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+    setThinkingMessages(merged)
+  }, [activeTaskId, reasoningMap, isWorking])
+
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
     if (sentMessages.length > 500) setSentMessages((prev) => prev.slice(-500))
   }, [sentMessages.length])
+
+  const thinkingRows = useMemo<ChatMessage[]>(() => {
+    return thinkingMessages.map((item) => ({
+      id: item.id,
+      role: 'thinking',
+      text: item.text,
+      stepId: item.stepId,
+      metadata: { status: item.status },
+    }))
+  }, [thinkingMessages])
 
   const allMessages = useMemo(() => {
     const baseUserTexts = new Set(
@@ -1288,6 +1383,7 @@ export function ChatPanel({
 
     const seenUserTexts = new Set(mergedSentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
     const dedupedBase = baseMessages.filter((m) => {
+      if (m.role === 'thinking') return false
       if (m.role !== 'user') return true
       const key = m.text.trim()
       if (!key) return true
@@ -1295,14 +1391,8 @@ export function ChatPanel({
       seenUserTexts.add(key)
       return true
     })
-    return [...mergedSentMessages, ...dedupedBase]
-  }, [sentMessages, baseMessages])
-  const latestThinkingId = useMemo(() => {
-    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
-      if (allMessages[i].role === 'thinking') return allMessages[i].id
-    }
-    return null
-  }, [allMessages])
+    return [...thinkingRows, ...mergedSentMessages, ...dedupedBase]
+  }, [sentMessages, baseMessages, thinkingRows])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
@@ -1465,6 +1555,21 @@ export function ChatPanel({
     onUserInputResponse?.(trimmed, requestId)
   }
 
+  const handleToggleThinkingOpen = useCallback((stepId: string) => {
+    if (!activeTaskId || !stepId) return
+    setOpenThinkingIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      try {
+        localStorage.setItem(OPEN_THINKING_KEY(activeTaskId), JSON.stringify(Array.from(next)))
+      } catch {
+        // ignore localStorage write failures
+      }
+      return next
+    })
+  }, [activeTaskId])
+
   const isDisabled = connectionStatus !== 'connected'
 
   // Personalised CTA — first name only
@@ -1587,16 +1692,21 @@ export function ChatPanel({
 
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
-            const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
-            const isStreaming = isWorking && msg.id === latestThinkingId
+            const hasStructuredState = Boolean(stepId && thinkingMessages.find((item) => item.stepId === stepId))
+            const reasoningText = hasStructuredState
+              ? (reasoningMap?.[stepId] ?? msg.text ?? '')
+              : ''
+            const status = (msg.metadata as { status?: ThinkingState; placeholder?: boolean } | undefined)?.status
+            const placeholder = Boolean((msg.metadata as { placeholder?: boolean } | undefined)?.placeholder)
+            const isStreaming = placeholder || status !== 'completed'
             return (
               <div key={msg.id} className='px-1'>
                 <ThinkingRow
                   stepId={stepId}
                   reasoningText={reasoningText}
                   isStreaming={isStreaming}
-                  open={threadUi.openThinkingIds.includes(msg.id)}
-                  onOpenChange={(open) => setThinkingOpen(msg.id, open)}
+                  open={openThinkingIds.has(stepId)}
+                  onToggle={() => handleToggleThinkingOpen(stepId)}
                 />
               </div>
             )

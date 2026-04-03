@@ -1,35 +1,33 @@
-## Session 5.44 - April 3, 2026 (thread hydration signature hardening + per-thread chat UI state persistence)
+## Session 5.44 - April 3, 2026 (structured thinking persistence + hydration regressions)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused frontend resilience pass
+**Duration:** ~1 focused frontend persistence + test pass
 
 ### What Was Done
-- Replaced fragile chat hydration trigger (`serverMessages.length`) with a stable `serverThreadSignature` in `ChatPanel` keyed by task/thread id and server message identity/content, then moved hydration to depend on that signature.
-- Reworked hydration behavior to always remap server payloads on thread changes (including equal-length A/B switches), while preserving only optimistic local user messages not yet confirmed by the active thread payload.
-- Added per-thread UI-only persistence (`aegis.chat.ui.<taskId>`) for:
-  - collapsed tool cards,
-  - answered `ask_user_input` cards,
-  - open thinking rows.
-- Converted `ShellCard`, `ThinkingRow`, and `UserInputCard` to controlled-by-parent state flows so UI restoration can happen deterministically after thread switches.
-- Added a thread readiness gate to prevent visual jump/flicker during thread switch hydration (`Loading thread…` guard).
-- Added a regression spec covering A→B→A same-length thread switching with state restoration checks and stale-row prevention.
-- Updated the existing ask-user-input component test to wait for post-hydration UI readiness before interacting.
+- Added structured persisted thinking model usage in chat rendering flow, including task-scoped hydration from `aegis.reasoning.<taskId>` and deterministic `thinking-<taskId>-<stepId>` identities.
+- Removed chat derivation of thinking rows from raw log token text and replaced malformed `[thinking]` tool fallback with structured placeholder thinking rows (no raw token rendering).
+- Implemented task-scoped thinking cache persistence in `useWebSocket`:
+  - `reasoning_start` seeds streaming rows and persists immediately,
+  - `reasoning_delta` appends text snapshots and persists,
+  - `result` marks all streaming rows for task as completed,
+  - `reasoning` final payload now persists completed content snapshots.
+- Added optional persisted thinking accordion UI state per task via `aegis.chat.ui.<taskId>.openThinkingIds`.
+- Added regression tests covering reasoning cache persistence and chat-panel restoration/visual-state behavior on thread switches and refresh simulation.
 
 ### What's Working
-- Thread switches now rehydrate deterministically even when server message counts are identical.
-- Per-thread ephemeral UI state now round-trips via localStorage and restores correctly when returning to a previous thread.
-- A/B/A regression path is covered in frontend component tests and passes.
+- Revisiting a task/thread now restores purple thinking rows from local cache instead of relying on transient raw logs.
+- Streaming/completed thought status now persists across refreshes and task switches.
+- No literal `[thinking]` token text is surfaced in chat UI.
 
 ### What's NOT Working Yet
-- This pass did not add end-to-end browser automation coverage for the same scenario (component-level regression only).
+- No full browser E2E was added in this pass; coverage is unit/component-level via Vitest.
 
 ### Next Steps
-1. Add E2E coverage for multi-thread switching and UI-state restoration in the browser flow.
-2. Consider persisting additional per-thread ephemeral state (e.g., expanded plan cards) if needed for continuity.
+1. Extend persisted reasoning hydration to server-backed task archives if/when reasoning snapshots are stored remotely.
+2. Add E2E test proving task switch + refresh behavior in a full running app session.
 
 ### Decisions Made
-- Kept `collapsedToolIds` as the persisted shell-card control primitive and made chat row components controlled to centralize restore behavior in `ChatPanel`.
-- Introduced a lightweight loading guard during thread switches to prioritize consistency over transient flicker.
+- Kept `reasoningMap` as live runtime cache only; persisted local storage snapshot is now the source of truth for thought-row reconstruction.
 
 ### Blockers
 - None.
