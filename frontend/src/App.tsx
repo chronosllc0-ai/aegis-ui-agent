@@ -278,7 +278,7 @@ function App() {
   ])
 
   // ── Browser tab title: Working… / Steering… / Aegis ──────────────
-  const titleTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const titleTimeoutRef = useRef<number | null>(null)
   const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
   useEffect(() => {
     if (!isWorking) { setTitleMode('idle'); return }
@@ -1083,6 +1083,11 @@ function App() {
                 activeTaskId={selectedTaskId}
                 serverMessages={serverMessages}
                 onStop={() => send({ action: 'stop' })}
+                onUserInputResponse={(answer, requestId) => send({
+                  action: 'user_input_response',
+                  request_id: requestId,
+                  response: answer,
+                })}
                 reasoningMap={reasoningMap}
                 enableReasoning={settings.enableReasoning}
                 onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}
