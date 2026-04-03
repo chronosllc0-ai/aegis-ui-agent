@@ -253,6 +253,19 @@ async def submit_user_skill(
         await session.rollback()
         scan_ok = False
 
+    scan_ok = True
+    try:
+        await SkillService.run_scans_for_skill(
+            session,
+            skill_id=skill.id,
+            actor_id=current_user.uid,
+            actor_type="user",
+        )
+        await session.commit()
+    except ValueError:
+        await session.rollback()
+        scan_ok = False
+
     return {"ok": True, "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status}, "scan_status": "completed" if scan_ok else "failed"}
 
 
