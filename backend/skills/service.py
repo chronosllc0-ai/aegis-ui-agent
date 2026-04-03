@@ -366,7 +366,11 @@ class SkillService:
 
         from_status = skill.status
         target_status = "pending_review"
-        if vt_result["verdict"] == "error" and policy_result["verdict"] == "error":
+        vt_attempted = settings.VIRUSTOTAL_API_KEY and vt_result["verdict"] != "skipped"
+        if vt_attempted and vt_result["verdict"] == "error":
+            target_status = "pending_scan"
+        elif vt_result["verdict"] == "error" and policy_result["verdict"] == "error":
+            target_status = "pending_scan"
             target_status = "pending_scan"
         skill.status = target_status
         skill.risk_label = risk
