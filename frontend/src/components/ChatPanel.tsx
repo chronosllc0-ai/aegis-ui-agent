@@ -40,8 +40,6 @@ export interface ChatPanelProps {
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
-  /** True when the agent is actively executing browser steps right now */
-  isBrowsing?: boolean
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -54,8 +52,8 @@ export interface ChatPanelProps {
   reasoningMap?: Record<string, string>
   enableReasoning?: boolean
   onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'low' | 'medium' | 'high'
-  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
+  reasoningEffort?: 'medium' | 'high' | 'extended' | 'adaptive'
+  onChangeReasoningEffort?: (effort: 'medium' | 'high' | 'extended' | 'adaptive') => void
   currentModelSupportsReasoning?: boolean
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
@@ -66,6 +64,10 @@ export interface ChatPanelProps {
   }
   /** Display name of the logged-in user for personalised CTA */
   userName?: string
+  /** Mentionable sub-agent handles (used for @ picker in composer) */
+  subAgentNames?: string[]
+  browseHandoffPromptVisible?: boolean
+  onDismissBrowsePrompt?: () => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -76,6 +78,7 @@ interface ChatMessage {
   role: ChatRole
   text: string
   timestamp?: string
+  metadata?: Record<string, unknown>
   toolName?: string
   toolArgs?: string
   toolResult?: string
@@ -90,10 +93,71 @@ interface ChatMessage {
   planSteps?: string[]
 }
 
+type ThreadUiState = {
+  collapsedToolIds: string[]
+  answeredUserInputIds: string[]
+  openThinkingIds: string[]
+}
+
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  return rawOptions
+    .map((opt) => {
+      if (typeof opt === 'string') return opt.trim()
+      if (opt && typeof opt === 'object') {
+        const record = opt as Record<string, unknown>
+        const label = typeof record.label === 'string' ? record.label.trim() : ''
+        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+        return label || fallback
+      }
+      return ''
+    })
+    .filter((opt) => opt.length > 0)
+}
+
 interface AttachedFile {
   name: string
   type: string
   dataUrl: string
+}
+
+type ComposerSubmissionMode = 'normal' | 'plan'
+
+export function resolveComposerSubmission(input: string, planIntent: boolean): { mode: ComposerSubmissionMode; text: string } {
+  const trimmed = input.trim()
+  if (!trimmed) return { mode: 'normal', text: '' }
+  if (trimmed.startsWith('/plan')) {
+    return { mode: 'plan', text: trimmed.slice('/plan'.length).trim() }
+  }
+  if (planIntent) return { mode: 'plan', text: trimmed }
+  return { mode: 'normal', text: trimmed }
+}
+
+const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
+const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
+
+function readPersistedThinking(taskId: string | null | undefined): PersistedThinkingMessage[] {
+  if (!taskId) return []
+  try {
+    const raw = localStorage.getItem(THINKING_KEY(taskId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is PersistedThinkingMessage => {
+        const candidate = item as Partial<PersistedThinkingMessage>
+        return Boolean(candidate && candidate.role === 'thinking' && typeof candidate.stepId === 'string')
+      })
+      .map((item) => ({
+        ...item,
+        status: (item.status === 'completed' ? 'completed' : 'streaming') as ThinkingState,
+        text: typeof item.text === 'string' ? item.text : '',
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+  } catch {
+    return []
+  }
 }
 
 // ─── Live connector type ───────────────────────────────────────────────────────
@@ -173,19 +237,18 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
 
-    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
-      const stepId = entry.stepId
-      if (stepId && !msgs.find((m) => m.role === 'thinking' && m.stepId === stepId)) {
-        msgs.push({ id: `thinking-${stepId}`, role: 'thinking', text: msg, stepId })
-      }
-      continue
-    }
-
     if (msg.includes('[ask_user_input]')) {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
         const parsed = JSON.parse(jsonStr)
-        msgs.push({ id: entry.id, role: 'user_input', text: parsed.question ?? jsonStr, question: parsed.question, options: parsed.options ?? [], requestId: parsed.request_id })
+        msgs.push({
+          id: entry.id,
+          role: 'user_input',
+          text: parsed.question ?? jsonStr,
+          question: parsed.question,
+          options: normalizeAskUserInputOptions(parsed.options),
+          requestId: parsed.request_id,
+        })
       } catch {
         msgs.push({ id: entry.id, role: 'user_input', text: msg.replace('[ask_user_input]', '').trim(), options: [] })
       }
@@ -239,12 +302,22 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
     if (isModelResponse) {
-      msgs.push({ id: entry.id, role: 'assistant', text: displayText, timestamp: entry.timestamp })
+      msgs.push({ id: entry.id, role: 'assistant', text: displayText })
       continue
     }
     if (isToolCall) {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
+      if (toolName.toLowerCase() === 'thinking') {
+        msgs.push({
+          id: entry.id,
+          role: 'thinking',
+          text: '',
+          stepId: entry.stepId,
+          metadata: { placeholder: true },
+        })
+        continue
+      }
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
       let argsDisplay = argsRaw
       let result: string | undefined
@@ -266,7 +339,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     }
     if (isStepText || entry.type === 'result' || entry.type === 'error') {
       const role: ChatRole = isUser ? 'user' : 'assistant'
-      msgs.push({ id: entry.id, role, text: displayText, timestamp: entry.timestamp })
+      msgs.push({ id: entry.id, role, text: displayText, timestamp: role === 'user' ? entry.timestamp : undefined })
       continue
     }
   }
@@ -372,7 +445,7 @@ function GeneratingCanvas({ label }: { label: string }) {
 // ─── UserBubble — dark style (no blue) ────────────────────────────────────────
 function UserBubble({ msg }: { msg: ChatMessage }) {
   return (
-    <div className='flex justify-end px-1 py-1'>
+    <div className='flex justify-end px-1 py-1' data-testid='user-bubble'>
       <div className='max-w-[82%] space-y-1.5'>
         {msg.attachments?.map((att, i) =>
           att.type.startsWith('image/') ? (
@@ -411,7 +484,6 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
           )
         )}
       </div>
-      <p className='mt-0.5 text-[10px] text-zinc-600'>{msg.timestamp}</p>
     </div>
   )
 }
@@ -420,10 +492,11 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
 interface ShellCardProps {
   msg: ChatMessage
   isRunning?: boolean
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
 }
 
-function ShellCard({ msg, isRunning }: ShellCardProps) {
-  const [expanded, setExpanded] = useState(isRunning ?? false)
+function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProps) {
   const outputRef = useRef<HTMLPreElement>(null)
 
   const toolLabel = (msg.toolName ?? 'shell').replace(/_/g, ' ')
@@ -435,10 +508,10 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
   const prevRunning = useRef(isRunning)
   useEffect(() => {
     if (prevRunning.current === isRunning) return
-    if (isRunning) setExpanded(true)
-    if (!isRunning && prevRunning.current) setExpanded(false)
+    if (isRunning) onExpandedChange(true)
+    if (!isRunning && prevRunning.current) onExpandedChange(false)
     prevRunning.current = isRunning
-  }, [isRunning])
+  }, [isRunning, onExpandedChange])
 
   // Auto-scroll output while running
   useEffect(() => {
@@ -464,7 +537,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
     return (
       <button
         type='button'
-        onClick={() => setExpanded(true)}
+        onClick={() => onExpandedChange(true)}
         className='flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-[#1a1a1a] group'
       >
         {statusDot}
@@ -488,7 +561,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
       {/* Terminal header bar */}
       <button
         type='button'
-        onClick={() => setExpanded(false)}
+        onClick={() => onExpandedChange(false)}
         className='flex w-full items-center gap-2.5 border-b border-[#1e1e1e] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
       >
         {/* Traffic-light dots */}
@@ -532,10 +605,11 @@ interface ThinkingRowProps {
   stepId: string
   reasoningText: string
   isStreaming: boolean
+  open: boolean
+  onToggle: () => void
 }
 
-function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRowProps) {
-  const [open, setOpen] = useState(false)
+function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onToggle }: ThinkingRowProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -548,7 +622,7 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
     <div className='my-0.5'>
       <button
         type='button'
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className='flex items-center gap-2 rounded-xl px-3 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
       >
         {isStreaming ? (
@@ -661,115 +735,95 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
   )
 }
 
-// ─── UserInputCard — Codex-style numbered options + always-visible text field ─
-// Mirrors Codex ask-questions UI: numbered list of selectable options, free-type
-// field always visible at the bottom (4th option becomes text input on click).
+// ─── UserInputCard — inline quick-reply + custom reply slot ───────────────────
 function UserInputCard({
-  question, options, requestId, onRespond,
-}: { question: string; options: string[]; requestId: string; onRespond: (answer: string, requestId: string) => void }) {
-  const [selected, setSelected] = useState<number | null>(null)
+  question, options, requestId, answered, onRespond,
+}: {
+  question: string
+  options: string[]
+  requestId: string
+  answered: boolean
+  onRespond: (answer: string, requestId: string) => void
+}) {
+  const [customMode, setCustomMode] = useState(false)
   const [customText, setCustomText] = useState('')
-  const [answered, setAnswered] = useState<string | null>(null)
 
-  const handleSelect = (idx: number, opt: string) => {
-    setSelected(idx)
-    // Last option or "other" style options open free-text; all others auto-continue
-    const isOtherOption = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
-    if (!isOtherOption) {
-      // Send immediately on Continue click; just select for now
-    }
+  const promptOptions = options.length > 0 ? options : ['Continue']
+  const customSlotLabel = 'Type your own answer'
+
+  const handleQuickReply = (opt: string) => {
+    onRespond(opt, requestId)
   }
 
-  const handleContinue = () => {
-    if (selected === null && !customText.trim()) return
-    let answer: string
-    if (customText.trim()) {
-      answer = customText.trim()
-    } else if (selected !== null && options[selected]) {
-      answer = options[selected]
-    } else {
-      return
-    }
-    setAnswered(answer)
+  const handleCustomSend = () => {
+    const answer = customText.trim()
+    if (!answer) return
     onRespond(answer, requestId)
   }
 
   if (answered) {
     return (
       <div className='my-1.5 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2'>
-        <p className='text-xs text-zinc-500'>You answered: <span className='text-zinc-300'>{answered}</span></p>
+        <p className='text-xs text-zinc-500'>You answered this question.</p>
       </div>
     )
   }
 
   return (
-    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
-      {/* Question header */}
-      <div className='px-4 pt-4 pb-3'>
-        <p className='text-sm font-medium leading-snug text-zinc-100'>{question}</p>
+    <div className='my-2 rounded-xl border border-[#2a2a2a] bg-[#151515]'>
+      <div className='border-b border-[#242424] px-3 py-2'>
+        <p className='text-xs font-medium text-zinc-200'>Asking question</p>
+        <p className='mt-1 text-sm leading-snug text-zinc-100'>{question}</p>
       </div>
 
-      {/* Numbered option rows */}
-      <div className='space-y-px border-t border-[#222]'>
-        {options.map((opt, idx) => {
-          const isOther = opt.toLowerCase().includes('tell') || opt.toLowerCase().includes('choose') || opt.toLowerCase().includes('other')
-          const isSelected = selected === idx
-          return (
+      <div className='px-3 py-2'>
+        <div className='flex flex-wrap gap-2'>
+          {promptOptions.map((opt, idx) => (
             <button
-              key={idx}
+              key={`${opt}-${idx}`}
               type='button'
-              onClick={() => handleSelect(idx, opt)}
-              className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                isSelected
-                  ? 'bg-[#252525] text-zinc-100'
-                  : 'text-zinc-300 hover:bg-[#1e1e1e]'
-              }`}
+              onClick={() => handleQuickReply(opt)}
+              className='rounded-full border border-[#2f2f2f] bg-[#1d1d1d] px-3 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-[#252525]'
             >
-              <span className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-semibold transition-colors ${
-                isSelected ? 'border-zinc-400 bg-zinc-700 text-white' : 'border-zinc-700 text-zinc-600'
-              }`}>
-                {idx + 1}
-              </span>
-              <span className={`flex-1 text-xs font-medium ${isOther ? 'text-zinc-500' : ''}`}>{opt}</span>
-              {isSelected && !isOther && (
-                <IcoCheck className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
-              )}
+              {idx + 1}. {opt}
             </button>
-          )
-        })}
+          ))}
+          <button
+            type='button'
+            onClick={() => setCustomMode((prev) => !prev)}
+            className={`rounded-full border px-3 py-1.5 text-xs ${
+              customMode
+                ? 'border-blue-400/60 bg-blue-500/10 text-blue-300'
+                : 'border-[#2f2f2f] bg-[#1d1d1d] text-zinc-200 hover:border-zinc-500 hover:bg-[#252525]'
+            }`}
+          >
+            {promptOptions.length + 1}. {customSlotLabel}
+          </button>
+        </div>
       </div>
 
-      {/* Always-visible free-text field */}
-      <div className='border-t border-[#222] px-3 py-3'>
-        <input
-          type='text'
-          value={customText}
-          onChange={(e) => setCustomText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && customText.trim()) handleContinue() }}
-          placeholder='Or type your own answer…'
-          className='w-full rounded-xl border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors'
-        />
-      </div>
-
-      {/* Footer: dismiss + continue */}
-      <div className='flex items-center justify-end gap-2 border-t border-[#222] px-4 py-3'>
-        <button
-          type='button'
-          onClick={() => onRespond('dismissed', requestId)}
-          className='px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors'
-        >
-          Dismiss
-        </button>
-        <button
-          type='button'
-          onClick={handleContinue}
-          disabled={selected === null && !customText.trim()}
-          className='flex items-center gap-1.5 rounded-xl bg-[#2a7ae2] px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-        >
-          Continue
-          <span className='text-[10px] opacity-60'>&#9166;</span>
-        </button>
-      </div>
+      {customMode && (
+        <div className='border-t border-[#242424] px-3 py-2'>
+          <div className='flex items-center gap-2'>
+            <input
+              type='text'
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCustomSend() }}
+              placeholder='Type your answer...'
+              className='flex-1 rounded-lg border border-[#2a2a2a] bg-[#101010] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-blue-500/60'
+            />
+            <button
+              type='button'
+              onClick={handleCustomSend}
+              disabled={!customText.trim()}
+              className='rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -947,14 +1001,9 @@ interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
   onConnector: (connector: ConnectorMeta) => void
   onClose: () => void
-  enableReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'low' | 'medium' | 'high'
-  onChangeReasoningEffort?: (effort: 'low' | 'medium' | 'high') => void
-  modelSupportsReasoning?: boolean
 }
 
-function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleReasoning, reasoningEffort, onChangeReasoningEffort, modelSupportsReasoning }: PlusMenuProps) {
+function PlusMenu({ onAttach, onConnector, onClose }: PlusMenuProps) {
   const [connectors, setConnectors] = useState<ConnectorMeta[]>([])
   const [query, setQuery] = useState('')
 
@@ -994,39 +1043,6 @@ function PlusMenu({ onAttach, onConnector, onClose, enableReasoning, onToggleRea
             </button>
           ))}
         </div>
-
-        {modelSupportsReasoning && (
-          <>
-            <div className='mx-4 my-1 border-t border-[#2a2a2a]' />
-            <button type='button' onClick={() => onToggleReasoning?.(!enableReasoning)}
-              className='flex w-full items-center gap-4 rounded-xl px-3 py-2.5 text-left hover:bg-[#2a2a2a] transition-colors'>
-              <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#2a2a2a]'>
-                <svg className='h-5 w-5 text-zinc-200' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-                  <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
-                  <path d='M9 18h6' /><path d='M10 22h4' />
-                </svg>
-              </div>
-              <span className='flex-1 text-sm font-medium text-zinc-200'>Think harder</span>
-              {enableReasoning && (
-                <svg className='h-5 w-5 text-zinc-200 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round'>
-                  <path d='M20 6 9 17l-5-5' />
-                </svg>
-              )}
-            </button>
-            {enableReasoning && (
-              <div className='flex gap-1.5 px-3 pb-2'>
-                {(['low', 'medium', 'high'] as const).map((effort) => (
-                  <button key={effort} type='button' onClick={(e) => { e.stopPropagation(); onChangeReasoningEffort?.(effort) }}
-                    className={`flex-1 rounded-lg py-1 text-xs font-medium capitalize transition-colors ${
-                      reasoningEffort === effort ? 'bg-violet-600 text-white' : 'bg-[#2a2a2a] text-zinc-400 hover:text-zinc-200'
-                    }`}>
-                    {effort}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
 
         {connectors.length > 0 && (
           <>
@@ -1082,11 +1098,8 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
-  enableReasoning?: boolean
-  currentModelSupportsReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
+  planIntent?: boolean
   modelChipLabel?: string
-  effortChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
 }
@@ -1094,10 +1107,9 @@ interface InputBarCursorProps {
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick, onBrainstormClick,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
-  activeConnector, onRemoveConnector, hasAttachments, enableReasoning,
-  currentModelSupportsReasoning, onToggleReasoning,
+  activeConnector, onRemoveConnector, hasAttachments,
+  planIntent = false,
   modelChipLabel = 'GPT-5.4',
-  effortChipLabel = 'Standard',
   isLocalOnly = true,
   hasFullAccess = true,
 }: InputBarCursorProps) {
@@ -1161,7 +1173,12 @@ function InputBarCursor({
 
         {/* Plan button */}
         <button type='button' onClick={onPlanClick} disabled={isDisabled}
-          className='flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium'>
+          aria-pressed={planIntent}
+          className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium ${
+            planIntent
+              ? 'bg-blue-500/15 text-blue-300'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
+          }`}>
           <IcoPlan className='h-3.5 w-3.5' />
           Plan
         </button>
@@ -1213,9 +1230,8 @@ function InputBarCursor({
       </div>
 
       <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
-        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◉ Local' : '◻ Local'}</span>
-        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◻ Full access'}</span>
-        <span className='inline-flex items-center gap-1'>◉ Full access</span>
+        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◻ Local' : '◻ Remote'}</span>
+        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◉ Limited access'}</span>
       </div>
     </div>
   )
@@ -1230,7 +1246,6 @@ export function ChatPanel({
   connectionStatus,
   onSwitchToBrowser,
   latestFrame,
-  isBrowsing = false,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
@@ -1242,51 +1257,92 @@ export function ChatPanel({
   onPlanConfirm,
   onPlanReject,
   reasoningMap,
-  enableReasoning,
-  onToggleReasoning,
-  reasoningEffort,
-  onChangeReasoningEffort,
-  currentModelSupportsReasoning,
   contextSnapshot,
   userName,
+  subAgentNames = [],
+  browseHandoffPromptVisible = false,
+  onDismissBrowsePrompt,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [planIntent, setPlanIntent] = useState(false)
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
 
   // ── Conversation persistence ──────────────────────────────────────────────
   const CHAT_KEY = (id: string) => `aegis.chat.${id}`
+  const uiKey = (taskId: string | null | undefined) => `aegis.chat.ui.${taskId ?? 'none'}`
+  const emptyThreadUiState = (): ThreadUiState => ({
+    collapsedToolIds: [],
+    answeredUserInputIds: [],
+    openThinkingIds: [],
+  })
   const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
     if (!id) return
     try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
   }
 
   const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
-  const prevTaskIdRef    = useRef(activeTaskId)
-  const prevServerLenRef = useRef(0)
+  const [threadUi, setThreadUi] = useState<ThreadUiState>(emptyThreadUiState)
+  const [threadReady, setThreadReady] = useState(false)
+
+  const serverThreadSignature = useMemo(() => {
+    const id = activeTaskId ?? 'no-task'
+    const msgSig = serverMessages
+      .map((m) => `${m.id}:${m.role}:${m.created_at ?? ''}:${m.content}`)
+      .join('|')
+    return `${id}::${msgSig}`
+  }, [activeTaskId, serverMessages])
 
   useEffect(() => {
-    const taskChanged   = prevTaskIdRef.current !== activeTaskId
-    const serverArrived = prevServerLenRef.current === 0 && serverMessages.length > 0
-    prevTaskIdRef.current    = activeTaskId
-    prevServerLenRef.current = serverMessages.length
-    if (!taskChanged && !serverArrived) return
+    try {
+      const raw = localStorage.getItem(uiKey(activeTaskId))
+      if (raw) setThreadUi(JSON.parse(raw) as ThreadUiState)
+      else setThreadUi(emptyThreadUiState())
+    } catch {
+      setThreadUi(emptyThreadUiState())
+    }
+  }, [activeTaskId])
+
+  useEffect(() => {
+    if (!activeTaskId) return
+    try {
+      localStorage.setItem(uiKey(activeTaskId), JSON.stringify(threadUi))
+    } catch {
+      // ignore localStorage quota/read-only errors
+    }
+  }, [activeTaskId, threadUi])
+
+  useEffect(() => {
     if (serverMessages.length > 0) {
-      setSentMessages(
-        serverMessages.map((m) => ({
-          id: m.id,
-          role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
-          text: m.content,
-          timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
-          attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
-            ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
-            : undefined,
-        }))
-      )
-    } else if (taskChanged) {
+      const mapped = serverMessages.map((m) => ({
+        id: m.id,
+        role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
+        text: m.content,
+        timestamp:
+          m.role === 'assistant'
+            ? undefined
+            : m.created_at
+              ? new Date(m.created_at).toLocaleTimeString()
+              : new Date().toLocaleTimeString(),
+        attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
+          ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
+          : undefined,
+      }))
+      const serverUserTexts = new Set(mapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+      setSentMessages((prev) => {
+        const optimistic = prev.filter(
+          (m) => m.role === 'user' && String(m.id).startsWith('local-') && !serverUserTexts.has((m.text ?? '').trim()),
+        )
+        return [...optimistic, ...mapped]
+      })
+    } else {
       setSentMessages([])
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId, serverMessages.length])
+  }, [serverThreadSignature, serverMessages])
+
+  useEffect(() => {
+    setThreadReady(false)
+    queueMicrotask(() => setThreadReady(true))
+  }, [serverThreadSignature])
 
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
@@ -1344,28 +1400,103 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
-  const baseMessages = useMemo(() => logsToMessages(logs).filter((m) => m.role !== 'user'), [logs])
+  const [thinkingMessages, setThinkingMessages] = useState<PersistedThinkingMessage[]>([])
+  const [openThinkingIds, setOpenThinkingIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    setThinkingMessages(readPersistedThinking(activeTaskId))
+    if (!activeTaskId) {
+      setOpenThinkingIds(new Set())
+      return
+    }
+    try {
+      const raw = localStorage.getItem(OPEN_THINKING_KEY(activeTaskId))
+      const parsed = raw ? JSON.parse(raw) : []
+      const openIds = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+      setOpenThinkingIds(new Set(openIds))
+    } catch {
+      setOpenThinkingIds(new Set())
+    }
+  }, [activeTaskId])
+
+  useEffect(() => {
+    const persisted = readPersistedThinking(activeTaskId)
+    if (!activeTaskId) {
+      setThinkingMessages(persisted)
+      return
+    }
+    const runtimeRows = Object.entries(reasoningMap ?? {}).map(([stepId, text]) => ({
+      id: `thinking-${activeTaskId}-${stepId}`,
+      role: 'thinking' as const,
+      taskId: activeTaskId,
+      stepId,
+      status: 'streaming' as const,
+      text,
+      updatedAt: new Date().toISOString(),
+    }))
+    const byStep = new Map<string, PersistedThinkingMessage>()
+    for (const item of persisted) byStep.set(item.stepId, item)
+    for (const item of runtimeRows) {
+      const existing = byStep.get(item.stepId)
+      byStep.set(item.stepId, {
+        ...item,
+        text: item.text || existing?.text || '',
+        status: existing?.status ?? item.status,
+        updatedAt: existing?.updatedAt ?? item.updatedAt,
+      })
+    }
+    const merged = Array.from(byStep.values()).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+    setThinkingMessages(merged)
+  }, [activeTaskId, reasoningMap, isWorking])
+
+  const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
     if (sentMessages.length > 500) setSentMessages((prev) => prev.slice(-500))
   }, [sentMessages.length])
 
-  const allMessages = useMemo(() => [...sentMessages, ...baseMessages], [sentMessages, baseMessages])
-  const latestThinkingId = useMemo(() => {
-    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
-      if (allMessages[i].role === 'thinking') return allMessages[i].id
-    }
-    return null
-  }, [allMessages])
+  const thinkingRows = useMemo<ChatMessage[]>(() => {
+    return thinkingMessages.map((item) => ({
+      id: item.id,
+      role: 'thinking',
+      text: item.text,
+      stepId: item.stepId,
+      metadata: { status: item.status },
+    }))
+  }, [thinkingMessages])
+
+  const allMessages = useMemo(() => {
+    const baseUserTexts = new Set(
+      baseMessages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.text.trim())
+        .filter(Boolean),
+    )
+    const mergedSentMessages = sentMessages.filter((m) => {
+      if (m.role !== 'user') return true
+      if ((m.metadata as { source?: string } | undefined)?.source !== 'ask_user_input') return true
+      return !baseUserTexts.has(m.text.trim())
+    })
+
+    const seenUserTexts = new Set(mergedSentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+    const dedupedBase = baseMessages.filter((m) => {
+      if (m.role === 'thinking') return false
+      if (m.role !== 'user') return true
+      const key = m.text.trim()
+      if (!key) return true
+      if (seenUserTexts.has(key)) return false
+      seenUserTexts.add(key)
+      return true
+    })
+    return [...thinkingRows, ...mergedSentMessages, ...dedupedBase]
+  }, [sentMessages, baseMessages, thinkingRows])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allMessages.length, activeTaskId])
 
-  // Show the browsing banner when: the agent is actively browsing (isBrowsing prop),
-  // OR when there's already a live frame (backward-compat with old callers).
-  const showBrowseBanner = isBrowsing || (isWorking && Boolean(latestFrame))
+  const showBrowsePill = browseHandoffPromptVisible && isWorking && latestFrame
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1384,10 +1515,29 @@ export function ChatPanel({
     resizeTextarea()
   }
 
-  const handleSend = () => {
+  const mentionQuery = useMemo(() => {
+    const match = input.match(/@([a-zA-Z0-9._-]*)$/)
+    return match ? match[1].toLowerCase() : null
+  }, [input])
+
+  const mentionOptions = useMemo(() => {
+    if (mentionQuery === null) return []
+    return subAgentNames
+      .filter((name) => name.toLowerCase().includes(mentionQuery))
+      .slice(0, 6)
+  }, [mentionQuery, subAgentNames])
+
+  const handleMentionPick = (name: string) => {
+    setInput((prev) => prev.replace(/@([a-zA-Z0-9._-]*)$/, `@${name} `))
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  const handleSend = (forcePlan = false) => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
-    const withContext = activeConnector ? `[${activeConnector.name}] ${trimmed}` : trimmed
+    const parsed = resolveComposerSubmission(trimmed, forcePlan || planIntent)
+    const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
+    const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const localMsg: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
@@ -1401,8 +1551,8 @@ export function ChatPanel({
       saveMsgs(activeTaskId, next)
       return next
     })
-    if (withContext.startsWith('/plan ')) {
-      onDecomposePlan(withContext.slice(6))
+    if (parsed.mode === 'plan' && withContext) {
+      onDecomposePlan(withContext)
     } else {
       onSend(withContext || '(attachment)', 'steer', {
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -1410,9 +1560,12 @@ export function ChatPanel({
           ? { id: activeConnector.id, name: activeConnector.name }
           : undefined,
         context_snapshot: contextSnapshot ?? undefined,
+        task_label_source: 'chat',
+        task_label: withContext || '(attachment)',
       })
     }
     setInput('')
+    setPlanIntent(false)
     setAttachments([])
     setActiveConnector(null)
     if (textareaRef.current) { textareaRef.current.style.height = 'auto' }
@@ -1424,8 +1577,11 @@ export function ChatPanel({
 
   const handlePlanClick = () => {
     const prompt = input.trim()
-    if (prompt) { onDecomposePlan(prompt); setInput('') }
-    else setInput('/plan ')
+    if (prompt) {
+      handleSend(true)
+    } else {
+      setPlanIntent((prev) => !prev)
+    }
     textareaRef.current?.focus()
   }
 
@@ -1464,6 +1620,65 @@ export function ChatPanel({
 
   const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onSend('approved', 'steer') }
   const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onSend('rejected', 'steer') }
+  const setToolCollapsed = useCallback((toolId: string, collapsed: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.collapsedToolIds)
+      if (collapsed) next.add(toolId)
+      else next.delete(toolId)
+      return { ...prev, collapsedToolIds: Array.from(next) }
+    })
+  }, [])
+  const setUserInputAnswered = useCallback((requestId: string) => {
+    setThreadUi((prev) => {
+      if (prev.answeredUserInputIds.includes(requestId)) return prev
+      return { ...prev, answeredUserInputIds: [...prev.answeredUserInputIds, requestId] }
+    })
+  }, [])
+  const setThinkingOpen = useCallback((thinkingId: string, open: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.openThinkingIds)
+      if (open) next.add(thinkingId)
+      else next.delete(thinkingId)
+      return { ...prev, openThinkingIds: Array.from(next) }
+    })
+  }, [])
+
+  const handleUserInputReply = (answer: string, requestId: string) => {
+    const trimmed = answer.trim()
+    if (!trimmed) return
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    setSentMessages((prev) => {
+      const next: ChatMessage[] = [
+        ...prev,
+        {
+          id: `local-${crypto.randomUUID()}`,
+          role: 'user',
+          text: trimmed,
+          timestamp: now,
+          metadata: { source: 'ask_user_input', request_id: requestId },
+        },
+      ]
+      saveMsgs(activeTaskId, next)
+      return next
+    })
+    setUserInputAnswered(requestId)
+    onUserInputResponse?.(trimmed, requestId)
+  }
+
+  const handleToggleThinkingOpen = useCallback((stepId: string) => {
+    if (!activeTaskId || !stepId) return
+    setOpenThinkingIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      try {
+        localStorage.setItem(OPEN_THINKING_KEY(activeTaskId), JSON.stringify(Array.from(next)))
+      } catch {
+        // ignore localStorage write failures
+      }
+      return next
+    })
+  }, [activeTaskId])
 
   const isDisabled = connectionStatus !== 'connected'
 
@@ -1472,65 +1687,44 @@ export function ChatPanel({
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
   const modelChipLabel = 'GPT-5.4'
-  const effortChipLabel = reasoningEffort ? `${reasoningEffort[0].toUpperCase()}${reasoningEffort.slice(1)} effort` : 'Standard'
   const isLocalOnly = true
   const hasFullAccess = true
 
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
 
-      {/* ── Browsing banner ────────────────────────────────────────────────── */}
-      {/* Sticky top banner that appears when the agent is executing browser   */}
-      {/* actions. Stays clean — does not flood the chat thread with log spam. */}
-      {showBrowseBanner && (
-        <div className='flex-shrink-0 border-b border-[#1e1e1e] bg-[#0d1626]/80 px-4 py-2.5 backdrop-blur-sm'>
-          <div className='flex items-center gap-3'>
-            {/* Live pulse dot */}
-            <span className='relative flex h-2.5 w-2.5 flex-shrink-0'>
-              <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60' />
-              <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500' />
-            </span>
-
-            {/* Label */}
-            <div className='flex-1 min-w-0'>
-              <span className='text-xs font-medium text-blue-300'>Agent is browsing</span>
-              <span className='mx-1.5 text-blue-500/50'>·</span>
-              <span className='text-xs text-zinc-500'>Results will appear here when done</span>
-            </div>
-
-            {/* CTA */}
+      {/* Browsing pill */}
+      {showBrowsePill && (
+        <div className='flex justify-center pt-2 px-4'>
+          <div className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 shadow-md'>
             <button
               type='button'
               onClick={onSwitchToBrowser}
-              className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300 transition-all hover:border-blue-400/50 hover:bg-blue-500/20 hover:text-blue-200 active:scale-95'
+              className='flex items-center gap-2 rounded-full px-1 py-0.5 text-xs font-medium text-blue-300 hover:text-blue-100 transition-colors'
             >
-              <IcoGlobe className='h-3 w-3' />
-              Watch live
+              <IcoGlobe className='h-3.5 w-3.5' />
+              Agent is browsing — Switch to Browser
+            </button>
+            <button
+              type='button'
+              onClick={onDismissBrowsePrompt}
+              className='rounded-full border border-blue-400/30 px-1.5 py-0.5 text-[10px] text-blue-200/80 hover:text-blue-100'
+              title='Dismiss'
+              aria-label='Dismiss browse switch prompt'
+            >
+              Dismiss
             </button>
           </div>
-
-          {/* Thumbnail strip — shows latest frame as a tiny preview */}
-          {latestFrame && (
-            <button
-              type='button'
-              onClick={onSwitchToBrowser}
-              className='mt-2 block w-full overflow-hidden rounded-lg border border-[#2a2a2a] transition-opacity hover:opacity-80'
-              aria-label='Switch to browser view'
-            >
-              <img
-                src={latestFrame}
-                alt='Live browser preview'
-                className='h-16 w-full object-cover object-top'
-              />
-            </button>
-          )}
         </div>
       )}
 
       {/* Messages */}
       <div className='flex-1 overflow-y-auto px-3 py-3 space-y-0.5'>
+        {!threadReady && (
+          <div className='flex-1 px-3 py-3 text-xs text-zinc-500'>Loading thread…</div>
+        )}
 
-        {allMessages.length === 0 && (
+        {threadReady && allMessages.length === 0 && (
           <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-4'>
             <div className='flex h-12 w-12 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
               <IcoMessage className='h-5 w-5 text-zinc-500' />
@@ -1550,14 +1744,23 @@ export function ChatPanel({
           </div>
         )}
 
-        {allMessages.map((msg) => {
+        {threadReady && allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
 
           // Tool calls → ShellCard (collapsed accordion by default when done, open while running)
           if (msg.role === 'tool') {
             const isLive = isWorking && msg.toolStatus === 'in_progress'
-            return <ShellCard key={msg.id} msg={msg} isRunning={isLive} />
+            const collapsed = threadUi.collapsedToolIds.includes(msg.id)
+            return (
+              <ShellCard
+                key={msg.id}
+                msg={msg}
+                isRunning={isLive}
+                expanded={isLive || !collapsed}
+                onExpandedChange={(expanded) => setToolCollapsed(msg.id, !expanded)}
+              />
+            )
           }
 
           if (msg.role === 'approval') {
@@ -1608,11 +1811,22 @@ export function ChatPanel({
 
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
-            const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
-            const isStreaming = isWorking && msg.id === latestThinkingId
+            const hasStructuredState = Boolean(stepId && thinkingMessages.find((item) => item.stepId === stepId))
+            const reasoningText = hasStructuredState
+              ? (reasoningMap?.[stepId] ?? msg.text ?? '')
+              : ''
+            const status = (msg.metadata as { status?: ThinkingState; placeholder?: boolean } | undefined)?.status
+            const placeholder = Boolean((msg.metadata as { placeholder?: boolean } | undefined)?.placeholder)
+            const isStreaming = placeholder || status !== 'completed'
             return (
               <div key={msg.id} className='px-1'>
-                <ThinkingRow stepId={stepId} reasoningText={reasoningText} isStreaming={isStreaming} />
+                <ThinkingRow
+                  stepId={stepId}
+                  reasoningText={reasoningText}
+                  isStreaming={isStreaming}
+                  open={openThinkingIds.has(stepId)}
+                  onToggle={() => handleToggleThinkingOpen(stepId)}
+                />
               </div>
             )
           }
@@ -1661,17 +1875,27 @@ export function ChatPanel({
 
       {/* Input area */}
       <div className='relative border-t border-[#1e1e1e] bg-[#111] px-3 py-3'>
+        {mentionOptions.length > 0 && (
+          <div className='mb-2 rounded-xl border border-[#2a2a2a] bg-[#141414] p-1.5'>
+            {mentionOptions.map((name) => (
+              <button
+                key={name}
+                type='button'
+                onClick={() => handleMentionPick(name)}
+                className='flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-xs text-zinc-300 hover:bg-[#1f1f1f]'
+              >
+                <span>@{name}</span>
+                <span className='text-zinc-600'>tag sub-agent</span>
+              </button>
+            ))}
+          </div>
+        )}
         {/* Plus menu */}
         {showPlusMenu && (
           <PlusMenu
             onAttach={handleAttach}
             onConnector={handleConnectorSelect}
             onClose={() => setShowPlusMenu(false)}
-            enableReasoning={enableReasoning}
-            onToggleReasoning={onToggleReasoning}
-            reasoningEffort={reasoningEffort}
-            onChangeReasoningEffort={onChangeReasoningEffort}
-            modelSupportsReasoning={currentModelSupportsReasoning}
           />
         )}
 
@@ -1701,11 +1925,8 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
-          enableReasoning={enableReasoning}
-          currentModelSupportsReasoning={currentModelSupportsReasoning}
-          onToggleReasoning={onToggleReasoning}
+          planIntent={planIntent}
           modelChipLabel={modelChipLabel}
-          effortChipLabel={effortChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
         />

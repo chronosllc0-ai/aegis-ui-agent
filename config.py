@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     FIREWORKS_API_KEY: str = ""
     BRAVE_SEARCH_API_KEY: str = ""  # Brave Search API key for the built-in web_search tool
+    VIRUSTOTAL_API_KEY: str = ""
 
     # ── Platform-level agent instruction (admin-only) ─────────────────
     # Injected at the top of every agent system prompt on every session.
@@ -104,6 +106,15 @@ class Settings(BaseSettings):
     # ── Railway / Deployment ─────────────────────────────────────────
     RAILWAY_ENVIRONMENT: str = ""
     RAILWAY_PUBLIC_DOMAIN: str = ""
+    VIRUSTOTAL_TIMEOUT_SECONDS: int = 30
+    VIRUSTOTAL_MAX_FILE_BYTES: int = 1048576
+    VIRUSTOTAL_POLL_INTERVAL_SECONDS: int = 5
+    VIRUSTOTAL_MAX_POLLS: int = 12
+    VIRUSTOTAL_REQUIRED: bool = False
+    SKILLS_MAX_TOKENS: int = 10_000
+    SKILLS_MIN_PRIORITY: int | None = None
+    # Backward-compatible singular alias requested in some deployments.
+    SKILLS_MAX_TOKEN: int = Field(default=10_000, validation_alias="SKILLS_MAX_TOKEN")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

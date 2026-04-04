@@ -37,6 +37,8 @@ import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
+import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
+import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
@@ -47,6 +49,10 @@ type TaskHistoryItem = {
   title: string
   dateLabel: string
   instruction: string
+  labelSource?: 'browser' | 'chat' | 'system'
+}
+function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
+  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
 }
 const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
@@ -69,7 +75,6 @@ const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().repla
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
-
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
@@ -118,6 +123,9 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>('browser')
+  const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
+  const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
+  const prevIsWorkingRef = useRef(false)
   // Use case page routing
   const [activeUseCaseId, setActiveUseCaseId] = useState<string | null>(null)
   // draftInput reserved for future InputBar onChange wiring
@@ -207,8 +215,52 @@ function App() {
     setUrlInput(currentUrl)
   }, [currentUrl])
 
+  // Split-surface UX helpers:
+  // 1) Contextual handoff prompt when browsing starts while user is in chat mode.
+  // 2) Optional auto-return to chat when the task completes.
+  useEffect(() => {
+    const wasWorking = prevIsWorkingRef.current
+    const startedWorking = !wasWorking && isWorking
+    const finishedWorking = wasWorking && !isWorking
+    prevIsWorkingRef.current = isWorking
+
+    if (!settings.separateExecutionSurfaces) {
+      setShowBrowseHandoffPrompt(false)
+      return
+    }
+
+    if (startedWorking && appMode === 'chat' && settings.promptToSwitchOnBrowse) {
+      const activeTaskId = activeTaskIdRef.current
+      if (activeTaskId && !promptShownTaskIdsRef.current.has(activeTaskId)) {
+        promptShownTaskIdsRef.current.add(activeTaskId)
+        setShowBrowseHandoffPrompt(true)
+      }
+    }
+
+    if (finishedWorking) {
+      setShowBrowseHandoffPrompt(false)
+      if (appMode === 'browser' && settings.autoReturnToChat) {
+        setAppMode('chat')
+        addNotification({
+          type: 'info',
+          title: 'Task complete',
+          message: 'Browsing finished. Returned you to chat.',
+          source: 'websocket',
+        })
+      }
+    }
+  }, [
+    isWorking,
+    appMode,
+    settings.separateExecutionSurfaces,
+    settings.promptToSwitchOnBrowse,
+    settings.autoReturnToChat,
+    activeTaskIdRef,
+    addNotification,
+  ])
+
   // ── Browser tab title: Working… / Steering… / Aegis ──────────────
-  const titleTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const titleTimeoutRef = useRef<number | null>(null)
   const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
   useEffect(() => {
     if (!isWorking) { setTitleMode('idle'); return }
@@ -371,8 +423,9 @@ function App() {
     if (!activeConversationId) return
     const taskId = activeTaskIdRef.current
     taskToConvRef.current.set(taskId, activeConversationId)
-    onNewConversationId(activeConversationId, undefined)
-  }, [activeConversationId, activeTaskIdRef, onNewConversationId])
+    const localTask = taskHistory.find((item) => item.id === taskId)
+    onNewConversationId(activeConversationId, localTask?.title)
+  }, [activeConversationId, activeTaskIdRef, onNewConversationId, taskHistory])
 
   // When the selected task changes, load messages from server for that conversation
   // ── Seed taskHistory from server conversations so history survives refresh ──
@@ -381,26 +434,47 @@ function App() {
   useEffect(() => {
     if (!conversations.length) return
     setTaskHistory((prev) => {
-      const existingIds = new Set(prev.map((t) => t.id))
-      const toAdd: TaskHistoryItem[] = []
+      const byId = new Map(prev.map((item) => [item.id, item]))
+      const next = [...prev]
+
       for (const conv of conversations) {
-        if (!existingIds.has(conv.id)) {
-          const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
-          const today = new Date()
-          const yesterday = new Date(today)
-          yesterday.setDate(today.getDate() - 1)
-          let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
-          if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
-          else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
-          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '' })
+        const existing = byId.get(conv.id)
+        if (existing) {
+          const mergedTitle = mergeTitlePreferMeaningful(
+            existing.title,
+            conv.title,
+            existing.instruction || existing.title,
+          )
+          if (mergedTitle !== existing.title) {
+            const idx = next.findIndex((item) => item.id === conv.id)
+            if (idx >= 0) next[idx] = { ...next[idx], title: mergedTitle }
+          }
+          continue
         }
+
+        const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
+        const today = new Date()
+        const yesterday = new Date(today)
+        yesterday.setDate(today.getDate() - 1)
+        let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
+        else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
+
+        const fallbackInstruction = deriveTitleFromInstruction(conv.title)
+        next.unshift({
+          id: conv.id,
+          title: mergeTitlePreferMeaningful(undefined, conv.title, fallbackInstruction),
+          dateLabel,
+          instruction: isPlaceholderTitle(conv.title) ? fallbackInstruction : (conv.title ?? ''),
+          labelSource: 'system',
+        })
       }
-      if (!toAdd.length) return prev
-      const merged = [...toAdd, ...prev].slice(0, 200) // keep max 200
+
+      const merged = next.slice(0, 200)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(merged)) } catch { /* quota */ }
       return merged
     })
-  }, [conversations])
+  }, [authUser?.uid, conversations])
 
   useEffect(() => {
     if (!selectedTaskId) { setServerMessages([]); return }
@@ -422,6 +496,11 @@ function App() {
   const filteredHistory = useMemo(
     () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
     [historySearch, taskHistory],
+  )
+
+  const taskLabels = useMemo(
+    () => Object.fromEntries(taskHistory.map((item) => [item.id, item.title])),
+    [taskHistory],
   )
 
   const scopedSubAgents = useMemo(() => {
@@ -515,14 +594,8 @@ function App() {
     return result
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
-  // ── Browser activity detection ──────────────────────────────────────────
-  // True when any log in the current task contains browser execution steps.
-  // Drives the "Agent is browsing" banner in ChatPanel and auto-mode switches.
-  const hasBrowserActivity = useMemo(
-    () => enrichedLogs.some(
-      (l) => l.stepKind === 'click' || l.stepKind === 'type' || l.stepKind === 'scroll' ||
-             (l.stepKind === 'navigate' && l.elapsedSeconds > 0),
-    ),
+  const actionLogEntries = useMemo(
+    () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
 
@@ -558,6 +631,10 @@ function App() {
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
+    const mentionMatches = [...trimmed.matchAll(/@([a-zA-Z0-9._-]+)/g)].map((m) => m[1].toLowerCase())
+    const mentionedAgents = subAgents.filter((agent) => mentionMatches.includes(subAgentDisplayName(agent).toLowerCase()))
+    const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
+    const finalInstruction = cleanedInstruction || trimmed
 
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
@@ -565,18 +642,25 @@ function App() {
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: trimmed, metadata })
+      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: trimmed, metadata })
+      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
     const action = isWorking ? 'steer' : 'navigate'
-    send({ action, instruction: trimmed, metadata })
+    const activeSubAgent = subAgents.find((a) => a.sub_id === selectedTaskId)
+    if (activeSubAgent) {
+      void messageSubAgent(activeSubAgent.sub_id, finalInstruction)
+      return
+    }
+
+    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // ── Update browser tab title for steering state ────────────────
     if (action === 'steer') {
@@ -602,7 +686,11 @@ function App() {
         : `pending-${crypto.randomUUID()}`
       const now = new Date()
       const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      const newEntry = { id: taskId, title: trimmed, dateLabel, instruction: trimmed }
+      const labelSource = metadata?.task_label_source === 'browser' ? 'browser' : 'chat'
+      const lockedTitle = typeof metadata?.task_label === 'string' && metadata.task_label.trim()
+        ? metadata.task_label.trim()
+        : finalInstruction
+      const newEntry: TaskHistoryItem = { id: taskId, title: lockedTitle, dateLabel, instruction: finalInstruction, labelSource }
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
@@ -617,7 +705,7 @@ function App() {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, isWorking ? 'steer' : mode)
+    handleSend(normalized, isWorking ? 'steer' : mode, { task_label_source: 'browser', task_label: normalized })
   }
 
   const handleDecomposePlan = async (prompt: string) => {
@@ -820,11 +908,12 @@ function App() {
         {sidebarOpen && (
           <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
         )}
-        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
-          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium'>
-            New Task
+        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-gradient-to-b from-[#1a1f2d] via-[#191b26] to-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
+          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
+            ⌁ New thread
           </button>
-          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task history' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
+          <button type='button' onClick={() => setShowAutomations(true)} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/30 px-3 py-2 text-left text-sm text-zinc-400'>◷ Automations</button>
+          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Threads' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
           {/* ── Task list — Codex-style text-only threads ── */}
           <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
@@ -845,9 +934,9 @@ function App() {
                             <button
                               type='button'
                               onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }}
-                              className={`flex-1 min-w-0 rounded-lg px-2 py-1.5 text-left transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#1e1e1e]'}`}
+                              className={`flex-1 min-w-0 px-2 py-1 text-left transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
                             >
-                              <p className={`truncate text-xs font-medium ${isActive ? 'text-zinc-100' : ''}`}>
+                              <p className={`truncate text-sm font-normal ${isActive ? 'text-zinc-100' : ''}`}>
                                 {item.title || item.instruction.slice(0, 40) || 'Untitled'}
                               </p>
                             </button>
@@ -868,20 +957,21 @@ function App() {
                               {agentsForTask.map((agent, aIdx) => {
                                 const nameColors = ['text-orange-400','text-green-400','text-sky-400','text-violet-400','text-rose-400']
                                 const nc = nameColors[aIdx % nameColors.length]
-                                const taskTitle = agent.instruction.split(' ').slice(0, 5).join(' ').slice(0, 30) || 'Sub-task'
+                                const taskTitle = agent.instruction.split(' ').slice(0, 6).join(' ').slice(0, 36) || 'Sub-task'
                                 const isLive = agent.status === 'spawning' || agent.status === 'running'
+                                const shortName = subAgentDisplayName(agent).slice(0, 12) || `Agent ${aIdx + 1}`
                                 return (
                                   <button
                                     key={agent.sub_id}
                                     type='button'
                                     onClick={() => { setSelectedTaskId(agent.sub_id); setSidebarOpen(false) }}
-                                    className={`flex w-full items-baseline gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[#1e1e1e] ${selectedTaskId === agent.sub_id ? 'bg-[#1e1e1e]' : ''}`}
+                                    className={`flex w-full items-baseline gap-1.5 px-2 py-1 text-left transition-colors ${selectedTaskId === agent.sub_id ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
                                   >
-                                    <span className='truncate text-[11px] text-zinc-500 flex-1'>
-                                      {taskTitle}{taskTitle.length < agent.instruction.length ? '…' : ''}
+                                    <span className={`text-[11px] font-semibold flex-shrink-0 ${nc} ${isLive ? 'agent-name-shimmer' : ''}`}>
+                                      {shortName}
                                     </span>
-                                    <span className={`text-[10px] font-semibold flex-shrink-0 ${nc} ${isLive ? 'agent-name-shimmer' : ''}`}>
-                                      {agent.instruction.split(' ').slice(0, 2).join(' ').slice(0, 12) || `Agent ${aIdx + 1}`}
+                                    <span className='truncate text-[11px] flex-1'>
+                                      — {taskTitle}{taskTitle.length < agent.instruction.length ? '…' : ''}
                                     </span>
                                   </button>
                                 )
@@ -1030,9 +1120,8 @@ function App() {
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
-                onSwitchToBrowser={() => setAppMode('browser')}
+                onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setAppMode('browser') }}
                 latestFrame={latestFrame}
-                isBrowsing={isBrowsing}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
@@ -1054,6 +1143,9 @@ function App() {
                   modelId: contextMeter.current.modelId,
                   isCompacting: contextMeter.isCompacting,
                 }}
+                subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
+                browseHandoffPromptVisible={settings.separateExecutionSurfaces && showBrowseHandoffPrompt}
+                onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
@@ -1072,7 +1164,7 @@ function App() {
 
                 {/* Action log - stacked below the browser, full width on all screen sizes */}
                 <div className='h-40 min-h-0 shrink-0 sm:h-48'>
-                  <ActionLog entries={enrichedLogs} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
+                  <ActionLog entries={actionLogEntries} taskLabels={taskLabels} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
                 </div>
               </div>
             )}

@@ -173,6 +173,87 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
+class Skill(Base):
+    """User/admin-submitted skill definition with moderation lifecycle state."""
+
+    __tablename__ = "skills"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    slug = Column(String(120), nullable=False, unique=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, default="")
+    owner_user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    owner_type = Column(String(20), nullable=False, default="user")  # admin|user
+    status = Column(String(40), nullable=False, default="draft")
+    visibility = Column(String(20), nullable=False, default="private")
+    risk_label = Column(String(20), nullable=False, default="medium")
+    is_new = Column(Boolean, nullable=False, default=False)
+    new_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillVersion(Base):
+    """Immutable version snapshot of a skill submission."""
+
+    __tablename__ = "skill_versions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    storage_url = Column(Text, nullable=False)
+    metadata_json = Column(Text, nullable=False)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillScanResult(Base):
+    """Security/policy scan output for an immutable skill version."""
+
+    __tablename__ = "skill_scan_results"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    engine = Column(String(40), nullable=False)  # virustotal|policy
+    verdict = Column(String(30), nullable=False)
+    score = Column(Float, nullable=False, default=0.0)
+    raw_json = Column(Text)
+    report_url = Column(Text)
+    scanned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillReview(Base):
+    """Human moderation decision on a skill version."""
+
+    __tablename__ = "skill_reviews"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    reviewer_admin_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    decision = Column(String(40), nullable=False)
+    notes = Column(Text)
+    reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillPublishEvent(Base):
+    """Immutable audit trail for skill status transitions."""
+
+    __tablename__ = "skill_publish_events"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    from_status = Column(String(40), nullable=False)
+    to_status = Column(String(40), nullable=False)
+    actor_id = Column(String(255), nullable=False, index=True)
+    actor_type = Column(String(20), nullable=False)
+    reason = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class ImpersonationSession(Base):
     """Track when admins impersonate user accounts."""
 
