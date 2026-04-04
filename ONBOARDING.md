@@ -1,3 +1,41 @@
+## Session 5.53 - April 4, 2026 (skills token-budget defaults follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 config/test stabilization pass
+
+### What Was Done
+- Added missing runtime skill-budget settings defaults in `config.py`:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MIN_PRIORITY=None`
+  - plus backward-compatible `SKILLS_MAX_TOKEN=10000` alias field for singular-env deployments.
+- Hardened runtime skill assembly in `universal_navigator.py`:
+  - reads `SKILLS_MAX_TOKENS` with fallback to `SKILLS_MAX_TOKEN` (default `10000`),
+  - reads `SKILLS_MIN_PRIORITY` via safe `getattr(..., None)` fallback.
+- Updated `.env.example` with:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MAX_TOKEN=10000`
+  - `SKILLS_MIN_PRIORITY=`
+- Re-ran runtime-skills tests that previously failed due to missing config attributes.
+
+### What's Working
+- Full `tests/test_universal_navigator_runtime_skills.py` now passes in this environment.
+- Batch-tool orchestration tests continue to pass.
+
+### What's NOT Working Yet
+- No new functional blockers found in this pass.
+
+### Next Steps
+1. Decide whether to deprecate singular `SKILLS_MAX_TOKEN` after migration period and keep only plural.
+2. Add config docs in README for runtime skill budget tuning and priority filtering.
+
+### Decisions Made
+- Kept both plural and singular env names for compatibility while standardizing logic on `SKILLS_MAX_TOKENS`.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.52 - April 4, 2026 (universal navigator batch tool-call orchestration)
 
 **Agent:** GPT-5.3-Codex  

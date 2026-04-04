@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -110,6 +111,10 @@ class Settings(BaseSettings):
     VIRUSTOTAL_POLL_INTERVAL_SECONDS: int = 5
     VIRUSTOTAL_MAX_POLLS: int = 12
     VIRUSTOTAL_REQUIRED: bool = False
+    SKILLS_MAX_TOKENS: int = 10_000
+    SKILLS_MIN_PRIORITY: int | None = None
+    # Backward-compatible singular alias requested in some deployments.
+    SKILLS_MAX_TOKEN: int = Field(default=10_000, validation_alias="SKILLS_MAX_TOKEN")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

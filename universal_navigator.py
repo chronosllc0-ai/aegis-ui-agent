@@ -456,8 +456,9 @@ def _assemble_runtime_skills_section(
     runtime_skills: list[RuntimeSkill],
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     """Build runtime skill prompt section using priority-based token budgeting."""
-    budget = max(int(_app_settings.SKILLS_MAX_TOKENS), 0)
-    min_priority = _app_settings.SKILLS_MIN_PRIORITY
+    raw_budget = getattr(_app_settings, "SKILLS_MAX_TOKENS", getattr(_app_settings, "SKILLS_MAX_TOKEN", 10_000))
+    budget = max(int(raw_budget), 0)
+    min_priority = getattr(_app_settings, "SKILLS_MIN_PRIORITY", None)
     baseline = datetime.min.replace(tzinfo=timezone.utc)
     sorted_skills = sorted(
         runtime_skills,
