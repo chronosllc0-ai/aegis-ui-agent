@@ -1665,19 +1665,6 @@ async def run_universal_navigation(
                 messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
                 continue
 
-        if len(tool_calls) > MAX_BATCH_TOOL_CALLS:
-            await emit_step(
-                f"Model returned too many tool calls ({len(tool_calls)}). Max allowed is {MAX_BATCH_TOOL_CALLS}.",
-                step_type="error",
-            )
-            messages.append(
-                ChatMessage(
-                    role="user",
-                    content=f"No valid tool call. tool_calls length must be <= {MAX_BATCH_TOOL_CALLS}. Return valid JSON.",
-                )
-            )
-            continue
-
         primary_tool = str(tool_calls[0].get("tool", "unknown"))
         if len(tool_calls) == 1 and primary_tool == "done":
             summary = str(tool_calls[0].get("summary", "Task completed."))
@@ -1706,36 +1693,9 @@ async def run_universal_navigation(
         payload_by_index: dict[int, dict[str, Any]] = {}
         immediate_results: list[dict[str, Any]] = []
         for index, raw_call in enumerate(tool_calls):
-            if not isinstance(raw_call, dict):
-                immediate_results.append(
-                    {
-                        "index": index,
-                        "tool": "unknown",
-                        "ok": False,
-                        "result_text": "",
-                        "screenshot_bytes": None,
-                        "error": "Invalid tool call: expected object.",
-                        "duration_ms": 0,
-                    }
-                )
-                continue
-            raw_tool = raw_call.get("tool")
-            if not isinstance(raw_tool, str) or not raw_tool.strip():
-                immediate_results.append(
-                    {
-                        "index": index,
-                        "tool": "unknown",
-                        "ok": False,
-                        "result_text": "",
-                        "screenshot_bytes": None,
-                        "error": "Invalid tool call: missing tool name.",
-                        "duration_ms": 0,
-                    }
-                )
-                continue
             tool_call = dict(raw_call)
-            tool_call["tool"] = raw_tool.strip().lower()
-            tool_name = tool_call["tool"]
+            tool_name = str(tool_call.get("tool", "")).strip().lower()
+            tool_call["tool"] = tool_name
             payload_by_index[index] = tool_call
             if tool_name == "ask_user_input":
                 question = str(tool_call.get("question", ""))
@@ -1752,6 +1712,18 @@ async def run_universal_navigation(
                 steps.append(special_step)
                 if on_step:
                     await on_step(special_step)
+                immediate_results.append(
+                    {
+                        "index": index,
+                        "tool": tool_name,
+                        "ok": True,
+                        "result_text": f"Awaiting user response to: {question}",
+                        "screenshot_bytes": None,
+                        "error": None,
+                        "duration_ms": 0,
+                    }
+                )
+                continue
             unavailable_reason = tool_executor._tool_unavailable_reason(tool_name)
             if unavailable_reason:
                 immediate_results.append(
@@ -1800,7 +1772,9 @@ async def run_universal_navigation(
                 result_text, screenshot_bytes = await tool_executor.run(call, skip_policy_checks=True)
             duration_ms = int((asyncio.get_running_loop().time() - started_at) * 1000)
             lowered = result_text.lower()
-            is_error = lowered.startswith(("error", "tool error", "unknown tool", "user declined", "tool '")) or " error:" in lowered
+            is_error = lowered.startswith(("error: ", "tool error (", "unknown tool: ", "user declined tool "))
+            if not is_error and re.match(r"^[a-z0-9_]+ error: ", lowered):
+                is_error = True
             return {
                 "index": idx,
                 "tool": str(call.get("tool", "unknown")),
