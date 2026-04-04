@@ -1,3 +1,127 @@
+## Session 5.54 - April 4, 2026 (PR review fixes: batch validation + ask_user_input feedback)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed PR review comments in `universal_navigator.py`:
+  - Removed unreachable `len(tool_calls) > MAX_BATCH_TOOL_CALLS` guard in loop (batch length is already bounded by parser contract).
+  - Removed redundant per-item shape/tool-name validation blocks in batch validation loop; parsing helpers already guarantee normalized structure.
+  - Fixed batch `ask_user_input` behavior by adding an immediate consolidated-result entry (`ok`) indicating pending user response, so model receives explicit feedback in the single merged follow-up message.
+  - Tightened tool error classification heuristic by removing broad substring matching and limiting detection to explicit error prefixes.
+- Cleaned `tests/test_universal_navigator_parallel_tools.py` formatting:
+  - added proper blank-line spacing between top-level tests,
+  - removed trailing whitespace,
+  - added explicit regression test for batch `ask_user_input` consolidated feedback line.
+
+### What's Working
+- Batch orchestration remains deterministic and concurrent while now producing explicit model-visible feedback for `ask_user_input`.
+- Review-file style nitpicks in test layout were resolved.
+
+### What's NOT Working Yet
+- Long-term typed `ToolExecutionResult` return contract is still future work; current pass tightens heuristic without changing tool return API.
+
+### Next Steps
+1. Migrate `UniversalToolExecutor.run(...)` to a typed result object (`ok`, `error`, `result_text`, `screenshot`) to remove string-based status inference entirely.
+2. Add websocket-level coverage for user-input response lifecycle in batch context.
+
+### Decisions Made
+- Kept review-requested scope narrow for this pass (no breaking return-shape changes).
+
+### Blockers
+- None.
+
+---
+
+## Session 5.53 - April 4, 2026 (skills token-budget defaults follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 config/test stabilization pass
+
+### What Was Done
+- Added missing runtime skill-budget settings defaults in `config.py`:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MIN_PRIORITY=None`
+  - plus backward-compatible `SKILLS_MAX_TOKEN=10000` alias field for singular-env deployments.
+- Hardened runtime skill assembly in `universal_navigator.py`:
+  - reads `SKILLS_MAX_TOKENS` with fallback to `SKILLS_MAX_TOKEN` (default `10000`),
+  - reads `SKILLS_MIN_PRIORITY` via safe `getattr(..., None)` fallback.
+- Updated `.env.example` with:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MAX_TOKEN=10000`
+  - `SKILLS_MIN_PRIORITY=`
+- Re-ran runtime-skills tests that previously failed due to missing config attributes.
+
+### What's Working
+- Full `tests/test_universal_navigator_runtime_skills.py` now passes in this environment.
+- Batch-tool orchestration tests continue to pass.
+
+### What's NOT Working Yet
+- No new functional blockers found in this pass.
+
+### Next Steps
+1. Decide whether to deprecate singular `SKILLS_MAX_TOKEN` after migration period and keep only plural.
+2. Add config docs in README for runtime skill budget tuning and priority filtering.
+
+### Decisions Made
+- Kept both plural and singular env names for compatibility while standardizing logic on `SKILLS_MAX_TOKENS`.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.52 - April 4, 2026 (universal navigator batch tool-call orchestration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend orchestration + tests pass
+
+### What Was Done
+- Refactored `universal_navigator.py` loop to support backward-compatible multi-tool responses:
+  - Added batch contract parsing for `tool_calls` (max 3), with precedence over `tool` when valid.
+  - Added malformed-batch fallback behavior to legacy single-call parsing (`tool`) when available.
+  - Added per-call validation pipeline in batch mode (shape/tool checks, availability gate, confirmation gate) before execution.
+  - Added bounded concurrent execution (`asyncio.Semaphore(3)`) with deterministic transcript ordering by original index.
+  - Added consolidated single follow-up message format:
+    - `Tool results:` block with ordered per-call `ok/error` status and provenance.
+    - deterministic screenshot attachment from highest-index successful call containing screenshot bytes.
+  - Added structured observability events:
+    - `batch_tool_start`
+    - `batch_tool_result` (index/tool/status/duration)
+    - `batch_tool_complete` summary.
+- Extended `UniversalToolExecutor.run(...)` with `skip_policy_checks` flag so batch pre-validation can enforce policy gates once per call without duplicate confirmation prompts.
+- Added dedicated test suite `tests/test_universal_navigator_parallel_tools.py` covering:
+  - valid batch acceptance,
+  - over-limit rejection,
+  - deterministic ordering under async completion,
+  - mixed pass/fail consolidation,
+  - malformed batch fallback to legacy single-call,
+  - confirmation gate enforcement for high-risk tools in batch,
+  - workflow event emission + consolidated follow-up,
+  - subagent allowlist enforcement in batch mode.
+
+### What's Working
+- Single-call flow remains supported and done/error handling still works for legacy responses.
+- Batch mode now executes up to 3 validated calls concurrently while preserving ordered transcript output.
+- Existing safety controls (disabled tools/integration requirements/subagent allowlist/high-risk confirmation) remain enforced per call in batch mode.
+
+### What's NOT Working Yet
+- Batch mode currently classifies textual tool failures via conservative string-pattern detection (`error:` etc.); richer typed tool-result envelopes could improve this later.
+
+### Next Steps
+1. Consider adding a typed `ToolExecutionResult` object to avoid string-based `ok/error` inference.
+2. Extend websocket-level tests to assert UI action-log rendering for batch event types.
+3. Add provider adapter hints/examples documenting `tool_calls` response shape for stronger model compliance.
+
+### Decisions Made
+- Kept provider compatibility by preserving legacy parsing and only activating batch path when `tool_calls` is valid.
+- Kept policy enforcement semantics unchanged by reusing existing gate methods per call.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.51 - April 3, 2026 (PR follow-up: VT upload-path status handling cleanup)
 
 **Agent:** GPT-5.3-Codex  

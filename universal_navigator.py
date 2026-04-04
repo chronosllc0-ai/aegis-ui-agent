@@ -38,6 +38,7 @@ from backend.session_workspace import (
 logger = logging.getLogger(__name__)
 
 MAX_STEPS = 40
+MAX_BATCH_TOOL_CALLS = 3
 RESULT_CHAR_LIMIT = 12_000
 CODE_OUTPUT_LIMIT = 8_000
 EXEC_ENV_BLOCKED_PREFIXES = (
@@ -455,8 +456,9 @@ def _assemble_runtime_skills_section(
     runtime_skills: list[RuntimeSkill],
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     """Build runtime skill prompt section using priority-based token budgeting."""
-    budget = max(int(_app_settings.SKILLS_MAX_TOKENS), 0)
-    min_priority = _app_settings.SKILLS_MIN_PRIORITY
+    raw_budget = getattr(_app_settings, "SKILLS_MAX_TOKENS", getattr(_app_settings, "SKILLS_MAX_TOKEN", 10_000))
+    budget = max(int(raw_budget), 0)
+    min_priority = getattr(_app_settings, "SKILLS_MIN_PRIORITY", None)
     baseline = datetime.min.replace(tzinfo=timezone.utc)
     sorted_skills = sorted(
         runtime_skills,
@@ -687,7 +689,7 @@ class UniversalToolExecutor:
         ensure_session_workspace(self._session_id)
         self._github_manager: GitHubRepoWorkspaceManager | None = None
 
-    async def run(self, tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
+    async def run(self, tool_call: dict[str, Any], *, skip_policy_checks: bool = False) -> tuple[str, bytes | None]:
         """Execute a tool and return (text_result, optional_screenshot_bytes)."""
         tool = str(tool_call.get("tool", "")).strip()
         screenshot: bytes | None = None
@@ -695,13 +697,14 @@ class UniversalToolExecutor:
         if tool in {"done", "error"}:
             return "", None
 
-        unavailable_reason = self._tool_unavailable_reason(tool)
-        if unavailable_reason:
-            return unavailable_reason, None
+        if not skip_policy_checks:
+            unavailable_reason = self._tool_unavailable_reason(tool)
+            if unavailable_reason:
+                return unavailable_reason, None
 
-        blocked_by_approval = await self._confirm_if_needed(tool_call)
-        if blocked_by_approval:
-            return blocked_by_approval, None
+            blocked_by_approval = await self._confirm_if_needed(tool_call)
+            if blocked_by_approval:
+                return blocked_by_approval, None
 
         try:
             if tool == "screenshot":
@@ -1450,6 +1453,39 @@ def _parse_tool_call(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _parse_tool_calls(parsed: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, bool]:
+    """Return normalized batch calls and whether tool_calls was malformed."""
+    if "tool_calls" not in parsed:
+        return None, False
+    raw_calls = parsed.get("tool_calls")
+    if not isinstance(raw_calls, list) or not raw_calls:
+        return None, True
+    if len(raw_calls) > MAX_BATCH_TOOL_CALLS:
+        return None, True
+
+    calls: list[dict[str, Any]] = []
+    for raw_call in raw_calls:
+        if not isinstance(raw_call, dict):
+            return None, True
+        tool_name = raw_call.get("tool")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            return None, True
+        normalized = dict(raw_call)
+        normalized["tool"] = tool_name.strip().lower()
+        calls.append(normalized)
+    return calls, False
+
+
+def _normalize_single_tool_call(parsed: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a normalized legacy single-call payload when present."""
+    tool_name = parsed.get("tool")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        return None
+    normalized = dict(parsed)
+    normalized["tool"] = tool_name.strip().lower()
+    return normalized
+
+
 async def run_universal_navigation(
     *,
     provider: BaseProvider,
@@ -1606,15 +1642,32 @@ async def run_universal_navigation(
             }
 
         messages.append(ChatMessage(role="assistant", content=reply))
-        tool_call = _parse_tool_call(reply)
-        if not tool_call:
+        parsed_reply = _parse_tool_call(reply)
+        if not parsed_reply:
             await emit_step(f"Model response (no tool call): {reply[:200]}")
             messages.append(ChatMessage(role="user", content="Please return exactly one JSON tool call to continue."))
             continue
 
-        tool_name = str(tool_call.get("tool", "unknown"))
-        if tool_name == "done":
-            summary = str(tool_call.get("summary", "Task completed."))
+        batch_calls, batch_malformed = _parse_tool_calls(parsed_reply)
+        tool_calls: list[dict[str, Any]]
+        if batch_calls is not None:
+            tool_calls = batch_calls
+        else:
+            single_call = _normalize_single_tool_call(parsed_reply)
+            if single_call:
+                tool_calls = [single_call]
+            elif batch_malformed:
+                await emit_step("Model returned malformed tool_calls payload; no valid legacy tool call found.", step_type="error")
+                messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
+                continue
+            else:
+                await emit_step(f"Model response (no valid tool call): {reply[:200]}")
+                messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
+                continue
+
+        primary_tool = str(tool_calls[0].get("tool", "unknown"))
+        if len(tool_calls) == 1 and primary_tool == "done":
+            summary = str(tool_calls[0].get("summary", "Task completed."))
             await emit_step(summary, step_type="result")
             return {
                 "status": "completed",
@@ -1624,8 +1677,8 @@ async def run_universal_navigation(
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
             }
-        if tool_name == "error":
-            error_message = str(tool_call.get("message", "Unknown error."))
+        if len(tool_calls) == 1 and primary_tool == "error":
+            error_message = str(tool_calls[0].get("message", "Unknown error."))
             await emit_step(f"Error: {error_message}", step_type="error")
             return {
                 "status": "failed",
@@ -1636,37 +1689,170 @@ async def run_universal_navigation(
                 "output_tokens": total_output_tokens,
             }
 
-        if tool_name == "ask_user_input":
-            question = str(tool_call.get("question", ""))
-            options = [str(item) for item in list(tool_call.get("options", []))]
-            request_id = str(uuid4())
-            special_step: dict[str, Any] = {
-                "type": "user_input_request",
-                "content": f"[ask_user_input] {question}",
-                "question": question,
-                "options": options,
-                "request_id": request_id,
-                "steering": [],
+        validated_calls: list[dict[str, Any]] = []
+        payload_by_index: dict[int, dict[str, Any]] = {}
+        immediate_results: list[dict[str, Any]] = []
+        for index, raw_call in enumerate(tool_calls):
+            tool_call = dict(raw_call)
+            tool_name = str(tool_call.get("tool", "")).strip().lower()
+            tool_call["tool"] = tool_name
+            payload_by_index[index] = tool_call
+            if tool_name == "ask_user_input":
+                question = str(tool_call.get("question", ""))
+                options = [str(item) for item in list(tool_call.get("options", []))]
+                request_id = str(uuid4())
+                special_step: dict[str, Any] = {
+                    "type": "user_input_request",
+                    "content": f"[ask_user_input] {question}",
+                    "question": question,
+                    "options": options,
+                    "request_id": request_id,
+                    "steering": [],
+                }
+                steps.append(special_step)
+                if on_step:
+                    await on_step(special_step)
+                immediate_results.append(
+                    {
+                        "index": index,
+                        "tool": tool_name,
+                        "ok": True,
+                        "result_text": f"Awaiting user response to: {question}",
+                        "screenshot_bytes": None,
+                        "error": None,
+                        "duration_ms": 0,
+                    }
+                )
+                continue
+            unavailable_reason = tool_executor._tool_unavailable_reason(tool_name)
+            if unavailable_reason:
+                immediate_results.append(
+                    {
+                        "index": index,
+                        "tool": tool_name,
+                        "ok": False,
+                        "result_text": "",
+                        "screenshot_bytes": None,
+                        "error": unavailable_reason,
+                        "duration_ms": 0,
+                    }
+                )
+                continue
+            blocked_by_approval = await tool_executor._confirm_if_needed(tool_call)
+            if blocked_by_approval:
+                immediate_results.append(
+                    {
+                        "index": index,
+                        "tool": tool_name,
+                        "ok": False,
+                        "result_text": "",
+                        "screenshot_bytes": None,
+                        "error": blocked_by_approval,
+                        "duration_ms": 0,
+                    }
+                )
+                continue
+            validated_calls.append({"index": index, "call": tool_call})
+
+        if not validated_calls and not immediate_results:
+            await emit_step("No valid tool call in batch.", step_type="error")
+            messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
+            continue
+
+        batch_start_event = {"type": "batch_tool_start", "task_id": session_id, "count": len(tool_calls)}
+        logger.info("batch_tool_start %s", json.dumps(batch_start_event, ensure_ascii=False))
+        if on_workflow_step:
+            await on_workflow_step(batch_start_event)
+
+        semaphore = asyncio.Semaphore(MAX_BATCH_TOOL_CALLS)
+
+        async def _run_one(call: dict[str, Any], idx: int) -> dict[str, Any]:
+            started_at = asyncio.get_running_loop().time()
+            async with semaphore:
+                result_text, screenshot_bytes = await tool_executor.run(call, skip_policy_checks=True)
+            duration_ms = int((asyncio.get_running_loop().time() - started_at) * 1000)
+            lowered = result_text.lower()
+            is_error = lowered.startswith(("error: ", "tool error (", "unknown tool: ", "user declined tool "))
+            if not is_error and re.match(r"^[a-z0-9_]+ error: ", lowered):
+                is_error = True
+            return {
+                "index": idx,
+                "tool": str(call.get("tool", "unknown")),
+                "ok": not is_error,
+                "result_text": result_text,
+                "screenshot_bytes": screenshot_bytes,
+                "error": None if not is_error else result_text,
+                "duration_ms": duration_ms,
             }
-            steps.append(special_step)
-            if on_step:
-                await on_step(special_step)
-        else:
-            await emit_step(f"[{tool_name}] {json.dumps({key: value for key, value in tool_call.items() if key != 'tool'})[:220]}")
 
-        result_text, screenshot_bytes = await tool_executor.run(tool_call)
-        if screenshot_bytes and on_frame:
-            await on_frame(base64.b64encode(screenshot_bytes).decode())
+        pending = [asyncio.create_task(_run_one(item["call"], int(item["index"]))) for item in validated_calls]
+        executed_results: list[dict[str, Any]] = []
+        if pending:
+            raw_results = await asyncio.gather(*pending, return_exceptions=True)
+            for item, raw in zip(validated_calls, raw_results, strict=False):
+                if isinstance(raw, Exception):
+                    executed_results.append(
+                        {
+                            "index": int(item["index"]),
+                            "tool": str(item["call"].get("tool", "unknown")),
+                            "ok": False,
+                            "result_text": "",
+                            "screenshot_bytes": None,
+                            "error": str(raw),
+                            "duration_ms": 0,
+                        }
+                    )
+                else:
+                    executed_results.append(raw)
 
-        if screenshot_bytes:
-            follow_up = ChatMessage(
-                role="user",
-                content=f"Tool result: {result_text}\nHere is the current screenshot. Decide your next action.",
-                images=[screenshot_bytes],
+        all_results = sorted([*immediate_results, *executed_results], key=lambda item: int(item["index"]))
+        for result in all_results:
+            status = "ok" if result["ok"] else "error"
+            batch_result_event = {
+                "type": "batch_tool_result",
+                "task_id": session_id,
+                "index": result["index"],
+                "tool": result["tool"],
+                "status": status,
+                "duration_ms": result["duration_ms"],
+            }
+            logger.info("batch_tool_result %s", json.dumps(batch_result_event, ensure_ascii=False))
+            if on_workflow_step:
+                await on_workflow_step(batch_result_event)
+            payload_preview = payload_by_index.get(int(result["index"]), {})
+            await emit_step(
+                f"[{result['tool']}] {json.dumps({k: v for k, v in payload_preview.items() if k != 'tool'})[:220]}",
             )
+
+        batch_complete_event = {
+            "type": "batch_tool_complete",
+            "task_id": session_id,
+            "count": len(tool_calls),
+            "ok_count": sum(1 for item in all_results if item["ok"]),
+            "error_count": sum(1 for item in all_results if not item["ok"]),
+        }
+        logger.info("batch_tool_complete %s", json.dumps(batch_complete_event, ensure_ascii=False))
+        if on_workflow_step:
+            await on_workflow_step(batch_complete_event)
+
+        screenshot_candidates = [item for item in all_results if item["ok"] and item.get("screenshot_bytes")]
+        screenshot_result = max(screenshot_candidates, key=lambda item: int(item["index"]), default=None)
+        follow_up_lines = ["Tool results:"]
+        for line_index, result in enumerate(all_results, start=1):
+            status = "ok" if result["ok"] else "error"
+            content = result["result_text"] if result["ok"] else result["error"]
+            follow_up_lines.append(f"{line_index}) [{result['tool']}] {status}: {content}")
+        follow_up_lines.append("")
+        follow_up_lines.append("Decide the next action.")
+        follow_up_text = "\n".join(follow_up_lines)
+
+        if screenshot_result:
+            screenshot_bytes = screenshot_result["screenshot_bytes"]
+            if screenshot_bytes and on_frame:
+                await on_frame(base64.b64encode(screenshot_bytes).decode())
+            messages.append(ChatMessage(role="user", content=follow_up_text, images=[screenshot_bytes]))
         else:
-            follow_up = ChatMessage(role="user", content=f"Tool result: {result_text}\nDecide your next action.")
-        messages.append(follow_up)
+            messages.append(ChatMessage(role="user", content=follow_up_text))
 
     await emit_step("Reached maximum step limit without completing task.", step_type="error")
     return {
