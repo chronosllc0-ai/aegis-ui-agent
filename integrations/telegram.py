@@ -112,20 +112,42 @@ class TelegramClient:
         payload = await self._post("sendChatAction", data={"chat_id": chat_id, "action": action})
         return bool(payload.get("result", True))
 
-    async def send_photo(self, *, chat_id: Any, image_bytes: bytes, caption: str | None = None, parse_mode: str | None = None) -> dict[str, Any]:
-        files = {"photo": ("frame.png", io.BytesIO(image_bytes), "image/png")}
+    async def _send_media(
+        self,
+        method: str,
+        field_name: str,
+        filename: str,
+        mime_type: str,
+        *,
+        chat_id: Any,
+        file_bytes: bytes,
+        caption: str | None = None,
+        parse_mode: str | None = None,
+    ) -> dict[str, Any]:
+        files = {field_name: (filename, io.BytesIO(file_bytes), mime_type)}
         data: dict[str, Any] = {"chat_id": str(chat_id)}
         if caption:
             data["caption"] = caption
         if parse_mode:
             data["parse_mode"] = parse_mode
-        # _post does not support multipart uploads; use direct call for sendPhoto.
-        url = f"{TELEGRAM_API_BASE}/bot{self._token}/sendPhoto"
+        url = f"{TELEGRAM_API_BASE}/bot{self._token}/{method}"
         response = await self._client.post(url, data=data, files=files)
-        response_payload = response.json()
-        if not response_payload.get("ok"):
-            raise TelegramAPIError(response_payload.get("error_code"), str(response_payload.get("description") or "Telegram API error"))
-        return response_payload.get("result", {})
+        payload = response.json()
+        if not payload.get("ok"):
+            raise TelegramAPIError(payload.get("error_code"), str(payload.get("description") or "Telegram API error"))
+        return payload.get("result", {})
+
+    async def send_photo(self, *, chat_id: Any, image_bytes: bytes, caption: str | None = None, parse_mode: str | None = None) -> dict[str, Any]:
+        return await self._send_media(
+            "sendPhoto",
+            "photo",
+            "frame.png",
+            "image/png",
+            chat_id=chat_id,
+            file_bytes=image_bytes,
+            caption=caption,
+            parse_mode=parse_mode,
+        )
 
     async def send_document(
         self,
@@ -136,18 +158,16 @@ class TelegramClient:
         caption: str | None = None,
         parse_mode: str | None = None,
     ) -> dict[str, Any]:
-        files = {"document": (filename, io.BytesIO(file_bytes), "application/octet-stream")}
-        data: dict[str, Any] = {"chat_id": str(chat_id)}
-        if caption:
-            data["caption"] = caption
-        if parse_mode:
-            data["parse_mode"] = parse_mode
-        url = f"{TELEGRAM_API_BASE}/bot{self._token}/sendDocument"
-        response = await self._client.post(url, data=data, files=files)
-        payload = response.json()
-        if not payload.get("ok"):
-            raise TelegramAPIError(payload.get("error_code"), str(payload.get("description") or "Telegram API error"))
-        return payload.get("result", {})
+        return await self._send_media(
+            "sendDocument",
+            "document",
+            filename,
+            "application/octet-stream",
+            chat_id=chat_id,
+            file_bytes=file_bytes,
+            caption=caption,
+            parse_mode=parse_mode,
+        )
 
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None, show_alert: bool = False) -> bool:
         data: dict[str, Any] = {"callback_query_id": callback_query_id, "show_alert": show_alert}
@@ -401,7 +421,7 @@ class TelegramIntegration(BaseIntegration):
             raise TelegramAPIError(None, "Missing message_id for progressive updates")
 
         for chunk in chunks[1:]:
-            await self.client.send_message_draft(chat_id=chat_id, draft_id=message_id, text=chunk)
+            await self.client.edit_message_text(chat_id=chat_id, message_id=message_id, text=chunk)
             if delay_between_chunks > 0:
                 await asyncio.sleep(delay_between_chunks)
 

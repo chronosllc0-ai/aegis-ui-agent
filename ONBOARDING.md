@@ -1,3 +1,37 @@
+## Session 5.56 - April 4, 2026 (Telegram PR review follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed Telegram integration PR review comments:
+  - extracted shared multipart upload helper `TelegramClient._send_media(...)` and refactored `send_photo(...)` / `send_document(...)` to call it.
+  - fixed progressive update path in `stream_draft_then_send(...)` to call official `edit_message_text(...)` directly instead of deprecated `send_message_draft(...)`, preventing self-generated deprecation telemetry noise.
+- Addressed `main.py` review comments:
+  - replaced `async for ... break` DB session pattern in `_log_platform_message(...)` with explicit async-generator lifecycle handling (`anext(...)` + `aclose()`) so cleanup is deterministic.
+  - normalized top-level spacing around `_log_platform_message(...)` to PEP 8 two-blank-line convention.
+- Updated tests to reflect the progressive-edit change (`edit_message_text` call expectations in `tests/test_telegram.py`).
+
+### What's Working
+- Telegram media upload code is now DRY via shared helper.
+- Progressive Telegram message updates now use official edit API end-to-end without contaminating legacy deprecation counters.
+- Webhook message persistence path still passes existing coverage.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add explicit unit test coverage for `TelegramClient._send_media(...)` error-path behavior.
+2. Add route-level callback-query webhook tests in `main.py` endpoint tests.
+
+### Decisions Made
+- Kept legacy alias functions for migration compatibility, but removed internal usage of deprecated path.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.55 - April 4, 2026 (Telegram official Bot API normalization + conformance)
 
 **Agent:** GPT-5.3-Codex  

@@ -1320,8 +1320,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await live_manager.close_session(session_id)
 
 
-
-
 async def _log_platform_message(
     user_id: str | None,
     *,
@@ -1336,7 +1334,9 @@ async def _log_platform_message(
     """Persist a platform message to conversation storage when an owner is available."""
     if not user_id:
         return
-    async for db in get_session():
+    session_iter = get_session()
+    db = await anext(session_iter)
+    try:
         conversation = await get_or_create_conversation(
             db,
             user_id=user_id,
@@ -1352,7 +1352,8 @@ async def _log_platform_message(
             metadata=metadata or {},
             platform_message_id=platform_message_id,
         )
-        break
+    finally:
+        await session_iter.aclose()
 
 
 # ── Integration webhook / registration endpoints ─────────────────────

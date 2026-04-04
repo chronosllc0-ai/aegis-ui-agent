@@ -135,9 +135,9 @@ def test_stream_draft_then_send_uses_edit_api() -> None:
             integration.client,
             "send_message",
             new_callable=AsyncMock,
-        ) as mock_send, patch.object(integration.client, "send_message_draft", new_callable=AsyncMock) as mock_draft:
+        ) as mock_send, patch.object(integration.client, "edit_message_text", new_callable=AsyncMock) as mock_edit:
             mock_send.return_value = {"message_id": 33}
-            mock_draft.return_value = True
+            mock_edit.return_value = {"message_id": 33}
             mock_action.return_value = True
 
             result = await integration.stream_draft_then_send(
@@ -149,7 +149,7 @@ def test_stream_draft_then_send_uses_edit_api() -> None:
 
             mock_action.assert_called_once_with(12345, "typing")
             mock_send.assert_called_once_with(chat_id=12345, text="Thinking...", parse_mode=None)
-            assert mock_draft.call_count == 2
+            assert mock_edit.call_count == 2
             assert result == {"message_id": 33}
         await integration.disconnect()
 
