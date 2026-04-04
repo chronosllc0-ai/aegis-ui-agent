@@ -1,3 +1,54 @@
+## Session 5.52 - April 4, 2026 (universal navigator batch tool-call orchestration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend orchestration + tests pass
+
+### What Was Done
+- Refactored `universal_navigator.py` loop to support backward-compatible multi-tool responses:
+  - Added batch contract parsing for `tool_calls` (max 3), with precedence over `tool` when valid.
+  - Added malformed-batch fallback behavior to legacy single-call parsing (`tool`) when available.
+  - Added per-call validation pipeline in batch mode (shape/tool checks, availability gate, confirmation gate) before execution.
+  - Added bounded concurrent execution (`asyncio.Semaphore(3)`) with deterministic transcript ordering by original index.
+  - Added consolidated single follow-up message format:
+    - `Tool results:` block with ordered per-call `ok/error` status and provenance.
+    - deterministic screenshot attachment from highest-index successful call containing screenshot bytes.
+  - Added structured observability events:
+    - `batch_tool_start`
+    - `batch_tool_result` (index/tool/status/duration)
+    - `batch_tool_complete` summary.
+- Extended `UniversalToolExecutor.run(...)` with `skip_policy_checks` flag so batch pre-validation can enforce policy gates once per call without duplicate confirmation prompts.
+- Added dedicated test suite `tests/test_universal_navigator_parallel_tools.py` covering:
+  - valid batch acceptance,
+  - over-limit rejection,
+  - deterministic ordering under async completion,
+  - mixed pass/fail consolidation,
+  - malformed batch fallback to legacy single-call,
+  - confirmation gate enforcement for high-risk tools in batch,
+  - workflow event emission + consolidated follow-up,
+  - subagent allowlist enforcement in batch mode.
+
+### What's Working
+- Single-call flow remains supported and done/error handling still works for legacy responses.
+- Batch mode now executes up to 3 validated calls concurrently while preserving ordered transcript output.
+- Existing safety controls (disabled tools/integration requirements/subagent allowlist/high-risk confirmation) remain enforced per call in batch mode.
+
+### What's NOT Working Yet
+- Batch mode currently classifies textual tool failures via conservative string-pattern detection (`error:` etc.); richer typed tool-result envelopes could improve this later.
+
+### Next Steps
+1. Consider adding a typed `ToolExecutionResult` object to avoid string-based `ok/error` inference.
+2. Extend websocket-level tests to assert UI action-log rendering for batch event types.
+3. Add provider adapter hints/examples documenting `tool_calls` response shape for stronger model compliance.
+
+### Decisions Made
+- Kept provider compatibility by preserving legacy parsing and only activating batch path when `tool_calls` is valid.
+- Kept policy enforcement semantics unchanged by reusing existing gate methods per call.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.51 - April 3, 2026 (PR follow-up: VT upload-path status handling cleanup)
 
 **Agent:** GPT-5.3-Codex  
