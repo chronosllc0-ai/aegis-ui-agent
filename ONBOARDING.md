@@ -1,3 +1,48 @@
+## Session 5.55 - April 4, 2026 (Telegram official Bot API normalization + conformance)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend integration + tests pass
+
+### What Was Done
+- Refactored `integrations/telegram.py` to use official Bot API methods for normal operations:
+  - `sendMessage`, `editMessageText`, `sendChatAction`, `sendPhoto`, `sendDocument`, `answerCallbackQuery`, `setMyCommands`.
+- Added temporary legacy-compat mapper + deprecation telemetry:
+  - `send_message_draft` now maps to `editMessageText`.
+  - `set_chat_member_tag` now maps to `setChatAdministratorCustomTitle`.
+  - mapper usage logs deprecation warnings and increments in-memory counters.
+- Implemented missing `telegram_send_image` tool dispatcher path end-to-end (base64 validation + `sendPhoto` execution).
+- Added optional `telegram_send_file` path (`sendDocument`) with consistent `{ok, tool, result|error}` output shape.
+- Preserved webhook/polling parity and made mode transitions explicit:
+  - webhook mode sets webhook and clears polling offset,
+  - polling mode deletes webhook with drop-pending and resets offset.
+- Added callback-query handling path:
+  - webhook updates now support callback payload extraction,
+  - integration answers callback queries and can perform inline follow-up actions (`edit:` / `reply:` patterns).
+- Added tested capability documentation in `docs/telegram-capabilities.md`.
+- Expanded Telegram conformance tests in `tests/test_telegram.py` for commands, callbacks, edits/progressive flow, media, mode parity, and legacy mapper behavior.
+- Fixed Telegram webhook routing helper gap in `main.py` by adding `_extract_telegram_message(...)` and callback-aware sender extraction.
+
+### What's Working
+- Telegram integration no longer requires non-standard methods during normal operation.
+- `telegram_send_image` now works through official send-photo API path.
+- Webhook and polling connect paths are both covered and validated by tests.
+
+### What's NOT Working Yet
+- Legacy mapper is still temporary and should be removed once migration consumers are updated.
+
+### Next Steps
+1. Add route-level webhook callback tests in `main.py` endpoint coverage to verify full request/response behavior.
+2. Decide timeline for removing legacy aliases and telemetry counters.
+
+### Decisions Made
+- Kept legacy aliases as compatibility shims (not primary runtime path) to avoid abrupt downstream breakage.
+- Avoided runtime Bot API version constants; compatibility is enforced via method set + tests + docs.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.54 - April 4, 2026 (PR review fixes: batch validation + ask_user_input feedback)
 
 **Agent:** GPT-5.3-Codex  
