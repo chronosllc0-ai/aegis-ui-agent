@@ -599,6 +599,35 @@ function App() {
     [enrichedLogs],
   )
 
+  // isBrowsing: agent is actively running browser steps RIGHT NOW
+  const isBrowsing = isWorking && hasBrowserActivity
+
+  // ── Auto-return to chat when a browser task finishes ────────────────────
+  // When isWorking flips true→false and the task had browser activity,
+  // automatically switch the user back to chat so they see the summary card.
+  const prevIsWorkingRef = useRef(isWorking)
+  useEffect(() => {
+    const wasWorking = prevIsWorkingRef.current
+    prevIsWorkingRef.current = isWorking
+    if (wasWorking && !isWorking && hasBrowserActivity && appMode === 'browser') {
+      setAppMode('chat')
+    }
+  }, [isWorking, hasBrowserActivity, appMode])
+
+  // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
+  // If the agent needs user input mid-task and the user is watching the
+  // browser, jump them to chat so they see (and can answer) the question.
+  useEffect(() => {
+    if (!enrichedLogs.length || appMode !== 'browser') return
+    const last = enrichedLogs[enrichedLogs.length - 1]
+    if (last?.message?.includes('[ask_user_input]') ||
+        last?.message?.includes('[confirm_plan]') ||
+        last?.message?.includes('[plan_steps]')) {
+      setAppMode('chat')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrichedLogs.length, appMode])
+
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
@@ -696,6 +725,18 @@ function App() {
     } catch {
       // silent - plan decompose errors are non-fatal
     }
+  }
+
+  const handleUserInputResponse = (answer: string, requestId: string) => {
+    send({ action: 'user_input_response', request_id: requestId, response: answer })
+  }
+
+  const handlePlanConfirm = (requestId: string) => {
+    send({ action: 'plan_confirm_response', request_id: requestId, response: 'Approve' })
+  }
+
+  const handlePlanReject = (requestId: string) => {
+    send({ action: 'plan_confirm_response', request_id: requestId, response: 'Cancel' })
   }
 
   const onDeleteTask = (id: string) => {
@@ -1003,7 +1044,7 @@ function App() {
                 <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
                 </button>
-                <img src='/aegis-owl-logo.svg' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
+                <img src='/aegis-shield.png' alt='Aegis' className='h-5 w-5 sm:h-6 sm:w-6 object-contain' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
                 {/* ── Chat ↔ Browser mode switcher ── */}
                 {!showSettings && !showAutomations && (
@@ -1087,11 +1128,9 @@ function App() {
                 activeTaskId={selectedTaskId}
                 serverMessages={serverMessages}
                 onStop={() => send({ action: 'stop' })}
-                onUserInputResponse={(answer, requestId) => send({
-                  action: 'user_input_response',
-                  request_id: requestId,
-                  response: answer,
-                })}
+                onUserInputResponse={handleUserInputResponse}
+                onPlanConfirm={handlePlanConfirm}
+                onPlanReject={handlePlanReject}
                 reasoningMap={reasoningMap}
                 enableReasoning={settings.enableReasoning}
                 onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}

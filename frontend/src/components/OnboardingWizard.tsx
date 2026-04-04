@@ -96,7 +96,7 @@ export function OnboardingWizard({ userName, userEmail, onComplete }: WizardProp
           <div className='animate-in fade-in slide-in-from-bottom-2 duration-300'>
             <div className='text-center mb-8'>
               <div className='mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10'>
-                <img src='/aegis-owl-logo.svg' alt='Aegis' className='h-10 w-10' />
+                <img src='/aegis-shield.png' alt='Aegis' className='h-10 w-10' />
               </div>
               <h1 className='text-2xl font-bold text-white'>Welcome to Aegis{displayName ? `, ${displayName.split(' ')[0]}` : ''}!</h1>
               <p className='mt-2 text-sm text-zinc-400'>Let's set things up so your first session goes smoothly.</p>
