@@ -1320,6 +1320,42 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await live_manager.close_session(session_id)
 
 
+async def _log_platform_message(
+    user_id: str | None,
+    *,
+    platform: str,
+    platform_chat_id: str,
+    role: str,
+    content: str,
+    title: str,
+    metadata: dict[str, Any] | None = None,
+    platform_message_id: str | None = None,
+) -> None:
+    """Persist a platform message to conversation storage when an owner is available."""
+    if not user_id:
+        return
+    session_iter = get_session()
+    db = await anext(session_iter)
+    try:
+        conversation = await get_or_create_conversation(
+            db,
+            user_id=user_id,
+            platform=platform,
+            platform_chat_id=str(platform_chat_id),
+            title=title,
+        )
+        await append_message(
+            db,
+            conversation_id=conversation.id,
+            role=role,
+            content=content,
+            metadata=metadata or {},
+            platform_message_id=platform_message_id,
+        )
+    finally:
+        await session_iter.aclose()
+
+
 # ── Integration webhook / registration endpoints ─────────────────────
 
 
@@ -1330,9 +1366,13 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
         raise HTTPException(status_code=404, detail="Integration not found")
     config = telegram_registry.get_config(integration_id)
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    expected_secret = str(config.get("webhook_secret", ""))
-    if expected_secret and secret != expected_secret:
-        raise HTTPException(status_code=403, detail="Invalid secret token")
+    if hasattr(integration, "validate_webhook_secret"):
+        if not integration.validate_webhook_secret(secret):
+            raise HTTPException(status_code=403, detail="Invalid secret token")
+    else:
+        expected_secret = str(config.get("webhook_secret", ""))
+        if expected_secret and secret != expected_secret:
+            raise HTTPException(status_code=403, detail="Invalid secret token")
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
@@ -1817,8 +1857,38 @@ async def _run_navigation_task_from_bot(
 
 
 def _get_telegram_sender_id(update: dict[str, Any]) -> str:
+    callback_query = update.get("callback_query") or {}
+    callback_from = callback_query.get("from") or {}
+    if callback_from.get("id") is not None:
+        return str(callback_from.get("id"))
     msg = update.get("message") or update.get("edited_message") or {}
     return str((msg.get("from") or {}).get("id", ""))
+
+
+def _extract_telegram_message(update: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract chat/text/message-id from message or callback payloads."""
+    callback_query = update.get("callback_query") or {}
+    if callback_query:
+        message = callback_query.get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        text = str(callback_query.get("data", "")).strip() or None
+        message_id = message.get("message_id")
+        return (
+            str(chat_id) if chat_id is not None else None,
+            text,
+            str(message_id) if message_id is not None else None,
+        )
+
+    message = update.get("message") or update.get("edited_message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    text = str(message.get("text", "")).strip() or None
+    message_id = message.get("message_id")
+    return (
+        str(chat_id) if chat_id is not None else None,
+        text,
+        str(message_id) if message_id is not None else None,
+    )
 
 
 async def _handle_slash_command(
