@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 APPROVED_STATUSES = {"approved_internal", "approved_marketplace"}
 _APPROVED_REVIEW_DECISIONS = {"approve_internal", "approve_marketplace"}
-MAX_RUNTIME_SKILLS = 100
 
 
 @dataclass
@@ -40,7 +39,7 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
         select(Skill)
         .where(Skill.status.in_(APPROVED_STATUSES))
         .order_by(desc(Skill.updated_at), desc(Skill.created_at))
-        .limit(MAX_RUNTIME_SKILLS)
+        .limit(max(int(settings.MAX_RUNTIME_SKILLS), 1))
     )
     skills = rows.scalars().all()
     if not skills:

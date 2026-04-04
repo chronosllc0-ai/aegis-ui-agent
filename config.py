@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     SKILLS_MAX_TOKENS: int = 6000
     SKILLS_MIN_PRIORITY: int | None = None
     SKILLS_FAIL_CLOSED: bool = False
+    MAX_RUNTIME_SKILLS: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

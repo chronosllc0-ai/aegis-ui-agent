@@ -2655,3 +2655,29 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.29 - April 3, 2026 (PR Review Follow-up: runtime skill cap moved to config)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed the remaining review suggestion by removing the hardcoded `MAX_RUNTIME_SKILLS` module constant from `backend/skills/runtime_loader.py`.
+- Added `MAX_RUNTIME_SKILLS` to `config.py` settings so runtime-skill cap is environment-configurable.
+- Updated runtime loader query to consume `settings.MAX_RUNTIME_SKILLS` with defensive clamping (`>= 1`).
+
+### What's Working
+- Runtime skill fetch cap is now configurable and no longer a hidden magic number in module scope.
+
+### What's NOT Working Yet
+- No dedicated API/admin surface exists yet to adjust this setting at runtime without redeploying env configuration.
+
+### Next Steps
+1. Expose runtime skill cap in admin platform settings if live tuning is required.
+2. Add a focused unit test that monkeypatches `MAX_RUNTIME_SKILLS` and asserts capped fetch behavior.
+
+### Decisions Made
+- Used simple integer clamping in loader (`max(int(settings.MAX_RUNTIME_SKILLS), 1)`) to prevent accidental zero/negative caps.
+
+### Blockers
+- None in this pass.
