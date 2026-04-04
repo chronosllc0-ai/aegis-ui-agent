@@ -2579,3 +2579,105 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.27 - April 3, 2026 (Runtime Skill Loader + Prompt Injection + Provenance Logging)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/skills/runtime_loader.py` with a dedicated `RuntimeSkill` dataclass and runtime skill-loading policy gate that only returns skills with approved status, latest version, resolved scans/review, and not disabled for the active user/session context.
+- Added runtime skill prompt assembly in `universal_navigator.py` including:
+  - control-char sanitization,
+  - priority-based ordering,
+  - token-budget enforcement via `len(text)/4` heuristic,
+  - explicit truncation marker when the budget is exceeded.
+- Added runtime-skill config knobs in `config.py`:
+  - `SKILLS_MAX_TOKENS`
+  - `SKILLS_MIN_PRIORITY`
+  - `SKILLS_FAIL_CLOSED`
+- Wired one-time runtime skill loading into `run_universal_navigation(...)` startup and appended the `### Active Skills (read-only directives)` section to the system prompt once per run.
+- Added structured provenance logging/event emission at task start with `type: skills_loaded`, including `skills[]` and `excluded[]` metadata.
+- Preserved existing tool safety path (`_tool_requires_confirmation` / `_confirm_if_needed`) unchanged.
+
+### What's Working
+- Runtime skills are now injected once at task startup through the system prompt build path.
+- Budget truncation behavior is deterministic by priority order and emits an explicit truncation marker.
+- Skills provenance is emitted to logs and the workflow event callback.
+- High-risk tool confirmation is still enforced even if an injected skill directive attempts to bypass it.
+
+### What's NOT Working Yet
+- There is no dedicated DB-backed assignment model yet for per-user/per-session disablement beyond metadata-driven disable flags.
+
+### Next Steps
+1. Add explicit relational tables for user/session skill assignment & disable rules (instead of metadata-only checks).
+2. Extend runtime loader API to return first-class exclusion reasons alongside active skills for richer observability.
+3. Add admin UI visibility for runtime loaded/excluded skills per task.
+
+### Decisions Made
+- Implemented fail-open runtime behavior by default (`SKILLS_FAIL_CLOSED=False`) to prioritize task availability; fail-closed can be enabled by config.
+
+### Blockers
+- None in this pass.
+
+## Session 5.28 - April 3, 2026 (PR Review Follow-up: runtime skills perf + edge-case fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed code review feedback on runtime skill loading performance by removing per-skill scan/review DB lookups and switching to batched fetching:
+  - batched latest version resolution,
+  - batched review resolution,
+  - batched scan resolution.
+- Added a cap to the runtime skill catalog query (`MAX_RUNTIME_SKILLS=100`) to avoid unbounded in-memory loading during prompt assembly.
+- Extended `RuntimeSkill` with optional `created_at` and updated prompt skill sorting to use real recency metadata (priority desc, then created_at, then version id).
+- Fixed token-budget edge case where `SKILLS_MAX_TOKENS=0` previously behaved as unbounded; now zero budget excludes all skills.
+- Tightened skill-content sanitization to exclude DEL (`0x7F`) in addition to other control-character handling.
+- Added regression coverage for the zero-budget behavior.
+
+### What's Working
+- Runtime loader avoids the previous N+1 query behavior and resolves security metadata in bulk.
+- Prompt inclusion ordering now has a meaningful recency tie-breaker.
+- Zero-budget behavior now correctly excludes all runtime skills.
+- Targeted tests pass including the new edge-case test.
+
+### What's NOT Working Yet
+- Loader exclusion reasons from DB-level filtering (e.g., malformed metadata, unresolved review) are logged but not yet surfaced as a first-class return payload from `get_active_runtime_skills`.
+
+### Next Steps
+1. Expand runtime loader return type to include structured exclusion reasons directly (not only active skills).
+2. Add integration coverage that asserts batched loader behavior at scale (mock/spy query counts).
+3. Consider moving `MAX_RUNTIME_SKILLS` to env config for deployment-level tuning.
+
+### Decisions Made
+- Kept the loader API contract stable (`list[RuntimeSkill]`) for now and handled review suggestions with internal batching + limit to minimize broader API churn.
+
+### Blockers
+- None in this pass.
+
+## Session 5.29 - April 3, 2026 (PR Review Follow-up: runtime skill cap moved to config)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed the remaining review suggestion by removing the hardcoded `MAX_RUNTIME_SKILLS` module constant from `backend/skills/runtime_loader.py`.
+- Added `MAX_RUNTIME_SKILLS` to `config.py` settings so runtime-skill cap is environment-configurable.
+- Updated runtime loader query to consume `settings.MAX_RUNTIME_SKILLS` with defensive clamping (`>= 1`).
+
+### What's Working
+- Runtime skill fetch cap is now configurable and no longer a hidden magic number in module scope.
+
+### What's NOT Working Yet
+- No dedicated API/admin surface exists yet to adjust this setting at runtime without redeploying env configuration.
+
+### Next Steps
+1. Expose runtime skill cap in admin platform settings if live tuning is required.
+2. Add a focused unit test that monkeypatches `MAX_RUNTIME_SKILLS` and asserts capped fetch behavior.
+
+### Decisions Made
+- Used simple integer clamping in loader (`max(int(settings.MAX_RUNTIME_SKILLS), 1)`) to prevent accidental zero/negative caps.
+
+### Blockers
+- None in this pass.
