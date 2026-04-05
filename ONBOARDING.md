@@ -2969,3 +2969,13 @@
 
 ### Why
 - Addressed code review concern about duplicate/fragile normalization behavior and made this function clearly authoritative and maintainable.
+
+## 2026-04-05 — Review follow-up for PR #161 (duplicate normalizer guard)
+
+### What changed
+- Moved `normalizeAskUserInputOptions` into `frontend/src/lib/askUserInput.ts`.
+- Removed local declaration from `ChatPanel.tsx` and imported the shared helper instead.
+
+### Why
+- Eliminates any chance of duplicate in-file declarations for `normalizeAskUserInputOptions` and makes the parser truly single-source.
+- Addresses review-critical duplicate identifier concern directly.

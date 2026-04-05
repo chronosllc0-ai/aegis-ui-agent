@@ -4,6 +4,7 @@ import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
+import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -161,6 +162,8 @@ function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
 
   return normalized
 }
+
+
 
 interface AttachedFile {
   name: string
