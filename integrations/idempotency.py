@@ -22,7 +22,7 @@ class DeliveryDeduper:
 
         self._seen.add(delivery_id)
         self._order.append(delivery_id)
-        if len(self._order) > self._max_entries:
+        while len(self._order) > self._max_entries:
             oldest = self._order.popleft()
             self._seen.discard(oldest)
         return False

@@ -1,3 +1,37 @@
+## Session 5.59 - April 5, 2026 (PR review follow-up: retry-after parsing hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick fix pass
+
+### What Was Done
+- Addressed latest PR review follow-up on Slack/Discord retry branch robustness and indentation concerns.
+- Updated Slack retry logic in `integrations/slack_connector.py` to parse `Retry-After` with guarded float conversion:
+  - defaults to `1.0`,
+  - catches `TypeError`/`ValueError` to avoid runtime parse errors.
+- Updated Discord retry logic in `integrations/discord.py` to parse `retry_after` with guarded conversion from API payload:
+  - reads raw value when payload is dict,
+  - safely casts with fallback to `1.0`.
+- Re-ran syntax + adapter tests to confirm import/runtime stability.
+
+### What's Working
+- Both adapters compile cleanly and pass adapter test suite after retry parsing hardening.
+- Retry code path now tolerates malformed/non-numeric retry headers/payload values.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add explicit unit tests for malformed retry headers/payload values (e.g., `Retry-After: foo`) to lock in behavior.
+2. Continue webhook endpoint wiring parity validation for `handle_event(...)` at route level.
+
+### Decisions Made
+- Kept fallback retry delay at `1.0s` for invalid provider hints to preserve deterministic backoff behavior.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.58 - April 5, 2026 (PR review follow-up: adapter cleanup + bounded idempotency)
 
 **Agent:** GPT-5.3-Codex  

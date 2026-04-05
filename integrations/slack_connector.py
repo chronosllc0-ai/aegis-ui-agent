@@ -265,10 +265,11 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
                 response = await client.request(method, url, headers=headers, params=params, json=json_payload)
 
                 if response.status_code == 429 and attempt < retries:
-                    try:
-                    retry_after = float(response.headers.get("Retry-After", "1"))
-                except (ValueError, TypeError):
                     retry_after = 1.0
+                    try:
+                        retry_after = float(response.headers.get("Retry-After", "1"))
+                    except (TypeError, ValueError):
+                        retry_after = 1.0
                     logger.warning("Slack rate limited on %s, retrying in %ss", endpoint, retry_after)
                     await asyncio.sleep(retry_after)
                     attempt += 1
