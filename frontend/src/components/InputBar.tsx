@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
 import { apiUrl } from '../lib/api'
 import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
@@ -29,8 +29,6 @@ type InputBarProps = {
   onModelChange: (model: string) => void
   queuedMessages: string[]
   onDeleteQueueItem: (index: number) => void
-  examplePrompt?: string | null
-  onExampleHandled?: () => void
   transcripts?: TranscriptEntry[]
 }
 
@@ -129,17 +127,13 @@ export function InputBar({
   onModelChange,
   queuedMessages,
   onDeleteQueueItem,
-  examplePrompt,
-  onExampleHandled,
   transcripts = [],
 }: InputBarProps) {
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [planMode, setPlanMode] = useState(false)
-  const pendingExampleRef = useRef<string | null>(null)
-
-  const effectiveValue = () => value.trim() || pendingExampleRef.current?.trim() || ''
+  const effectiveValue = () => value.trim()
 
   const submit = (overrideValue?: string) => {
     const raw = overrideValue ?? effectiveValue()
@@ -153,21 +147,8 @@ export function InputBar({
     }
     if (!overrideValue) {
       setValue('')
-      pendingExampleRef.current = null
     }
   }
-
-  useEffect(() => {
-    if (!examplePrompt) return
-    const instruction = examplePrompt.trim()
-    pendingExampleRef.current = instruction
-    const timeout = window.setTimeout(() => {
-      if (instruction) setValue(instruction)
-      pendingExampleRef.current = null
-      onExampleHandled?.()
-    }, 0)
-    return () => window.clearTimeout(timeout)
-  }, [examplePrompt, onExampleHandled])
 
   const recentTranscripts = useMemo(() => transcripts.slice(-3).reverse(), [transcripts])
   const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window

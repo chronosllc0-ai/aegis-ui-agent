@@ -3087,3 +3087,26 @@
 
 ### Validation
 - Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
+
+## 2026-04-05 — Single-composer UX: browser panel view-only + ScreenView direct send
+
+### What changed
+- Updated `frontend/src/App.tsx` to remove the browser-mode `InputBar` mount so browser mode is now strictly view/log focused.
+- Switched `ScreenView` example prompt behavior to call:
+  - `handleSend(prompt, 'steer', { task_label_source: 'chat', task_label: prompt })`
+  directly, instead of routing via `examplePrompt` state.
+- Removed browser-only `examplePrompt` plumbing in `App.tsx` and removed the related `examplePrompt` / `onExampleHandled` props + handling in `frontend/src/components/InputBar.tsx`.
+- Added optimistic chat-message bridging in `App.tsx` (`optimisticMessagesByTask`) so externally-triggered sends (including ScreenView examples) still show a user bubble in chat.
+- Kept the browser-mode stop button path unchanged so stop remains available while active execution is running.
+- Added UX coverage in `frontend/src/App.browser-example.test.tsx` validating:
+  1. example click triggers a chat-sourced navigate send payload,
+  2. user bubble appears in chat,
+  3. no action-log noise is introduced.
+
+### Why
+- Aligns UI with a single execution entry surface (ChatPanel composer) while keeping browser mode focused on visualization and controls.
+- Removes split input behavior that was causing confusion between browser and chat workflows.
+
+### Validation
+- Ran `npm --prefix frontend run build`; build passed.
+- Ran `npm --prefix frontend run test -- src/App.browser-example.test.tsx`; new UX test passed.
