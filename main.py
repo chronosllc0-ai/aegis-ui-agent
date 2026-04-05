@@ -1955,7 +1955,7 @@ async def _handle_slash_command(
         if not runtime:
             return "⚪ No active session."
         if not arg:
-            active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
+        return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
             return f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
         requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
         runtime.settings["agent_mode"] = requested_mode
