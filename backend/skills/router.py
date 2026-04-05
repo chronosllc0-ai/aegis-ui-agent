@@ -18,6 +18,7 @@ skills_router = APIRouter(tags=["skills"])
 
 
 def _safe_json_loads(text: str | None, *, default: dict[str, Any] | list[Any] | None = None) -> Any:
+    """Safely parse stored JSON fields without failing endpoint responses."""
     fallback = {} if default is None else default
     if not text:
         return fallback
@@ -79,6 +80,7 @@ async def submit_user_skill(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
+        publish_target = body.publish_target if current_user.role in {"admin", "superadmin"} else "hub"
         skill, submission = await SkillService.submit_skill(
             session,
             slug=body.slug,
@@ -86,7 +88,7 @@ async def submit_user_skill(
             description=body.description,
             owner_user_id=current_user.uid,
             owner_type="admin" if current_user.role in {"admin", "superadmin"} else "user",
-            publish_target=body.publish_target,
+            publish_target=publish_target,
             metadata_json=body.metadata_json,
             skill_markdown=body.skill_md,
             submitted_by=current_user.uid,

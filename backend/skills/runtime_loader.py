@@ -42,28 +42,41 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
         .where(and_(SkillInstall.user_id == user_id, SkillInstall.enabled.is_(True)))
         .order_by(desc(SkillInstall.updated_at))
     )
+    install_rows = rows.all()
 
     runtime: list[RuntimeSkill] = []
-    token_budget = max(int(getattr(settings, "SKILLS_MAX_TOKEN", settings.SKILLS_MAX_TOKENS)), 1)
-    max_budget = max(int(settings.SKILLS_MAX_TOKENS), 1)
-    remaining_budget = min(token_budget, max_budget)
+    remaining_budget = max(int(getattr(settings, "SKILLS_MAX_TOKEN", settings.SKILLS_MAX_TOKENS)), 1)
+    version_ids = [version.id for _, _, version in install_rows]
 
-    for install, skill, version in rows.all():
+    scans_by_version_id: dict[str, dict[str, SkillScanResult]] = {}
+    latest_review_by_version_id: dict[str, SkillReview] = {}
+    if version_ids:
+        scan_rows = await session.execute(
+            select(SkillScanResult)
+            .where(SkillScanResult.skill_version_id.in_(version_ids))
+            .order_by(desc(SkillScanResult.scanned_at), desc(SkillScanResult.created_at))
+        )
+        for scan in scan_rows.scalars().all():
+            by_engine = scans_by_version_id.setdefault(scan.skill_version_id, {})
+            by_engine.setdefault(scan.engine, scan)
+
+        review_rows = await session.execute(
+            select(SkillReview)
+            .where(SkillReview.skill_version_id.in_(version_ids))
+            .order_by(desc(SkillReview.reviewed_at), desc(SkillReview.created_at))
+        )
+        for review in review_rows.scalars().all():
+            latest_review_by_version_id.setdefault(review.skill_version_id, review)
+
+    for install, skill, version in install_rows:
         if skill.status not in APPROVED_STATUSES:
             logger.warning("Runtime skill %s excluded: not_approved_status", skill.id)
             continue
 
-        scans = await session.execute(select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id))
-        by_engine = {scan.engine: scan for scan in scans.scalars().all()}
-
-        reviews = await session.execute(
-            select(SkillReview)
-            .where(SkillReview.skill_version_id == version.id)
-            .order_by(desc(SkillReview.reviewed_at), desc(SkillReview.created_at))
-            .limit(1)
-        )
-        review = reviews.scalar_one_or_none()
-        if not _is_security_resolved(review=review, scans_by_engine=by_engine):
+        if not _is_security_resolved(
+            review=latest_review_by_version_id.get(version.id),
+            scans_by_engine=scans_by_version_id.get(version.id, {}),
+        ):
             logger.warning("Runtime skill %s excluded: unresolved_scan_or_review", skill.id)
             continue
 

@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 from sqlalchemy import and_, delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from backend.database import (
     Skill,
@@ -39,8 +40,9 @@ class VirusTotalScanner:
     _lock = asyncio.Lock()
 
     @classmethod
-    def _is_open(cls) -> bool:
-        return cls._opened_until is not None and datetime.now(timezone.utc) < cls._opened_until
+    async def _is_open(cls) -> bool:
+        async with cls._lock:
+            return cls._opened_until is not None and datetime.now(timezone.utc) < cls._opened_until
 
     @classmethod
     async def _register_failure(cls) -> None:
@@ -78,7 +80,7 @@ class VirusTotalScanner:
                 "scanned_at": datetime.now(timezone.utc),
             }
 
-        if cls._is_open():
+        if await cls._is_open():
             return {
                 "engine": "virustotal",
                 "verdict": "error",
@@ -462,12 +464,29 @@ class SkillService:
             .where(SkillSubmission.review_state == "pending_review")
             .order_by(SkillSubmission.created_at.asc())
         )
-        queue: list[dict[str, Any]] = []
-        for submission, skill, version in rows.all():
-            scans = await session.execute(
-                select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id).order_by(SkillScanResult.scanned_at.desc())
+        queue_rows = rows.all()
+        version_ids = [version.id for _, _, version in queue_rows]
+        scans_by_version_id: dict[str, list[SkillScanResult]] = {version_id: [] for version_id in version_ids}
+
+        if version_ids:
+            scan_rows = await session.execute(
+                select(SkillScanResult)
+                .where(SkillScanResult.skill_version_id.in_(version_ids))
+                .order_by(desc(SkillScanResult.scanned_at), desc(SkillScanResult.created_at))
             )
-            queue.append({"submission": submission, "skill": skill, "version": version, "scans": scans.scalars().all()})
+            for scan in scan_rows.scalars().all():
+                scans_by_version_id.setdefault(scan.skill_version_id, []).append(scan)
+
+        queue: list[dict[str, Any]] = []
+        for submission, skill, version in queue_rows:
+            queue.append(
+                {
+                    "submission": submission,
+                    "skill": skill,
+                    "version": version,
+                    "scans": scans_by_version_id.get(version.id, []),
+                }
+            )
         return queue
 
     @staticmethod
@@ -562,7 +581,6 @@ class SkillService:
 
     @staticmethod
     async def list_catalog(session: AsyncSession, *, publish_target: str) -> list[dict[str, Any]]:
-        await SkillService.expire_new_flags(session)
         approved_status = "approved_global" if publish_target == "global" else "approved_hub"
         rows = await session.execute(
             select(Skill, User)
@@ -618,11 +636,25 @@ class SkillService:
                 updated_at=now,
             )
             session.add(install)
+            try:
+                await session.flush()
+            except IntegrityError:
+                await session.rollback()
+                rows = await session.execute(
+                    select(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id))
+                )
+                install = rows.scalar_one_or_none()
+                if install is None:
+                    raise
+                install.skill_version_id = version.id
+                install.enabled = True
+                install.updated_at = now
+                await session.flush()
         else:
             install.skill_version_id = version.id
             install.enabled = True
             install.updated_at = now
-        await session.flush()
+            await session.flush()
         return install
 
     @staticmethod

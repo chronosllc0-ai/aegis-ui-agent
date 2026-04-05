@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func, inspect, text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func, inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -258,6 +258,7 @@ class SkillInstall(Base):
     """Per-user installed skill relation with enabled runtime toggle."""
 
     __tablename__ = "skill_installs"
+    __table_args__ = (UniqueConstraint("user_id", "skill_id", name="uq_skill_install_user_skill"),)
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)

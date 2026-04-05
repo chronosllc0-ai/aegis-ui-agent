@@ -3085,3 +3085,51 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.31 - April 5, 2026 (PR review fixes: perf, safety, and data integrity hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed PR review warnings/suggestions from `kilo-code-bot`:
+  1. **Runtime loader N+1 fix**
+     - Reworked `backend/skills/runtime_loader.py` to batch-fetch scans and reviews for all installed version IDs before loop processing.
+     - Removed per-skill scan/review queries.
+  2. **Review queue N+1 fix**
+     - Reworked `SkillService.get_review_queue()` to batch-load all scan rows for queued submission versions in one query and group in-memory.
+  3. **Install uniqueness at DB layer**
+     - Added DB `UniqueConstraint(user_id, skill_id)` to `SkillInstall`.
+     - Added `IntegrityError` recovery path in `install_skill()` to keep install behavior idempotent under race conditions.
+  4. **Non-admin global publish guard**
+     - In submit API, force `publish_target="hub"` unless requester is admin/superadmin.
+  5. **Circuit-breaker lock consistency**
+     - Made `VirusTotalScanner._is_open()` async + lock-protected and updated caller to `await` it.
+  6. **Token budget simplification**
+     - Simplified runtime budget initialization to a single fallback expression.
+  7. **GET side-effect reduction**
+     - Removed `expire_new_flags()` write-side effect from `list_catalog()` read path.
+  8. **Docstring restoration**
+     - Restored `_safe_json_loads()` docstring in router.
+- Added API regression test ensuring non-admin submissions cannot persist `publish_target="global"`.
+
+### What's Working
+- Runtime skill loading avoids N+1 scan/review lookups.
+- Admin review queue avoids N+1 scan lookups.
+- Install relation now has DB-level uniqueness protection.
+- Non-admin users are forced to Hub target on submission.
+- Targeted tests pass after fixes.
+
+### What's NOT Working Yet
+- The `install_skill()` IntegrityError recovery currently uses rollback-and-refetch in the same service method; a future pass should move this to an explicit upsert strategy for cleaner transaction semantics.
+
+### Next Steps
+1. Replace install race recovery with dialect-aware upsert (`ON CONFLICT`) where supported.
+2. Add explicit perf-oriented tests (query counting/mocking) for runtime loader and review queue.
+3. Add a scheduled job for `expire_new_flags()` to keep read APIs mutation-free while preserving badge freshness.
+
+### Decisions Made
+- Prioritized correctness + production query-shape improvements from review comments over introducing larger infra changes (e.g., full scheduler/upsert framework) in this pass.
+
+### Blockers
+- None in this pass.

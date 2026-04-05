@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend import database
-from backend.database import User, get_session
+from backend.database import Skill, User, get_session
 from backend.skills.service import SkillService
 from backend.skills.router import skills_router
 
@@ -114,3 +114,39 @@ def test_admin_review_actions_require_admin_role(tmp_path) -> None:
         queue_response = client.get("/api/admin/skills/review-queue")
         assert queue_response.status_code == 403
         assert queue_response.json()["detail"] == "Admin access required"
+
+
+def test_non_admin_submit_forces_hub_publish_target(tmp_path) -> None:
+    _init_db_sync(tmp_path)
+    app = FastAPI()
+    app.include_router(skills_router)
+
+    with (
+        TestClient(app) as client,
+        patch("auth._verify_session", side_effect=_mock_verify_session),
+        patch("backend.skills.router._verify_session", side_effect=_mock_verify_session),
+    ):
+        client.cookies.set("aegis_session", "user-1")
+        response = client.post(
+            "/api/skills/submit",
+            json={
+                "slug": "user-global-attempt",
+                "name": "User Global Attempt",
+                "description": "desc",
+                "publish_target": "global",
+                "metadata_json": {},
+                "skill_md": "# Safe",
+            },
+        )
+        assert response.status_code == 200
+
+    async def _assert_saved() -> None:
+        async for session in get_session():
+            row = await session.execute(select(Skill).where(Skill.slug == "user-global-attempt"))
+            skill = row.scalar_one()
+            assert skill.publish_target == "hub"
+            break
+
+    from sqlalchemy import select
+
+    asyncio.run(_assert_saved())
