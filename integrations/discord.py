@@ -276,10 +276,13 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
                     retry_after = 1.0
                     if isinstance(data, dict):
                         raw_retry_after = data.get("retry_after")
-                        try:
+                        if isinstance(raw_retry_after, (int, float)) and not isinstance(raw_retry_after, bool):
                             retry_after = float(raw_retry_after)
-                        except (TypeError, ValueError):
-                            retry_after = 1.0
+                        elif isinstance(raw_retry_after, str) and raw_retry_after.strip():
+                            try:
+                                retry_after = float(raw_retry_after)
+                            except (ValueError, OverflowError):
+                                retry_after = 1.0
                     logger.warning("Discord rate limited on %s, retrying in %ss", path, retry_after)
                     await asyncio.sleep(retry_after)
                     attempt += 1
