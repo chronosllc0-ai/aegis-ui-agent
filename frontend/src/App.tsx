@@ -599,17 +599,15 @@ function App() {
     () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
-
-  // isBrowsing: agent is actively running browser steps RIGHT NOW
-  const isBrowsing = isWorking && hasBrowserActivity
+  const hasBrowserActivity = actionLogEntries.length > 0
 
   // ── Auto-return to chat when a browser task finishes ────────────────────
   // When isWorking flips true→false and the task had browser activity,
   // automatically switch the user back to chat so they see the summary card.
-  const prevIsWorkingRef = useRef(isWorking)
+  const prevBrowsingWorkingRef = useRef(isWorking)
   useEffect(() => {
-    const wasWorking = prevIsWorkingRef.current
-    prevIsWorkingRef.current = isWorking
+    const wasWorking = prevBrowsingWorkingRef.current
+    prevBrowsingWorkingRef.current = isWorking
     if (wasWorking && !isWorking && hasBrowserActivity && appMode === 'browser') {
       setAppMode('chat')
     }

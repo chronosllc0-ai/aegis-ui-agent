@@ -3019,3 +3019,21 @@
 
 ### Validation
 - Ran `cd frontend && npm ci && npm run build` to mirror Netlify command; build succeeded.
+
+## 2026-04-05 — Netlify/Railway build break fix (App + ChatPanel TS cleanup)
+
+### What changed
+- Fixed `frontend/src/App.tsx` browser handoff logic by restoring a valid `hasBrowserActivity` derivation from action-log entries and removing the duplicate `prevIsWorkingRef` declaration by renaming the task-finish tracker ref.
+- Repaired `frontend/src/components/ChatPanel.tsx` after a bad merge state:
+  - removed duplicate local `normalizeAskUserInputOptions` declarations and kept the shared import from `frontend/src/lib/askUserInput.ts`.
+  - restored missing reasoning toggle wiring (`enableReasoning`, `onToggleReasoning`, `reasoningEffort`, `currentModelSupportsReasoning`) through `ChatPanel` → `InputBarCursor` props.
+  - fixed thinking UI state handling to use `threadUi.openThinkingIds` and `setThreadUi(...)` (replacing an undefined `setOpenThinkingIds` path).
+  - fixed ask-user-input rendering by passing required `answered` and routing replies through `handleUserInputReply` when callback exists.
+  - removed orphaned/undefined thinking persistence type usage that caused TS symbol errors.
+
+### Why
+- Railway/Netlify production builds failed at `npm run build` with TS2451/TS2304/TS2393 errors in `App.tsx` and `ChatPanel.tsx`.
+- These changes make the frontend compile deterministic again in CI/CD and local Docker image builds.
+
+### Validation
+- Ran `cd frontend && npm run build`; TypeScript + Vite build now pass successfully.
