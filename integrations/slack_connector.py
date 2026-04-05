@@ -265,7 +265,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
                 response = await client.request(method, url, headers=headers, params=params, json=json_payload)
 
                 if response.status_code == 429 and attempt < retries:
-                try:
+                    try:
                     retry_after = float(response.headers.get("Retry-After", "1"))
                 except (ValueError, TypeError):
                     retry_after = 1.0
