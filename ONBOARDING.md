@@ -3007,3 +3007,15 @@
 ### Why
 - Railway build logs showed a TS parse failure from a stray `src/components/__tests__/__ChatPanel.thinking-persistence.test.tsx` file.
 - Excluding test artifacts from `tsc -b` prevents production builds from failing due to accidental or environment-specific test files.
+
+## 2026-04-05 — Netlify/Railway production build hardening follow-up
+
+### What changed
+- Updated `frontend/package.json` build script from `tsc -b && vite build` to `tsc -b tsconfig.app.json tsconfig.node.json && vite build`.
+
+### Why
+- Netlify/Railway logs show build failures triggered when `tsc -b` picks up unexpected test artifacts in production contexts.
+- Explicitly targeting app + node tsconfig projects makes production compilation deterministic and aligned with the test-file exclusions in `tsconfig.app.json`.
+
+### Validation
+- Ran `cd frontend && npm ci && npm run build` to mirror Netlify command; build succeeded.
