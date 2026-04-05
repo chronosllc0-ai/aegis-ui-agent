@@ -2959,3 +2959,13 @@
 ### Decisions / notes
 - Current implementation treats modes as authoritative runtime policy gates, with defaults falling back to `orchestrator`.
 - Orchestrator mode intentionally blocks direct `spawn_subagent` to preserve router semantics requested in product direction.
+
+## 2026-04-05 — Post-review hotfix (ChatPanel option normalizer)
+
+### What changed
+- Hardened `normalizeAskUserInputOptions` in `frontend/src/components/ChatPanel.tsx` as the single canonical parser for ask-user-input options.
+- Added inline docs and converted logic to explicit loop-based normalization.
+- Added de-duplication of rendered quick-reply chips to prevent repeated options from mixed payloads.
+
+### Why
+- Addressed code review concern about duplicate/fragile normalization behavior and made this function clearly authoritative and maintainable.

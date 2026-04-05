@@ -131,6 +131,37 @@ function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
     .filter((opt) => opt.length > 0)
 }
 
+/**
+ * Canonical ask_user_input option normalizer.
+ *
+ * Supports either string options (`["A", "B"]`) or object options
+ * (`[{ label: "A" }, { id: "b" }]`) and returns a trimmed, de-duplicated
+ * list for chip rendering.
+ */
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  const seen = new Set<string>()
+  const normalized: string[] = []
+
+  for (const opt of rawOptions) {
+    let candidate = ''
+    if (typeof opt === 'string') {
+      candidate = opt.trim()
+    } else if (opt && typeof opt === 'object') {
+      const record = opt as Record<string, unknown>
+      const label = typeof record.label === 'string' ? record.label.trim() : ''
+      const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+      candidate = label || fallback
+    }
+
+    if (!candidate || seen.has(candidate)) continue
+    seen.add(candidate)
+    normalized.push(candidate)
+  }
+
+  return normalized
+}
+
 interface AttachedFile {
   name: string
   type: string
