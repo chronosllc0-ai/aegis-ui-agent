@@ -72,13 +72,14 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'thinking'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'thinking'
 
 interface ChatMessage {
   id: string
   role: ChatRole
   text: string
   timestamp?: string
+  metadata?: Record<string, unknown>
   toolName?: string
   toolArgs?: string
   toolResult?: string
@@ -90,6 +91,76 @@ interface ChatMessage {
   options?: string[]
   requestId?: string
   stepId?: string
+  planSteps?: string[]
+}
+
+type ThreadUiState = {
+  collapsedToolIds: string[]
+  answeredUserInputIds: string[]
+  openThinkingIds: string[]
+}
+
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  return rawOptions
+    .map((opt) => {
+      if (typeof opt === 'string') return opt.trim()
+      if (opt && typeof opt === 'object') {
+        const record = opt as Record<string, unknown>
+        const label = typeof record.label === 'string' ? record.label.trim() : ''
+        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+        return label || fallback
+      }
+      return ''
+    })
+    .filter((opt) => opt.length > 0)
+}
+
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  return rawOptions
+    .map((opt) => {
+      if (typeof opt === 'string') return opt.trim()
+      if (opt && typeof opt === 'object') {
+        const record = opt as Record<string, unknown>
+        const label = typeof record.label === 'string' ? record.label.trim() : ''
+        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+        return label || fallback
+      }
+      return ''
+    })
+    .filter((opt) => opt.length > 0)
+}
+
+/**
+ * Canonical ask_user_input option normalizer.
+ *
+ * Supports either string options (`["A", "B"]`) or object options
+ * (`[{ label: "A" }, { id: "b" }]`) and returns a trimmed, de-duplicated
+ * list for chip rendering.
+ */
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  const seen = new Set<string>()
+  const normalized: string[] = []
+
+  for (const opt of rawOptions) {
+    let candidate = ''
+    if (typeof opt === 'string') {
+      candidate = opt.trim()
+    } else if (opt && typeof opt === 'object') {
+      const record = opt as Record<string, unknown>
+      const label = typeof record.label === 'string' ? record.label.trim() : ''
+      const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+      candidate = label || fallback
+    }
+
+    if (!candidate || seen.has(candidate)) continue
+    seen.add(candidate)
+    normalized.push(candidate)
+  }
+
+  return normalized
 }
 
 
@@ -98,6 +169,45 @@ interface AttachedFile {
   name: string
   type: string
   dataUrl: string
+}
+
+type ComposerSubmissionMode = 'normal' | 'plan'
+
+export function resolveComposerSubmission(input: string, planIntent: boolean): { mode: ComposerSubmissionMode; text: string } {
+  const trimmed = input.trim()
+  if (!trimmed) return { mode: 'normal', text: '' }
+  if (trimmed.startsWith('/plan')) {
+    return { mode: 'plan', text: trimmed.slice('/plan'.length).trim() }
+  }
+  if (planIntent) return { mode: 'plan', text: trimmed }
+  return { mode: 'normal', text: trimmed }
+}
+
+const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
+const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
+
+function readPersistedThinking(taskId: string | null | undefined): PersistedThinkingMessage[] {
+  if (!taskId) return []
+  try {
+    const raw = localStorage.getItem(THINKING_KEY(taskId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is PersistedThinkingMessage => {
+        const candidate = item as Partial<PersistedThinkingMessage>
+        return Boolean(candidate && candidate.role === 'thinking' && typeof candidate.stepId === 'string')
+      })
+      .map((item) => ({
+        ...item,
+        status: (item.status === 'completed' ? 'completed' : 'streaming') as ThinkingState,
+        text: typeof item.text === 'string' ? item.text : '',
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+  } catch {
+    return []
+  }
 }
 
 // ─── Live connector type ───────────────────────────────────────────────────────
@@ -177,14 +287,6 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
 
-    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
-      const stepId = entry.stepId
-      if (stepId && !msgs.find((m) => m.role === 'thinking' && m.stepId === stepId)) {
-        msgs.push({ id: `thinking-${stepId}`, role: 'thinking', text: msg, stepId })
-      }
-      continue
-    }
-
     if (msg.includes('[ask_user_input]')) {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
@@ -219,6 +321,17 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
 
+    if (msg.includes('[plan_steps]')) {
+      try {
+        const jsonStr = msg.replace('[plan_steps]', '').trim()
+        const steps: string[] = JSON.parse(jsonStr)
+        msgs.push({ id: entry.id, role: 'live_plan', text: '', planSteps: steps })
+      } catch {
+        msgs.push({ id: entry.id, role: 'live_plan', text: msg.replace('[plan_steps]', '').trim(), planSteps: [] })
+      }
+      continue
+    }
+
     const isUser       = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
     const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
     const isApproval   = entry.type === 'interrupt'
@@ -246,7 +359,13 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
       if (toolName.toLowerCase() === 'thinking') {
-        msgs.push({ id: entry.id, role: 'thinking', text: msg.replace(/^\[[\w_]+\]\s*/, '').trim() || 'Thinking', stepId: entry.stepId })
+        msgs.push({
+          id: entry.id,
+          role: 'thinking',
+          text: '',
+          stepId: entry.stepId,
+          metadata: { placeholder: true },
+        })
         continue
       }
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
@@ -351,16 +470,24 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
   )
 }
 
-// ─── GeneratingCanvas ─────────────────────────────────────────────────────────
+// ─── GeneratingCanvas — spinning Aegis shield + label ─────────────────────────
 function GeneratingCanvas({ label }: { label: string }) {
   return (
-    <div className='my-2 flex items-center gap-3 rounded-xl border border-[#2a2a2a] bg-[#141414] p-4'>
-      <div className='flex gap-0.5'>
-        {[0, 1, 2, 3].map((i) => (
-          <span key={i} className='h-5 w-1 rounded-full bg-violet-400 animate-pulse' style={{ animationDelay: `${i * 120}ms` }} />
-        ))}
+    <div className='my-2 flex items-center gap-3 rounded-xl border border-blue-500/10 bg-[#0d1117] p-4'>
+      {/* Spinning shield logo */}
+      <div className='relative flex h-9 w-9 flex-shrink-0 items-center justify-center'>
+        <span className='absolute inset-0 rounded-full border border-blue-500/40 animate-spin' style={{ animationDuration: '2.5s' }} />
+        <span className='absolute inset-[3px] rounded-full border border-cyan-400/25 animate-spin' style={{ animationDuration: '1.8s', animationDirection: 'reverse' }} />
+        <img src='/aegis-shield.png' alt='Aegis' className='h-6 w-6 object-contain' />
       </div>
-      <span className='text-sm text-zinc-400'>{label}</span>
+      <div className='flex flex-col gap-0.5'>
+        <span className='text-sm font-medium text-zinc-300'>{label}</span>
+        <div className='flex gap-0.5 mt-0.5'>
+          {[0, 1, 2].map((i) => (
+            <span key={i} className='h-1 w-1 rounded-full bg-blue-400/70 animate-bounce' style={{ animationDelay: `${i * 150}ms`, animationDuration: '1s' }} />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -368,7 +495,7 @@ function GeneratingCanvas({ label }: { label: string }) {
 // ─── UserBubble — dark style (no blue) ────────────────────────────────────────
 function UserBubble({ msg }: { msg: ChatMessage }) {
   return (
-    <div className='flex justify-end px-1 py-1'>
+    <div className='flex justify-end px-1 py-1' data-testid='user-bubble'>
       <div className='max-w-[82%] space-y-1.5'>
         {msg.attachments?.map((att, i) =>
           att.type.startsWith('image/') ? (
@@ -415,10 +542,11 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
 interface ShellCardProps {
   msg: ChatMessage
   isRunning?: boolean
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
 }
 
-function ShellCard({ msg, isRunning }: ShellCardProps) {
-  const [expanded, setExpanded] = useState(isRunning ?? false)
+function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProps) {
   const outputRef = useRef<HTMLPreElement>(null)
 
   const toolLabel = (msg.toolName ?? 'shell').replace(/_/g, ' ')
@@ -430,10 +558,10 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
   const prevRunning = useRef(isRunning)
   useEffect(() => {
     if (prevRunning.current === isRunning) return
-    if (isRunning) setExpanded(true)
-    if (!isRunning && prevRunning.current) setExpanded(false)
+    if (isRunning) onExpandedChange(true)
+    if (!isRunning && prevRunning.current) onExpandedChange(false)
     prevRunning.current = isRunning
-  }, [isRunning])
+  }, [isRunning, onExpandedChange])
 
   // Auto-scroll output while running
   useEffect(() => {
@@ -459,7 +587,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
     return (
       <button
         type='button'
-        onClick={() => setExpanded(true)}
+        onClick={() => onExpandedChange(true)}
         className='flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-[#1a1a1a] group'
       >
         {statusDot}
@@ -483,7 +611,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
       {/* Terminal header bar */}
       <button
         type='button'
-        onClick={() => setExpanded(false)}
+        onClick={() => onExpandedChange(false)}
         className='flex w-full items-center gap-2.5 border-b border-[#1e1e1e] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
       >
         {/* Traffic-light dots */}
@@ -527,10 +655,11 @@ interface ThinkingRowProps {
   stepId: string
   reasoningText: string
   isStreaming: boolean
+  open: boolean
+  onToggle: () => void
 }
 
-function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRowProps) {
-  const [open, setOpen] = useState(false)
+function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onToggle }: ThinkingRowProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -543,7 +672,7 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
     <div className='my-0.5'>
       <button
         type='button'
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className='flex items-center gap-2 rounded-xl px-3 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
       >
         {isStreaming ? (
@@ -658,31 +787,34 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
 
 // ─── UserInputCard — inline quick-reply + custom reply slot ───────────────────
 function UserInputCard({
-  question, options, requestId, onRespond,
-}: { question: string; options: string[]; requestId: string; onRespond: (answer: string, requestId: string) => void }) {
+  question, options, requestId, answered, onRespond,
+}: {
+  question: string
+  options: string[]
+  requestId: string
+  answered: boolean
+  onRespond: (answer: string, requestId: string) => void
+}) {
   const [customMode, setCustomMode] = useState(false)
   const [customText, setCustomText] = useState('')
-  const [answered, setAnswered] = useState<string | null>(null)
 
   const promptOptions = options.length > 0 ? options : ['Continue']
   const customSlotLabel = 'Type your own answer'
 
   const handleQuickReply = (opt: string) => {
-    setAnswered(opt)
     onRespond(opt, requestId)
   }
 
   const handleCustomSend = () => {
     const answer = customText.trim()
     if (!answer) return
-    setAnswered(answer)
     onRespond(answer, requestId)
   }
 
   if (answered) {
     return (
       <div className='my-1.5 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2'>
-        <p className='text-xs text-zinc-500'>You answered: <span className='text-zinc-300'>{answered}</span></p>
+        <p className='text-xs text-zinc-500'>You answered this question.</p>
       </div>
     )
   }
@@ -878,6 +1010,42 @@ function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
   )
 }
 
+// ─── LivePlanCard — animated step checklist for announce_plan ────────────────
+function LivePlanCard({ steps, completedTools }: { steps: string[]; completedTools: Set<string> }) {
+  if (!steps.length) return null
+  const doneCount = steps.filter((_, i) => completedTools.has(String(i))).length
+  const pct = Math.round((doneCount / steps.length) * 100)
+  return (
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#141414] overflow-hidden'>
+      <div className='flex items-center gap-2 border-b border-[#222] px-4 py-3'>
+        <IcoPlan className='h-4 w-4 flex-shrink-0 text-violet-400' />
+        <p className='flex-1 text-xs font-semibold text-zinc-200'>Plan</p>
+        <span className='text-[10px] text-zinc-500'>{doneCount}/{steps.length} steps</span>
+      </div>
+      <div className='px-4 py-3 space-y-2'>
+        {steps.map((step, i) => {
+          const done = completedTools.has(String(i))
+          return (
+            <div key={i} className='flex items-start gap-2'>
+              <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[9px] font-bold transition-colors ${done ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-[#333] text-zinc-600'}`}>
+                {done ? <IcoCheck className='h-2.5 w-2.5' /> : i + 1}
+              </span>
+              <span className={`text-xs leading-relaxed transition-colors ${done ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>{step}</span>
+            </div>
+          )
+        })}
+      </div>
+      {doneCount > 0 && (
+        <div className='px-4 pb-3'>
+          <div className='h-0.5 rounded-full bg-[#222]'>
+            <div className='h-0.5 rounded-full bg-emerald-500/50 transition-all duration-500' style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── PlusMenu ─────────────────────────────────────────────────────────────────
 interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
@@ -969,6 +1137,7 @@ interface InputBarCursorProps {
   onMicClick: () => void
   onPlusClick: () => void
   onPlanClick: () => void
+  onBrainstormClick?: () => void
   isWorking: boolean
   isDisabled: boolean
   micIsActive: boolean
@@ -979,15 +1148,17 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
+  planIntent?: boolean
   modelChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
 }
 
 function InputBarCursor({
-  input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick,
+  input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick, onBrainstormClick,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments,
+  planIntent = false,
   modelChipLabel = 'GPT-5.4',
   isLocalOnly = true,
   hasFullAccess = true,
@@ -1052,12 +1223,48 @@ function InputBarCursor({
 
         {/* Plan button */}
         <button type='button' onClick={onPlanClick} disabled={isDisabled}
-          className='flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium'>
+          aria-pressed={planIntent}
+          className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium ${
+            planIntent
+              ? 'bg-blue-500/15 text-blue-300'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
+          }`}>
           <IcoPlan className='h-3.5 w-3.5' />
           Plan
         </button>
 
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
+        {/* Brainstorm button */}
+        {onBrainstormClick && (
+          <button type='button' onClick={onBrainstormClick} disabled={isDisabled}
+            title='Brainstorm: agent will think through options before acting'
+            className='flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-zinc-500 hover:text-violet-300 hover:bg-violet-500/10 disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium'>
+            <span className='flex h-3.5 w-3.5 items-center justify-center rounded-full border border-current text-[9px] font-bold'>?</span>
+            Brainstorm
+          </button>
+        )}
+
+        {modelChipLabel && (
+          <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
+        )}
+        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>{effortChipLabel}</span>
+        <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
+
+        {/* Think harder toggle — only for capable models */}
+        {currentModelSupportsReasoning && (
+          <button type='button'
+            onClick={() => onToggleReasoning?.(!enableReasoning)}
+            className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs font-medium transition-colors flex-shrink-0 ${
+              enableReasoning
+                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
+                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
+            }`}>
+            <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+              <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
+              <path d='M9 18h6' /><path d='M10 22h4' />
+            </svg>
+            Think
+          </button>
+        )}
 
         <div className='flex-1' />
 
@@ -1107,27 +1314,56 @@ export function ChatPanel({
   onDismissBrowsePrompt,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [planIntent, setPlanIntent] = useState(false)
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
 
   // ── Conversation persistence ──────────────────────────────────────────────
   const CHAT_KEY = (id: string) => `aegis.chat.${id}`
+  const uiKey = (taskId: string | null | undefined) => `aegis.chat.ui.${taskId ?? 'none'}`
+  const emptyThreadUiState = (): ThreadUiState => ({
+    collapsedToolIds: [],
+    answeredUserInputIds: [],
+    openThinkingIds: [],
+  })
   const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
     if (!id) return
     try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
   }
 
   const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
-  const prevTaskIdRef    = useRef(activeTaskId)
-  const prevServerLenRef = useRef(0)
+  const [threadUi, setThreadUi] = useState<ThreadUiState>(emptyThreadUiState)
+  const [threadReady, setThreadReady] = useState(false)
+
+  const serverThreadSignature = useMemo(() => {
+    const id = activeTaskId ?? 'no-task'
+    const msgSig = serverMessages
+      .map((m) => `${m.id}:${m.role}:${m.created_at ?? ''}:${m.content}`)
+      .join('|')
+    return `${id}::${msgSig}`
+  }, [activeTaskId, serverMessages])
 
   useEffect(() => {
-    const taskChanged   = prevTaskIdRef.current !== activeTaskId
-    const serverArrived = prevServerLenRef.current === 0 && serverMessages.length > 0
-    prevTaskIdRef.current    = activeTaskId
-    prevServerLenRef.current = serverMessages.length
-    if (!taskChanged && !serverArrived) return
+    try {
+      const raw = localStorage.getItem(uiKey(activeTaskId))
+      if (raw) setThreadUi(JSON.parse(raw) as ThreadUiState)
+      else setThreadUi(emptyThreadUiState())
+    } catch {
+      setThreadUi(emptyThreadUiState())
+    }
+  }, [activeTaskId])
+
+  useEffect(() => {
+    if (!activeTaskId) return
+    try {
+      localStorage.setItem(uiKey(activeTaskId), JSON.stringify(threadUi))
+    } catch {
+      // ignore localStorage quota/read-only errors
+    }
+  }, [activeTaskId, threadUi])
+
+  useEffect(() => {
     if (serverMessages.length > 0) {
-      const serverMapped = serverMessages.map((m) => ({
+      const mapped = serverMessages.map((m) => ({
         id: m.id,
         role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
         text: m.content,
@@ -1141,18 +1377,22 @@ export function ChatPanel({
           ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
           : undefined,
       }))
-      const serverUserTexts = new Set(serverMapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+      const serverUserTexts = new Set(mapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
       setSentMessages((prev) => {
-        const optimisticLocalUsers = prev.filter(
+        const optimistic = prev.filter(
           (m) => m.role === 'user' && String(m.id).startsWith('local-') && !serverUserTexts.has((m.text ?? '').trim()),
         )
-        return [...optimisticLocalUsers, ...serverMapped]
+        return [...optimistic, ...mapped]
       })
-    } else if (taskChanged) {
+    } else {
       setSentMessages([])
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId, serverMessages.length])
+  }, [serverThreadSignature, serverMessages])
+
+  useEffect(() => {
+    setThreadReady(false)
+    queueMicrotask(() => setThreadReady(true))
+  }, [serverThreadSignature])
 
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
@@ -1276,10 +1516,12 @@ export function ChatPanel({
     window.setTimeout(() => textareaRef.current?.focus(), 0)
   }
 
-  const handleSend = () => {
+  const handleSend = (forcePlan = false) => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
-    const withContext = activeConnector ? `[${activeConnector.name}] ${trimmed}` : trimmed
+    const parsed = resolveComposerSubmission(trimmed, forcePlan || planIntent)
+    const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
+    const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const localMsg: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
@@ -1293,8 +1535,8 @@ export function ChatPanel({
       saveMsgs(activeTaskId, next)
       return next
     })
-    if (withContext.startsWith('/plan ')) {
-      onDecomposePlan(withContext.slice(6))
+    if (parsed.mode === 'plan' && withContext) {
+      onDecomposePlan(withContext)
     } else {
       onSend(withContext || '(attachment)', 'steer', {
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -1307,6 +1549,7 @@ export function ChatPanel({
       })
     }
     setInput('')
+    setPlanIntent(false)
     setAttachments([])
     setActiveConnector(null)
     if (textareaRef.current) { textareaRef.current.style.height = 'auto' }
@@ -1318,8 +1561,18 @@ export function ChatPanel({
 
   const handlePlanClick = () => {
     const prompt = input.trim()
-    if (prompt) { onDecomposePlan(prompt); setInput('') }
-    else setInput('/plan ')
+    if (prompt) {
+      handleSend(true)
+    } else {
+      setPlanIntent((prev) => !prev)
+    }
+    textareaRef.current?.focus()
+  }
+
+  const handleBrainstormClick = () => {
+    const prompt = input.trim()
+    if (prompt) setInput(`/brainstorm ${prompt}`)
+    else setInput('/brainstorm ')
     textareaRef.current?.focus()
   }
 
@@ -1351,19 +1604,65 @@ export function ChatPanel({
 
   const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onSend('approved', 'steer') }
   const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onSend('rejected', 'steer') }
+  const setToolCollapsed = useCallback((toolId: string, collapsed: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.collapsedToolIds)
+      if (collapsed) next.add(toolId)
+      else next.delete(toolId)
+      return { ...prev, collapsedToolIds: Array.from(next) }
+    })
+  }, [])
+  const setUserInputAnswered = useCallback((requestId: string) => {
+    setThreadUi((prev) => {
+      if (prev.answeredUserInputIds.includes(requestId)) return prev
+      return { ...prev, answeredUserInputIds: [...prev.answeredUserInputIds, requestId] }
+    })
+  }, [])
+  const setThinkingOpen = useCallback((thinkingId: string, open: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.openThinkingIds)
+      if (open) next.add(thinkingId)
+      else next.delete(thinkingId)
+      return { ...prev, openThinkingIds: Array.from(next) }
+    })
+  }, [])
 
   const handleUserInputReply = (answer: string, requestId: string) => {
     const trimmed = answer.trim()
     if (!trimmed) return
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     setSentMessages((prev) => {
-      const next: ChatMessage[] = [...prev, { id: `local-${crypto.randomUUID()}`, role: 'user', text: trimmed, timestamp: now }]
+      const next: ChatMessage[] = [
+        ...prev,
+        {
+          id: `local-${crypto.randomUUID()}`,
+          role: 'user',
+          text: trimmed,
+          timestamp: now,
+          metadata: { source: 'ask_user_input', request_id: requestId },
+        },
+      ]
       saveMsgs(activeTaskId, next)
       return next
     })
+    setUserInputAnswered(requestId)
     onUserInputResponse?.(trimmed, requestId)
-    onSend(trimmed, 'steer', { task_label_source: 'chat', task_label: trimmed })
   }
+
+  const handleToggleThinkingOpen = useCallback((stepId: string) => {
+    if (!activeTaskId || !stepId) return
+    setOpenThinkingIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      try {
+        localStorage.setItem(OPEN_THINKING_KEY(activeTaskId), JSON.stringify(Array.from(next)))
+      } catch {
+        // ignore localStorage write failures
+      }
+      return next
+    })
+  }, [activeTaskId])
 
   const isDisabled = connectionStatus !== 'connected'
 
@@ -1405,8 +1704,11 @@ export function ChatPanel({
 
       {/* Messages */}
       <div className='flex-1 overflow-y-auto px-3 py-3 space-y-0.5'>
+        {!threadReady && (
+          <div className='flex-1 px-3 py-3 text-xs text-zinc-500'>Loading thread…</div>
+        )}
 
-        {allMessages.length === 0 && (
+        {threadReady && allMessages.length === 0 && (
           <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-4'>
             <div className='flex h-12 w-12 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
               <IcoMessage className='h-5 w-5 text-zinc-500' />
@@ -1426,14 +1728,23 @@ export function ChatPanel({
           </div>
         )}
 
-        {allMessages.map((msg) => {
+        {threadReady && allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
 
           // Tool calls → ShellCard (collapsed accordion by default when done, open while running)
           if (msg.role === 'tool') {
             const isLive = isWorking && msg.toolStatus === 'in_progress'
-            return <ShellCard key={msg.id} msg={msg} isRunning={isLive} />
+            const collapsed = threadUi.collapsedToolIds.includes(msg.id)
+            return (
+              <ShellCard
+                key={msg.id}
+                msg={msg}
+                isRunning={isLive}
+                expanded={isLive || !collapsed}
+                onExpandedChange={(expanded) => setToolCollapsed(msg.id, !expanded)}
+              />
+            )
           }
 
           if (msg.role === 'approval') {
@@ -1456,7 +1767,7 @@ export function ChatPanel({
                 question={msg.question ?? msg.text}
                 options={msg.options ?? []}
                 requestId={msg.requestId ?? msg.id}
-                onRespond={(answer, reqId) => { handleUserInputReply(answer, reqId) }}
+                onRespond={(answer, reqId) => { if (onUserInputResponse) { onUserInputResponse(answer, reqId) } else { onSend(answer, 'steer') } }}
               />
             )
           }
@@ -1466,19 +1777,40 @@ export function ChatPanel({
           if (msg.role === 'plan_confirm') {
             return (
               <PlanConfirmCard key={msg.id} plan={msg.text} requestId={msg.requestId ?? msg.id}
-                onConfirm={(reqId) => { onPlanConfirm?.(reqId); onSend('confirmed', 'steer') }}
-                onReject={(reqId) => { onPlanReject?.(reqId); onSend('rejected', 'steer') }}
+                onConfirm={(reqId) => { onPlanConfirm?.(reqId) }}
+                onReject={(reqId) => { onPlanReject?.(reqId) }}
               />
             )
           }
 
+          if (msg.role === 'live_plan') {
+            const msgIdx = allMessages.indexOf(msg)
+            const subsequentTools = new Set(
+              allMessages.slice(msgIdx + 1)
+                .filter((m) => m.role === 'tool')
+                .map((_, i) => String(i))
+            )
+            return <LivePlanCard key={msg.id} steps={msg.planSteps ?? []} completedTools={subsequentTools} />
+          }
+
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
-            const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
-            const isStreaming = isWorking && msg.id === latestThinkingId
+            const hasStructuredState = Boolean(stepId && thinkingMessages.find((item) => item.stepId === stepId))
+            const reasoningText = hasStructuredState
+              ? (reasoningMap?.[stepId] ?? msg.text ?? '')
+              : ''
+            const status = (msg.metadata as { status?: ThinkingState; placeholder?: boolean } | undefined)?.status
+            const placeholder = Boolean((msg.metadata as { placeholder?: boolean } | undefined)?.placeholder)
+            const isStreaming = placeholder || status !== 'completed'
             return (
               <div key={msg.id} className='px-1'>
-                <ThinkingRow stepId={stepId} reasoningText={reasoningText} isStreaming={isStreaming} />
+                <ThinkingRow
+                  stepId={stepId}
+                  reasoningText={reasoningText}
+                  isStreaming={isStreaming}
+                  open={openThinkingIds.has(stepId)}
+                  onToggle={() => handleToggleThinkingOpen(stepId)}
+                />
               </div>
             )
           }
@@ -1486,14 +1818,17 @@ export function ChatPanel({
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 
-        {/* Agent working indicator — shows when no explicit thinking card yet */}
+        {/* Agent working indicator — spinning Aegis shield logo like Gemini */}
         {isWorking && !allMessages.some((m) => m.role === 'thinking' || m.role === 'tool') && (
-          <div className='flex items-center gap-2 px-3 py-2'>
-            <span
-              className='thinking-shimmer rounded-md bg-[#1e1e2e] px-2.5 py-0.5 text-xs font-semibold text-violet-300 border border-violet-500/20'
-            >
-              Thinking
-            </span>
+          <div className='flex items-center gap-3 px-3 py-2'>
+            <div className='relative flex h-7 w-7 flex-shrink-0 items-center justify-center'>
+              {/* Outer glow ring — spins */}
+              <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
+              <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+              {/* Logo itself — gentle pulse */}
+              <img src='/aegis-shield.png' alt='Aegis thinking' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
+            </div>
+            <span className='thinking-shimmer text-xs font-medium text-zinc-400'>Aegis is thinking…</span>
           </div>
         )}
 
@@ -1557,6 +1892,7 @@ export function ChatPanel({
           onMicClick={handleMicClick}
           onPlusClick={() => setShowPlusMenu((v) => !v)}
           onPlanClick={handlePlanClick}
+          onBrainstormClick={handleBrainstormClick}
           isWorking={isWorking}
           isDisabled={isDisabled}
           micIsActive={micIsActive}
@@ -1573,6 +1909,7 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
+          planIntent={planIntent}
           modelChipLabel={modelChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
