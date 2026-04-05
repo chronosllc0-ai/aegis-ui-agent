@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from backend.integrations.contracts import ChannelAdapter
 from integrations.discord import DiscordIntegration
+from integrations.idempotency import DeliveryDeduper
 from integrations.slack_connector import SlackIntegration
 
 
@@ -65,7 +66,7 @@ def test_slack_send_edit_file_and_rate_limit_backoff() -> None:
             _MockResponse(status_code=200, payload={"ok": True, "ts": "1.2", "channel": "C1"}),
         ]
 
-        async def _request_side_effect(method: str, url: str, **_: Any) -> _MockResponse:
+        async def _request_side_effect(*args: Any, **kwargs: Any) -> _MockResponse:
             return responses.pop(0)
 
         with patch("integrations.slack_connector.httpx.AsyncClient.request", side_effect=_request_side_effect):
@@ -145,7 +146,7 @@ def test_discord_rate_limit_backoff_and_contract_conformance() -> None:
             _MockResponse(status_code=200, payload={"id": "m1", "content": "ok"}),
         ]
 
-        async def _request_side_effect(method: str, url: str, **_: Any) -> _MockResponse:
+        async def _request_side_effect(*args: Any, **kwargs: Any) -> _MockResponse:
             return responses.pop(0)
 
         with patch("integrations.discord.httpx.AsyncClient.request", side_effect=_request_side_effect):
@@ -157,3 +158,16 @@ def test_discord_rate_limit_backoff_and_contract_conformance() -> None:
         assert isinstance(SlackIntegration(), ChannelAdapter)
 
     asyncio.run(_run())
+
+
+def test_delivery_deduper_is_bounded() -> None:
+    deduper = DeliveryDeduper(max_entries=3)
+
+    assert deduper.seen_or_add("a") is False
+    assert deduper.seen_or_add("b") is False
+    assert deduper.seen_or_add("c") is False
+    assert deduper.seen_or_add("d") is False
+
+    # oldest id should be evicted once capacity is exceeded
+    assert deduper.seen_or_add("a") is False
+    assert deduper.seen_or_add("d") is True

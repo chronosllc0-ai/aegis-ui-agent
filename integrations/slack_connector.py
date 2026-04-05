@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
 from typing import Any
 
@@ -10,6 +12,7 @@ import httpx
 
 from backend.integrations.contracts import ChannelAdapter
 from integrations.base import BaseIntegration
+from integrations.idempotency import DeliveryDeduper
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +28,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token: str | None = None
         self._workspace: str | None = None
-        self._processed_delivery_ids: set[str] = set()
+        self._delivery_deduper = DeliveryDeduper(max_entries=10_000)
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate the provided token and store workspace metadata."""
@@ -58,7 +61,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token = None
         self._workspace = None
-        self._processed_delivery_ids.clear()
+        self._delivery_deduper.clear()
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
@@ -117,7 +120,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         payload: dict[str, Any] = {"channel": channel, "text": text}
         if metadata and metadata.get("thread_ts"):
             payload["thread_ts"] = str(metadata["thread_ts"])
-        data = await self._request("POST", "chat.postMessage", json=payload)
+        data = await self._request("POST", "chat.postMessage", json_payload=payload)
         return {"ok": bool(data.get("ok")), "tool": "slack_send_message", "result": data}
 
     async def edit_text(
@@ -141,7 +144,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         payload: dict[str, Any] = {"channel": channel, "ts": ts, "text": text}
         if metadata and metadata.get("blocks"):
             payload["blocks"] = metadata["blocks"]
-        data = await self._request("POST", "chat.update", json=payload)
+        data = await self._request("POST", "chat.update", json_payload=payload)
         return {"ok": bool(data.get("ok")), "tool": "slack_edit_message", "result": data}
 
     async def send_file(
@@ -163,7 +166,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         prep = await self._request(
             "POST",
             "files.getUploadURLExternal",
-            json={"filename": filename, "length": len(file_bytes)},
+            json_payload={"filename": filename, "length": len(file_bytes)},
         )
         if not prep.get("ok"):
             return {"ok": False, "tool": "slack_send_file", "result": prep, "error": prep.get("error", "Upload init failed")}
@@ -188,15 +191,14 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         }
         if caption:
             complete_payload["initial_comment"] = caption
-        complete = await self._request("POST", "files.completeUploadExternal", json=complete_payload)
+        complete = await self._request("POST", "files.completeUploadExternal", json_payload=complete_payload)
         return {"ok": bool(complete.get("ok")), "tool": "slack_send_file", "result": complete}
 
     async def handle_event(self, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         """Normalize inbound Slack event/interaction payloads with idempotency guards."""
         delivery_id = self._delivery_id(payload, headers)
-        if delivery_id in self._processed_delivery_ids:
+        if self._delivery_deduper.seen_or_add(delivery_id):
             return {"ok": True, "duplicate": True, "envelope": {"provider": "slack", "deduped": True, "delivery_id": delivery_id}}
-        self._processed_delivery_ids.add(delivery_id)
 
         payload_type = str(payload.get("type") or "")
         if payload_type == "url_verification":
@@ -249,7 +251,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         endpoint: str,
         *,
         params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
+        json_payload: dict[str, Any] | None = None,
         retries: int = 3,
     ) -> dict[str, Any]:
         if not self._token:
@@ -257,37 +259,35 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
 
         url = f"{SLACK_API_BASE}/{endpoint}"
         headers = {"Authorization": f"Bearer {self._token}"}
-        attempt = 0
-        while True:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.request(method, url, headers=headers, params=params, json=json)
+        async with httpx.AsyncClient(timeout=10) as client:
+            attempt = 0
+            while True:
+                response = await client.request(method, url, headers=headers, params=params, json=json_payload)
 
-            if response.status_code == 429 and attempt < retries:
-                retry_after = float(response.headers.get("Retry-After", "1"))
-                logger.warning("Slack rate limited on %s, retrying in %ss", endpoint, retry_after)
-                import asyncio
+                if response.status_code == 429 and attempt < retries:
+                    retry_after = float(response.headers.get("Retry-After", "1"))
+                    logger.warning("Slack rate limited on %s, retrying in %ss", endpoint, retry_after)
+                    await asyncio.sleep(retry_after)
+                    attempt += 1
+                    continue
 
-                await asyncio.sleep(retry_after)
-                attempt += 1
-                continue
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = {"ok": False, "error": response.text}
 
-            try:
-                data = response.json()
-            except ValueError:
-                data = {"ok": False, "error": response.text}
+                if response.status_code >= 400:
+                    error = data.get("error") if isinstance(data, dict) else response.text
+                    return {
+                        "ok": False,
+                        "error": error or f"HTTP {response.status_code}",
+                        "status": response.status_code,
+                        "rate_limited": response.status_code == 429,
+                    }
 
-            if response.status_code >= 400:
-                error = data.get("error") if isinstance(data, dict) else response.text
-                return {
-                    "ok": False,
-                    "error": error or f"HTTP {response.status_code}",
-                    "status": response.status_code,
-                    "rate_limited": response.status_code == 429,
-                }
-
-            if isinstance(data, dict):
-                return data
-            return {"ok": False, "error": "Invalid response"}
+                if isinstance(data, dict):
+                    return data
+                return {"ok": False, "error": "Invalid response"}
 
     def _delivery_id(self, payload: dict[str, Any], headers: dict[str, str]) -> str:
         event_id = str(payload.get("event_id") or "").strip()
@@ -298,5 +298,6 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         timestamp = str(normalized.get("x-slack-request-timestamp") or "").strip()
         if signature and timestamp:
             return f"sig:{timestamp}:{signature}"
-        digest = hashlib.sha256(repr(sorted(payload.items())).encode("utf-8")).hexdigest()
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         return f"fallback:{digest}"

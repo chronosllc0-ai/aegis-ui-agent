@@ -1,3 +1,41 @@
+## Session 5.58 - April 5, 2026 (PR review follow-up: adapter cleanup + bounded idempotency)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed Slack/Discord review comments from the adapter modernization PR.
+- Slack (`integrations/slack_connector.py`):
+  - moved `asyncio` import to module scope,
+  - changed fallback delivery-id digest to deterministic JSON serialization (`json.dumps(..., sort_keys=True)`),
+  - hoisted `httpx.AsyncClient` outside retry loop to reuse client across retry attempts,
+  - replaced unbounded idempotency set with a shared bounded deduper utility.
+- Discord (`integrations/discord.py`):
+  - moved `base64` import to module scope,
+  - refactored nested inline payload parsing into helper methods (`_extract_user_id`, `_extract_option_value`, `_extract_message_id`) for readability and safer parsing,
+  - hoisted `httpx.AsyncClient` outside retry loop,
+  - replaced unbounded idempotency set with shared bounded deduper utility.
+- Added shared `DeliveryDeduper` helper in `integrations/idempotency.py` and updated adapter tests with bounded deduper coverage and cleaner request mock signatures.
+
+### What's Working
+- Review issues around retry-client churn, import placement, deterministic fallback hashing, and unbounded idempotency memory growth are resolved in code.
+- Adapter regression tests pass with updated behavior and added bounded deduper coverage.
+
+### What's NOT Working Yet
+- Deduper remains in-memory process-local state; horizontal pod-level dedupe still requires shared storage if needed for production-scale webhook fanout.
+
+### Next Steps
+1. If needed, introduce Redis/DB-backed dedupe for cross-instance webhook delivery idempotency.
+2. Add webhook route tests that validate adapter `handle_event(...)` wiring from HTTP endpoints end-to-end.
+
+### Decisions Made
+- Implemented a shared bounded dedupe helper to keep Slack and Discord behavior consistent and avoid duplicated eviction logic.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.57 - April 4, 2026 (Slack/Discord adapter modernization + unified contract)
 
 **Agent:** GPT-5.3-Codex  

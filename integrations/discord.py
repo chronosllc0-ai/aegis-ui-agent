@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 from typing import Any
@@ -11,6 +12,7 @@ import httpx
 
 from backend.integrations.contracts import ChannelAdapter
 from integrations.base import BaseIntegration
+from integrations.idempotency import DeliveryDeduper
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token: str | None = None
         self._guild_id: str | None = None
-        self._processed_delivery_ids: set[str] = set()
+        self._delivery_deduper = DeliveryDeduper(max_entries=10_000)
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate the bot token and cache guild metadata."""
@@ -56,7 +58,7 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token = None
         self._guild_id = None
-        self._processed_delivery_ids.clear()
+        self._delivery_deduper.clear()
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
@@ -107,7 +109,6 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             image_b64 = str(params.get("image_b64", "")).strip()
             if not image_b64:
                 return {"ok": False, "tool": tool_name, "error": "image_b64 is required"}
-            import base64
 
             try:
                 image_bytes = base64.b64decode(image_b64, validate=True)
@@ -189,10 +190,8 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
     async def handle_event(self, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         """Normalize Discord gateway/webhook events into canonical envelopes."""
         delivery_id = str(headers.get("X-Signature-Timestamp") or headers.get("x-signature-timestamp") or payload.get("id") or "")
-        if delivery_id and delivery_id in self._processed_delivery_ids:
+        if self._delivery_deduper.seen_or_add(delivery_id):
             return {"ok": True, "duplicate": True, "envelope": {"provider": "discord", "deduped": True, "delivery_id": delivery_id}}
-        if delivery_id:
-            self._processed_delivery_ids.add(delivery_id)
 
         interaction_type = int(payload.get("type", 0) or 0)
         if interaction_type == 1:
@@ -209,21 +208,24 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             }
 
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        user_id = self._extract_user_id(payload)
+        text = self._extract_option_value(data)
+        message_id = self._extract_message_id(payload)
+
         envelope = {
             "provider": "discord",
             "kind": "interaction" if interaction_type else "event",
             "event_type": str(data.get("name") or payload.get("t") or "unknown"),
             "destination": str(payload.get("channel_id") or ""),
-            "message_id": str((payload.get("message") or {}).get("id") if isinstance(payload.get("message"), dict) else ""),
-            "user_id": str((payload.get("member") or {}).get("user", {}).get("id") if isinstance(payload.get("member"), dict) else payload.get("user", {}).get("id") if isinstance(payload.get("user"), dict) else ""),
-            "text": str((data.get("options") or [{}])[0].get("value") if isinstance(data.get("options"), list) and data.get("options") else ""),
+            "message_id": message_id,
+            "user_id": user_id,
+            "text": text,
             "raw": payload,
             "delivery_id": delivery_id,
         }
 
         ack_response = None
         if interaction_type in {2, 3, 5}:
-            # Deferred channel message with source for command/component events.
             ack_response = {"type": 5}
 
         return {"ok": True, "duplicate": False, "response": ack_response, "envelope": envelope}
@@ -260,31 +262,56 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
 
         url = f"{DISCORD_API_BASE}{path}"
         headers = {"Authorization": f"Bot {self._token}"}
-        attempt = 0
-        while True:
-            async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
+            attempt = 0
+            while True:
                 response = await client.request(method, url, headers=headers, params=params, json=json_payload, files=files)
 
-            try:
-                data = response.json()
-            except ValueError:
-                data = {"message": response.text}
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = {"message": response.text}
 
-            if response.status_code == 429 and attempt < retries:
-                retry_after = 1.0
-                if isinstance(data, dict) and isinstance(data.get("retry_after"), (int, float)):
-                    retry_after = float(data["retry_after"])
-                logger.warning("Discord rate limited on %s, retrying in %ss", path, retry_after)
-                await asyncio.sleep(retry_after)
-                attempt += 1
-                continue
+                if response.status_code == 429 and attempt < retries:
+                    retry_after = 1.0
+                    if isinstance(data, dict) and isinstance(data.get("retry_after"), (int, float)):
+                        retry_after = float(data["retry_after"])
+                    logger.warning("Discord rate limited on %s, retrying in %ss", path, retry_after)
+                    await asyncio.sleep(retry_after)
+                    attempt += 1
+                    continue
 
-            if response.status_code >= 400:
-                error = data.get("message") if isinstance(data, dict) else response.text
-                return {
-                    "message": error or f"HTTP {response.status_code}",
-                    "status": response.status_code,
-                    "rate_limited": response.status_code == 429,
-                }
+                if response.status_code >= 400:
+                    error = data.get("message") if isinstance(data, dict) else response.text
+                    return {
+                        "message": error or f"HTTP {response.status_code}",
+                        "status": response.status_code,
+                        "rate_limited": response.status_code == 429,
+                    }
 
-            return data
+                return data
+
+    def _extract_user_id(self, payload: dict[str, Any]) -> str:
+        member = payload.get("member")
+        user = payload.get("user")
+        if isinstance(member, dict):
+            member_user = member.get("user")
+            if isinstance(member_user, dict):
+                return str(member_user.get("id") or "")
+        if isinstance(user, dict):
+            return str(user.get("id") or "")
+        return ""
+
+    def _extract_option_value(self, data: dict[str, Any]) -> str:
+        options = data.get("options")
+        if isinstance(options, list) and options:
+            first = options[0]
+            if isinstance(first, dict):
+                return str(first.get("value") or "")
+        return ""
+
+    def _extract_message_id(self, payload: dict[str, Any]) -> str:
+        message = payload.get("message")
+        if isinstance(message, dict):
+            return str(message.get("id") or "")
+        return ""
