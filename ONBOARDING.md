@@ -2979,3 +2979,13 @@
 ### Why
 - Eliminates any chance of duplicate in-file declarations for `normalizeAskUserInputOptions` and makes the parser truly single-source.
 - Addresses review-critical duplicate identifier concern directly.
+
+## 2026-04-05 — PR #161 post-merge trace fix (ChatPanel review cleanup)
+
+### What changed
+- Re-traced `ChatPanel.tsx` and confirmed `normalizeAskUserInputOptions` is only imported from `frontend/src/lib/askUserInput.ts` with no local redeclarations.
+- Removed extra blank-line spacing around the `AttachedFile` boundary to satisfy review nitpick and keep TypeScript style clean.
+- Rebuilt frontend to verify no duplicate-identifier or TS compile issues remain.
+
+### Why
+- Ensures the critical review concern (duplicate local declarations conflicting with import) is fully resolved on the post-merge branch.
