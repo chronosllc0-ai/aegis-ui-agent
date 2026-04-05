@@ -1580,7 +1580,10 @@ export function ChatPanel({
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
   const modelChipLabel = 'GPT-5.4'
-  const effortChipLabel = `Reasoning: ${reasoningEffort[0].toUpperCase()}${reasoningEffort.slice(1)}`
+  const normalizedReasoningEffort = reasoningEffort.trim()
+  const effortChipLabel = normalizedReasoningEffort.length > 0
+    ? `Reasoning: ${normalizedReasoningEffort[0].toUpperCase()}${normalizedReasoningEffort.slice(1)}`
+    : 'Reasoning: Off'
   const isLocalOnly = true
   const hasFullAccess = true
 

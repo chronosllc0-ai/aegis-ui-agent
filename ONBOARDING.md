@@ -3037,3 +3037,19 @@
 
 ### Validation
 - Ran `cd frontend && npm run build`; TypeScript + Vite build now pass successfully.
+
+## 2026-04-05 — Review nitpick follow-up (task-scoped browser activity + effort guard)
+
+### What changed
+- Updated `frontend/src/App.tsx` so `hasBrowserActivity` is now task-scoped, derived via `useMemo` against the active task id (`selectedTaskId ?? activeTaskIdRef.current`) instead of a global `actionLogEntries.length > 0` check.
+- Updated `frontend/src/components/ChatPanel.tsx` to harden effort-chip rendering:
+  - normalize with `reasoningEffort.trim()`
+  - render `'Reasoning: Off'` when empty
+  - otherwise safely title-case the normalized value.
+
+### Why
+- Addresses review warning that browser-activity state could remain sticky after the first browser task and incorrectly trigger auto-return behavior for later non-browser tasks.
+- Addresses review suggestion about potential runtime crash risk from indexing `reasoningEffort[0]` without guarding empty strings.
+
+### Validation
+- Ran `cd frontend && npm run build` and confirmed TypeScript + Vite build still pass.

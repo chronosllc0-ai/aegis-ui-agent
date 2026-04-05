@@ -599,7 +599,11 @@ function App() {
     () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
-  const hasBrowserActivity = actionLogEntries.length > 0
+  const hasBrowserActivity = useMemo(() => {
+    const activeTaskId = selectedTaskId ?? activeTaskIdRef.current
+    if (!activeTaskId || activeTaskId === 'idle') return false
+    return actionLogEntries.some((entry) => entry.taskId === activeTaskId)
+  }, [actionLogEntries, selectedTaskId, activeTaskIdRef])
 
   // ── Auto-return to chat when a browser task finishes ────────────────────
   // When isWorking flips true→false and the task had browser activity,
