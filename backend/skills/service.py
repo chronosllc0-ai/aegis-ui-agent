@@ -635,11 +635,11 @@ class SkillService:
                 installed_at=now,
                 updated_at=now,
             )
-            session.add(install)
             try:
-                await session.flush()
+                async with session.begin_nested():
+                    session.add(install)
+                    await session.flush()
             except IntegrityError:
-                await session.rollback()
                 rows = await session.execute(
                     select(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id))
                 )

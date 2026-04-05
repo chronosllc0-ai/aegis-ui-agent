@@ -45,7 +45,9 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
     install_rows = rows.all()
 
     runtime: list[RuntimeSkill] = []
-    remaining_budget = max(int(getattr(settings, "SKILLS_MAX_TOKEN", settings.SKILLS_MAX_TOKENS)), 1)
+    configured_budget = max(int(getattr(settings, "SKILLS_MAX_TOKEN", settings.SKILLS_MAX_TOKENS)), 1)
+    hard_budget_cap = max(int(settings.SKILLS_MAX_TOKENS), 1)
+    remaining_budget = min(configured_budget, hard_budget_cap)
     version_ids = [version.id for _, _, version in install_rows]
 
     scans_by_version_id: dict[str, dict[str, SkillScanResult]] = {}

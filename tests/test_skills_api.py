@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from backend import database
 from backend.database import Skill, User, get_session
@@ -146,7 +147,5 @@ def test_non_admin_submit_forces_hub_publish_target(tmp_path) -> None:
             skill = row.scalar_one()
             assert skill.publish_target == "hub"
             break
-
-    from sqlalchemy import select
 
     asyncio.run(_assert_saved())

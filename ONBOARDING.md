@@ -3133,3 +3133,36 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.32 - April 5, 2026 (PR review follow-up: savepoint rollback scope + budget cap + import hygiene)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed latest review comments:
+  1. **Install race handling rollback scope**
+     - Replaced broad `session.rollback()` in `install_skill()` with `session.begin_nested()` savepoint around insert+flush.
+     - Integrity conflicts now rollback only the nested transaction and then refetch/update existing install row.
+  2. **Runtime budget cap restoration**
+     - Restored hard cap behavior so effective runtime budget is `min(SKILLS_MAX_TOKEN, SKILLS_MAX_TOKENS)` with defensive lower bounds.
+  3. **Import hygiene**
+     - Moved `from sqlalchemy import select` from function-local scope to module imports in `tests/test_skills_api.py`.
+
+### What's Working
+- Install idempotency under races no longer requires a full session rollback.
+- Runtime budget cannot exceed system-wide cap even if `SKILLS_MAX_TOKEN` is overconfigured.
+- Targeted tests continue to pass.
+
+### What's NOT Working Yet
+- The race path currently uses exception-driven conflict handling; a future dialect-aware upsert can still reduce exception overhead.
+
+### Next Steps
+1. Evaluate `INSERT ... ON CONFLICT DO UPDATE` for PostgreSQL deployments.
+2. Add focused tests that simulate conflicting install writes under concurrent tasks.
+
+### Decisions Made
+- Used nested savepoint approach as the smallest safe change without coupling to database-specific upsert syntax.
+
+### Blockers
+- None in this pass.
