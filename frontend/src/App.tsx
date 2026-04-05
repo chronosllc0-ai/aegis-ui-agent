@@ -599,7 +599,7 @@ function App() {
     () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
-  const hasBrowserActivity = useMemo(() => {
+  const hasBrowserActivityForActiveTask = useMemo(() => {
     const activeTaskId = selectedTaskId ?? activeTaskIdRef.current
     if (!activeTaskId || activeTaskId === 'idle') return false
     return actionLogEntries.some((entry) => entry.taskId === activeTaskId)
@@ -609,13 +609,31 @@ function App() {
   // When isWorking flips true→false and the task had browser activity,
   // automatically switch the user back to chat so they see the summary card.
   const prevBrowsingWorkingRef = useRef(isWorking)
+  const browserActivityDuringRunRef = useRef(false)
+
+  useEffect(() => {
+    if (isWorking && hasBrowserActivityForActiveTask) {
+      browserActivityDuringRunRef.current = true
+    }
+  }, [isWorking, hasBrowserActivityForActiveTask])
+
   useEffect(() => {
     const wasWorking = prevBrowsingWorkingRef.current
     prevBrowsingWorkingRef.current = isWorking
-    if (wasWorking && !isWorking && hasBrowserActivity && appMode === 'browser') {
-      setAppMode('chat')
+
+    if (!wasWorking && isWorking) {
+      browserActivityDuringRunRef.current = false
+      return
     }
-  }, [isWorking, hasBrowserActivity, appMode])
+
+    if (wasWorking && !isWorking) {
+      const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
+      browserActivityDuringRunRef.current = false
+      if (hadBrowserActivityThisRun && appMode === 'browser') {
+        setAppMode('chat')
+      }
+    }
+  }, [isWorking, appMode])
 
   // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
   // If the agent needs user input mid-task and the user is watching the

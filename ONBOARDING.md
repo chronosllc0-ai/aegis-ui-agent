@@ -3053,3 +3053,19 @@
 
 ### Validation
 - Ran `cd frontend && npm run build` and confirmed TypeScript + Vite build still pass.
+
+## 2026-04-05 — Review follow-up v2 (run-scoped browser handoff state)
+
+### What changed
+- Refined `frontend/src/App.tsx` browser handoff logic to be scoped to the **current run lifecycle**, not just active-task history:
+  - Added `browserActivityDuringRunRef` that resets when a run starts.
+  - While running, mark the ref true only if browser primitive actions are detected for the active task.
+  - On run completion (`isWorking` true→false), auto-return to chat only when that run had browser activity, then reset the ref.
+- Kept `hasBrowserActivityForActiveTask` as a task-scoped derivation to feed the run tracker.
+
+### Why
+- Addresses lingering review concern about sticky browser-activity behavior causing false auto-return-to-chat transitions after earlier browsing sessions.
+- Ensures post-run behavior is deterministic and tied strictly to the just-completed run.
+
+### Validation
+- Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
