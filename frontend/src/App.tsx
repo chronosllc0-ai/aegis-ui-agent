@@ -612,18 +612,14 @@ function App() {
   const browserActivityDuringRunRef = useRef(false)
 
   useEffect(() => {
-    if (isWorking && hasBrowserActivityForActiveTask) {
-      browserActivityDuringRunRef.current = true
-    }
-  }, [isWorking, hasBrowserActivityForActiveTask])
-
-  useEffect(() => {
     const wasWorking = prevBrowsingWorkingRef.current
-    prevBrowsingWorkingRef.current = isWorking
 
     if (!wasWorking && isWorking) {
       browserActivityDuringRunRef.current = false
-      return
+    }
+
+    if (isWorking && hasBrowserActivityForActiveTask) {
+      browserActivityDuringRunRef.current = true
     }
 
     if (wasWorking && !isWorking) {
@@ -633,7 +629,9 @@ function App() {
         setAppMode('chat')
       }
     }
-  }, [isWorking, appMode])
+
+    prevBrowsingWorkingRef.current = isWorking
+  }, [isWorking, hasBrowserActivityForActiveTask, appMode])
 
   // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
   // If the agent needs user input mid-task and the user is watching the

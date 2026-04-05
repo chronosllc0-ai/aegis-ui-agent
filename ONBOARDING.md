@@ -3069,3 +3069,21 @@
 
 ### Validation
 - Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
+
+## 2026-04-05 — Review follow-up v3 (single-effect browser activity lifecycle)
+
+### What changed
+- Consolidated run-scoped browser handoff tracking in `frontend/src/App.tsx` into a **single `useEffect`**.
+- Removed the previous dual-effect pattern that both mutated `browserActivityDuringRunRef`.
+- The unified effect now handles, in one place:
+  1. run-start reset (`!wasWorking && isWorking`)
+  2. mid-run browser activity accumulation (`isWorking && hasBrowserActivityForActiveTask`)
+  3. run-end auto-return decision (`wasWorking && !isWorking`)
+  4. previous-state ref update.
+
+### Why
+- Addresses code review suggestion to avoid relying on multi-effect execution order when mutating shared refs.
+- Improves readability and correctness confidence by making lifecycle transitions explicit in one flow.
+
+### Validation
+- Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
