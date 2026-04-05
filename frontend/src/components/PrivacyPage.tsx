@@ -313,7 +313,7 @@ export function PrivacyPage({ onGoHome, onGoAuth }: Props) {
       <nav className='sticky top-0 z-20 border-b border-white/8 bg-[#090c13]/95 backdrop-blur'>
         <div className='mx-auto flex max-w-5xl items-center justify-between px-6 py-4'>
           <button type='button' onClick={onGoHome} className='flex items-center gap-3'>
-            <img src='/aegis-owl-logo.svg' alt='Aegis owl logo' className='h-7 w-7' />
+            <img src='/aegis-shield.png' alt='Aegis logo' className='h-7 w-7' />
             <span className='font-semibold text-white'>{PRODUCT}</span>
           </button>
           <button

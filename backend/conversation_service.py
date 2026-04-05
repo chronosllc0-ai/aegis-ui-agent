@@ -15,6 +15,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import Conversation, ConversationMessage
 
+PLACEHOLDER_TITLES = {"new task", "untitled", ""}
+
+
+def _normalize_title(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _is_placeholder_title(value: str | None) -> bool:
+    return _normalize_title(value).lower() in PLACEHOLDER_TITLES
+
+
+def _derive_title_from_instruction(text: str, limit: int = 120) -> str:
+    clean = " ".join((text or "").split()).strip()
+    return clean[:limit] if clean else "New task"
+
 
 async def get_or_create_conversation(
     session: AsyncSession,
@@ -64,6 +79,7 @@ async def append_message(
     content: str,
     metadata: dict[str, object] | None = None,
     platform_message_id: str | None = None,
+    title_candidate: str | None = None,
 ) -> ConversationMessage | None:
     """Persist a conversation message and bump the parent conversation timestamp."""
     normalized = content.strip()
@@ -82,6 +98,14 @@ async def append_message(
 
     conversation = await session.get(Conversation, conversation_id)
     if conversation is not None:
+        if role == "user" and _is_placeholder_title(conversation.title):
+            metadata_task_label = metadata.get("task_label") if metadata else None
+            preferred = metadata_task_label if isinstance(metadata_task_label, str) else None
+            if _is_placeholder_title(preferred):
+                preferred = title_candidate
+            if _is_placeholder_title(preferred):
+                preferred = normalized
+            conversation.title = _derive_title_from_instruction(preferred)[:500]
         conversation.updated_at = datetime.now(timezone.utc)
 
     await session.commit()

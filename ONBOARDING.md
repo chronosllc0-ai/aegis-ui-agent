@@ -1,3 +1,686 @@
+## Session 5.60 - April 5, 2026 (Discord retry_after micro-optimization follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick nitpick pass
+
+### What Was Done
+- Addressed final PR nitpick in `integrations/discord.py` retry parsing logic.
+- Optimized 429 `retry_after` handling to avoid exception-driven control flow in the common case where `retry_after` is absent/null:
+  - numeric values (`int`/`float`) are used directly,
+  - non-empty string values are parsed with guarded `ValueError` fallback,
+  - missing/empty/invalid values fall back to `1.0` without `TypeError` noise.
+- Re-ran adapter tests and syntax check for Discord integration.
+
+### What's Working
+- Adapter tests remain green.
+- Discord rate-limit parsing is now slightly cleaner/faster on missing-key paths while preserving safe fallback behavior.
+
+### What's NOT Working Yet
+- None identified in this pass.
+
+### Next Steps
+1. Optional: add a focused unit test for `retry_after=None` / missing key path to explicitly assert non-exception fallback.
+
+### Decisions Made
+- Kept logic explicit and readable (type checks first, parse second) rather than relying on broad exception handling for normal flow.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.59 - April 5, 2026 (PR review follow-up: retry-after parsing hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick fix pass
+
+### What Was Done
+- Addressed latest PR review follow-up on Slack/Discord retry branch robustness and indentation concerns.
+- Updated Slack retry logic in `integrations/slack_connector.py` to parse `Retry-After` with guarded float conversion:
+  - defaults to `1.0`,
+  - catches `TypeError`/`ValueError` to avoid runtime parse errors.
+- Updated Discord retry logic in `integrations/discord.py` to parse `retry_after` with guarded conversion from API payload:
+  - reads raw value when payload is dict,
+  - safely casts with fallback to `1.0`.
+- Re-ran syntax + adapter tests to confirm import/runtime stability.
+
+### What's Working
+- Both adapters compile cleanly and pass adapter test suite after retry parsing hardening.
+- Retry code path now tolerates malformed/non-numeric retry headers/payload values.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add explicit unit tests for malformed retry headers/payload values (e.g., `Retry-After: foo`) to lock in behavior.
+2. Continue webhook endpoint wiring parity validation for `handle_event(...)` at route level.
+
+### Decisions Made
+- Kept fallback retry delay at `1.0s` for invalid provider hints to preserve deterministic backoff behavior.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.58 - April 5, 2026 (PR review follow-up: adapter cleanup + bounded idempotency)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed Slack/Discord review comments from the adapter modernization PR.
+- Slack (`integrations/slack_connector.py`):
+  - moved `asyncio` import to module scope,
+  - changed fallback delivery-id digest to deterministic JSON serialization (`json.dumps(..., sort_keys=True)`),
+  - hoisted `httpx.AsyncClient` outside retry loop to reuse client across retry attempts,
+  - replaced unbounded idempotency set with a shared bounded deduper utility.
+- Discord (`integrations/discord.py`):
+  - moved `base64` import to module scope,
+  - refactored nested inline payload parsing into helper methods (`_extract_user_id`, `_extract_option_value`, `_extract_message_id`) for readability and safer parsing,
+  - hoisted `httpx.AsyncClient` outside retry loop,
+  - replaced unbounded idempotency set with shared bounded deduper utility.
+- Added shared `DeliveryDeduper` helper in `integrations/idempotency.py` and updated adapter tests with bounded deduper coverage and cleaner request mock signatures.
+
+### What's Working
+- Review issues around retry-client churn, import placement, deterministic fallback hashing, and unbounded idempotency memory growth are resolved in code.
+- Adapter regression tests pass with updated behavior and added bounded deduper coverage.
+
+### What's NOT Working Yet
+- Deduper remains in-memory process-local state; horizontal pod-level dedupe still requires shared storage if needed for production-scale webhook fanout.
+
+### Next Steps
+1. If needed, introduce Redis/DB-backed dedupe for cross-instance webhook delivery idempotency.
+2. Add webhook route tests that validate adapter `handle_event(...)` wiring from HTTP endpoints end-to-end.
+
+### Decisions Made
+- Implemented a shared bounded dedupe helper to keep Slack and Discord behavior consistent and avoid duplicated eviction logic.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.57 - April 4, 2026 (Slack/Discord adapter modernization + unified contract)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend integrations pass
+
+### What Was Done
+- Added unified channel adapter contract at `backend/integrations/contracts.py` with required methods (`send_text`, `edit_text`, `send_file`, `handle_event`) for cross-platform parity.
+- Modernized `integrations/slack_connector.py`:
+  - implemented adapter contract methods and kept legacy tool names as compatibility wrappers,
+  - added `chat.update`-based edit path for progressive streaming updates,
+  - implemented `slack_send_file` via Slack external upload flow (`files.getUploadURLExternal` + binary upload + `files.completeUploadExternal`),
+  - added rate-limit retry/backoff handling for API 429 responses,
+  - added canonical envelope normalization and idempotency guard for repeated webhook deliveries.
+- Modernized `integrations/discord.py`:
+  - implemented adapter contract methods while preserving existing API v10 baseline,
+  - added message edit support via `PATCH /channels/{channel}/messages/{message_id}`,
+  - implemented robust multipart attachment upload for `discord_send_file` and retained `discord_send_image` wrapper support,
+  - added interaction handling (PING ACK + deferred ACK for command/component flows) with canonical envelope mapping,
+  - added 429 backoff retry behavior.
+- Added required capability matrix artifact at `docs/integrations/capability-matrix.md` with per-platform support status and notes.
+- Added test lane `tests/test_slack_discord_adapters.py` covering Slack/Discord connect, events/interactions, send/edit/file, rate-limit backoff, envelope/idempotency behavior, and contract conformance.
+
+### What's Working
+- Slack and Discord now share a concrete adapter surface while preserving legacy tool names for migration safety.
+- File upload tool paths are implemented on both platforms.
+- Event payload normalization and idempotency guards are in place for webhook delivery handling.
+
+### What's NOT Working Yet
+- Slack/Discord webhook endpoint wiring to route all incoming platform events through adapter `handle_event(...)` is still partial in router-level code paths.
+- Error normalization taxonomy is still provider-specific (not yet fully unified in a shared error schema).
+
+### Next Steps
+1. Route existing webhook endpoints to adapter `handle_event(...)` consistently and add signature verification parity checks in endpoint tests.
+2. Introduce shared envelope/error dataclasses to remove remaining provider-specific response shape differences.
+3. Add parity gate before enabling deprecation warnings for legacy tool aliases.
+
+### Decisions Made
+- Kept compatibility wrappers (`slack_send_message`, `discord_send_message`, etc.) as the stable surface while moving implementation under adapter methods.
+- Used in-memory idempotency guards for this pass to avoid DB migration scope expansion.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.56 - April 4, 2026 (Telegram PR review follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed Telegram integration PR review comments:
+  - extracted shared multipart upload helper `TelegramClient._send_media(...)` and refactored `send_photo(...)` / `send_document(...)` to call it.
+  - fixed progressive update path in `stream_draft_then_send(...)` to call official `edit_message_text(...)` directly instead of deprecated `send_message_draft(...)`, preventing self-generated deprecation telemetry noise.
+- Addressed `main.py` review comments:
+  - replaced `async for ... break` DB session pattern in `_log_platform_message(...)` with explicit async-generator lifecycle handling (`anext(...)` + `aclose()`) so cleanup is deterministic.
+  - normalized top-level spacing around `_log_platform_message(...)` to PEP 8 two-blank-line convention.
+- Updated tests to reflect the progressive-edit change (`edit_message_text` call expectations in `tests/test_telegram.py`).
+
+### What's Working
+- Telegram media upload code is now DRY via shared helper.
+- Progressive Telegram message updates now use official edit API end-to-end without contaminating legacy deprecation counters.
+- Webhook message persistence path still passes existing coverage.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add explicit unit test coverage for `TelegramClient._send_media(...)` error-path behavior.
+2. Add route-level callback-query webhook tests in `main.py` endpoint tests.
+
+### Decisions Made
+- Kept legacy alias functions for migration compatibility, but removed internal usage of deprecated path.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.55 - April 4, 2026 (Telegram official Bot API normalization + conformance)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend integration + tests pass
+
+### What Was Done
+- Refactored `integrations/telegram.py` to use official Bot API methods for normal operations:
+  - `sendMessage`, `editMessageText`, `sendChatAction`, `sendPhoto`, `sendDocument`, `answerCallbackQuery`, `setMyCommands`.
+- Added temporary legacy-compat mapper + deprecation telemetry:
+  - `send_message_draft` now maps to `editMessageText`.
+  - `set_chat_member_tag` now maps to `setChatAdministratorCustomTitle`.
+  - mapper usage logs deprecation warnings and increments in-memory counters.
+- Implemented missing `telegram_send_image` tool dispatcher path end-to-end (base64 validation + `sendPhoto` execution).
+- Added optional `telegram_send_file` path (`sendDocument`) with consistent `{ok, tool, result|error}` output shape.
+- Preserved webhook/polling parity and made mode transitions explicit:
+  - webhook mode sets webhook and clears polling offset,
+  - polling mode deletes webhook with drop-pending and resets offset.
+- Added callback-query handling path:
+  - webhook updates now support callback payload extraction,
+  - integration answers callback queries and can perform inline follow-up actions (`edit:` / `reply:` patterns).
+- Added tested capability documentation in `docs/telegram-capabilities.md`.
+- Expanded Telegram conformance tests in `tests/test_telegram.py` for commands, callbacks, edits/progressive flow, media, mode parity, and legacy mapper behavior.
+- Fixed Telegram webhook routing helper gap in `main.py` by adding `_extract_telegram_message(...)` and callback-aware sender extraction.
+
+### What's Working
+- Telegram integration no longer requires non-standard methods during normal operation.
+- `telegram_send_image` now works through official send-photo API path.
+- Webhook and polling connect paths are both covered and validated by tests.
+
+### What's NOT Working Yet
+- Legacy mapper is still temporary and should be removed once migration consumers are updated.
+
+### Next Steps
+1. Add route-level webhook callback tests in `main.py` endpoint coverage to verify full request/response behavior.
+2. Decide timeline for removing legacy aliases and telemetry counters.
+
+### Decisions Made
+- Kept legacy aliases as compatibility shims (not primary runtime path) to avoid abrupt downstream breakage.
+- Avoided runtime Bot API version constants; compatibility is enforced via method set + tests + docs.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.54 - April 4, 2026 (PR review fixes: batch validation + ask_user_input feedback)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed PR review comments in `universal_navigator.py`:
+  - Removed unreachable `len(tool_calls) > MAX_BATCH_TOOL_CALLS` guard in loop (batch length is already bounded by parser contract).
+  - Removed redundant per-item shape/tool-name validation blocks in batch validation loop; parsing helpers already guarantee normalized structure.
+  - Fixed batch `ask_user_input` behavior by adding an immediate consolidated-result entry (`ok`) indicating pending user response, so model receives explicit feedback in the single merged follow-up message.
+  - Tightened tool error classification heuristic by removing broad substring matching and limiting detection to explicit error prefixes.
+- Cleaned `tests/test_universal_navigator_parallel_tools.py` formatting:
+  - added proper blank-line spacing between top-level tests,
+  - removed trailing whitespace,
+  - added explicit regression test for batch `ask_user_input` consolidated feedback line.
+
+### What's Working
+- Batch orchestration remains deterministic and concurrent while now producing explicit model-visible feedback for `ask_user_input`.
+- Review-file style nitpicks in test layout were resolved.
+
+### What's NOT Working Yet
+- Long-term typed `ToolExecutionResult` return contract is still future work; current pass tightens heuristic without changing tool return API.
+
+### Next Steps
+1. Migrate `UniversalToolExecutor.run(...)` to a typed result object (`ok`, `error`, `result_text`, `screenshot`) to remove string-based status inference entirely.
+2. Add websocket-level coverage for user-input response lifecycle in batch context.
+
+### Decisions Made
+- Kept review-requested scope narrow for this pass (no breaking return-shape changes).
+
+### Blockers
+- None.
+
+---
+
+## Session 5.53 - April 4, 2026 (skills token-budget defaults follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 config/test stabilization pass
+
+### What Was Done
+- Added missing runtime skill-budget settings defaults in `config.py`:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MIN_PRIORITY=None`
+  - plus backward-compatible `SKILLS_MAX_TOKEN=10000` alias field for singular-env deployments.
+- Hardened runtime skill assembly in `universal_navigator.py`:
+  - reads `SKILLS_MAX_TOKENS` with fallback to `SKILLS_MAX_TOKEN` (default `10000`),
+  - reads `SKILLS_MIN_PRIORITY` via safe `getattr(..., None)` fallback.
+- Updated `.env.example` with:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MAX_TOKEN=10000`
+  - `SKILLS_MIN_PRIORITY=`
+- Re-ran runtime-skills tests that previously failed due to missing config attributes.
+
+### What's Working
+- Full `tests/test_universal_navigator_runtime_skills.py` now passes in this environment.
+- Batch-tool orchestration tests continue to pass.
+
+### What's NOT Working Yet
+- No new functional blockers found in this pass.
+
+### Next Steps
+1. Decide whether to deprecate singular `SKILLS_MAX_TOKEN` after migration period and keep only plural.
+2. Add config docs in README for runtime skill budget tuning and priority filtering.
+
+### Decisions Made
+- Kept both plural and singular env names for compatibility while standardizing logic on `SKILLS_MAX_TOKENS`.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.52 - April 4, 2026 (universal navigator batch tool-call orchestration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend orchestration + tests pass
+
+### What Was Done
+- Refactored `universal_navigator.py` loop to support backward-compatible multi-tool responses:
+  - Added batch contract parsing for `tool_calls` (max 3), with precedence over `tool` when valid.
+  - Added malformed-batch fallback behavior to legacy single-call parsing (`tool`) when available.
+  - Added per-call validation pipeline in batch mode (shape/tool checks, availability gate, confirmation gate) before execution.
+  - Added bounded concurrent execution (`asyncio.Semaphore(3)`) with deterministic transcript ordering by original index.
+  - Added consolidated single follow-up message format:
+    - `Tool results:` block with ordered per-call `ok/error` status and provenance.
+    - deterministic screenshot attachment from highest-index successful call containing screenshot bytes.
+  - Added structured observability events:
+    - `batch_tool_start`
+    - `batch_tool_result` (index/tool/status/duration)
+    - `batch_tool_complete` summary.
+- Extended `UniversalToolExecutor.run(...)` with `skip_policy_checks` flag so batch pre-validation can enforce policy gates once per call without duplicate confirmation prompts.
+- Added dedicated test suite `tests/test_universal_navigator_parallel_tools.py` covering:
+  - valid batch acceptance,
+  - over-limit rejection,
+  - deterministic ordering under async completion,
+  - mixed pass/fail consolidation,
+  - malformed batch fallback to legacy single-call,
+  - confirmation gate enforcement for high-risk tools in batch,
+  - workflow event emission + consolidated follow-up,
+  - subagent allowlist enforcement in batch mode.
+
+### What's Working
+- Single-call flow remains supported and done/error handling still works for legacy responses.
+- Batch mode now executes up to 3 validated calls concurrently while preserving ordered transcript output.
+- Existing safety controls (disabled tools/integration requirements/subagent allowlist/high-risk confirmation) remain enforced per call in batch mode.
+
+### What's NOT Working Yet
+- Batch mode currently classifies textual tool failures via conservative string-pattern detection (`error:` etc.); richer typed tool-result envelopes could improve this later.
+
+### Next Steps
+1. Consider adding a typed `ToolExecutionResult` object to avoid string-based `ok/error` inference.
+2. Extend websocket-level tests to assert UI action-log rendering for batch event types.
+3. Add provider adapter hints/examples documenting `tool_calls` response shape for stronger model compliance.
+
+### Decisions Made
+- Kept provider compatibility by preserving legacy parsing and only activating batch path when `tool_calls` is valid.
+- Kept policy enforcement semantics unchanged by reusing existing gate methods per call.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.51 - April 3, 2026 (PR follow-up: VT upload-path status handling cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused scanner-flow correctness pass
+
+### What Was Done
+- Updated `VirusTotalScanner.scan_content(...)` upload/poll path in `backend/skills/service.py`:
+  - removed post-poll re-fetch behavior for 404→upload flow,
+  - now uses completed `poll_json` as `raw` for the upload path,
+  - guarded `file_report.raise_for_status()` under the non-upload (`else`) path to avoid raising on the original 404 response after successful polling.
+- Improved VT stats extraction fallback to support both file-report (`last_analysis_stats`) and analysis payload (`stats`) shapes.
+- Simplified scan transition gate in `run_scans_for_skill(...)`:
+  - `pending_scan` when VT was attempted and returned `error`,
+  - also `pending_scan` when VT is skipped and policy scanner returns `error`.
+- Re-validated user submit rollback/status branch in `backend/skills/router.py`; no duplicate rollback lines exist in current branch.
+
+### What's Working
+- Upload path no longer invalidates successful poll completion by raising on stale 404 `file_report`.
+- Status transition logic is now explicit for VT-attempted error and VT-skipped + policy-error cases.
+
+### What's NOT Working Yet
+- VT analysis payload can vary across API versions; broader schema normalization can still be improved in a future hardening pass.
+
+### Next Steps
+1. Add focused unit tests for VT upload path parsing (`stats` fallback) and transition branching.
+2. Add integration smoke with mocked VT API fixture for 404→upload→completed-analysis flow.
+
+### Decisions Made
+- Chose completed poll payload as source of truth for upload path to avoid redundant network roundtrip and stale-status risk.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.50 - April 3, 2026 (PR review polish: submit scan_status response correctness)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted API response consistency pass
+
+### What Was Done
+- Updated `POST /api/skills/submit` response behavior in `backend/skills/router.py` to report the real scan outcome using an explicit `scan_status` field:
+  - `scan_status = "completed"` when follow-up scan commit succeeds,
+  - `scan_status = "failed"` when scan phase raises `ValueError` and transaction rolls back.
+- Preserved two-phase submission semantics (submission commit is not rolled back by scan-phase failures), while making response payload truthful for clients.
+- Re-verified `backend/skills/service.py` `VirusTotalScanner._is_open(...)` shape is clean and contains no duplicate decorator/dead-return code in current branch.
+
+### What's Working
+- `/api/skills/submit` now returns accurate post-submit scan state for UI/client handling.
+
+### What's NOT Working Yet
+- Scan phase remains synchronous in-request; async background execution remains a planned follow-up.
+
+### Next Steps
+1. Add endpoint test coverage for `scan_status` success/failure branches.
+2. Move scan phase to background worker for better request latency.
+
+### Decisions Made
+- Kept scan failure surfacing as payload state (not HTTP error) to preserve successful submission creation semantics.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.49 - April 3, 2026 (PR review fixes: JSON hardening + VT compliance gating)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend review-fix pass
+
+### What Was Done
+- Addressed review warnings in `backend/skills/service.py`:
+  - narrowed VT exception handling from broad `Exception` to expected IO/network failures (`httpx.RequestError`, `httpx.HTTPStatusError`, `OSError`),
+  - added safe handling for corrupted `metadata_json` in scan flow by raising `ValueError(\"Invalid skill metadata JSON\")`,
+  - computed scan `max_score` once and reused for risk-label branching,
+  - added `VIRUSTOTAL_REQUIRED` behavior in runtime compliance logic so `skipped` VT verdicts are only accepted when explicitly allowed (and now emit warning logs when allowed by config).
+- Addressed review suggestions in `backend/skills/router.py`:
+  - added `_safe_json_loads(...)` helper and applied it to review-queue JSON fields (`metadata_json`, scan `raw_json`) to avoid endpoint 500s on malformed stored JSON,
+  - split user submit flow into two phases:
+    1) create+commit skill/version first,
+    2) scan in a follow-up transaction,
+    so scan failures no longer roll back successful submission creation.
+- Added `VIRUSTOTAL_REQUIRED` to `config.py` and `.env.example`.
+
+### What's Working
+- Review queue endpoint now tolerates malformed persisted JSON blobs safely.
+- User submissions are preserved even if downstream scanning encounters errors.
+- Runtime compliance behavior is now explicit and configurable for skipped VT scans.
+
+### What's NOT Working Yet
+- User submission scan phase is still synchronous in-request; fully async background scan worker remains a follow-up optimization.
+
+### Next Steps
+1. Move submission scan phase to background queue for lower API latency.
+2. Add tests for malformed JSON in review queue response and `VIRUSTOTAL_REQUIRED=true` runtime gating behavior.
+3. Add metrics for `skipped` VT scans to monitor operational drift.
+
+### Decisions Made
+- Kept default `VIRUSTOTAL_REQUIRED=false` to preserve local-dev usability without API key; added warning logging + config switch for stricter environments.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.48 - April 3, 2026 (PR review hardening for skill governance pipeline)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend hardening/refinement pass
+
+### What Was Done
+- Addressed review feedback in `backend/skills/service.py`:
+  - VirusTotal poll loop now returns an explicit `error` verdict when analysis does not reach `completed` within `VIRUSTOTAL_MAX_POLLS` (instead of proceeding with potentially stale data).
+  - Added lock-guarded circuit breaker state updates (`asyncio.Lock`) for `_consecutive_failures` / `_opened_until` mutation safety under concurrent requests.
+  - Updated scan transition behavior so skills are only moved to `pending_review` when scans produce usable output; if both scanners return `error`, skill remains `pending_scan` for retry.
+  - Upgraded version handling so re-submitting an existing owned slug now creates immutable `skill_versions` with incrementing version numbers (`latest + 1`) rather than hardcoding `version=1`.
+- Addressed API review feedback in `backend/skills/router.py`:
+  - Added authenticated-user dependency to `/api/skills/global` and `/api/skills/hub`.
+  - Clarified runtime active-skill semantics by renaming service argument to `requested_for_user_id` while preserving external API contract `?user_id=...`.
+- Addressed testing feedback in `tests/test_skills_service.py`:
+  - Consolidated multiple `asyncio.run(...)` calls into a single event-loop execution in the transition test.
+
+### What's Working
+- VT timeout behavior now fails safely rather than allowing indeterminate scan status to flow through.
+- Concurrent scan failures now update breaker state through a lock-protected path.
+- Revisions to existing skill slugs now produce incremented immutable versions for the same owner.
+- Global/hub catalogs now require authentication.
+
+### What's NOT Working Yet
+- Circuit breaker state is still process-local; cross-worker shared breaker coordination (Redis/DB) is still a future enhancement.
+
+### Next Steps
+1. Add shared-store circuit breaker state for multi-worker deployments.
+2. Add API tests for authenticated `/api/skills/global` and `/api/skills/hub`.
+3. Add tests for VT timeout path and dual-error transition (`pending_scan` retry state).
+
+### Decisions Made
+- Kept process-local breaker implementation for now (hackathon-appropriate), but made it concurrency-safe within worker process boundaries.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.47 - April 3, 2026 (skills governance pipeline: model + APIs + scanners)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend governance implementation pass
+
+### What Was Done
+- Added a full versioned/auditable skill governance data model in `backend/database.py`:
+  - `skills`,
+  - `skill_versions` (immutable),
+  - `skill_scan_results`,
+  - `skill_reviews`,
+  - `skill_publish_events`.
+- Implemented skill workflow services in `backend/skills/service.py`:
+  - VirusTotal scanner flow with hash lookup/upload/poll support, timeout and simple circuit breaker behavior,
+  - prompt/policy scanner with rule-based forbidden-pattern detection and severity scoring,
+  - state-machine transitions across scan/review decisions,
+  - NEW badge expiration handling (`new_until`), visibility-target listing, and runtime active/compliance filtering.
+- Added API routes in `backend/skills/router.py` for:
+  - Admin: create/upload, scan, review queue, review decision,
+  - User: global listing, hub listing, submit, mine,
+  - Runtime: active skill fetch with compliance enforcement.
+- Wired skills routes into FastAPI app in `main.py`.
+- Added VirusTotal environment settings to `config.py` and `.env.example`.
+- Added tests in `tests/test_skills_service.py` for policy scan detection and review transition behavior.
+
+### What's Working
+- End-to-end backend shape now supports the requested dual publish targets (`global` vs `hub`) with separate review decisions.
+- Immutable version rows + publish event trail are persisted for auditability.
+- Runtime active endpoint returns only approved + scan-compliant skills.
+- Added tests pass for new scanner/transition logic.
+
+### What's NOT Working Yet
+- No dedicated background worker cron was added for nightly NEW-flag expiry; current implementation expires at read time.
+- VirusTotal scan path is implemented but not integration-tested against live VT API in this pass.
+- Admin frontend CTA buttons are not yet implemented; API response now exposes CTA decision mapping.
+
+### Next Steps
+1. Add admin UI moderation screen with explicit **Approve to Global** and **Approve to Hub** buttons.
+2. Add async job/queue scheduling for scan polling + nightly NEW flag cleanup.
+3. Add API integration tests for `/api/admin/skills/*` and `/api/skills/*` endpoints with auth fixtures.
+
+### Decisions Made
+- Chose read-time NEW-expiry enforcement now to avoid blocking on scheduler complexity while preserving correct runtime behavior.
+- Kept skill content storage as `inline://` metadata payload for now, with `storage_url` field ready for object storage migration.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.46 - April 3, 2026 (Plan mode first-class composer behavior)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend behavior + test pass
+
+### What Was Done
+- Implemented first-class plan intent behavior in `ChatPanel` composer via explicit `planIntent` state (instead of injecting `/plan ` into the textarea).
+- Added a reusable parser/normalizer helper `resolveComposerSubmission(...)` that determines submission mode (`normal` vs `plan`) and strips slash command tokens from visible user bubble text.
+- Updated send pipeline behavior:
+  - typed `/plan ...` now routes through `onDecomposePlan(...)` and shows clean bubble text without the slash token,
+  - plan-intent mode (`Plan` clicked on empty composer) sends the next prompt through decompose flow,
+  - non-plan messages continue through normal `onSend(...)` flow unchanged.
+- Updated Plan button UX:
+  - empty composer click toggles visual plan intent state,
+  - non-empty composer click immediately submits as plan request.
+- Added/updated component tests:
+  - parser unit cases for slash + intent + normal modes,
+  - UI coverage ensuring no `/plan` token injection into composer,
+  - UI coverage ensuring slash command text is cleaned in the user bubble.
+
+### What's Working
+- Plan mode now behaves like an explicit composer mode rather than slash text injection.
+- Manual slash command path and button-intent path both route to plan decomposition.
+- Existing normal send path behavior remains intact.
+- Targeted ChatPanel Vitest suite passes.
+
+### What's NOT Working Yet
+- No additional E2E browser test was added in this pass (coverage is component/unit level).
+
+### Next Steps
+1. Add an integration/E2E test covering full plan card appearance after decompose API response.
+2. Consider subtle composer hint text while `planIntent` is active (optional UX polish).
+
+### Decisions Made
+- Kept external `onSend(...)` behavior unchanged for non-plan submissions to preserve compatibility across non-chat channels.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.45 - April 3, 2026 (Railway TS6133 follow-up verification + guard test)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted frontend verification pass
+
+### What Was Done
+- Investigated Railway build failure screenshot (`TS6133: 'setThinkingOpen' is declared but its value is never read`) and verified current `ChatPanel` no longer declares `setThinkingOpen`; active state setter is `setOpenThinkingIds` and is used in hydration/toggle flows.
+- Added a regression test to cover task-scoped thinking accordion UI persistence (`aegis.chat.ui.<taskId>.openThinkingIds`) by toggling a thinking row and asserting localStorage persistence + expanded content render.
+- Re-ran frontend test suite and production build to confirm no TypeScript unused-local failures in current source.
+
+### What's Working
+- Frontend tests now include explicit coverage for open/closed thinking-row persistence behavior.
+- Local build passes (`npm run build`) with no `TS6133` error in `ChatPanel.tsx`.
+
+### What's NOT Working Yet
+- Railway build verification still depends on redeploying the latest commit hash (screenshot appears to reference an older failed deployment snapshot).
+
+### Next Steps
+1. Trigger Railway redeploy using latest commit.
+2. Confirm build logs no longer report `setThinkingOpen` TS6133.
+
+### Decisions Made
+- Added a focused guard test instead of introducing additional UI logic churn since current production code path already uses the setter correctly.
+
+### Blockers
+- None in code; only hosted redeploy confirmation remains.
+
+---
+
+## Session 5.44 - April 3, 2026 (structured thinking persistence + hydration regressions)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend persistence + test pass
+
+### What Was Done
+- Added structured persisted thinking model usage in chat rendering flow, including task-scoped hydration from `aegis.reasoning.<taskId>` and deterministic `thinking-<taskId>-<stepId>` identities.
+- Removed chat derivation of thinking rows from raw log token text and replaced malformed `[thinking]` tool fallback with structured placeholder thinking rows (no raw token rendering).
+- Implemented task-scoped thinking cache persistence in `useWebSocket`:
+  - `reasoning_start` seeds streaming rows and persists immediately,
+  - `reasoning_delta` appends text snapshots and persists,
+  - `result` marks all streaming rows for task as completed,
+  - `reasoning` final payload now persists completed content snapshots.
+- Added optional persisted thinking accordion UI state per task via `aegis.chat.ui.<taskId>.openThinkingIds`.
+- Added regression tests covering reasoning cache persistence and chat-panel restoration/visual-state behavior on thread switches and refresh simulation.
+
+### What's Working
+- Revisiting a task/thread now restores purple thinking rows from local cache instead of relying on transient raw logs.
+- Streaming/completed thought status now persists across refreshes and task switches.
+- No literal `[thinking]` token text is surfaced in chat UI.
+
+### What's NOT Working Yet
+- No full browser E2E was added in this pass; coverage is unit/component-level via Vitest.
+
+### Next Steps
+1. Extend persisted reasoning hydration to server-backed task archives if/when reasoning snapshots are stored remotely.
+2. Add E2E test proving task switch + refresh behavior in a full running app session.
+
+### Decisions Made
+- Kept `reasoningMap` as live runtime cache only; persisted local storage snapshot is now the source of truth for thought-row reconstruction.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.43 - April 3, 2026 (ask_user_input reply routing + dedupe + regressions)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend test pass
+
+### What Was Done
+- Updated `ChatPanel` ask-user-input reply handling to keep optimistic local bubble insertion while removing generic steer send from `handleUserInputReply(...)`.
+- Added optimistic reply metadata (`source: "ask_user_input"`, `request_id`) on local user bubbles and tightened merge behavior to treat those optimistic messages as dedupe candidates when equivalent server user bubbles arrive.
+- Wired `ChatPanel` to use the dedicated `onUserInputResponse(answer, requestId)` callback and updated `App.tsx` to send direct websocket payloads with `action: "user_input_response"` (not routed via `handleSend`/steering).
+- Added frontend regression test for ask-user-input card response flow (single callback call + single local user bubble).
+- Added backend websocket regression tests ensuring `user_input_response` resumes exactly one pending prompt, continues the paused task once, and logs unknown/expired request IDs at debug level.
+
+### What's Working
+- ask-user-input responses now route directly to pending prompt futures without kicking off a new steer/navigate path.
+- Optimistic ask-user-input local replies no longer double-render once server user messages hydrate.
+- Backend and frontend regression coverage added for the ask-user-input resume path.
+
+### What's NOT Working Yet
+- No additional browser E2E harness was introduced in this pass beyond websocket integration + frontend component tests.
+
+### Next Steps
+1. Add a full browser-level E2E spec (Playwright UI test) once frontend test harness scope expands.
+2. Extend dedupe metadata to all optimistic message classes (not just ask-user-input) if similar hydration duplication is observed.
+
+### Decisions Made
+- Kept `onUserInputResponse` optional in props for backward compatibility, but all ask-user-input replies now use this callback path as the only transport.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.42 - April 2, 2026 (Follow-up: @mentions + explicit sub-agent message routing)
 
 **Agent:** GPT-5.3-Codex  
