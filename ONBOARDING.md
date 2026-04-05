@@ -2998,3 +2998,12 @@
 
 ### Why
 - Reduces pytest collection-time side effects and keeps this unit test lighter as `main.py` grows.
+
+## 2026-04-05 — Railway build resilience fix (frontend test-file exclusion)
+
+### What changed
+- Updated `frontend/tsconfig.app.json` to explicitly exclude frontend test/spec files and `__tests__` directories from production TypeScript builds.
+
+### Why
+- Railway build logs showed a TS parse failure from a stray `src/components/__tests__/__ChatPanel.thinking-persistence.test.tsx` file.
+- Excluding test artifacts from `tsc -b` prevents production builds from failing due to accidental or environment-specific test files.
