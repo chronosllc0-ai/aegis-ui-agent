@@ -2931,238 +2931,31 @@
 ### Blockers
 - None in this pass.
 
-## Session 5.27 - April 3, 2026 (Runtime Skill Loader + Prompt Injection + Provenance Logging)
+## 2026-04-05 — Modes foundation pass (system subagent framing)
 
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 pass
+### What changed
+- Added a frontend **Agent Mode picker** in `InputBar` with the requested options: Orchestrator, Planner, Architect, Deep Research, Code.
+- Added persistent `agentMode` session setting in frontend app settings and websocket config payloads.
+- Added backend mode policy module (`backend/modes.py`) with:
+  - mode normalization
+  - canonical labels
+  - mode-level blocked tool policies
+- Enforced mode tool gating in `universal_navigator._available_tools(...)` so non-code modes cannot use high-risk execution tools; only Code mode retains `spawn_subagent`.
+- Extended system prompt assembly to state the **active mode policy hint**.
+- Added Telegram slash command support for `/mode` (show + switch), and surfaced mode in `/status` + `/help`.
+- Added tests for mode policy + slash command behavior.
+- Added `docs/modes-industry-feasibility.md` with research-backed architecture/feasibility notes and recommended next steps for admin-managed per-mode system instructions.
 
-### What Was Done
-- Added `backend/skills/runtime_loader.py` with a dedicated `RuntimeSkill` dataclass and runtime skill-loading policy gate that only returns skills with approved status, latest version, resolved scans/review, and not disabled for the active user/session context.
-- Added runtime skill prompt assembly in `universal_navigator.py` including:
-  - control-char sanitization,
-  - priority-based ordering,
-  - token-budget enforcement via `len(text)/4` heuristic,
-  - explicit truncation marker when the budget is exceeded.
-- Added runtime-skill config knobs in `config.py`:
-  - `SKILLS_MAX_TOKENS`
-  - `SKILLS_MIN_PRIORITY`
-  - `SKILLS_FAIL_CLOSED`
-- Wired one-time runtime skill loading into `run_universal_navigation(...)` startup and appended the `### Active Skills (read-only directives)` section to the system prompt once per run.
-- Added structured provenance logging/event emission at task start with `type: skills_loaded`, including `skills[]` and `excluded[]` metadata.
-- Preserved existing tool safety path (`_tool_requires_confirmation` / `_confirm_if_needed`) unchanged.
+### Working
+- Mode state now round-trips from UI to backend runtime settings.
+- Tool manifest respects mode policy in universal navigator path.
+- Telegram users can switch mode via `/mode code` etc.
 
-### What's Working
-- Runtime skills are now injected once at task startup through the system prompt build path.
-- Budget truncation behavior is deterministic by priority order and emits an explicit truncation marker.
-- Skills provenance is emitted to logs and the workflow event callback.
-- High-risk tool confirmation is still enforced even if an injected skill directive attempts to bypass it.
+### Not yet done / next
+- Admin UI for editing per-mode system instructions is not implemented yet.
+- Telegram inline keyboard mode selector (instead of text-only `/mode`) is not implemented yet.
+- Need end-to-end UI snapshot once browser screenshot tooling is available in this environment.
 
-### What's NOT Working Yet
-- There is no dedicated DB-backed assignment model yet for per-user/per-session disablement beyond metadata-driven disable flags.
-
-### Next Steps
-1. Add explicit relational tables for user/session skill assignment & disable rules (instead of metadata-only checks).
-2. Extend runtime loader API to return first-class exclusion reasons alongside active skills for richer observability.
-3. Add admin UI visibility for runtime loaded/excluded skills per task.
-
-### Decisions Made
-- Implemented fail-open runtime behavior by default (`SKILLS_FAIL_CLOSED=False`) to prioritize task availability; fail-closed can be enabled by config.
-
-### Blockers
-- None in this pass.
-
-## Session 5.28 - April 3, 2026 (PR Review Follow-up: runtime skills perf + edge-case fixes)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 pass
-
-### What Was Done
-- Addressed code review feedback on runtime skill loading performance by removing per-skill scan/review DB lookups and switching to batched fetching:
-  - batched latest version resolution,
-  - batched review resolution,
-  - batched scan resolution.
-- Added a cap to the runtime skill catalog query (`MAX_RUNTIME_SKILLS=100`) to avoid unbounded in-memory loading during prompt assembly.
-- Extended `RuntimeSkill` with optional `created_at` and updated prompt skill sorting to use real recency metadata (priority desc, then created_at, then version id).
-- Fixed token-budget edge case where `SKILLS_MAX_TOKENS=0` previously behaved as unbounded; now zero budget excludes all skills.
-- Tightened skill-content sanitization to exclude DEL (`0x7F`) in addition to other control-character handling.
-- Added regression coverage for the zero-budget behavior.
-
-### What's Working
-- Runtime loader avoids the previous N+1 query behavior and resolves security metadata in bulk.
-- Prompt inclusion ordering now has a meaningful recency tie-breaker.
-- Zero-budget behavior now correctly excludes all runtime skills.
-- Targeted tests pass including the new edge-case test.
-
-### What's NOT Working Yet
-- Loader exclusion reasons from DB-level filtering (e.g., malformed metadata, unresolved review) are logged but not yet surfaced as a first-class return payload from `get_active_runtime_skills`.
-
-### Next Steps
-1. Expand runtime loader return type to include structured exclusion reasons directly (not only active skills).
-2. Add integration coverage that asserts batched loader behavior at scale (mock/spy query counts).
-3. Consider moving `MAX_RUNTIME_SKILLS` to env config for deployment-level tuning.
-
-### Decisions Made
-- Kept the loader API contract stable (`list[RuntimeSkill]`) for now and handled review suggestions with internal batching + limit to minimize broader API churn.
-
-### Blockers
-- None in this pass.
-
-## Session 5.29 - April 3, 2026 (PR Review Follow-up: runtime skill cap moved to config)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 pass
-
-### What Was Done
-- Addressed the remaining review suggestion by removing the hardcoded `MAX_RUNTIME_SKILLS` module constant from `backend/skills/runtime_loader.py`.
-- Added `MAX_RUNTIME_SKILLS` to `config.py` settings so runtime-skill cap is environment-configurable.
-- Updated runtime loader query to consume `settings.MAX_RUNTIME_SKILLS` with defensive clamping (`>= 1`).
-
-### What's Working
-- Runtime skill fetch cap is now configurable and no longer a hidden magic number in module scope.
-
-### What's NOT Working Yet
-- No dedicated API/admin surface exists yet to adjust this setting at runtime without redeploying env configuration.
-
-### Next Steps
-1. Expose runtime skill cap in admin platform settings if live tuning is required.
-2. Add a focused unit test that monkeypatches `MAX_RUNTIME_SKILLS` and asserts capped fetch behavior.
-
-### Decisions Made
-- Used simple integer clamping in loader (`max(int(settings.MAX_RUNTIME_SKILLS), 1)`) to prevent accidental zero/negative caps.
-
-### Blockers
-- None in this pass.
-
-## Session 5.30 - April 5, 2026 (Secure skills ecosystem: Global + Hub + installs + runtime gating)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 pass
-
-### What Was Done
-- Reworked skills data model to support two publication channels (`global`, `hub`), immutable versions, submission queueing, scan evidence, human review decisions, install relations, and audit traceability.
-- Added/updated DB entities:
-  - `skills` now includes `publish_target` and new status workflow values.
-  - `skill_versions` now uses `storage_path`.
-  - Added `skill_submissions`, `skill_installs`, and `skill_audit_events`.
-  - Updated `skill_scan_results` to persist `risk_label` and `skill_reviews` to include `submission_id`.
-- Rebuilt `backend/skills/service.py` to implement:
-  - submission flow (`submit_skill`),
-  - VT + policy scan flow (`run_scans_for_submission`),
-  - admin review transitions (`approve_global|approve_hub|reject|needs_changes`),
-  - NEW badge auto-expiry,
-  - install/uninstall/enable + installed listing,
-  - admin skill history from audit events.
-- Reworked skills API (`backend/skills/router.py`) to match requested contracts:
-  - user: `/api/skills/hub`, `/api/skills/submit`, `/api/skills/{skill_id}/install`, `/api/skills/{skill_id}/uninstall`, `/api/skills/{skill_id}/enable`, `/api/skills/installed`
-  - admin: `/api/admin/skills/review-queue`, `/api/admin/skills/{submission_id}/scan`, `/api/admin/skills/{submission_id}/review`, `/api/admin/skills/{skill_id}/history`
-- Rebuilt runtime gating (`backend/skills/runtime_loader.py`) so runtime only loads installed+enabled skills that are approved and fully scan/review resolved, with token-budget enforcement via `SKILLS_MAX_TOKEN`/`SKILLS_MAX_TOKENS`.
-- Added/updated tests covering:
-  - version immutability,
-  - submit→scan→review workflow transitions,
-  - NEW badge expiry,
-  - runtime exclusion of unapproved skills,
-  - install + enable flow,
-  - admin-only permission gate for review queue.
-
-### What's Working
-- End-to-end security gate chain now exists (scan + policy + human review) before runtime inclusion.
-- Install-to-user and runtime enable toggle flow is covered by API tests.
-- Runtime loader now enforces both approval state and install/enabled state.
-
-### What's NOT Working Yet
-- No dedicated asynchronous scheduler process was added in this pass for NEW-badge expiry; expiry is currently handled by service read/maintenance path.
-- Frontend UI flows (Settings Skills tab / Hub / Admin review UI) were not implemented in this pass; backend endpoints are ready.
-
-### Next Steps
-1. Build frontend Skills tab, Hub browse UI, and Admin review queue pages against new APIs.
-2. Add a periodic background task for `expire_new_flags()` so badges can clear without read-path interaction.
-3. Integrate real VT hash-first/upload+poll telemetry enrichment and stronger policy reason-code taxonomy.
-4. Add optimistic locking/idempotency handling for repeated scan/review operations on the same submission.
-
-### Decisions Made
-- Adopted submission-centric admin scan/review endpoints (`submission_id`) so each versioned update has isolated moderation state.
-- Kept storage abstraction as `storage_path` with existing inline payload strategy to avoid adding object storage scope in this pass.
-
-### Blockers
-- None in this pass.
-
-## Session 5.31 - April 5, 2026 (PR review fixes: perf, safety, and data integrity hardening)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 pass
-
-### What Was Done
-- Addressed PR review warnings/suggestions from `kilo-code-bot`:
-  1. **Runtime loader N+1 fix**
-     - Reworked `backend/skills/runtime_loader.py` to batch-fetch scans and reviews for all installed version IDs before loop processing.
-     - Removed per-skill scan/review queries.
-  2. **Review queue N+1 fix**
-     - Reworked `SkillService.get_review_queue()` to batch-load all scan rows for queued submission versions in one query and group in-memory.
-  3. **Install uniqueness at DB layer**
-     - Added DB `UniqueConstraint(user_id, skill_id)` to `SkillInstall`.
-     - Added `IntegrityError` recovery path in `install_skill()` to keep install behavior idempotent under race conditions.
-  4. **Non-admin global publish guard**
-     - In submit API, force `publish_target="hub"` unless requester is admin/superadmin.
-  5. **Circuit-breaker lock consistency**
-     - Made `VirusTotalScanner._is_open()` async + lock-protected and updated caller to `await` it.
-  6. **Token budget simplification**
-     - Simplified runtime budget initialization to a single fallback expression.
-  7. **GET side-effect reduction**
-     - Removed `expire_new_flags()` write-side effect from `list_catalog()` read path.
-  8. **Docstring restoration**
-     - Restored `_safe_json_loads()` docstring in router.
-- Added API regression test ensuring non-admin submissions cannot persist `publish_target="global"`.
-
-### What's Working
-- Runtime skill loading avoids N+1 scan/review lookups.
-- Admin review queue avoids N+1 scan lookups.
-- Install relation now has DB-level uniqueness protection.
-- Non-admin users are forced to Hub target on submission.
-- Targeted tests pass after fixes.
-
-### What's NOT Working Yet
-- The `install_skill()` IntegrityError recovery currently uses rollback-and-refetch in the same service method; a future pass should move this to an explicit upsert strategy for cleaner transaction semantics.
-
-### Next Steps
-1. Replace install race recovery with dialect-aware upsert (`ON CONFLICT`) where supported.
-2. Add explicit perf-oriented tests (query counting/mocking) for runtime loader and review queue.
-3. Add a scheduled job for `expire_new_flags()` to keep read APIs mutation-free while preserving badge freshness.
-
-### Decisions Made
-- Prioritized correctness + production query-shape improvements from review comments over introducing larger infra changes (e.g., full scheduler/upsert framework) in this pass.
-
-### Blockers
-- None in this pass.
-
-## Session 5.32 - April 5, 2026 (PR review follow-up: savepoint rollback scope + budget cap + import hygiene)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 pass
-
-### What Was Done
-- Addressed latest review comments:
-  1. **Install race handling rollback scope**
-     - Replaced broad `session.rollback()` in `install_skill()` with `session.begin_nested()` savepoint around insert+flush.
-     - Integrity conflicts now rollback only the nested transaction and then refetch/update existing install row.
-  2. **Runtime budget cap restoration**
-     - Restored hard cap behavior so effective runtime budget is `min(SKILLS_MAX_TOKEN, SKILLS_MAX_TOKENS)` with defensive lower bounds.
-  3. **Import hygiene**
-     - Moved `from sqlalchemy import select` from function-local scope to module imports in `tests/test_skills_api.py`.
-
-### What's Working
-- Install idempotency under races no longer requires a full session rollback.
-- Runtime budget cannot exceed system-wide cap even if `SKILLS_MAX_TOKEN` is overconfigured.
-- Targeted tests continue to pass.
-
-### What's NOT Working Yet
-- The race path currently uses exception-driven conflict handling; a future dialect-aware upsert can still reduce exception overhead.
-
-### Next Steps
-1. Evaluate `INSERT ... ON CONFLICT DO UPDATE` for PostgreSQL deployments.
-2. Add focused tests that simulate conflicting install writes under concurrent tasks.
-
-### Decisions Made
-- Used nested savepoint approach as the smallest safe change without coupling to database-specific upsert syntax.
-
-### Blockers
-- None in this pass.
+### Decisions / notes
+- Current implementation treats modes as authoritative runtime policy gates, with defaults falling back to `orchestrator`.
+- Orchestrator mode intentionally blocks direct `spawn_subagent` to preserve router semantics requested in product direction.

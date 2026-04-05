@@ -36,6 +36,7 @@ import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, providerById, modelInfo } from './lib/models'
+import { normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
 import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
@@ -638,15 +639,16 @@ function App() {
 
     setSending(true)
     window.setTimeout(() => setSending(false), 280)
+    const selectedAgentMode = normalizeAgentMode(settings.agentMode)
     send({ action: 'config', settings: wsConfig })
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
@@ -659,7 +661,7 @@ function App() {
       return
     }
 
-    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // ── Update browser tab title for steering state ────────────────
@@ -1214,6 +1216,8 @@ function App() {
                 sending={sending}
                 onModeChange={setMode}
                 onSend={handleSend}
+                agentMode={settings.agentMode}
+                onAgentModeChange={(nextMode) => patchSettings({ agentMode: nextMode })}
                 onDecomposePlan={handleDecomposePlan}
                 provider={settings.provider}
                 model={settings.model}

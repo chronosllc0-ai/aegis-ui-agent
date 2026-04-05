@@ -115,6 +115,22 @@ function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
     .filter((opt) => opt.length > 0)
 }
 
+function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
+  if (!Array.isArray(rawOptions)) return []
+  return rawOptions
+    .map((opt) => {
+      if (typeof opt === 'string') return opt.trim()
+      if (opt && typeof opt === 'object') {
+        const record = opt as Record<string, unknown>
+        const label = typeof record.label === 'string' ? record.label.trim() : ''
+        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
+        return label || fallback
+      }
+      return ''
+    })
+    .filter((opt) => opt.length > 0)
+}
+
 interface AttachedFile {
   name: string
   type: string
@@ -1400,87 +1416,15 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
-  const [thinkingMessages, setThinkingMessages] = useState<PersistedThinkingMessage[]>([])
-  const [openThinkingIds, setOpenThinkingIds] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    setThinkingMessages(readPersistedThinking(activeTaskId))
-    if (!activeTaskId) {
-      setOpenThinkingIds(new Set())
-      return
-    }
-    try {
-      const raw = localStorage.getItem(OPEN_THINKING_KEY(activeTaskId))
-      const parsed = raw ? JSON.parse(raw) : []
-      const openIds = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
-      setOpenThinkingIds(new Set(openIds))
-    } catch {
-      setOpenThinkingIds(new Set())
-    }
-  }, [activeTaskId])
-
-  useEffect(() => {
-    const persisted = readPersistedThinking(activeTaskId)
-    if (!activeTaskId) {
-      setThinkingMessages(persisted)
-      return
-    }
-    const runtimeRows = Object.entries(reasoningMap ?? {}).map(([stepId, text]) => ({
-      id: `thinking-${activeTaskId}-${stepId}`,
-      role: 'thinking' as const,
-      taskId: activeTaskId,
-      stepId,
-      status: 'streaming' as const,
-      text,
-      updatedAt: new Date().toISOString(),
-    }))
-    const byStep = new Map<string, PersistedThinkingMessage>()
-    for (const item of persisted) byStep.set(item.stepId, item)
-    for (const item of runtimeRows) {
-      const existing = byStep.get(item.stepId)
-      byStep.set(item.stepId, {
-        ...item,
-        text: item.text || existing?.text || '',
-        status: existing?.status ?? item.status,
-        updatedAt: existing?.updatedAt ?? item.updatedAt,
-      })
-    }
-    const merged = Array.from(byStep.values()).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
-    setThinkingMessages(merged)
-  }, [activeTaskId, reasoningMap, isWorking])
-
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
     if (sentMessages.length > 500) setSentMessages((prev) => prev.slice(-500))
   }, [sentMessages.length])
 
-  const thinkingRows = useMemo<ChatMessage[]>(() => {
-    return thinkingMessages.map((item) => ({
-      id: item.id,
-      role: 'thinking',
-      text: item.text,
-      stepId: item.stepId,
-      metadata: { status: item.status },
-    }))
-  }, [thinkingMessages])
-
   const allMessages = useMemo(() => {
-    const baseUserTexts = new Set(
-      baseMessages
-        .filter((m) => m.role === 'user')
-        .map((m) => m.text.trim())
-        .filter(Boolean),
-    )
-    const mergedSentMessages = sentMessages.filter((m) => {
-      if (m.role !== 'user') return true
-      if ((m.metadata as { source?: string } | undefined)?.source !== 'ask_user_input') return true
-      return !baseUserTexts.has(m.text.trim())
-    })
-
-    const seenUserTexts = new Set(mergedSentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+    const seenUserTexts = new Set(sentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
     const dedupedBase = baseMessages.filter((m) => {
-      if (m.role === 'thinking') return false
       if (m.role !== 'user') return true
       const key = m.text.trim()
       if (!key) return true
@@ -1488,8 +1432,14 @@ export function ChatPanel({
       seenUserTexts.add(key)
       return true
     })
-    return [...thinkingRows, ...mergedSentMessages, ...dedupedBase]
-  }, [sentMessages, baseMessages, thinkingRows])
+    return [...sentMessages, ...dedupedBase]
+  }, [sentMessages, baseMessages])
+  const latestThinkingId = useMemo(() => {
+    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
+      if (allMessages[i].role === 'thinking') return allMessages[i].id
+    }
+    return null
+  }, [allMessages])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
