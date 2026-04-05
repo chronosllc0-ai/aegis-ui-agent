@@ -276,7 +276,7 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
                     retry_after = 1.0
                     if isinstance(data, dict):
                         raw_retry_after = data.get("retry_after")
-                        if isinstance(raw_retry_after, (int, float)):
+                        if isinstance(raw_retry_after, (int, float)) and not isinstance(raw_retry_after, bool):
                             retry_after = float(raw_retry_after)
                         elif isinstance(raw_retry_after, str) and raw_retry_after.strip():
                             try:
