@@ -1,4 +1,4 @@
-"""Business logic for versioned, scanned, and reviewed skills."""
+"""Business logic for secure skill publication, installation, and runtime gating."""
 
 from __future__ import annotations
 
@@ -11,20 +11,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import (
     Skill,
-    SkillPublishEvent,
+    SkillAuditEvent,
+    SkillInstall,
     SkillReview,
     SkillScanResult,
+    SkillSubmission,
     SkillVersion,
     User,
 )
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+APPROVED_STATUSES = {"approved_global", "approved_hub"}
 
 
 class VirusTotalScanner:
@@ -36,13 +40,10 @@ class VirusTotalScanner:
 
     @classmethod
     def _is_open(cls) -> bool:
-        if cls._opened_until is None:
-            return False
-        return datetime.now(timezone.utc) < cls._opened_until
+        return cls._opened_until is not None and datetime.now(timezone.utc) < cls._opened_until
 
     @classmethod
     async def _register_failure(cls) -> None:
-        """Increment breaker failure count and open circuit when threshold is exceeded."""
         async with cls._lock:
             cls._consecutive_failures += 1
             if cls._consecutive_failures >= 3:
@@ -50,19 +51,18 @@ class VirusTotalScanner:
 
     @classmethod
     async def _register_success(cls) -> None:
-        """Reset breaker state after a successful VT interaction."""
         async with cls._lock:
             cls._consecutive_failures = 0
             cls._opened_until = None
 
     @classmethod
     async def scan_content(cls, *, file_name: str, content: bytes) -> dict[str, Any]:
-        """Run VirusTotal hash lookup/upload flow and return a normalized payload."""
+        """Run VirusTotal hash lookup/upload flow and return normalized payload."""
         if not settings.VIRUSTOTAL_API_KEY:
             return {
                 "engine": "virustotal",
                 "verdict": "skipped",
-                "score": 0.0,
+                "risk_label": "low",
                 "raw_json": {"reason": "missing_api_key"},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -72,7 +72,7 @@ class VirusTotalScanner:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "score": 1.0,
+                "risk_label": "critical",
                 "raw_json": {"reason": "file_too_large", "max_bytes": settings.VIRUSTOTAL_MAX_FILE_BYTES},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -82,7 +82,7 @@ class VirusTotalScanner:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "score": 1.0,
+                "risk_label": "high",
                 "raw_json": {"reason": "circuit_open"},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -103,15 +103,13 @@ class VirusTotalScanner:
                     upload_response.raise_for_status()
                     analysis_id = upload_response.json().get("data", {}).get("id")
                     final_status = "queued"
-                    poll_json: dict[str, Any] | None = None
+                    raw: dict[str, Any] = {}
                     if analysis_id:
                         for _ in range(settings.VIRUSTOTAL_MAX_POLLS):
-                            poll_response = await client.get(
-                                f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
-                            )
+                            poll_response = await client.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}")
                             poll_response.raise_for_status()
-                            poll_json = poll_response.json()
-                            final_status = poll_json.get("data", {}).get("attributes", {}).get("status", "queued")
+                            raw = poll_response.json()
+                            final_status = raw.get("data", {}).get("attributes", {}).get("status", "queued")
                             if final_status == "completed":
                                 break
                             await asyncio.sleep(settings.VIRUSTOTAL_POLL_INTERVAL_SECONDS)
@@ -119,17 +117,11 @@ class VirusTotalScanner:
                         return {
                             "engine": "virustotal",
                             "verdict": "error",
-                            "score": 1.0,
-                            "raw_json": {
-                                "reason": "analysis_timeout",
-                                "max_polls": settings.VIRUSTOTAL_MAX_POLLS,
-                                "last_status": final_status,
-                            },
-                                "report_url": None,
-                                "scanned_at": datetime.now(timezone.utc),
-                            }
-                    # Use the completed poll response directly instead of re-fetching.
-                    raw = poll_json or {}
+                            "risk_label": "high",
+                            "raw_json": {"reason": "analysis_timeout", "last_status": final_status},
+                            "report_url": None,
+                            "scanned_at": datetime.now(timezone.utc),
+                        }
                 else:
                     file_report.raise_for_status()
                     raw = file_report.json()
@@ -139,7 +131,7 @@ class VirusTotalScanner:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "score": 1.0,
+                "risk_label": "high",
                 "raw_json": {"reason": "exception", "error": str(exc)},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -151,28 +143,22 @@ class VirusTotalScanner:
         stats = attributes.get("last_analysis_stats") or attributes.get("stats", {})
         malicious = int(stats.get("malicious", 0))
         suspicious = int(stats.get("suspicious", 0))
-        harmless = int(stats.get("harmless", 0))
-        total = max(malicious + suspicious + harmless, 1)
-        score = float((malicious * 1.0 + suspicious * 0.5) / total)
 
         if malicious > 0:
             verdict = "fail"
+            risk = "critical"
         elif suspicious > 0:
             verdict = "warn"
+            risk = "medium"
         else:
             verdict = "pass"
+            risk = "low"
 
         return {
             "engine": "virustotal",
             "verdict": verdict,
-            "score": score,
-            "raw_json": {
-                "sha256": sha256,
-                "malicious": malicious,
-                "suspicious": suspicious,
-                "harmless": harmless,
-                "stats": stats,
-            },
+            "risk_label": risk,
+            "raw_json": {"sha256": sha256, "stats": stats},
             "report_url": f"https://www.virustotal.com/gui/file/{sha256}",
             "scanned_at": datetime.now(timezone.utc),
         }
@@ -191,7 +177,7 @@ class PolicyScanner:
 
     @classmethod
     def scan_text(cls, text: str) -> dict[str, Any]:
-        """Return structured flags and severity score for a skill document."""
+        """Return structured flags and risk label for a skill document."""
         lowered = text.lower()
         flags: list[dict[str, Any]] = []
         max_score = 0.0
@@ -203,15 +189,18 @@ class PolicyScanner:
 
         if max_score >= 0.9:
             verdict = "fail"
+            risk = "critical"
         elif max_score >= 0.5:
             verdict = "warn"
+            risk = "medium"
         else:
             verdict = "pass"
+            risk = "low"
 
         return {
             "engine": "policy",
             "verdict": verdict,
-            "score": max_score,
+            "risk_label": risk,
             "raw_json": {"flags": flags, "count": len(flags)},
             "report_url": None,
             "scanned_at": datetime.now(timezone.utc),
@@ -226,7 +215,43 @@ class SkillService:
         return datetime.now(timezone.utc)
 
     @staticmethod
-    async def create_skill_with_version(
+    async def latest_version(session: AsyncSession, skill_id: str) -> SkillVersion | None:
+        result = await session.execute(
+            select(SkillVersion).where(SkillVersion.skill_id == skill_id).order_by(desc(SkillVersion.version)).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _record_event(
+        session: AsyncSession,
+        *,
+        skill_id: str,
+        version_id: str,
+        submission_id: str | None,
+        from_status: str,
+        to_status: str,
+        actor_id: str,
+        actor_type: str,
+        reason: str,
+        event_type: str = "transition",
+    ) -> None:
+        session.add(
+            SkillAuditEvent(
+                skill_id=skill_id,
+                submission_id=submission_id,
+                skill_version_id=version_id,
+                from_status=from_status,
+                to_status=to_status,
+                actor_id=actor_id,
+                actor_type=actor_type,
+                reason=reason,
+                event_type=event_type,
+                created_at=SkillService._now(),
+            )
+        )
+
+    @staticmethod
+    async def submit_skill(
         session: AsyncSession,
         *,
         slug: str,
@@ -234,16 +259,18 @@ class SkillService:
         description: str,
         owner_user_id: str,
         owner_type: str,
+        publish_target: str,
         metadata_json: dict[str, Any],
         skill_markdown: str,
         submitted_by: str,
-        status: str = "pending_scan",
-    ) -> Skill:
-        """Create a skill and immutable version in one transaction."""
+    ) -> tuple[Skill, SkillSubmission]:
+        """Create/update a skill, append immutable version, and queue submission."""
         now = SkillService._now()
         normalized_slug = slug.strip().lower()
         existing = await session.execute(select(Skill).where(Skill.slug == normalized_slug))
         skill = existing.scalar_one_or_none()
+
+        submission_type = "new"
         from_status = "draft"
         if skill is None:
             skill = Skill(
@@ -252,8 +279,8 @@ class SkillService:
                 description=description,
                 owner_user_id=owner_user_id,
                 owner_type=owner_type,
-                status=status,
-                visibility="private",
+                publish_target=publish_target,
+                status="pending_scan",
                 risk_label="medium",
                 is_new=False,
                 new_until=None,
@@ -265,23 +292,25 @@ class SkillService:
         else:
             if skill.owner_user_id != owner_user_id:
                 raise ValueError("Skill slug already exists")
+            submission_type = "update"
             from_status = skill.status
             skill.name = name
             skill.description = description
-            skill.status = status
-            skill.visibility = "private"
+            skill.publish_target = publish_target
+            skill.status = "pending_scan"
             skill.is_new = False
             skill.new_until = None
             skill.updated_at = now
 
-        content_sha256 = hashlib.sha256(skill_markdown.encode("utf-8")).hexdigest()
         latest_version = await SkillService.latest_version(session, skill.id)
         next_version = (latest_version.version + 1) if latest_version else 1
+        content_sha256 = hashlib.sha256(skill_markdown.encode("utf-8")).hexdigest()
+
         version = SkillVersion(
             skill_id=skill.id,
             version=next_version,
             content_sha256=content_sha256,
-            storage_url=f"inline://skill_versions/{content_sha256}",
+            storage_path=f"inline://skill_versions/{content_sha256}",
             metadata_json=json.dumps({"metadata": metadata_json, "skill_md": skill_markdown}),
             created_by=submitted_by,
             created_at=now,
@@ -289,39 +318,50 @@ class SkillService:
         session.add(version)
         await session.flush()
 
-        event = SkillPublishEvent(
+        submission = SkillSubmission(
             skill_id=skill.id,
-            skill_version_id=version.id,
+            version_id=version.id,
+            submitted_by=submitted_by,
+            submission_type=submission_type,
+            review_state="pending_scan",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(submission)
+        await session.flush()
+
+        await SkillService._record_event(
+            session,
+            skill_id=skill.id,
+            version_id=version.id,
+            submission_id=submission.id,
             from_status=from_status,
-            to_status=status,
+            to_status="pending_scan",
             actor_id=submitted_by,
             actor_type=owner_type,
-            reason="initial_submission",
-            created_at=now,
+            reason="submitted",
         )
-        session.add(event)
         await session.flush()
         await session.refresh(skill)
-        return skill
+        return skill, submission
 
     @staticmethod
-    async def latest_version(session: AsyncSession, skill_id: str) -> SkillVersion | None:
-        """Return the latest immutable version for a skill."""
-        result = await session.execute(
-            select(SkillVersion).where(SkillVersion.skill_id == skill_id).order_by(desc(SkillVersion.version)).limit(1)
-        )
-        return result.scalar_one_or_none()
+    async def run_scans_for_submission(
+        session: AsyncSession,
+        *,
+        submission_id: str,
+        actor_id: str,
+        actor_type: str,
+    ) -> dict[str, Any]:
+        """Run VT then policy scan and move state machine forward."""
+        submission = await session.get(SkillSubmission, submission_id)
+        if submission is None:
+            raise ValueError("Submission not found")
 
-    @staticmethod
-    async def run_scans_for_skill(session: AsyncSession, *, skill_id: str, actor_id: str, actor_type: str) -> dict[str, Any]:
-        """Run VirusTotal and policy scans for the latest version and transition workflow state."""
-        skill = await session.get(Skill, skill_id)
-        if skill is None:
-            raise ValueError("Skill not found")
-
-        version = await SkillService.latest_version(session, skill_id)
-        if version is None:
-            raise ValueError("Skill version not found")
+        skill = await session.get(Skill, submission.skill_id)
+        version = await session.get(SkillVersion, submission.version_id)
+        if skill is None or version is None:
+            raise ValueError("Submission references missing skill/version")
 
         try:
             payload = json.loads(version.metadata_json or "{}")
@@ -329,28 +369,53 @@ class SkillService:
             raise ValueError("Invalid skill metadata JSON") from exc
         skill_md = str(payload.get("skill_md", ""))
 
-        vt_result = await VirusTotalScanner.scan_content(file_name=f"{skill.slug}.md", content=skill_md.encode("utf-8"))
-        policy_result = PolicyScanner.scan_text(skill_md)
-
         now = SkillService._now()
+
+        from_status = skill.status
+        skill.status = "pending_scan"
+        submission.review_state = "pending_scan"
+
+        vt_result = await VirusTotalScanner.scan_content(file_name=f"{skill.slug}.md", content=skill_md.encode("utf-8"))
         session.add(
             SkillScanResult(
                 skill_version_id=version.id,
                 engine="virustotal",
                 verdict=vt_result["verdict"],
-                score=vt_result["score"],
+                risk_label=vt_result["risk_label"],
                 raw_json=json.dumps(vt_result["raw_json"]),
                 report_url=vt_result["report_url"],
                 scanned_at=vt_result["scanned_at"],
                 created_at=now,
             )
         )
+
+        if vt_result["verdict"] == "error":
+            skill.status = "pending_scan"
+            submission.review_state = "pending_scan"
+            await SkillService._record_event(
+                session,
+                skill_id=skill.id,
+                version_id=version.id,
+                submission_id=submission.id,
+                from_status=from_status,
+                to_status="pending_scan",
+                actor_id=actor_id,
+                actor_type=actor_type,
+                reason="vt_scan_error",
+            )
+            await session.flush()
+            return {"skill_id": skill.id, "submission_id": submission.id, "version_id": version.id, "vt": vt_result}
+
+        skill.status = "pending_policy"
+        submission.review_state = "pending_policy"
+
+        policy_result = PolicyScanner.scan_text(skill_md)
         session.add(
             SkillScanResult(
                 skill_version_id=version.id,
                 engine="policy",
                 verdict=policy_result["verdict"],
-                score=policy_result["score"],
+                risk_label=policy_result["risk_label"],
                 raw_json=json.dumps(policy_result["raw_json"]),
                 report_url=None,
                 scanned_at=policy_result["scanned_at"],
@@ -358,112 +423,110 @@ class SkillService:
             )
         )
 
-        max_score = max(vt_result["score"], policy_result["score"])
-        risk = "low"
-        if max_score >= 0.9:
-            risk = "critical"
-        elif max_score >= 0.7:
-            risk = "high"
-        elif max_score >= 0.4:
-            risk = "medium"
-
-        vt_attempted = vt_result["verdict"] != "skipped"
-        from_status = skill.status
-        target_status = "pending_review"
-        if vt_attempted and vt_result["verdict"] == "error":
-            target_status = "pending_scan"
-        elif vt_result["verdict"] == "skipped" and policy_result["verdict"] == "error":
-            target_status = "pending_scan"
-        skill.status = target_status
-        skill.risk_label = risk
-        skill.updated_at = now
-
-        session.add(
-            SkillPublishEvent(
-                skill_id=skill.id,
-                skill_version_id=version.id,
-                from_status=from_status,
-                to_status=target_status,
-                actor_id=actor_id,
-                actor_type=actor_type,
-                reason="scan_completed" if target_status == "pending_review" else "scan_failed_retry_required",
-                created_at=now,
+        skill.risk_label = "critical" if "critical" in {vt_result["risk_label"], policy_result["risk_label"]} else (
+            "high" if "high" in {vt_result["risk_label"], policy_result["risk_label"]} else (
+                "medium" if "medium" in {vt_result["risk_label"], policy_result["risk_label"]} else "low"
             )
         )
+        skill.status = "pending_review"
+        submission.review_state = "pending_review"
+        skill.updated_at = now
+        submission.updated_at = now
+
+        await SkillService._record_event(
+            session,
+            skill_id=skill.id,
+            version_id=version.id,
+            submission_id=submission.id,
+            from_status=from_status,
+            to_status="pending_review",
+            actor_id=actor_id,
+            actor_type=actor_type,
+            reason="scan_and_policy_complete",
+        )
         await session.flush()
-        return {"skill_id": skill.id, "version_id": version.id, "vt": vt_result, "policy": policy_result}
+        return {
+            "skill_id": skill.id,
+            "submission_id": submission.id,
+            "version_id": version.id,
+            "vt": vt_result,
+            "policy": policy_result,
+        }
 
     @staticmethod
     async def get_review_queue(session: AsyncSession) -> list[dict[str, Any]]:
-        """Return pending-review skills with latest scan context for admin moderation."""
         rows = await session.execute(
-            select(Skill).where(Skill.status == "pending_review").order_by(Skill.updated_at.desc())
+            select(SkillSubmission, Skill, SkillVersion)
+            .join(Skill, Skill.id == SkillSubmission.skill_id)
+            .join(SkillVersion, SkillVersion.id == SkillSubmission.version_id)
+            .where(SkillSubmission.review_state == "pending_review")
+            .order_by(SkillSubmission.created_at.asc())
         )
         queue: list[dict[str, Any]] = []
-        for skill in rows.scalars().all():
-            version = await SkillService.latest_version(session, skill.id)
-            if version is None:
-                continue
+        for submission, skill, version in rows.all():
             scans = await session.execute(
                 select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id).order_by(SkillScanResult.scanned_at.desc())
             )
-            queue.append(
-                {
-                    "skill": skill,
-                    "version": version,
-                    "scans": scans.scalars().all(),
-                }
-            )
+            queue.append({"submission": submission, "skill": skill, "version": version, "scans": scans.scalars().all()})
         return queue
 
     @staticmethod
     async def apply_review_decision(
         session: AsyncSession,
         *,
-        skill_id: str,
+        submission_id: str,
         reviewer_admin_id: str,
         decision: str,
         notes: str | None,
     ) -> Skill:
-        """Apply admin review decision and persist audit/review rows."""
-        skill = await session.get(Skill, skill_id)
+        """Apply human moderation decision to submission and parent skill."""
+        submission = await session.get(SkillSubmission, submission_id)
+        if submission is None:
+            raise ValueError("Submission not found")
+
+        skill = await session.get(Skill, submission.skill_id)
         if skill is None:
             raise ValueError("Skill not found")
 
-        version = await SkillService.latest_version(session, skill_id)
+        version = await session.get(SkillVersion, submission.version_id)
         if version is None:
             raise ValueError("Skill version not found")
 
         now = SkillService._now()
         from_status = skill.status
 
-        if decision == "approve_internal":
-            skill.status = "approved_internal"
-            skill.visibility = "global"
+        if decision == "approve_global":
+            skill.status = "approved_global"
+            skill.publish_target = "global"
             skill.is_new = True
             skill.new_until = now + timedelta(days=7)
-        elif decision == "approve_marketplace":
-            skill.status = "approved_marketplace"
-            skill.visibility = "hub"
+            submission.review_state = "approved_global"
+        elif decision == "approve_hub":
+            skill.status = "approved_hub"
+            skill.publish_target = "hub"
             skill.is_new = True
             skill.new_until = now + timedelta(days=7)
+            submission.review_state = "approved_hub"
         elif decision == "reject":
             skill.status = "rejected"
             skill.is_new = False
             skill.new_until = None
+            submission.review_state = "rejected"
         elif decision == "needs_changes":
             skill.status = "draft"
-            skill.visibility = "private"
             skill.is_new = False
             skill.new_until = None
+            submission.review_state = "needs_changes"
         else:
             raise ValueError("Unsupported decision")
 
         skill.updated_at = now
+        submission.updated_at = now
 
         session.add(
             SkillReview(
                 skill_version_id=version.id,
+                submission_id=submission.id,
                 reviewer_admin_id=reviewer_admin_id,
                 decision=decision,
                 notes=notes,
@@ -471,17 +534,16 @@ class SkillService:
                 created_at=now,
             )
         )
-        session.add(
-            SkillPublishEvent(
-                skill_id=skill.id,
-                skill_version_id=version.id,
-                from_status=from_status,
-                to_status=skill.status,
-                actor_id=reviewer_admin_id,
-                actor_type="admin",
-                reason=notes or decision,
-                created_at=now,
-            )
+        await SkillService._record_event(
+            session,
+            skill_id=skill.id,
+            version_id=version.id,
+            submission_id=submission.id,
+            from_status=from_status,
+            to_status=skill.status,
+            actor_id=reviewer_admin_id,
+            actor_type="admin",
+            reason=notes or decision,
         )
         await session.flush()
         await session.refresh(skill)
@@ -489,11 +551,8 @@ class SkillService:
 
     @staticmethod
     async def expire_new_flags(session: AsyncSession) -> int:
-        """Unset NEW badges after expiry threshold."""
         now = SkillService._now()
-        rows = await session.execute(
-            select(Skill).where(and_(Skill.is_new.is_(True), Skill.new_until.is_not(None), Skill.new_until < now))
-        )
+        rows = await session.execute(select(Skill).where(and_(Skill.is_new.is_(True), Skill.new_until.is_not(None), Skill.new_until < now)))
         count = 0
         for skill in rows.scalars().all():
             skill.is_new = False
@@ -502,14 +561,13 @@ class SkillService:
         return count
 
     @staticmethod
-    async def list_visibility(session: AsyncSession, *, visibility: str) -> list[dict[str, Any]]:
-        """List approved skills by visibility target, with creator context for hub."""
+    async def list_catalog(session: AsyncSession, *, publish_target: str) -> list[dict[str, Any]]:
         await SkillService.expire_new_flags(session)
-        approved_status = "approved_internal" if visibility == "global" else "approved_marketplace"
+        approved_status = "approved_global" if publish_target == "global" else "approved_hub"
         rows = await session.execute(
             select(Skill, User)
             .join(User, User.uid == Skill.owner_user_id, isouter=True)
-            .where(and_(Skill.visibility == visibility, Skill.status == approved_status))
+            .where(and_(Skill.publish_target == publish_target, Skill.status == approved_status))
             .order_by(Skill.updated_at.desc())
         )
         payload: list[dict[str, Any]] = []
@@ -520,7 +578,7 @@ class SkillService:
                     "slug": skill.slug,
                     "name": skill.name,
                     "description": skill.description,
-                    "visibility": skill.visibility,
+                    "publish_target": skill.publish_target,
                     "status": skill.status,
                     "risk_label": skill.risk_label,
                     "is_new": skill.is_new,
@@ -536,62 +594,83 @@ class SkillService:
         return payload
 
     @staticmethod
-    async def list_user_skills(session: AsyncSession, *, user_id: str) -> list[Skill]:
-        """List all skills submitted by a given user."""
-        rows = await session.execute(select(Skill).where(Skill.owner_user_id == user_id).order_by(Skill.updated_at.desc()))
-        return rows.scalars().all()
+    async def install_skill(session: AsyncSession, *, user_id: str, skill_id: str) -> SkillInstall:
+        skill = await session.get(Skill, skill_id)
+        if skill is None:
+            raise ValueError("Skill not found")
+        if skill.status not in APPROVED_STATUSES:
+            raise ValueError("Skill is not approved for installation")
+
+        version = await SkillService.latest_version(session, skill_id)
+        if version is None:
+            raise ValueError("Approved skill is missing version")
+
+        rows = await session.execute(select(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
+        install = rows.scalar_one_or_none()
+        now = SkillService._now()
+        if install is None:
+            install = SkillInstall(
+                user_id=user_id,
+                skill_id=skill_id,
+                skill_version_id=version.id,
+                enabled=True,
+                installed_at=now,
+                updated_at=now,
+            )
+            session.add(install)
+        else:
+            install.skill_version_id = version.id
+            install.enabled = True
+            install.updated_at = now
+        await session.flush()
+        return install
 
     @staticmethod
-    async def list_active_skills(session: AsyncSession, *, requested_for_user_id: str) -> list[dict[str, Any]]:
-        """Return globally active, compliant skills for runtime injection."""
-        await SkillService.expire_new_flags(session)
+    async def uninstall_skill(session: AsyncSession, *, user_id: str, skill_id: str) -> int:
+        result = await session.execute(delete(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
+        return int(result.rowcount or 0)
+
+    @staticmethod
+    async def set_skill_enabled(session: AsyncSession, *, user_id: str, skill_id: str, enabled: bool) -> SkillInstall:
+        rows = await session.execute(select(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
+        install = rows.scalar_one_or_none()
+        if install is None:
+            raise ValueError("Skill is not installed")
+        install.enabled = enabled
+        install.updated_at = SkillService._now()
+        await session.flush()
+        return install
+
+    @staticmethod
+    async def list_installed_skills(session: AsyncSession, *, user_id: str) -> list[dict[str, Any]]:
         rows = await session.execute(
-            select(Skill).where(
-                and_(
-                    Skill.status.in_(["approved_internal", "approved_marketplace"]),
-                    Skill.visibility.in_(["global", "hub"]),
-                )
-            )
+            select(SkillInstall, Skill, SkillVersion)
+            .join(Skill, Skill.id == SkillInstall.skill_id)
+            .join(SkillVersion, SkillVersion.id == SkillInstall.skill_version_id)
+            .where(SkillInstall.user_id == user_id)
+            .order_by(desc(SkillInstall.updated_at))
         )
-        active: list[dict[str, Any]] = []
-        for skill in rows.scalars().all():
-            version = await SkillService.latest_version(session, skill.id)
-            if version is None:
-                continue
-
-            scans = await session.execute(
-                select(SkillScanResult).where(SkillScanResult.skill_version_id == version.id)
-            )
-            by_engine = {scan.engine: scan for scan in scans.scalars().all()}
-            vt_verdict = by_engine.get("virustotal").verdict if by_engine.get("virustotal") else None
-            if settings.VIRUSTOTAL_REQUIRED:
-                vt_ok = vt_verdict in {"pass", "warn"}
-            else:
-                vt_ok = vt_verdict in {"pass", "warn", "skipped"}
-                if vt_verdict == "skipped":
-                    logger.warning(
-                        "Skill %s is runtime-compliant with skipped VT scan because VIRUSTOTAL_REQUIRED=false",
-                        skill.id,
-                    )
-            policy_ok = by_engine.get("policy") and by_engine["policy"].verdict in {"pass", "warn"}
-            if not (vt_ok and policy_ok):
-                continue
-
-            payload = json.loads(version.metadata_json or "{}")
-            active.append(
+        payload: list[dict[str, Any]] = []
+        for install, skill, version in rows.all():
+            payload.append(
                 {
                     "skill_id": skill.id,
+                    "version_id": version.id,
                     "slug": skill.slug,
                     "name": skill.name,
-                    "version": version.version,
-                    "content_sha256": version.content_sha256,
-                    "provenance": {
-                        "owner_user_id": skill.owner_user_id,
-                        "visibility": skill.visibility,
-                        "approved_status": skill.status,
-                        "for_user_id": requested_for_user_id,
-                    },
-                    "skill_md": payload.get("skill_md", ""),
+                    "publish_target": skill.publish_target,
+                    "risk_label": skill.risk_label,
+                    "status": skill.status,
+                    "enabled": install.enabled,
+                    "installed_at": install.installed_at,
+                    "updated_at": install.updated_at,
                 }
             )
-        return active
+        return payload
+
+    @staticmethod
+    async def list_skill_history(session: AsyncSession, *, skill_id: str) -> list[SkillAuditEvent]:
+        rows = await session.execute(
+            select(SkillAuditEvent).where(SkillAuditEvent.skill_id == skill_id).order_by(desc(SkillAuditEvent.created_at))
+        )
+        return rows.scalars().all()

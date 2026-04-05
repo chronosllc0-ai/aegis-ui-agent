@@ -184,8 +184,8 @@ class Skill(Base):
     description = Column(Text, default="")
     owner_user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
     owner_type = Column(String(20), nullable=False, default="user")  # admin|user
+    publish_target = Column(String(20), nullable=False, default="hub")  # global|hub
     status = Column(String(40), nullable=False, default="draft")
-    visibility = Column(String(20), nullable=False, default="private")
     risk_label = Column(String(20), nullable=False, default="medium")
     is_new = Column(Boolean, nullable=False, default=False)
     new_until = Column(DateTime(timezone=True), nullable=True)
@@ -202,10 +202,25 @@ class SkillVersion(Base):
     skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
     version = Column(Integer, nullable=False)
     content_sha256 = Column(String(64), nullable=False, index=True)
-    storage_url = Column(Text, nullable=False)
+    storage_path = Column(Text, nullable=False)
     metadata_json = Column(Text, nullable=False)
     created_by = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillSubmission(Base):
+    """Submission queue record for new skills and updates."""
+
+    __tablename__ = "skill_submissions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    submitted_by = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    submission_type = Column(String(20), nullable=False, default="new")  # new|update
+    review_state = Column(String(40), nullable=False, default="pending_scan")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class SkillScanResult(Base):
@@ -217,7 +232,7 @@ class SkillScanResult(Base):
     skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
     engine = Column(String(40), nullable=False)  # virustotal|policy
     verdict = Column(String(30), nullable=False)
-    score = Column(Float, nullable=False, default=0.0)
+    risk_label = Column(String(20), nullable=False, default="low")
     raw_json = Column(Text)
     report_url = Column(Text)
     scanned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -231,6 +246,7 @@ class SkillReview(Base):
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    submission_id = Column(String(255), ForeignKey("skill_submissions.id"), nullable=True, index=True)
     reviewer_admin_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
     decision = Column(String(40), nullable=False)
     notes = Column(Text)
@@ -238,18 +254,34 @@ class SkillReview(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
-class SkillPublishEvent(Base):
-    """Immutable audit trail for skill status transitions."""
+class SkillInstall(Base):
+    """Per-user installed skill relation with enabled runtime toggle."""
 
-    __tablename__ = "skill_publish_events"
+    __tablename__ = "skill_installs"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    installed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillAuditEvent(Base):
+    """Immutable audit trail for skill status transitions and key events."""
+
+    __tablename__ = "skill_audit_events"
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    submission_id = Column(String(255), ForeignKey("skill_submissions.id"), nullable=True, index=True)
     skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
     from_status = Column(String(40), nullable=False)
     to_status = Column(String(40), nullable=False)
     actor_id = Column(String(255), nullable=False, index=True)
     actor_type = Column(String(20), nullable=False)
+    event_type = Column(String(40), nullable=False, default="transition")
     reason = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 

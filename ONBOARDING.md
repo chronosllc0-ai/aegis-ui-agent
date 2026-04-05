@@ -3032,3 +3032,56 @@
 
 ### Blockers
 - None in this pass.
+
+## Session 5.30 - April 5, 2026 (Secure skills ecosystem: Global + Hub + installs + runtime gating)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Reworked skills data model to support two publication channels (`global`, `hub`), immutable versions, submission queueing, scan evidence, human review decisions, install relations, and audit traceability.
+- Added/updated DB entities:
+  - `skills` now includes `publish_target` and new status workflow values.
+  - `skill_versions` now uses `storage_path`.
+  - Added `skill_submissions`, `skill_installs`, and `skill_audit_events`.
+  - Updated `skill_scan_results` to persist `risk_label` and `skill_reviews` to include `submission_id`.
+- Rebuilt `backend/skills/service.py` to implement:
+  - submission flow (`submit_skill`),
+  - VT + policy scan flow (`run_scans_for_submission`),
+  - admin review transitions (`approve_global|approve_hub|reject|needs_changes`),
+  - NEW badge auto-expiry,
+  - install/uninstall/enable + installed listing,
+  - admin skill history from audit events.
+- Reworked skills API (`backend/skills/router.py`) to match requested contracts:
+  - user: `/api/skills/hub`, `/api/skills/submit`, `/api/skills/{skill_id}/install`, `/api/skills/{skill_id}/uninstall`, `/api/skills/{skill_id}/enable`, `/api/skills/installed`
+  - admin: `/api/admin/skills/review-queue`, `/api/admin/skills/{submission_id}/scan`, `/api/admin/skills/{submission_id}/review`, `/api/admin/skills/{skill_id}/history`
+- Rebuilt runtime gating (`backend/skills/runtime_loader.py`) so runtime only loads installed+enabled skills that are approved and fully scan/review resolved, with token-budget enforcement via `SKILLS_MAX_TOKEN`/`SKILLS_MAX_TOKENS`.
+- Added/updated tests covering:
+  - version immutability,
+  - submit→scan→review workflow transitions,
+  - NEW badge expiry,
+  - runtime exclusion of unapproved skills,
+  - install + enable flow,
+  - admin-only permission gate for review queue.
+
+### What's Working
+- End-to-end security gate chain now exists (scan + policy + human review) before runtime inclusion.
+- Install-to-user and runtime enable toggle flow is covered by API tests.
+- Runtime loader now enforces both approval state and install/enabled state.
+
+### What's NOT Working Yet
+- No dedicated asynchronous scheduler process was added in this pass for NEW-badge expiry; expiry is currently handled by service read/maintenance path.
+- Frontend UI flows (Settings Skills tab / Hub / Admin review UI) were not implemented in this pass; backend endpoints are ready.
+
+### Next Steps
+1. Build frontend Skills tab, Hub browse UI, and Admin review queue pages against new APIs.
+2. Add a periodic background task for `expire_new_flags()` so badges can clear without read-path interaction.
+3. Integrate real VT hash-first/upload+poll telemetry enrichment and stronger policy reason-code taxonomy.
+4. Add optimistic locking/idempotency handling for repeated scan/review operations on the same submission.
+
+### Decisions Made
+- Adopted submission-centric admin scan/review endpoints (`submission_id`) so each versioned update has isolated moderation state.
+- Kept storage abstraction as `storage_path` with existing inline payload strategy to avoid adding object storage scope in this pass.
+
+### Blockers
+- None in this pass.
