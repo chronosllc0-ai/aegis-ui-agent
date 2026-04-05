@@ -1,3 +1,120 @@
+## Session 5.59 - April 5, 2026 (PR review follow-up: retry-after parsing hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick fix pass
+
+### What Was Done
+- Addressed latest PR review follow-up on Slack/Discord retry branch robustness and indentation concerns.
+- Updated Slack retry logic in `integrations/slack_connector.py` to parse `Retry-After` with guarded float conversion:
+  - defaults to `1.0`,
+  - catches `TypeError`/`ValueError` to avoid runtime parse errors.
+- Updated Discord retry logic in `integrations/discord.py` to parse `retry_after` with guarded conversion from API payload:
+  - reads raw value when payload is dict,
+  - safely casts with fallback to `1.0`.
+- Re-ran syntax + adapter tests to confirm import/runtime stability.
+
+### What's Working
+- Both adapters compile cleanly and pass adapter test suite after retry parsing hardening.
+- Retry code path now tolerates malformed/non-numeric retry headers/payload values.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add explicit unit tests for malformed retry headers/payload values (e.g., `Retry-After: foo`) to lock in behavior.
+2. Continue webhook endpoint wiring parity validation for `handle_event(...)` at route level.
+
+### Decisions Made
+- Kept fallback retry delay at `1.0s` for invalid provider hints to preserve deterministic backoff behavior.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.58 - April 5, 2026 (PR review follow-up: adapter cleanup + bounded idempotency)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed Slack/Discord review comments from the adapter modernization PR.
+- Slack (`integrations/slack_connector.py`):
+  - moved `asyncio` import to module scope,
+  - changed fallback delivery-id digest to deterministic JSON serialization (`json.dumps(..., sort_keys=True)`),
+  - hoisted `httpx.AsyncClient` outside retry loop to reuse client across retry attempts,
+  - replaced unbounded idempotency set with a shared bounded deduper utility.
+- Discord (`integrations/discord.py`):
+  - moved `base64` import to module scope,
+  - refactored nested inline payload parsing into helper methods (`_extract_user_id`, `_extract_option_value`, `_extract_message_id`) for readability and safer parsing,
+  - hoisted `httpx.AsyncClient` outside retry loop,
+  - replaced unbounded idempotency set with shared bounded deduper utility.
+- Added shared `DeliveryDeduper` helper in `integrations/idempotency.py` and updated adapter tests with bounded deduper coverage and cleaner request mock signatures.
+
+### What's Working
+- Review issues around retry-client churn, import placement, deterministic fallback hashing, and unbounded idempotency memory growth are resolved in code.
+- Adapter regression tests pass with updated behavior and added bounded deduper coverage.
+
+### What's NOT Working Yet
+- Deduper remains in-memory process-local state; horizontal pod-level dedupe still requires shared storage if needed for production-scale webhook fanout.
+
+### Next Steps
+1. If needed, introduce Redis/DB-backed dedupe for cross-instance webhook delivery idempotency.
+2. Add webhook route tests that validate adapter `handle_event(...)` wiring from HTTP endpoints end-to-end.
+
+### Decisions Made
+- Implemented a shared bounded dedupe helper to keep Slack and Discord behavior consistent and avoid duplicated eviction logic.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.57 - April 4, 2026 (Slack/Discord adapter modernization + unified contract)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend integrations pass
+
+### What Was Done
+- Added unified channel adapter contract at `backend/integrations/contracts.py` with required methods (`send_text`, `edit_text`, `send_file`, `handle_event`) for cross-platform parity.
+- Modernized `integrations/slack_connector.py`:
+  - implemented adapter contract methods and kept legacy tool names as compatibility wrappers,
+  - added `chat.update`-based edit path for progressive streaming updates,
+  - implemented `slack_send_file` via Slack external upload flow (`files.getUploadURLExternal` + binary upload + `files.completeUploadExternal`),
+  - added rate-limit retry/backoff handling for API 429 responses,
+  - added canonical envelope normalization and idempotency guard for repeated webhook deliveries.
+- Modernized `integrations/discord.py`:
+  - implemented adapter contract methods while preserving existing API v10 baseline,
+  - added message edit support via `PATCH /channels/{channel}/messages/{message_id}`,
+  - implemented robust multipart attachment upload for `discord_send_file` and retained `discord_send_image` wrapper support,
+  - added interaction handling (PING ACK + deferred ACK for command/component flows) with canonical envelope mapping,
+  - added 429 backoff retry behavior.
+- Added required capability matrix artifact at `docs/integrations/capability-matrix.md` with per-platform support status and notes.
+- Added test lane `tests/test_slack_discord_adapters.py` covering Slack/Discord connect, events/interactions, send/edit/file, rate-limit backoff, envelope/idempotency behavior, and contract conformance.
+
+### What's Working
+- Slack and Discord now share a concrete adapter surface while preserving legacy tool names for migration safety.
+- File upload tool paths are implemented on both platforms.
+- Event payload normalization and idempotency guards are in place for webhook delivery handling.
+
+### What's NOT Working Yet
+- Slack/Discord webhook endpoint wiring to route all incoming platform events through adapter `handle_event(...)` is still partial in router-level code paths.
+- Error normalization taxonomy is still provider-specific (not yet fully unified in a shared error schema).
+
+### Next Steps
+1. Route existing webhook endpoints to adapter `handle_event(...)` consistently and add signature verification parity checks in endpoint tests.
+2. Introduce shared envelope/error dataclasses to remove remaining provider-specific response shape differences.
+3. Add parity gate before enabling deprecation warnings for legacy tool aliases.
+
+### Decisions Made
+- Kept compatibility wrappers (`slack_send_message`, `discord_send_message`, etc.) as the stable surface while moving implementation under adapter methods.
+- Used in-memory idempotency guards for this pass to avoid DB migration scope expansion.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.56 - April 4, 2026 (Telegram PR review follow-up)
 
 **Agent:** GPT-5.3-Codex  
