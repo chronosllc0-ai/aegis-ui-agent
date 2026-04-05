@@ -25,6 +25,7 @@ import httpx
 from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
+from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.session_workspace import (
     ensure_session_workspace,
@@ -414,6 +415,8 @@ def _connected_integrations(settings: dict[str, Any]) -> set[str]:
 def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dict[str, Any]]:
     """Resolve the current tool manifest after permissions and integration gating."""
     disabled_tools = {str(item) for item in settings.get("disabled_tools", []) or []}
+    agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
+    disabled_tools.update(blocked_tools_for_mode(agent_mode))
     connected_integrations = _connected_integrations(settings)
     subagent_allowlist: set[str] | None = None
     if is_subagent:
@@ -451,6 +454,7 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
     browser_tools_enabled = any(tool["name"] == "screenshot" for tool in available)
     github_tools_enabled = any(str(tool["name"]).startswith("github_") for tool in available)
     local_workspace_enabled = any(tool["name"] in {"list_files", "read_file", "write_file", "exec_python", "exec_javascript", "exec_shell"} for tool in available)
+    agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
 
     rules: list[str] = [
         "Return exactly ONE JSON tool call per message and nothing else.",
@@ -481,6 +485,7 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
                 "Do not invent repository paths or branch names. Use returned tool results.",
             ]
         )
+    rules.append(f"Active system mode: {agent_mode}. {MODE_SYSTEM_HINTS.get(agent_mode, '')}")
     rules.extend(
         [
             "Identity: You are Aegis, an AI agent built by Chronos AI.",

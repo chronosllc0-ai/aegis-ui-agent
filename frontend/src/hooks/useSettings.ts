@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig } from '../lib/mcp'
+import { DEFAULT_AGENT_MODE, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
@@ -47,6 +48,7 @@ export type AppSettings = {
   promptToSwitchOnBrowse: boolean
   /** Automatically return from browser surface to chat when a task completes. */
   autoReturnToChat: boolean
+  agentMode: AgentModeId
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -75,6 +77,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   separateExecutionSurfaces: true,
   promptToSwitchOnBrowse: true,
   autoReturnToChat: true,
+  agentMode: DEFAULT_AGENT_MODE,
 }
 
 // Providers that require a user-supplied BYOK key to work
@@ -99,6 +102,7 @@ function loadInitialSettings(): AppSettings {
 
     return {
       ...merged,
+      agentMode: normalizeAgentMode(merged.agentMode),
       integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
     }
   } catch {
@@ -151,6 +155,7 @@ export function useSettings() {
       disabled_tools: settings.disabledTools,
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
+      agent_mode: settings.agentMode,
     }),
     [settings],
   )
