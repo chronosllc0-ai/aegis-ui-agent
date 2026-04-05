@@ -2989,3 +2989,12 @@
 
 ### Why
 - Ensures the critical review concern (duplicate local declarations conflicting with import) is fully resolved on the post-merge branch.
+
+## 2026-04-05 — Review follow-up (test import side-effect suggestion)
+
+### What changed
+- Updated `tests/test_mode_commands.py` to avoid module-level `import main`.
+- Switched to lazy import (`import_module("main")`) inside the test function to defer app/module initialization until test execution.
+
+### Why
+- Reduces pytest collection-time side effects and keeps this unit test lighter as `main.py` grows.
