@@ -37,9 +37,10 @@ from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
 from backend.research.router import research_router
+from backend.skills.router import skills_router
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
-from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
+from backend.conversation_service import append_message, get_or_create_conversation
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
@@ -93,6 +94,7 @@ app.include_router(planner_router)
 app.include_router(executor_router)
 app.include_router(research_router)
 app.include_router(tasks_router)
+app.include_router(skills_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
@@ -803,6 +805,7 @@ async def _log_web_message(
     *,
     title: str | None = None,
     metadata: dict[str, Any] | None = None,
+    title_candidate: str | None = None,
 ) -> None:
     """Persist a websocket message to the conversations DB and emit conversation_id to client."""
     if not runtime.user_uid:
@@ -817,7 +820,14 @@ async def _log_web_message(
                 title=title,
             )
             runtime.conversation_id = conv.id
-            await append_message(db, conv.id, role, content, metadata=metadata)
+            await append_message(
+                db,
+                conv.id,
+                role,
+                content,
+                metadata=metadata,
+                title_candidate=title_candidate,
+            )
             break
     except Exception:  # noqa: BLE001
         logger.warning("Failed to persist web message to DB for session %s", session_id)
@@ -1075,6 +1085,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             instruction = str(data.get("instruction", "")).strip()
             raw_metadata = data.get("metadata")
             client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
+            task_label = str(client_metadata.get("task_label", "")).strip() if client_metadata else ""
+            title_candidate = task_label or instruction
 
             if action == "navigate":
                 if runtime.task_running:
@@ -1086,7 +1098,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "navigate", "client": client_metadata or {}},
+                    title_candidate=title_candidate,
+                    metadata={
+                        "source": "websocket",
+                        "action": "navigate",
+                        "task_label": task_label,
+                        "client": client_metadata or {},
+                    },
                 )
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
@@ -1303,6 +1321,42 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await live_manager.close_session(session_id)
 
 
+async def _log_platform_message(
+    user_id: str | None,
+    *,
+    platform: str,
+    platform_chat_id: str,
+    role: str,
+    content: str,
+    title: str,
+    metadata: dict[str, Any] | None = None,
+    platform_message_id: str | None = None,
+) -> None:
+    """Persist a platform message to conversation storage when an owner is available."""
+    if not user_id:
+        return
+    session_iter = get_session()
+    db = await anext(session_iter)
+    try:
+        conversation = await get_or_create_conversation(
+            db,
+            user_id=user_id,
+            platform=platform,
+            platform_chat_id=str(platform_chat_id),
+            title=title,
+        )
+        await append_message(
+            db,
+            conversation_id=conversation.id,
+            role=role,
+            content=content,
+            metadata=metadata or {},
+            platform_message_id=platform_message_id,
+        )
+    finally:
+        await session_iter.aclose()
+
+
 # ── Integration webhook / registration endpoints ─────────────────────
 
 
@@ -1313,9 +1367,13 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
         raise HTTPException(status_code=404, detail="Integration not found")
     config = telegram_registry.get_config(integration_id)
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    expected_secret = str(config.get("webhook_secret", ""))
-    if expected_secret and secret != expected_secret:
-        raise HTTPException(status_code=403, detail="Invalid secret token")
+    if hasattr(integration, "validate_webhook_secret"):
+        if not integration.validate_webhook_secret(secret):
+            raise HTTPException(status_code=403, detail="Invalid secret token")
+    else:
+        expected_secret = str(config.get("webhook_secret", ""))
+        if expected_secret and secret != expected_secret:
+            raise HTTPException(status_code=403, detail="Invalid secret token")
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
@@ -1801,8 +1859,38 @@ async def _run_navigation_task_from_bot(
 
 
 def _get_telegram_sender_id(update: dict[str, Any]) -> str:
+    callback_query = update.get("callback_query") or {}
+    callback_from = callback_query.get("from") or {}
+    if callback_from.get("id") is not None:
+        return str(callback_from.get("id"))
     msg = update.get("message") or update.get("edited_message") or {}
     return str((msg.get("from") or {}).get("id", ""))
+
+
+def _extract_telegram_message(update: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract chat/text/message-id from message or callback payloads."""
+    callback_query = update.get("callback_query") or {}
+    if callback_query:
+        message = callback_query.get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        text = str(callback_query.get("data", "")).strip() or None
+        message_id = message.get("message_id")
+        return (
+            str(chat_id) if chat_id is not None else None,
+            text,
+            str(message_id) if message_id is not None else None,
+        )
+
+    message = update.get("message") or update.get("edited_message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    text = str(message.get("text", "")).strip() or None
+    message_id = message.get("message_id")
+    return (
+        str(chat_id) if chat_id is not None else None,
+        text,
+        str(message_id) if message_id is not None else None,
+    )
 
 
 async def _handle_slash_command(
