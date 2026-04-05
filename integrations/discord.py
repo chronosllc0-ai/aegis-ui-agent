@@ -275,7 +275,10 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
                 if response.status_code == 429 and attempt < retries:
                     retry_after = 1.0
                     if isinstance(data, dict) and isinstance(data.get("retry_after"), (int, float)):
+                    try:
                         retry_after = float(data["retry_after"])
+                    except (ValueError, TypeError):
+                        retry_after = 1.0
                     logger.warning("Discord rate limited on %s, retrying in %ss", path, retry_after)
                     await asyncio.sleep(retry_after)
                     attempt += 1
