@@ -100,71 +100,6 @@ type ThreadUiState = {
   openThinkingIds: string[]
 }
 
-function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
-  if (!Array.isArray(rawOptions)) return []
-  return rawOptions
-    .map((opt) => {
-      if (typeof opt === 'string') return opt.trim()
-      if (opt && typeof opt === 'object') {
-        const record = opt as Record<string, unknown>
-        const label = typeof record.label === 'string' ? record.label.trim() : ''
-        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
-        return label || fallback
-      }
-      return ''
-    })
-    .filter((opt) => opt.length > 0)
-}
-
-function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
-  if (!Array.isArray(rawOptions)) return []
-  return rawOptions
-    .map((opt) => {
-      if (typeof opt === 'string') return opt.trim()
-      if (opt && typeof opt === 'object') {
-        const record = opt as Record<string, unknown>
-        const label = typeof record.label === 'string' ? record.label.trim() : ''
-        const fallback = typeof record.id === 'string' ? record.id.trim() : ''
-        return label || fallback
-      }
-      return ''
-    })
-    .filter((opt) => opt.length > 0)
-}
-
-/**
- * Canonical ask_user_input option normalizer.
- *
- * Supports either string options (`["A", "B"]`) or object options
- * (`[{ label: "A" }, { id: "b" }]`) and returns a trimmed, de-duplicated
- * list for chip rendering.
- */
-function normalizeAskUserInputOptions(rawOptions: unknown): string[] {
-  if (!Array.isArray(rawOptions)) return []
-  const seen = new Set<string>()
-  const normalized: string[] = []
-
-  for (const opt of rawOptions) {
-    let candidate = ''
-    if (typeof opt === 'string') {
-      candidate = opt.trim()
-    } else if (opt && typeof opt === 'object') {
-      const record = opt as Record<string, unknown>
-      const label = typeof record.label === 'string' ? record.label.trim() : ''
-      const fallback = typeof record.id === 'string' ? record.id.trim() : ''
-      candidate = label || fallback
-    }
-
-    if (!candidate || seen.has(candidate)) continue
-    seen.add(candidate)
-    normalized.push(candidate)
-  }
-
-  return normalized
-}
-
-
-
 interface AttachedFile {
   name: string
   type: string
@@ -183,32 +118,8 @@ export function resolveComposerSubmission(input: string, planIntent: boolean): {
   return { mode: 'normal', text: trimmed }
 }
 
-const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
 const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
-
-function readPersistedThinking(taskId: string | null | undefined): PersistedThinkingMessage[] {
-  if (!taskId) return []
-  try {
-    const raw = localStorage.getItem(THINKING_KEY(taskId))
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((item): item is PersistedThinkingMessage => {
-        const candidate = item as Partial<PersistedThinkingMessage>
-        return Boolean(candidate && candidate.role === 'thinking' && typeof candidate.stepId === 'string')
-      })
-      .map((item) => ({
-        ...item,
-        status: (item.status === 'completed' ? 'completed' : 'streaming') as ThinkingState,
-        text: typeof item.text === 'string' ? item.text : '',
-        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
-      }))
-      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
-  } catch {
-    return []
-  }
-}
+type ThinkingState = 'streaming' | 'completed'
 
 // ─── Live connector type ───────────────────────────────────────────────────────
 interface ConnectorMeta {
@@ -1150,8 +1061,12 @@ interface InputBarCursorProps {
   hasAttachments: boolean
   planIntent?: boolean
   modelChipLabel?: string
+  effortChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
+  currentModelSupportsReasoning?: boolean
+  enableReasoning?: boolean
+  onToggleReasoning?: (enabled: boolean) => void
 }
 
 function InputBarCursor({
@@ -1160,8 +1075,12 @@ function InputBarCursor({
   activeConnector, onRemoveConnector, hasAttachments,
   planIntent = false,
   modelChipLabel = 'GPT-5.4',
+  effortChipLabel = 'Reasoning: Adaptive',
   isLocalOnly = true,
   hasFullAccess = true,
+  currentModelSupportsReasoning = false,
+  enableReasoning = false,
+  onToggleReasoning,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
 
@@ -1307,6 +1226,10 @@ export function ChatPanel({
   onPlanConfirm,
   onPlanReject,
   reasoningMap,
+  enableReasoning = false,
+  onToggleReasoning,
+  reasoningEffort = 'adaptive',
+  currentModelSupportsReasoning = false,
   contextSnapshot,
   userName,
   subAgentNames = [],
@@ -1468,12 +1391,6 @@ export function ChatPanel({
     })
     return [...sentMessages, ...dedupedBase]
   }, [sentMessages, baseMessages])
-  const latestThinkingId = useMemo(() => {
-    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
-      if (allMessages[i].role === 'thinking') return allMessages[i].id
-    }
-    return null
-  }, [allMessages])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
@@ -1618,14 +1535,6 @@ export function ChatPanel({
       return { ...prev, answeredUserInputIds: [...prev.answeredUserInputIds, requestId] }
     })
   }, [])
-  const setThinkingOpen = useCallback((thinkingId: string, open: boolean) => {
-    setThreadUi((prev) => {
-      const next = new Set(prev.openThinkingIds)
-      if (open) next.add(thinkingId)
-      else next.delete(thinkingId)
-      return { ...prev, openThinkingIds: Array.from(next) }
-    })
-  }, [])
 
   const handleUserInputReply = (answer: string, requestId: string) => {
     const trimmed = answer.trim()
@@ -1651,8 +1560,8 @@ export function ChatPanel({
 
   const handleToggleThinkingOpen = useCallback((stepId: string) => {
     if (!activeTaskId || !stepId) return
-    setOpenThinkingIds((prev) => {
-      const next = new Set(prev)
+    setThreadUi((prev) => {
+      const next = new Set(prev.openThinkingIds)
       if (next.has(stepId)) next.delete(stepId)
       else next.add(stepId)
       try {
@@ -1660,7 +1569,7 @@ export function ChatPanel({
       } catch {
         // ignore localStorage write failures
       }
-      return next
+      return { ...prev, openThinkingIds: Array.from(next) }
     })
   }, [activeTaskId])
 
@@ -1671,6 +1580,10 @@ export function ChatPanel({
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
   const modelChipLabel = 'GPT-5.4'
+  const normalizedReasoningEffort = reasoningEffort.trim()
+  const effortChipLabel = normalizedReasoningEffort.length > 0
+    ? `Reasoning: ${normalizedReasoningEffort[0].toUpperCase()}${normalizedReasoningEffort.slice(1)}`
+    : 'Reasoning: Off'
   const isLocalOnly = true
   const hasFullAccess = true
 
@@ -1762,12 +1675,17 @@ export function ChatPanel({
           if (msg.role === 'subagent') return <SubagentCard key={msg.id} msg={msg} />
 
           if (msg.role === 'user_input') {
+            const requestId = msg.requestId ?? msg.id
             return (
               <UserInputCard key={msg.id}
                 question={msg.question ?? msg.text}
                 options={msg.options ?? []}
-                requestId={msg.requestId ?? msg.id}
-                onRespond={(answer, reqId) => { if (onUserInputResponse) { onUserInputResponse(answer, reqId) } else { onSend(answer, 'steer') } }}
+                requestId={requestId}
+                answered={threadUi.answeredUserInputIds.includes(requestId)}
+                onRespond={(answer, reqId) => {
+                  if (onUserInputResponse) handleUserInputReply(answer, reqId)
+                  else onSend(answer, 'steer')
+                }}
               />
             )
           }
@@ -1795,7 +1713,7 @@ export function ChatPanel({
 
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
-            const hasStructuredState = Boolean(stepId && thinkingMessages.find((item) => item.stepId === stepId))
+            const hasStructuredState = Boolean(stepId && reasoningMap?.[stepId])
             const reasoningText = hasStructuredState
               ? (reasoningMap?.[stepId] ?? msg.text ?? '')
               : ''
@@ -1808,7 +1726,7 @@ export function ChatPanel({
                   stepId={stepId}
                   reasoningText={reasoningText}
                   isStreaming={isStreaming}
-                  open={openThinkingIds.has(stepId)}
+                  open={threadUi.openThinkingIds.includes(stepId)}
                   onToggle={() => handleToggleThinkingOpen(stepId)}
                 />
               </div>
@@ -1911,8 +1829,12 @@ export function ChatPanel({
           hasAttachments={attachments.length > 0}
           planIntent={planIntent}
           modelChipLabel={modelChipLabel}
+          effortChipLabel={effortChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
+          currentModelSupportsReasoning={currentModelSupportsReasoning}
+          enableReasoning={enableReasoning}
+          onToggleReasoning={onToggleReasoning}
         />
 
         {/* Hidden file input */}

@@ -599,21 +599,39 @@ function App() {
     () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
-
-  // isBrowsing: agent is actively running browser steps RIGHT NOW
-  const isBrowsing = isWorking && hasBrowserActivity
+  const hasBrowserActivityForActiveTask = useMemo(() => {
+    const activeTaskId = selectedTaskId ?? activeTaskIdRef.current
+    if (!activeTaskId || activeTaskId === 'idle') return false
+    return actionLogEntries.some((entry) => entry.taskId === activeTaskId)
+  }, [actionLogEntries, selectedTaskId, activeTaskIdRef])
 
   // ── Auto-return to chat when a browser task finishes ────────────────────
   // When isWorking flips true→false and the task had browser activity,
   // automatically switch the user back to chat so they see the summary card.
-  const prevIsWorkingRef = useRef(isWorking)
+  const prevBrowsingWorkingRef = useRef(isWorking)
+  const browserActivityDuringRunRef = useRef(false)
+
   useEffect(() => {
-    const wasWorking = prevIsWorkingRef.current
-    prevIsWorkingRef.current = isWorking
-    if (wasWorking && !isWorking && hasBrowserActivity && appMode === 'browser') {
-      setAppMode('chat')
+    const wasWorking = prevBrowsingWorkingRef.current
+
+    if (!wasWorking && isWorking) {
+      browserActivityDuringRunRef.current = false
     }
-  }, [isWorking, hasBrowserActivity, appMode])
+
+    if (isWorking && hasBrowserActivityForActiveTask) {
+      browserActivityDuringRunRef.current = true
+    }
+
+    if (wasWorking && !isWorking) {
+      const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
+      browserActivityDuringRunRef.current = false
+      if (hadBrowserActivityThisRun && appMode === 'browser') {
+        setAppMode('chat')
+      }
+    }
+
+    prevBrowsingWorkingRef.current = isWorking
+  }, [isWorking, hasBrowserActivityForActiveTask, appMode])
 
   // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
   // If the agent needs user input mid-task and the user is watching the

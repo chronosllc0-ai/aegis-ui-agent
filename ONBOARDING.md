@@ -3019,3 +3019,71 @@
 
 ### Validation
 - Ran `cd frontend && npm ci && npm run build` to mirror Netlify command; build succeeded.
+
+## 2026-04-05 — Netlify/Railway build break fix (App + ChatPanel TS cleanup)
+
+### What changed
+- Fixed `frontend/src/App.tsx` browser handoff logic by restoring a valid `hasBrowserActivity` derivation from action-log entries and removing the duplicate `prevIsWorkingRef` declaration by renaming the task-finish tracker ref.
+- Repaired `frontend/src/components/ChatPanel.tsx` after a bad merge state:
+  - removed duplicate local `normalizeAskUserInputOptions` declarations and kept the shared import from `frontend/src/lib/askUserInput.ts`.
+  - restored missing reasoning toggle wiring (`enableReasoning`, `onToggleReasoning`, `reasoningEffort`, `currentModelSupportsReasoning`) through `ChatPanel` → `InputBarCursor` props.
+  - fixed thinking UI state handling to use `threadUi.openThinkingIds` and `setThreadUi(...)` (replacing an undefined `setOpenThinkingIds` path).
+  - fixed ask-user-input rendering by passing required `answered` and routing replies through `handleUserInputReply` when callback exists.
+  - removed orphaned/undefined thinking persistence type usage that caused TS symbol errors.
+
+### Why
+- Railway/Netlify production builds failed at `npm run build` with TS2451/TS2304/TS2393 errors in `App.tsx` and `ChatPanel.tsx`.
+- These changes make the frontend compile deterministic again in CI/CD and local Docker image builds.
+
+### Validation
+- Ran `cd frontend && npm run build`; TypeScript + Vite build now pass successfully.
+
+## 2026-04-05 — Review nitpick follow-up (task-scoped browser activity + effort guard)
+
+### What changed
+- Updated `frontend/src/App.tsx` so `hasBrowserActivity` is now task-scoped, derived via `useMemo` against the active task id (`selectedTaskId ?? activeTaskIdRef.current`) instead of a global `actionLogEntries.length > 0` check.
+- Updated `frontend/src/components/ChatPanel.tsx` to harden effort-chip rendering:
+  - normalize with `reasoningEffort.trim()`
+  - render `'Reasoning: Off'` when empty
+  - otherwise safely title-case the normalized value.
+
+### Why
+- Addresses review warning that browser-activity state could remain sticky after the first browser task and incorrectly trigger auto-return behavior for later non-browser tasks.
+- Addresses review suggestion about potential runtime crash risk from indexing `reasoningEffort[0]` without guarding empty strings.
+
+### Validation
+- Ran `cd frontend && npm run build` and confirmed TypeScript + Vite build still pass.
+
+## 2026-04-05 — Review follow-up v2 (run-scoped browser handoff state)
+
+### What changed
+- Refined `frontend/src/App.tsx` browser handoff logic to be scoped to the **current run lifecycle**, not just active-task history:
+  - Added `browserActivityDuringRunRef` that resets when a run starts.
+  - While running, mark the ref true only if browser primitive actions are detected for the active task.
+  - On run completion (`isWorking` true→false), auto-return to chat only when that run had browser activity, then reset the ref.
+- Kept `hasBrowserActivityForActiveTask` as a task-scoped derivation to feed the run tracker.
+
+### Why
+- Addresses lingering review concern about sticky browser-activity behavior causing false auto-return-to-chat transitions after earlier browsing sessions.
+- Ensures post-run behavior is deterministic and tied strictly to the just-completed run.
+
+### Validation
+- Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
+
+## 2026-04-05 — Review follow-up v3 (single-effect browser activity lifecycle)
+
+### What changed
+- Consolidated run-scoped browser handoff tracking in `frontend/src/App.tsx` into a **single `useEffect`**.
+- Removed the previous dual-effect pattern that both mutated `browserActivityDuringRunRef`.
+- The unified effect now handles, in one place:
+  1. run-start reset (`!wasWorking && isWorking`)
+  2. mid-run browser activity accumulation (`isWorking && hasBrowserActivityForActiveTask`)
+  3. run-end auto-return decision (`wasWorking && !isWorking`)
+  4. previous-state ref update.
+
+### Why
+- Addresses code review suggestion to avoid relying on multi-effect execution order when mutating shared refs.
+- Improves readability and correctness confidence by making lifecycle transitions explicit in one flow.
+
+### Validation
+- Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
