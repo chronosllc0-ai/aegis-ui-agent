@@ -5,6 +5,7 @@
  * localStorage is used ONLY as a read-cache to make the UI feel instant.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { mergeTitlePreferMeaningful } from '../lib/title'
 
 const API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? ''
 
@@ -65,8 +66,19 @@ export function useConversations(userUid: string | null) {
       if (!res.ok) return
       const data = await res.json() as { ok: boolean; conversations: ServerConversation[] }
       if (data.ok) {
-        setConversations(data.conversations)
-        writeCache(CONV_CACHE_KEY(cacheUid), data.conversations)
+        setConversations(prev => {
+          const localById = new Map(prev.map((c) => [c.id, c]))
+          const merged = data.conversations.map((serverConv) => {
+            const local = localById.get(serverConv.id)
+            if (!local) return serverConv
+            return {
+              ...serverConv,
+              title: mergeTitlePreferMeaningful(local.title, serverConv.title, local.title),
+            }
+          })
+          writeCache(CONV_CACHE_KEY(cacheUid), merged)
+          return merged
+        })
       }
     } catch { /* network error - cache serves */ }
   }, [cacheUid, userUid])
@@ -99,7 +111,9 @@ export function useConversations(userUid: string | null) {
         writeCache(cacheKey, data.messages)
         // Update conversation title in local list if server has a better one
         setConversations(prev =>
-          prev.map(c => c.id === conversationId ? { ...c, title: data.conversation.title ?? c.title } : c)
+          prev.map(c => c.id === conversationId
+            ? { ...c, title: mergeTitlePreferMeaningful(c.title, data.conversation.title, c.title) }
+            : c)
         )
         return data.messages
       }
@@ -128,7 +142,7 @@ export function useConversations(userUid: string | null) {
       if (exists) return prev
       const newConv: ServerConversation = {
         id: conversationId,
-        title: title ?? 'New task',
+        title: mergeTitlePreferMeaningful(title, undefined, title),
         status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
