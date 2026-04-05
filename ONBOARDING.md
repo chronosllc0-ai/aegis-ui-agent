@@ -1833,6 +1833,37 @@
 ### Blockers
 - None in this pass.
 
+## Session 5.27 - April 3, 2026 (Railway build failure triage for `isBrowsing` TypeScript errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Triaged Railway production build failure screenshot and confirmed the failing errors were:
+  - `src/App.tsx(...): Cannot find name 'isBrowsing'`
+  - `src/components/ChatPanel.tsx(...): 'isBrowsing' is declared but its value is never read`
+- Verified repository source no longer contains any `isBrowsing` references in frontend code.
+- Re-ran local frontend production build to validate the exact Docker-stage command used by Railway (`npm run build`) now succeeds.
+- Confirmed no merge-conflict markers remain in repo after prior cleanup.
+
+### What's Working
+- Frontend TypeScript + Vite production build completes successfully with current branch code.
+- The `isBrowsing` compile blockers from the screenshot are resolved in source.
+
+### What's NOT Working Yet
+- Full container-image parity check with Railway could not be executed in this environment because Docker CLI is unavailable.
+
+### Next Steps
+1. Redeploy Railway from latest commit containing the `isBrowsing` removal patch.
+2. If Railway still fails, clear build cache and force rebuild from scratch.
+3. Add a CI gate that runs `cd frontend && npm run build` on every PR to prevent regression.
+
+### Decisions Made
+- Treat this as a stale-deploy artifact (older commit) unless a fresh rebuild on the latest SHA reproduces.
+
+### Blockers
+- Local runtime lacks Docker binary, so direct `docker build` verification was not possible.
+
 ---
 ## Session 3.6 — March 16, 2026 (Final Pass: Live Wiring + Demo Data Removal)
 
@@ -2180,44 +2211,88 @@
 
 ### Blockers
 - None in this pass.
-<<<<<<< codex/redesign-chat-panel-input-bar-n1ro4s
 
-## Session 5.26 - April 2, 2026 (Mobile bubble regression, ask_user_input inline UX, billing+telegram import fixes)
+## Session 5.26 - April 2, 2026 (Mobile chat bubble fallback + ask_user_input inline reply polish + export fixes)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Fixed chat rendering regression where optimistic local user bubbles could disappear after server history hydration:
-  - server sync now preserves unsynced local user messages instead of hard-replacing message state.
-- Removed assistant timestamps from chat reply cards while keeping user-side timestamp behavior.
-- Reworked `ask_user_input` UI from popup-like card behavior into inline quick-reply tool UX:
-  - clickable numbered option chips that immediately send,
-  - always-available custom reply slot (`Type custom reply`) that opens inline input,
-  - custom text is sent via Continue button or Enter key.
-- Added explicit local user bubble insertion when responding to `ask_user_input`, so selected/custom replies appear in chat as user messages.
-- Fixed backend import/test blockers:
-  - added `_get_cycle_bounds(...)` helper export in `backend/admin/billing.py` and reused it in plan updates,
-  - restored validation constraints for billing payload models,
-  - restored Telegram compatibility surface in `integrations/telegram.py` (`TelegramAPIError`, `TelegramClient`, `TelegramConfig`) and implemented missing helper methods expected by tests (`validate_webhook_secret`, `handle_webhook_update`, `stream_draft_then_send`).
+- Fixed a mobile/alternate-entry chat visibility gap by allowing user-role log messages to render in chat as fallback when there is no matching optimistic/server user bubble.
+- Updated `ask_user_input` parsing to support structured option payloads (`[{ label, ... }]`) in addition to raw string lists so quick replies always render as clickable chips.
+- Kept ask-user-input interaction inline (chat-native):
+  - option click sends immediately,
+  - the final chip is always a custom-answer slot,
+  - custom answer sends on Enter or Continue.
+- Removed assistant timestamp assignment in chat message mapping so agent replies are timestamp-free while user bubbles keep timestamps.
+- Fixed package-level import surfaces used by downstream modules:
+  - exported `_get_cycle_bounds` from `backend.admin`,
+  - exported `TelegramAPIError` from `integrations`.
 
 ### What's Working
-- Frontend build passes with the updated chat + ask-user-input behavior.
-- Admin billing tests pass including `_get_cycle_bounds` import and payload validation.
-- Telegram integration tests pass including API error handling and draft-stream flow.
+- Targeted frontend behavior now supports structured quick-reply options for ask-user-input flows.
+- User prompts sent from non-chat composer paths can still appear in chat via user-log fallback.
+- Admin billing and Telegram targeted tests are passing.
 
 ### What's NOT Working Yet
-- Full test suite still appears to stall on websocket conversation persistence tests in this environment (timed out on the targeted websocket test), requiring separate investigation.
+- Full mobile visual verification was not captured in this environment (no browser screenshot tool available in this runtime).
 
 ### Next Steps
-1. Debug websocket test hang in `tests/test_conversation_persistence.py::test_websocket_navigation_persists_user_and_assistant_messages`.
-2. Add frontend interaction tests for ask_user_input quick-reply/custom flow.
-3. Validate mobile UX manually on-device for the optimistic user bubble path.
+1. Add frontend tests for structured ask-user-input option payloads and user-log fallback dedupe.
+2. Validate mobile portrait behavior on-device for composer + quick-reply spacing around the input bar.
+3. Consider adding richer per-option metadata support (e.g., description text) in quick-reply rendering.
 
 ### Decisions Made
-- Kept ask_user_input as an inline chat card (tool-like flow) rather than modal/popup to avoid input-bar obstruction and match chat-native response patterns.
+- Chose a fallback merge strategy (not hard replacement) so chat remains robust when messages originate from multiple composer surfaces.
 
 ### Blockers
-- Websocket persistence test timeout/hang (not an import error; likely async event sequencing issue).
-=======
->>>>>>> main
+- None in this pass.
+
+## 2026-04-05 — Modes foundation pass (system subagent framing)
+
+### What changed
+- Added a frontend **Agent Mode picker** in `InputBar` with the requested options: Orchestrator, Planner, Architect, Deep Research, Code.
+- Added persistent `agentMode` session setting in frontend app settings and websocket config payloads.
+- Added backend mode policy module (`backend/modes.py`) with:
+  - mode normalization
+  - canonical labels
+  - mode-level blocked tool policies
+- Enforced mode tool gating in `universal_navigator._available_tools(...)` so non-code modes cannot use high-risk execution tools; only Code mode retains `spawn_subagent`.
+- Extended system prompt assembly to state the **active mode policy hint**.
+- Added Telegram slash command support for `/mode` (show + switch), and surfaced mode in `/status` + `/help`.
+- Added tests for mode policy + slash command behavior.
+- Added `docs/modes-industry-feasibility.md` with research-backed architecture/feasibility notes and recommended next steps for admin-managed per-mode system instructions.
+
+### Working
+- Mode state now round-trips from UI to backend runtime settings.
+- Tool manifest respects mode policy in universal navigator path.
+- Telegram users can switch mode via `/mode code` etc.
+
+### Not yet done / next
+- Admin UI for editing per-mode system instructions is not implemented yet.
+- Telegram inline keyboard mode selector (instead of text-only `/mode`) is not implemented yet.
+- Need end-to-end UI snapshot once browser screenshot tooling is available in this environment.
+
+### Decisions / notes
+- Current implementation treats modes as authoritative runtime policy gates, with defaults falling back to `orchestrator`.
+- Orchestrator mode intentionally blocks direct `spawn_subagent` to preserve router semantics requested in product direction.
+
+## 2026-04-05 — Post-review hotfix (ChatPanel option normalizer)
+
+### What changed
+- Hardened `normalizeAskUserInputOptions` in `frontend/src/components/ChatPanel.tsx` as the single canonical parser for ask-user-input options.
+- Added inline docs and converted logic to explicit loop-based normalization.
+- Added de-duplication of rendered quick-reply chips to prevent repeated options from mixed payloads.
+
+### Why
+- Addressed code review concern about duplicate/fragile normalization behavior and made this function clearly authoritative and maintainable.
+
+## 2026-04-05 — Review follow-up for PR #161 (duplicate normalizer guard)
+
+### What changed
+- Moved `normalizeAskUserInputOptions` into `frontend/src/lib/askUserInput.ts`.
+- Removed local declaration from `ChatPanel.tsx` and imported the shared helper instead.
+
+### Why
+- Eliminates any chance of duplicate in-file declarations for `normalizeAskUserInputOptions` and makes the parser truly single-source.
+- Addresses review-critical duplicate identifier concern directly.
