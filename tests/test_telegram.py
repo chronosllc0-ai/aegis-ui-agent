@@ -192,6 +192,40 @@ def test_telegram_send_image_success_and_validation_errors() -> None:
     asyncio.run(run())
 
 
+def test_telegram_send_message_supports_reply_markup() -> None:
+    """telegram_send_message should forward inline keyboard reply_markup payloads."""
+
+    async def run() -> None:
+        integration = TelegramIntegration(TelegramConfig(bot_token="123:ABC"))
+        integration.connected = True
+        with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = {"ok": True, "result": {"message_id": 1}}
+            result = await integration.execute_tool(
+                "telegram_send_message",
+                {
+                    "chat_id": 1,
+                    "text": "choose mode",
+                    "reply_markup": {
+                        "inline_keyboard": [[{"text": "Code", "callback_data": "mode:code"}]],
+                    },
+                },
+            )
+            assert result["ok"] is True
+            mock_request.assert_awaited_once_with(
+                "sendMessage",
+                json={
+                    "chat_id": 1,
+                    "text": "choose mode",
+                    "reply_markup": {
+                        "inline_keyboard": [[{"text": "Code", "callback_data": "mode:code"}]],
+                    },
+                },
+            )
+        await integration.disconnect()
+
+    asyncio.run(run())
+
+
 def test_mode_transition_webhook_and_polling_paths() -> None:
     """Connect should preserve webhook/polling parity and clear stale mode state."""
 

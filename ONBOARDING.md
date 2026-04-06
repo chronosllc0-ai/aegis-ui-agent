@@ -1,3 +1,47 @@
+## Session 5.63 - April 6, 2026 (Telegram /mode inline selection UX)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend + test pass
+
+### What Was Done
+- Upgraded Telegram `/mode` command UX in `main.py`:
+  - `/mode` with no args now returns a Telegram-specific payload containing:
+    - current mode text, and
+    - inline keyboard buttons for all available modes (`orchestrator`, `planner`, `architect`, `deep_research`, `code`).
+  - Preserved existing `/mode <name>` behavior for power users (direct text-based mode switch).
+- Added Telegram callback mode selection handling in webhook flow:
+  - parses callback payloads in the form `mode:<mode_name>`,
+  - updates `runtime.settings["agent_mode"]` for the integration owner session,
+  - sends confirmation message with selected mode label.
+- Extended Telegram send-message tool path in `integrations/telegram.py` to accept/forward optional `reply_markup` objects to Telegram `sendMessage`.
+- Added acceptance-focused tests:
+  - `/mode` text path,
+  - `/mode` inline keyboard render path (direct command return + webhook send payload),
+  - callback selection path updates runtime mode and emits confirmation,
+  - Telegram send-message reply_markup forwarding coverage.
+
+### What's Working
+- Telegram `/mode` now supports inline selection UX while keeping text mode-switch compatibility.
+- Callback selection updates owner runtime mode as required.
+- Targeted tests for mode and Telegram integration paths pass.
+
+### What's NOT Working Yet
+- No new functional blockers identified in this pass.
+- Existing FastAPI `on_event` deprecation warnings still appear during test runs (pre-existing, unrelated to this change).
+
+### Next Steps
+1. Optional UX refinement: edit the original mode picker message on callback to visually mark selected mode.
+2. Optional hardening: add callback sender/owner parity checks for stricter multi-user bot safety when needed.
+
+### Decisions Made
+- Implemented callback mode selection handling in `main.py` webhook layer (session-aware), while keeping `integrations/telegram.py` generic and transport-focused.
+- Kept callback payload format simple and stable: `mode:<normalized_mode>`.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.62 - April 6, 2026 (post-review nitpick cleanup: redundant assertion)
 
 **Agent:** GPT-5.3-Codex  

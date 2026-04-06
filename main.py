@@ -1377,6 +1377,20 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
+    callback_mode = _parse_telegram_mode_callback(update)
+    if callback_mode and owner_user_id:
+        runtime = _user_runtimes.get(owner_user_id)
+        if runtime:
+            runtime.settings["agent_mode"] = callback_mode
+            mode_label = MODE_LABELS.get(callback_mode, callback_mode.title())
+            callback_message = update.get("callback_query", {}).get("message", {})
+            callback_chat_id = (callback_message.get("chat") or {}).get("id")
+            if callback_chat_id is not None:
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {"chat_id": callback_chat_id, "text": f"✅ Mode switched to *{mode_label}*"},
+                )
+        return {"ok": True}
     chat_id, text_content, platform_message_id = _extract_telegram_message(update)
 
     # Slash command handling
@@ -1398,7 +1412,17 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             ack_reaction=ack_reaction,
         )
         if cmd_response:
-            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
+            if isinstance(cmd_response, dict):
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": chat_id,
+                        "text": str(cmd_response.get("text", "")),
+                        "reply_markup": cmd_response.get("reply_markup"),
+                    },
+                )
+            else:
+                await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
         return {"ok": True}
 
     if chat_id and text_content:
@@ -1900,7 +1924,7 @@ async def _handle_slash_command(
     integration_id: str,
     chat_id: Any,
     ack_reaction: str = "",
-) -> str | None:
+) -> str | dict[str, Any] | None:
     """Parse a slash command and execute the appropriate action. Returns a reply string or None."""
     parts = text.strip().split(None, 1)
     cmd = parts[0].lstrip("/").lower().split("@")[0]  # strip bot username suffix
@@ -1956,7 +1980,10 @@ async def _handle_slash_command(
             return "⚪ No active session."
         if not arg:
             active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-            return f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+            message = f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+            if platform == "telegram":
+                return {"text": message, "reply_markup": _telegram_mode_reply_markup()}
+            return message
         requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
         runtime.settings["agent_mode"] = requested_mode
         return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
@@ -2067,6 +2094,25 @@ async def _handle_slash_command(
             )
 
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
+
+
+def _telegram_mode_reply_markup() -> dict[str, Any]:
+    """Build Telegram inline keyboard for all available modes."""
+    return {
+        "inline_keyboard": [
+            [{"text": label, "callback_data": f"mode:{mode_name}"}]
+            for mode_name, label in MODE_LABELS.items()
+        ]
+    }
+
+
+def _parse_telegram_mode_callback(update: dict[str, Any]) -> str | None:
+    """Parse Telegram callback payload for mode selection actions."""
+    callback = update.get("callback_query") or {}
+    data = str(callback.get("data", "")).strip()
+    if not data.startswith("mode:"):
+        return None
+    return normalize_agent_mode(data[5:])
 
 
 # ── Bot config endpoints ─────────────────────────────────────────────
