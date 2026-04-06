@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, or_, select
 
-from backend.database import Skill, SkillInstallation, SkillToggle, SkillVersion, get_session
+from backend.database import RuntimeSkillInstallation, Skill, SkillToggle, SkillVersion, get_session
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +64,32 @@ async def _resolve_with_session(*, session, user_uid: str, requested_ids: list[s
     if not requested_ids:
         return RuntimeSkillContext(requested_skill_ids=[], resolved_at=datetime.now(timezone.utc))
 
+    latest_version_by_skill = (
+        select(SkillVersion.skill_id.label("skill_id"), func.max(SkillVersion.version).label("max_version"))
+        .group_by(SkillVersion.skill_id)
+        .subquery()
+    )
+
     rows = await session.execute(
         select(Skill.id, Skill.status, SkillVersion.content_sha256)
-        .join(SkillInstallation, and_(SkillInstallation.skill_id == Skill.id, SkillInstallation.user_id == user_uid))
-        .join(SkillToggle, and_(SkillToggle.skill_id == Skill.id, SkillToggle.user_id == user_uid, SkillToggle.enabled.is_(True)))
-        .outerjoin(SkillVersion, SkillVersion.skill_id == Skill.id)
+        .join(
+            RuntimeSkillInstallation,
+            and_(RuntimeSkillInstallation.skill_id == Skill.id, RuntimeSkillInstallation.user_id == user_uid),
+        )
+        .outerjoin(
+            SkillToggle,
+            and_(SkillToggle.skill_id == Skill.id, SkillToggle.user_id == user_uid),
+        )
+        .outerjoin(latest_version_by_skill, latest_version_by_skill.c.skill_id == Skill.id)
+        .outerjoin(
+            SkillVersion,
+            and_(
+                SkillVersion.skill_id == Skill.id,
+                SkillVersion.version == latest_version_by_skill.c.max_version,
+            ),
+        )
         .where(Skill.id.in_(requested_ids))
+        .where(or_(SkillToggle.enabled.is_(True), SkillToggle.id.is_(None)))
     )
 
     db_rows = rows.all()

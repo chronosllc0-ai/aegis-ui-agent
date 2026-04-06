@@ -6,7 +6,7 @@ import asyncio
 import json
 
 from backend import database
-from backend.database import Skill, SkillInstallation, SkillToggle, SkillVersion, User, get_session
+from backend.database import RuntimeSkillInstallation, Skill, SkillToggle, SkillVersion, User, get_session
 from backend.skills.runtime import resolve_runtime_skills
 
 
@@ -56,7 +56,7 @@ async def _seed_skill(
             )
         )
         if installed:
-            session.add(SkillInstallation(user_id=owner_user_id, skill_id=skill_id))
+            session.add(RuntimeSkillInstallation(user_id=owner_user_id, skill_id=skill_id))
         session.add(SkillToggle(user_id=owner_user_id, skill_id=skill_id, enabled=enabled))
         await session.commit()
         break

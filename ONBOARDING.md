@@ -1,3 +1,43 @@
+## Session 5.73 - April 6, 2026 (PR #181 review fixes: runtime skill resolver hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed reviewer warning on non-deterministic version hash selection in `backend/skills/runtime.py`:
+  - resolver now joins against a latest-version subquery (`max(version)` per skill) before reading `content_sha256`, so version hashes are deterministic and represent the newest skill version.
+- Addressed reviewer warning on missing-toggle behavior in `backend/skills/runtime.py`:
+  - changed toggle join to `outerjoin` and added filter `enabled = true OR toggle is null`, so missing toggle rows default to enabled behavior.
+- Addressed naming clarity suggestion in `backend/database.py`:
+  - renamed the lightweight runtime install ORM class from `SkillInstallation` to `RuntimeSkillInstallation` (table name unchanged: `skill_installations`) to reduce confusion with legacy `SkillInstall`.
+- Addressed integrity suggestion in `backend/database.py`:
+  - added a composite FK constraint on `skill_toggles(user_id, skill_id)` to `skill_installations(user_id, skill_id)` with cascade delete, ensuring toggle rows cannot outlive their installation relation.
+- Addressed websocket config normalization nit in `main.py`:
+  - collapsed normalization to a single pass (`requested_skill_ids`) before resolving/persisting settings.
+- Updated tests to reflect renamed runtime installation class import and verified behavior remains green.
+
+### What's Working
+- Runtime skill metadata now consistently reflects latest skill version hashes.
+- Installed skills with no toggle row now resolve as enabled by default.
+- Toggle rows are now relationally constrained to existing installation rows.
+- Websocket skill ID normalization is simpler and single-pass.
+- Targeted regression test suite passes.
+
+### What's NOT Working Yet
+- No new issues identified in this review-fix pass.
+
+### Next Steps
+1. Consider adding a DB-level migration script for production environments that require explicit constraint management sequencing.
+2. Add a focused test for “multiple versions per skill picks latest hash” to guard this exact regression path long-term.
+
+### Decisions Made
+- Kept table names stable for backward compatibility while improving ORM class naming clarity.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.72 - April 6, 2026 (server-authoritative runtime skill scaffolding)
 
 **Agent:** GPT-5.3-Codex  

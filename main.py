@@ -1202,8 +1202,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         {"type": "error", "data": {"message": "Invalid config payload: enabled_skill_ids must be an array of strings"}}
                     )
                     continue
-                runtime_skill_context = await resolve_runtime_skills(runtime.user_uid, requested_skill_ids_raw)
-                candidate_settings["enabled_skill_ids"] = [item.strip() for item in requested_skill_ids_raw if item and item.strip()]
+                requested_skill_ids = [item.strip() for item in requested_skill_ids_raw if item.strip()]
+                runtime_skill_context = await resolve_runtime_skills(runtime.user_uid, requested_skill_ids)
+                candidate_settings["enabled_skill_ids"] = requested_skill_ids
                 candidate_settings.update(runtime_skill_context.as_settings_fragment())
                 runtime.settings = candidate_settings
                 await _send_step(

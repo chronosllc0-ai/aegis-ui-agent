@@ -11,7 +11,21 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func, inspect, text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    inspect,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -290,7 +304,7 @@ class SkillAuditEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
-class SkillInstallation(Base):
+class RuntimeSkillInstallation(Base):
     """Lightweight per-user skill installation record for runtime resolution."""
 
     __tablename__ = "skill_installations"
@@ -306,7 +320,15 @@ class SkillToggle(Base):
     """Per-user enable/disable state for an installed skill."""
 
     __tablename__ = "skill_toggles"
-    __table_args__ = (UniqueConstraint("user_id", "skill_id", name="uq_skill_toggles_user_skill"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "skill_id", name="uq_skill_toggles_user_skill"),
+        ForeignKeyConstraint(
+            ["user_id", "skill_id"],
+            ["skill_installations.user_id", "skill_installations.skill_id"],
+            name="fk_skill_toggles_installation",
+            ondelete="CASCADE",
+        ),
+    )
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
