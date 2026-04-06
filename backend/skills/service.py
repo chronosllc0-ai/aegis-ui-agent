@@ -59,13 +59,40 @@ class VirusTotalScanner:
             cls._opened_until = None
 
     @classmethod
+    async def _request_with_backoff(
+        cls,
+        *,
+        request_fn: Any,
+    ) -> httpx.Response:
+        """Execute a VT request with bounded retries and exponential backoff."""
+        max_retries = max(0, int(settings.VIRUSTOTAL_REQUEST_MAX_RETRIES))
+        base_delay = max(0.0, float(settings.VIRUSTOTAL_RETRY_BASE_DELAY_SECONDS))
+        last_error: httpx.RequestError | httpx.HTTPStatusError | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = await request_fn()
+                if response.status_code not in {429, 500, 502, 503, 504}:
+                    return response
+                response.raise_for_status()
+            except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                last_error = exc
+                if attempt >= max_retries:
+                    raise
+                await asyncio.sleep(base_delay * (2**attempt))
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("VirusTotal retry logic reached an unexpected state")
+
+    @classmethod
     async def scan_content(cls, *, file_name: str, content: bytes) -> dict[str, Any]:
         """Run VirusTotal hash lookup/upload flow and return normalized payload."""
         if not settings.VIRUSTOTAL_API_KEY:
             return {
                 "engine": "virustotal",
                 "verdict": "skipped",
-                "risk_label": "low",
+                "risk_label": "unknown",
                 "raw_json": {"reason": "missing_api_key"},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -75,7 +102,7 @@ class VirusTotalScanner:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "risk_label": "critical",
+                "risk_label": "unknown",
                 "raw_json": {"reason": "file_too_large", "max_bytes": settings.VIRUSTOTAL_MAX_FILE_BYTES},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -85,7 +112,7 @@ class VirusTotalScanner:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "risk_label": "high",
+                "risk_label": "unknown",
                 "raw_json": {"reason": "circuit_open"},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -97,11 +124,16 @@ class VirusTotalScanner:
 
         try:
             async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-                file_report = await client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
+                file_report = await cls._request_with_backoff(
+                    request_fn=lambda: client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
+                )
+                analysis_id: str | None = None
                 if file_report.status_code == 404:
-                    upload_response = await client.post(
-                        "https://www.virustotal.com/api/v3/files",
-                        files={"file": (file_name, content, "text/markdown")},
+                    upload_response = await cls._request_with_backoff(
+                        request_fn=lambda: client.post(
+                            "https://www.virustotal.com/api/v3/files",
+                            files={"file": (file_name, content, "text/markdown")},
+                        )
                     )
                     upload_response.raise_for_status()
                     analysis_id = upload_response.json().get("data", {}).get("id")
@@ -109,7 +141,9 @@ class VirusTotalScanner:
                     raw: dict[str, Any] = {}
                     if analysis_id:
                         for _ in range(settings.VIRUSTOTAL_MAX_POLLS):
-                            poll_response = await client.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}")
+                            poll_response = await cls._request_with_backoff(
+                                request_fn=lambda: client.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}")
+                            )
                             poll_response.raise_for_status()
                             raw = poll_response.json()
                             final_status = raw.get("data", {}).get("attributes", {}).get("status", "queued")
@@ -120,8 +154,8 @@ class VirusTotalScanner:
                         return {
                             "engine": "virustotal",
                             "verdict": "error",
-                            "risk_label": "high",
-                            "raw_json": {"reason": "analysis_timeout", "last_status": final_status},
+                            "risk_label": "unknown",
+                            "raw_json": {"reason": "analysis_timeout", "last_status": final_status, "analysis_id": analysis_id},
                             "report_url": None,
                             "scanned_at": datetime.now(timezone.utc),
                         }
@@ -134,7 +168,7 @@ class VirusTotalScanner:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "risk_label": "high",
+                "risk_label": "unknown",
                 "raw_json": {"reason": "exception", "error": str(exc)},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
@@ -146,22 +180,29 @@ class VirusTotalScanner:
         stats = attributes.get("last_analysis_stats") or attributes.get("stats", {})
         malicious = int(stats.get("malicious", 0))
         suspicious = int(stats.get("suspicious", 0))
+        vt_identifier = raw.get("data", {}).get("id")
 
         if malicious > 0:
             verdict = "fail"
-            risk = "critical"
+            risk = "high-risk"
         elif suspicious > 0:
             verdict = "warn"
-            risk = "medium"
+            risk = "suspicious"
         else:
             verdict = "pass"
-            risk = "low"
+            risk = "clean"
 
         return {
             "engine": "virustotal",
             "verdict": verdict,
             "risk_label": risk,
-            "raw_json": {"sha256": sha256, "stats": stats},
+            "raw_json": {
+                "sha256": sha256,
+                "stats": stats,
+                "positives": malicious,
+                "suspicious": suspicious,
+                "id": vt_identifier,
+            },
             "report_url": f"https://www.virustotal.com/gui/file/{sha256}",
             "scanned_at": datetime.now(timezone.utc),
         }
@@ -192,13 +233,13 @@ class PolicyScanner:
 
         if max_score >= 0.9:
             verdict = "fail"
-            risk = "critical"
+            risk = "high-risk"
         elif max_score >= 0.5:
             verdict = "warn"
-            risk = "medium"
+            risk = "suspicious"
         else:
             verdict = "pass"
-            risk = "low"
+            risk = "clean"
 
         return {
             "engine": "policy",
@@ -299,7 +340,7 @@ class SkillService:
                 owner_type=owner_type,
                 publish_target=publish_target,
                 status="draft",
-                risk_label="low",
+                risk_label="clean",
                 is_new=False,
                 new_until=None,
                 created_at=now,
@@ -392,7 +433,7 @@ class SkillService:
                 owner_type=owner_type,
                 publish_target=publish_target,
                 status="submitted",
-                risk_label="medium",
+                risk_label="unknown",
                 is_new=False,
                 new_until=None,
                 created_at=now,
@@ -440,6 +481,18 @@ class SkillService:
         )
         session.add(submission)
         await session.flush()
+        session.add(
+            SkillScanResult(
+                skill_version_id=version.id,
+                engine="virustotal",
+                verdict="queued",
+                risk_label="unknown",
+                raw_json=json.dumps({"status": "queued", "sha256": content_sha256}),
+                report_url=None,
+                scanned_at=now,
+                created_at=now,
+            )
+        )
 
         await SkillService._record_event(
             session,
@@ -511,15 +564,16 @@ class SkillService:
         )
 
         if vt_result["verdict"] == "error":
-            skill.status = "scanning"
-            submission.review_state = "scanning"
+            skill.status = "scan_failed"
+            submission.review_state = "scan_failed"
+            skill.risk_label = "unknown"
             await SkillService._record_event(
                 session,
                 skill_id=skill.id,
                 version_id=version.id,
                 submission_id=submission.id,
                 from_status=from_status,
-                to_status="scanning",
+                to_status="scan_failed",
                 actor_id=actor_id,
                 actor_type=actor_type,
                 reason="vt_scan_error",
@@ -544,11 +598,15 @@ class SkillService:
             )
         )
 
-        skill.risk_label = "critical" if "critical" in {vt_result["risk_label"], policy_result["risk_label"]} else (
-            "high" if "high" in {vt_result["risk_label"], policy_result["risk_label"]} else (
-                "medium" if "medium" in {vt_result["risk_label"], policy_result["risk_label"]} else "low"
-            )
-        )
+        combined_risks = {vt_result["risk_label"], policy_result["risk_label"]}
+        if "high-risk" in combined_risks:
+            skill.risk_label = "high-risk"
+        elif "suspicious" in combined_risks:
+            skill.risk_label = "suspicious"
+        elif "unknown" in combined_risks:
+            skill.risk_label = "unknown"
+        else:
+            skill.risk_label = "clean"
         skill.status = "review"
         submission.review_state = "review"
         skill.updated_at = now
@@ -580,7 +638,7 @@ class SkillService:
             select(SkillSubmission, Skill, SkillVersion)
             .join(Skill, Skill.id == SkillSubmission.skill_id)
             .join(SkillVersion, SkillVersion.id == SkillSubmission.version_id)
-            .where(SkillSubmission.review_state.in_(["submitted", "scanning", "review"]))
+            .where(SkillSubmission.review_state.in_(["submitted", "scanning", "review", "scan_failed"]))
             .order_by(SkillSubmission.created_at.asc())
         )
         queue_rows = rows.all()
@@ -634,6 +692,9 @@ class SkillService:
 
         now = SkillService._now()
         from_status = skill.status
+
+        if decision in {"approve_global", "approve_hub"} and skill.risk_label in {"suspicious", "high-risk"} and not (notes or "").strip():
+            raise ValueError("Suspicious/high-risk skills require explicit override reason")
 
         if decision == "approve_global":
             skill.status = "published_global"

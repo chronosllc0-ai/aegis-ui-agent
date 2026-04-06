@@ -178,7 +178,7 @@ async def list_admin_review_queue(
 ) -> dict[str, Any]:
     _ = admin_user
     queue = await SkillService.get_review_queue(session)
-    allowed_statuses = {"draft", "submitted", "scanning", "review", "rejected", "published_global", "published_hub"}
+    allowed_statuses = {"draft", "submitted", "scanning", "scan_failed", "review", "rejected", "published_global", "published_hub"}
     filtered = queue
     if status:
         if status not in allowed_statuses:
