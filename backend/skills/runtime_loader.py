@@ -130,6 +130,8 @@ def _parse_priority(raw: object) -> int:
     """Parse runtime skill priority from metadata with safe fallback."""
     if isinstance(raw, int):
         return raw
+    if isinstance(raw, float):
+        return int(raw)
     if isinstance(raw, str):
         try:
             return int(raw.strip())

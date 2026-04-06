@@ -1,3 +1,35 @@
+## Session 5.70 - April 6, 2026 (post-merge float priority regression fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused bug-fix pass
+
+### What Was Done
+- Fixed a subtle runtime-skill priority parsing regression in `backend/skills/runtime_loader.py`:
+  - `_parse_priority(...)` now accepts `float` inputs and coerces them with `int(raw)` before string parsing fallback.
+- Extended `tests/test_universal_navigator_runtime_skills.py` parser coverage with:
+  - `assert runtime_loader._parse_priority(1.0) == 1`
+  to lock float behavior and prevent recurrence.
+- Re-ran the combined navigator/runtime-skills test selection to ensure no regressions.
+
+### What's Working
+- Float priorities from metadata now map deterministically instead of defaulting to `0`.
+- Existing int/string/invalid/None parser behavior remains intact.
+- Targeted test suite remains fully green.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: if business rules require bounded priorities, clamp parsed values at parse time (e.g., 0-10) and document contract.
+
+### Decisions Made
+- Chose minimal backward-compatible fix (`float -> int`) to preserve existing parser semantics while addressing JSON numeric edge cases.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.69 - April 6, 2026 (PR #174 minor cleanup follow-up)
 
 **Agent:** GPT-5.3-Codex  
