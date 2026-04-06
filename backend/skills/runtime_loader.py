@@ -15,7 +15,7 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-APPROVED_STATUSES = {"approved_global", "approved_hub"}
+APPROVED_STATUSES = {"published_global", "published_hub"}
 _APPROVED_REVIEW_DECISIONS = {"approve_global", "approve_hub"}
 
 

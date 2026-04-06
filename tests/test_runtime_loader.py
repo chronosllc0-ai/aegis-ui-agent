@@ -96,7 +96,7 @@ def test_loader_returns_only_installed_enabled_and_approved_skills(tmp_path) -> 
 
         approved_v = await _seed_skill(
             skill_id="approved-skill",
-            status="approved_global",
+            status="published_global",
             publish_target="global",
             owner_user_id="admin-1",
             version=1,
@@ -107,7 +107,7 @@ def test_loader_returns_only_installed_enabled_and_approved_skills(tmp_path) -> 
 
         disabled_v = await _seed_skill(
             skill_id="disabled-skill",
-            status="approved_hub",
+            status="published_hub",
             publish_target="hub",
             owner_user_id="admin-1",
             version=1,
@@ -134,7 +134,7 @@ def test_loader_blocks_unapproved_skill_even_if_installed(tmp_path) -> None:
 
         pending_v = await _seed_skill(
             skill_id="pending-skill",
-            status="pending_review",
+            status="review",
             publish_target="hub",
             owner_user_id="admin-1",
             version=1,
