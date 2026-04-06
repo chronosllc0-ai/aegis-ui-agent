@@ -39,6 +39,7 @@ from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
 from backend.research.router import research_router
 from backend.skills.router import skills_router
+from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
 from backend.conversation_service import append_message, get_or_create_conversation
@@ -1193,6 +1194,18 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if not isinstance(candidate_settings, dict):
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
+                requested_skill_ids_raw = candidate_settings.get("enabled_skill_ids", [])
+                if requested_skill_ids_raw is None:
+                    requested_skill_ids_raw = []
+                if not isinstance(requested_skill_ids_raw, list) or any(not isinstance(item, str) for item in requested_skill_ids_raw):
+                    await websocket.send_json(
+                        {"type": "error", "data": {"message": "Invalid config payload: enabled_skill_ids must be an array of strings"}}
+                    )
+                    continue
+                requested_skill_ids = [item.strip() for item in requested_skill_ids_raw if item.strip()]
+                runtime_skill_context = await resolve_runtime_skills(runtime.user_uid, requested_skill_ids)
+                candidate_settings["enabled_skill_ids"] = requested_skill_ids
+                candidate_settings.update(runtime_skill_context.as_settings_fragment())
                 runtime.settings = candidate_settings
                 await _send_step(
                     websocket,

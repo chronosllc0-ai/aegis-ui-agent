@@ -49,6 +49,7 @@ export type AppSettings = {
   /** Automatically return from browser surface to chat when a task completes. */
   autoReturnToChat: boolean
   agentMode: AgentModeId
+  enabledSkillIds: string[]
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -78,6 +79,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   promptToSwitchOnBrowse: true,
   autoReturnToChat: true,
   agentMode: DEFAULT_AGENT_MODE,
+  enabledSkillIds: [],
 }
 
 // Providers that require a user-supplied BYOK key to work
@@ -156,6 +158,7 @@ export function useSettings() {
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
       agent_mode: settings.agentMode,
+      enabled_skill_ids: settings.enabledSkillIds,
     }),
     [settings],
   )

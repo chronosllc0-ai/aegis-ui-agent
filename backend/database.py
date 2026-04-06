@@ -11,7 +11,21 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func, inspect, text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    inspect,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -186,7 +200,9 @@ class Skill(Base):
     owner_type = Column(String(20), nullable=False, default="user")  # admin|user
     publish_target = Column(String(20), nullable=False, default="hub")  # global|hub
     status = Column(String(40), nullable=False, default="draft")
+    visibility = Column(String(20), nullable=False, default="private")
     risk_label = Column(String(20), nullable=False, default="medium")
+    created_by = Column(String(255), nullable=True)
     is_new = Column(Boolean, nullable=False, default=False)
     new_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -203,6 +219,7 @@ class SkillVersion(Base):
     version = Column(Integer, nullable=False)
     content_sha256 = Column(String(64), nullable=False, index=True)
     storage_path = Column(Text, nullable=False)
+    markdown_content = Column(Text, nullable=True)
     metadata_json = Column(Text, nullable=False)
     created_by = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -285,6 +302,39 @@ class SkillAuditEvent(Base):
     event_type = Column(String(40), nullable=False, default="transition")
     reason = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class RuntimeSkillInstallation(Base):
+    """Lightweight per-user skill installation record for runtime resolution."""
+
+    __tablename__ = "skill_installations"
+    __table_args__ = (UniqueConstraint("user_id", "skill_id", name="uq_skill_installations_user_skill"),)
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    installed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SkillToggle(Base):
+    """Per-user enable/disable state for an installed skill."""
+
+    __tablename__ = "skill_toggles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "skill_id", name="uq_skill_toggles_user_skill"),
+        ForeignKeyConstraint(
+            ["user_id", "skill_id"],
+            ["skill_installations.user_id", "skill_installations.skill_id"],
+            name="fk_skill_toggles_installation",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class ImpersonationSession(Base):
@@ -383,6 +433,7 @@ async def create_tables() -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns_sync)
+        await conn.run_sync(_ensure_skill_columns_sync)
         await conn.run_sync(_ensure_audit_log_created_at_sync)
         await conn.run_sync(_ensure_scheduled_tasks_table)
     _database_ready = True
@@ -410,6 +461,39 @@ def _ensure_user_columns_sync(sync_conn) -> None:
     add_column_if_missing("password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT")
     add_column_if_missing("role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
     add_column_if_missing("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
+
+
+def _ensure_skill_columns_sync(sync_conn) -> None:
+    """Apply lightweight schema fixes for runtime skill scaffolding tables."""
+    inspector = inspect(sync_conn)
+    table_names = set(inspector.get_table_names())
+
+    if "skills" in table_names:
+        skill_columns = {column["name"] for column in inspector.get_columns("skills")}
+
+        def add_skill_column_if_missing(column_name: str, ddl: str) -> None:
+            if column_name in skill_columns:
+                return
+            try:
+                sync_conn.execute(text(ddl))
+                skill_columns.add(column_name)
+            except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+                logger.warning("Skipping skills.%s sync; assuming column already exists or was created concurrently: %s", column_name, exc)
+                skill_columns.add(column_name)
+
+        add_skill_column_if_missing("visibility", "ALTER TABLE skills ADD COLUMN visibility VARCHAR(20) DEFAULT 'private'")
+        add_skill_column_if_missing("created_by", "ALTER TABLE skills ADD COLUMN created_by VARCHAR(255)")
+
+    if "skill_versions" in table_names:
+        version_columns = {column["name"] for column in inspector.get_columns("skill_versions")}
+        if "markdown_content" not in version_columns:
+            try:
+                sync_conn.execute(text("ALTER TABLE skill_versions ADD COLUMN markdown_content TEXT"))
+            except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+                logger.warning(
+                    "Skipping skill_versions.markdown_content sync; assuming column already exists or was created concurrently: %s",
+                    exc,
+                )
 
 
 def _ensure_audit_log_created_at_sync(sync_conn) -> None:

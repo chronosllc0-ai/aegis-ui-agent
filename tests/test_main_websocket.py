@@ -252,3 +252,74 @@ def test_websocket_stream_normalizes_steps_and_reasoning_deltas_incrementally() 
     assert step3["data"]["content"] == "[reasoning] part\ntwo"
     assert step4["data"]["content"] == "done"
     assert result["type"] == "result"
+
+
+def test_websocket_config_resolves_server_authoritative_skill_ids(monkeypatch) -> None:
+    """Config action should persist server-resolved skill IDs instead of trusting client list."""
+    class _CapturingOrchestrator(_StubOrchestrator):
+        def __init__(self) -> None:
+            super().__init__()
+            self.last_settings = None
+
+        async def execute_task(self, session_id: str, instruction: str, on_step=None, on_frame=None, on_workflow_step=None, **kwargs):
+            self.last_settings = kwargs.get("settings")
+            return await super().execute_task(
+                session_id=session_id,
+                instruction=instruction,
+                on_step=on_step,
+                on_frame=on_frame,
+                on_workflow_step=on_workflow_step,
+                **kwargs,
+            )
+
+    orchestrator = _CapturingOrchestrator()
+    main.orchestrator = orchestrator
+
+    class _ResolvedContext:
+        def as_settings_fragment(self) -> dict[str, object]:
+            return {
+                "resolved_skill_ids": ["skill-1"],
+                "skill_runtime_meta": {
+                    "version_hashes": {"skill-1": "hash-1"},
+                    "policy_refs": {"skill-1": "skill_status:published_hub"},
+                    "resolved_at": "2026-04-06T00:00:00+00:00",
+                },
+            }
+
+    async def _fake_resolve(user_uid: str | None, requested_ids: list[str]):
+        assert requested_ids == ["skill-1", "skill-2"]
+        return _ResolvedContext()
+
+    monkeypatch.setattr(main, "resolve_runtime_skills", _fake_resolve)
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "config", "settings": {"enabled_skill_ids": ["skill-1", "skill-2"]}})
+        ack = ws.receive_json()
+        ws.send_json({"action": "navigate", "instruction": "run with resolved skills"})
+        _ = ws.receive_json()
+        _ = ws.receive_json()
+        _ = ws.receive_json()
+        _ = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert ack["type"] == "step"
+    assert orchestrator.last_settings is not None
+    assert orchestrator.last_settings["enabled_skill_ids"] == ["skill-1", "skill-2"]
+    assert orchestrator.last_settings["resolved_skill_ids"] == ["skill-1"]
+
+
+def test_websocket_config_rejects_invalid_enabled_skill_ids_shape() -> None:
+    """Config action should return an error when enabled_skill_ids has invalid shape."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "config", "settings": {"enabled_skill_ids": "not-a-list"}})
+        error = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert error["type"] == "error"
+    assert "enabled_skill_ids must be an array of strings" in error["data"]["message"]
