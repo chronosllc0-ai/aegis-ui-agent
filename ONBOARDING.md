@@ -1,3 +1,35 @@
+## Session 5.67 - April 6, 2026 (runtime skills test breakage fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend compatibility pass
+
+### What Was Done
+- Fixed runtime skill model compatibility to unblock failing runtime-skill tests:
+  - added `priority` to `RuntimeSkill` with a safe default (`0`) so prompt assembly sorting can consistently consume runtime objects,
+  - added default `provenance` via `field(default_factory=dict)` to keep lightweight test construction valid without requiring explicit provenance payloads.
+- Updated runtime skill loading path to populate `RuntimeSkill.priority` from skill metadata (`priority`) with robust fallback to `0` on malformed/non-numeric values.
+- Re-ran the previously failing combined test command and confirmed all targeted suites are now green.
+
+### What's Working
+- `RuntimeSkill(...)` test fixtures that pass `priority` now instantiate correctly.
+- Runtime loader now forwards priority data into prompt assembly ordering logic.
+- Combined navigator parallel/system-prompt/runtime-skill test set passes.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Optional: add a focused unit test around metadata priority parsing fallback behavior (`priority=\"high\"` => `0`).
+2. Optional: document runtime-skill metadata schema fields (`priority`, `skill_md`) in developer docs.
+
+### Decisions Made
+- Kept fix minimal and backward-compatible by adding defaults rather than forcing provenance in all call sites/tests.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.66 - April 6, 2026 (dependency-aware parallel tool-call batches)
 
 **Agent:** GPT-5.3-Codex  
