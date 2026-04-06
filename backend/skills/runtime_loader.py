@@ -95,6 +95,11 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
             continue
 
         remaining_budget -= estimated_tokens
+        raw_priority = metadata.get("priority", 0)
+        try:
+            priority = int(raw_priority)
+        except (TypeError, ValueError):
+            priority = 0
         runtime.append(
             RuntimeSkill(
                 skill_id=skill.id,
