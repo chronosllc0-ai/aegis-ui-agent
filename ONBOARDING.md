@@ -1,3 +1,30 @@
+## Session 5.62 - April 6, 2026 (post-review nitpick cleanup: redundant assertion)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 tiny follow-up pass
+
+### What Was Done
+- Addressed PR review nitpick in `tests/test_main_websocket.py` by removing a redundant assertion:
+  - deleted `assert len(orchestrator.responses) == 1` immediately after `assert orchestrator.responses == ["Alpha"]`.
+- Kept the stronger semantic assertions (`responses == ["Alpha"]`, `execute_calls == 1`) so behavior validation remains intact without duplication.
+
+### What's Working
+- The websocket user-input regression test still validates a single resumed continuation and no extra task execution.
+
+### What's NOT Working Yet
+- No new issues introduced in this pass.
+
+### Next Steps
+1. Continue with normal review/merge flow.
+
+### Decisions Made
+- Prefer non-duplicative assertions when equality already encodes cardinality.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.61 - April 6, 2026 (ask_user_input websocket reply routing hardening)
 
 **Agent:** GPT-5.3-Codex  
