@@ -42,6 +42,18 @@ MAX_STEPS = 40
 MAX_BATCH_TOOL_CALLS = 3
 RESULT_CHAR_LIMIT = 12_000
 CODE_OUTPUT_LIMIT = 8_000
+PARALLEL_SAFE_TOOLS = frozenset(
+    {
+        "wait",
+        "web_search",
+        "extract_page",
+        "list_files",
+        "read_file",
+        "memory_search",
+        "memory_read",
+        "screenshot",
+    }
+)
 EXEC_ENV_BLOCKED_PREFIXES = (
     "API_",
     "AWS_",
@@ -1516,6 +1528,81 @@ def _normalize_single_tool_call(parsed: dict[str, Any]) -> dict[str, Any] | None
     return normalized
 
 
+def _dependency_batches(validated_calls: list[dict[str, Any]]) -> tuple[list[list[dict[str, Any]]] | None, bool]:
+    """Build dependency-aware execution batches.
+
+    Returns ``(batches, malformed)`` where malformed=True means the dependency
+    metadata could not be safely interpreted and caller should run sequentially.
+    """
+    # Defensive guard for direct/unit callers; current orchestrator only calls
+    # this helper when at least one validated call exists.
+    if not validated_calls:
+        return [], False
+
+    id_to_call: dict[str, dict[str, Any]] = {}
+    dependency_map: dict[str, set[str]] = {}
+
+    for item in validated_calls:
+        call = item["call"]
+        index = int(item["index"])
+        raw_id = call.get("id")
+        if raw_id is None:
+            call_id = f"idx:{index}"
+        elif isinstance(raw_id, str) and raw_id.strip():
+            call_id = raw_id.strip()
+        elif isinstance(raw_id, int):
+            call_id = str(raw_id)
+        else:
+            return None, True
+
+        if call_id in id_to_call:
+            return None, True
+
+        depends_on_raw = call.get("depends_on", [])
+        if depends_on_raw is None:
+            depends_on_raw = []
+        if not isinstance(depends_on_raw, list):
+            return None, True
+
+        depends_on: set[str] = set()
+        for dep in depends_on_raw:
+            if isinstance(dep, str) and dep.strip():
+                dep_id = dep.strip()
+            elif isinstance(dep, int):
+                dep_id = str(dep)
+            else:
+                return None, True
+            depends_on.add(dep_id)
+
+        if call_id in depends_on:
+            return None, True
+
+        id_to_call[call_id] = item
+        dependency_map[call_id] = depends_on
+    known_ids = set(id_to_call)
+    for deps in dependency_map.values():
+        if not deps.issubset(known_ids):
+            return None, True
+
+    # Topological level scheduling: each level can run in parallel.
+    remaining_deps = {call_id: set(deps) for call_id, deps in dependency_map.items()}
+    batches: list[list[dict[str, Any]]] = []
+    resolved: set[str] = set()
+
+    while len(resolved) < len(validated_calls):
+        ready = [call_id for call_id, deps in remaining_deps.items() if call_id not in resolved and not deps]
+        if not ready:
+            return None, True
+        ready_sorted = sorted(ready, key=lambda rid: int(id_to_call[rid]["index"]))
+        batches.append([id_to_call[rid] for rid in ready_sorted])
+        for rid in ready_sorted:
+            resolved.add(rid)
+        for deps in remaining_deps.values():
+            deps.difference_update(ready_sorted)
+
+    return batches, False
+
+
 async def run_universal_navigation(
     *,
     provider: BaseProvider,
@@ -1815,11 +1902,33 @@ async def run_universal_navigation(
                 "duration_ms": duration_ms,
             }
 
-        pending = [asyncio.create_task(_run_one(item["call"], int(item["index"]))) for item in validated_calls]
         executed_results: list[dict[str, Any]] = []
-        if pending:
+        fallback_to_sequential = False
+        dependency_batches: list[list[dict[str, Any]]] = []
+        if validated_calls:
+            for item in validated_calls:
+                raw_tool_name = item["call"].get("tool")
+                if not isinstance(raw_tool_name, str) or not raw_tool_name.strip():
+                    logger.warning("Batch tool call at index %s has invalid tool name %r; falling back to sequential.", item["index"], raw_tool_name)
+                    fallback_to_sequential = True
+                    break
+                if raw_tool_name.strip().lower() not in PARALLEL_SAFE_TOOLS:
+                    fallback_to_sequential = True
+                    break
+            if not fallback_to_sequential:
+                dependency_batches, malformed_dependencies = _dependency_batches(validated_calls)
+                if malformed_dependencies:
+                    fallback_to_sequential = True
+
+        if fallback_to_sequential:
+            dependency_batches = [[item] for item in validated_calls]
+
+        for batch in dependency_batches:
+            pending = [asyncio.create_task(_run_one(item["call"], int(item["index"]))) for item in batch]
+            if not pending:
+                continue
             raw_results = await asyncio.gather(*pending, return_exceptions=True)
-            for item, raw in zip(validated_calls, raw_results, strict=False):
+            for item, raw in zip(batch, raw_results, strict=False):
                 if isinstance(raw, Exception):
                     executed_results.append(
                         {
