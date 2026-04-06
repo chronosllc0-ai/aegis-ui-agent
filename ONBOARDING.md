@@ -1,3 +1,50 @@
+## Session 5.74 - April 6, 2026 (runtime tool gating now enforces skill policies)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused policy-gating + regression-test pass
+
+### What Was Done
+- Added runtime skill tool-policy support in `backend/skills/runtime.py`:
+  - introduced optional `skill_allow_tools` and `skill_deny_tools` on `RuntimeSkillContext`,
+  - parse policy keys from skill-version `metadata_json`,
+  - merged policies across resolved skills with **allowlist intersection** and **denylist union**,
+  - enforced deny-overrides-allow precedence by removing denied tools from effective allow set,
+  - persisted effective policy keys into websocket runtime settings via `as_settings_fragment()`.
+- Updated runtime tool manifest gating in `universal_navigator.py`:
+  - `_available_tools(settings, is_subagent)` now applies skill-policy constraints in addition to existing disabled tools, mode blocking, integration gates, and subagent allowlist.
+- Improved tool unavailability clarity in `universal_navigator.py`:
+  - added explicit reason attribution for mode blocks vs settings-disabled vs skill-policy blocks,
+  - added `_tool_unavailable_reason_with_meta(...)` helper so denial source can be surfaced safely.
+- Added skill-policy observability in batch workflow events:
+  - when a tool is denied by skill policy, `batch_tool_result` now includes minimal non-secret `denial_debug` metadata (`policy_source`, `policy_rule`).
+- Expanded test coverage:
+  - runtime skill policy merge behavior (allow intersection + deny union),
+  - skill deny blocking even when mode allows,
+  - allowlist narrowing,
+  - deny-overrides-allow precedence,
+  - no-skill-policy behavior parity,
+  - workflow denial debug metadata emission.
+
+### What's Working
+- Effective tool availability now enforces: base tool set ∩ mode policy ∩ user/tool settings ∩ skill policy (with deny precedence).
+- Tool denial reasons are now clearer and source-specific.
+- Existing mode gating and parallel batch behavior remain green under regression tests.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Consider extending websocket config validation to hard-validate `skill_allow_tools`/`skill_deny_tools` shapes when sent from trusted internal paths.
+2. Optionally expose aggregated skill-policy diagnostics in admin telemetry for easier support triage.
+
+### Decisions Made
+- Kept skill policy keys optional and fail-open when absent, preserving behavior for no-skill sessions.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.73 - April 6, 2026 (PR #181 review fixes: runtime skill resolver hardening)
 
 **Agent:** GPT-5.3-Codex  

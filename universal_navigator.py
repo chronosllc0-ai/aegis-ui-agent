@@ -427,11 +427,38 @@ def _connected_integrations(settings: dict[str, Any]) -> set[str]:
     return connected
 
 
+def _normalize_tool_name_list(raw_values: Any) -> set[str]:
+    """Normalize a raw array-like tool name payload into lowercase tool ids."""
+    if not isinstance(raw_values, list):
+        return set()
+    normalized: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str):
+            continue
+        tool = raw.strip().lower()
+        if tool:
+            normalized.add(tool)
+    return normalized
+
+
+def _resolve_skill_tool_policy(settings: dict[str, Any]) -> tuple[set[str] | None, set[str]]:
+    """Resolve effective runtime skill allow/deny policy from settings.
+
+    Allow list is treated as an intersection when provided by one or more skills.
+    Deny list is always treated as a union, and deny always wins.
+    """
+    allow_set = _normalize_tool_name_list(settings.get("skill_allow_tools"))
+    deny_set = _normalize_tool_name_list(settings.get("skill_deny_tools"))
+    return (allow_set if allow_set else None), deny_set
+
+
 def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dict[str, Any]]:
     """Resolve the current tool manifest after permissions and integration gating."""
     disabled_tools = {str(item) for item in settings.get("disabled_tools", []) or []}
     agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
-    disabled_tools.update(blocked_tools_for_mode(agent_mode))
+    mode_blocked_tools = {str(item) for item in blocked_tools_for_mode(agent_mode)}
+    disabled_tools.update(mode_blocked_tools)
+    skill_allow_tools, skill_deny_tools = _resolve_skill_tool_policy(settings)
     connected_integrations = _connected_integrations(settings)
     subagent_allowlist: set[str] | None = None
     if is_subagent:
@@ -446,6 +473,10 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
             available.append(tool)
             continue
         if name in disabled_tools:
+            continue
+        if skill_allow_tools is not None and name not in skill_allow_tools:
+            continue
+        if name in skill_deny_tools:
             continue
         required_integration = tool.get("requires_integration")
         if required_integration and required_integration not in connected_integrations:
@@ -722,6 +753,9 @@ class UniversalToolExecutor:
         self._on_message_subagent = on_message_subagent
         self._is_subagent = is_subagent
         self._disabled_tools = {str(item) for item in self._settings.get("disabled_tools", []) or []}
+        self._agent_mode = normalize_agent_mode(self._settings.get("agent_mode", ""))
+        self._mode_blocked_tools = {str(item) for item in blocked_tools_for_mode(self._agent_mode)}
+        self._skill_allow_tools, self._skill_deny_tools = _resolve_skill_tool_policy(self._settings)
         self._tool_permissions: dict[str, ToolPermission] = {
             str(key): str(value) for key, value in (self._settings.get("tool_permissions", {}) or {}).items()
         }
@@ -977,22 +1011,45 @@ class UniversalToolExecutor:
 
     def _tool_unavailable_reason(self, tool: str) -> str | None:
         """Explain why a tool is not available in the current session."""
+        reason, _ = self._tool_unavailable_reason_with_meta(tool)
+        return reason
+
+    def _tool_unavailable_reason_with_meta(self, tool: str) -> tuple[str | None, dict[str, str] | None]:
+        """Explain why a tool is not available in the current session with safe metadata."""
         if not tool:
-            return "Tool name is required."
+            return "Tool name is required.", {"policy_source": "validation"}
         metadata = TOOL_INDEX.get(tool)
         if metadata is None:
-            return None
+            return None, None
         if self._is_subagent:
             from subagent_runtime import SUBAGENT_ALLOWED_TOOLS
 
             if tool not in SUBAGENT_ALLOWED_TOOLS:
-                return f"Tool '{tool}' is not available to sub-agents."
+                return f"Tool '{tool}' is not available to sub-agents.", {"policy_source": "subagent"}
+        if tool in self._mode_blocked_tools:
+            return (
+                f"Tool '{tool}' is unavailable in '{self._agent_mode}' mode.",
+                {"policy_source": "mode", "agent_mode": self._agent_mode},
+            )
+        if self._skill_allow_tools is not None and tool not in self._skill_allow_tools:
+            return (
+                f"Tool '{tool}' is blocked by active skill policy allowlist.",
+                {"policy_source": "skill_policy", "policy_rule": "allow_intersection"},
+            )
+        if tool in self._skill_deny_tools:
+            return (
+                f"Tool '{tool}' is blocked by active skill policy denylist.",
+                {"policy_source": "skill_policy", "policy_rule": "deny_union"},
+            )
         if tool in self._disabled_tools:
-            return f"Tool '{tool}' is currently disabled in Settings → Tools."
+            return f"Tool '{tool}' is currently disabled in Settings → Tools.", {"policy_source": "settings"}
         required_integration = metadata.get("requires_integration")
         if required_integration and required_integration not in self._connected_integrations:
-            return f"Tool '{tool}' requires a connected GitHub PAT in Settings → Connections."
-        return None
+            return (
+                f"Tool '{tool}' requires a connected GitHub PAT in Settings → Connections.",
+                {"policy_source": "integration", "required_integration": str(required_integration)},
+            )
+        return None, None
 
     async def _confirm_if_needed(self, tool_call: dict[str, Any]) -> str | None:
         """Pause for approval when the current tool requires it."""
@@ -1841,8 +1898,11 @@ async def run_universal_navigation(
                     }
                 )
                 continue
-            unavailable_reason = tool_executor._tool_unavailable_reason(tool_name)
+            unavailable_reason, unavailable_meta = tool_executor._tool_unavailable_reason_with_meta(tool_name)
             if unavailable_reason:
+                denial_meta: dict[str, Any] = {}
+                if isinstance(unavailable_meta, dict):
+                    denial_meta = dict(unavailable_meta)
                 immediate_results.append(
                     {
                         "index": index,
@@ -1852,6 +1912,7 @@ async def run_universal_navigation(
                         "screenshot_bytes": None,
                         "error": unavailable_reason,
                         "duration_ms": 0,
+                        "debug": denial_meta,
                     }
                 )
                 continue
@@ -1955,6 +2016,12 @@ async def run_universal_navigation(
                 "status": status,
                 "duration_ms": result["duration_ms"],
             }
+            debug = result.get("debug")
+            if isinstance(debug, dict) and debug.get("policy_source") == "skill_policy":
+                batch_result_event["denial_debug"] = {
+                    "policy_source": "skill_policy",
+                    "policy_rule": str(debug.get("policy_rule", "")),
+                }
             logger.info("batch_tool_result %s", json.dumps(batch_result_event, ensure_ascii=False))
             if on_workflow_step:
                 await on_workflow_step(batch_result_event)

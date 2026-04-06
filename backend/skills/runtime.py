@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -24,12 +25,14 @@ class RuntimeSkillContext:
     resolved_skill_ids: list[str] = field(default_factory=list)
     version_hashes: dict[str, str] = field(default_factory=dict)
     policy_refs: dict[str, str] = field(default_factory=dict)
+    skill_allow_tools: list[str] | None = None
+    skill_deny_tools: list[str] = field(default_factory=list)
     requested_skill_ids: list[str] = field(default_factory=list)
     resolved_at: datetime | None = None
 
     def as_settings_fragment(self) -> dict[str, Any]:
         """Return a cache-safe settings fragment persisted in runtime.settings."""
-        return {
+        fragment = {
             "resolved_skill_ids": list(self.resolved_skill_ids),
             "skill_runtime_meta": {
                 "version_hashes": dict(self.version_hashes),
@@ -37,6 +40,36 @@ class RuntimeSkillContext:
                 "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
             },
         }
+        if self.skill_allow_tools is not None:
+            fragment["skill_allow_tools"] = list(self.skill_allow_tools)
+        if self.skill_deny_tools:
+            fragment["skill_deny_tools"] = list(self.skill_deny_tools)
+        return fragment
+
+
+def _normalize_tool_names(raw_values: Any) -> set[str]:
+    if not isinstance(raw_values, list):
+        return set()
+    normalized: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str):
+            continue
+        tool = raw.strip().lower()
+        if tool:
+            normalized.add(tool)
+    return normalized
+
+
+def _extract_policy(metadata_json: str) -> tuple[set[str], set[str]]:
+    try:
+        metadata = json.loads(metadata_json or "{}")
+    except json.JSONDecodeError:
+        return set(), set()
+    if not isinstance(metadata, dict):
+        return set(), set()
+    allow = _normalize_tool_names(metadata.get("skill_allow_tools"))
+    deny = _normalize_tool_names(metadata.get("skill_deny_tools"))
+    return allow, deny
 
 
 async def resolve_runtime_skills(user_uid: str | None, requested_ids: list[str]) -> RuntimeSkillContext:
@@ -71,7 +104,7 @@ async def _resolve_with_session(*, session, user_uid: str, requested_ids: list[s
     )
 
     rows = await session.execute(
-        select(Skill.id, Skill.status, SkillVersion.content_sha256)
+        select(Skill.id, Skill.status, SkillVersion.content_sha256, SkillVersion.metadata_json)
         .join(
             RuntimeSkillInstallation,
             and_(RuntimeSkillInstallation.skill_id == Skill.id, RuntimeSkillInstallation.user_id == user_uid),
@@ -95,18 +128,35 @@ async def _resolve_with_session(*, session, user_uid: str, requested_ids: list[s
     db_rows = rows.all()
     allowed: dict[str, str] = {}
     statuses_by_id: dict[str, str] = {}
-    for skill_id, status, content_sha256 in db_rows:
+    policy_by_id: dict[str, tuple[set[str], set[str]]] = {}
+    for skill_id, status, content_sha256, metadata_json in db_rows:
         if status not in _RUNTIME_ALLOWED_STATUSES:
             continue
         skill_key = str(skill_id)
         allowed[skill_key] = str(content_sha256 or "")
         statuses_by_id[skill_key] = str(status)
+        policy_by_id[skill_key] = _extract_policy(str(metadata_json or "{}"))
 
     resolved_ids = [skill_id for skill_id in requested_ids if skill_id in allowed]
+    effective_allow: set[str] | None = None
+    effective_deny: set[str] = set()
+    for skill_id in resolved_ids:
+        allow_tools, deny_tools = policy_by_id.get(skill_id, (set(), set()))
+        effective_deny.update(deny_tools)
+        if allow_tools:
+            if effective_allow is None:
+                effective_allow = set(allow_tools)
+            else:
+                effective_allow.intersection_update(allow_tools)
+    if effective_allow is not None:
+        effective_allow.difference_update(effective_deny)
+
     return RuntimeSkillContext(
         requested_skill_ids=requested_ids,
         resolved_skill_ids=resolved_ids,
         version_hashes={skill_id: allowed.get(skill_id, "") for skill_id in resolved_ids},
         policy_refs={skill_id: f"skill_status:{statuses_by_id.get(skill_id, 'unknown')}" for skill_id in resolved_ids},
+        skill_allow_tools=sorted(effective_allow) if effective_allow is not None else None,
+        skill_deny_tools=sorted(effective_deny),
         resolved_at=datetime.now(timezone.utc),
     )
