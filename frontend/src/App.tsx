@@ -1182,11 +1182,6 @@ function App() {
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
                 reasoningMap={reasoningMap}
-                enableReasoning={settings.enableReasoning}
-                onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}
-                reasoningEffort={settings.reasoningEffort}
-                onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
-                currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
                 provider={settings.provider}
                 model={settings.model}
                 agentMode={settings.agentMode}

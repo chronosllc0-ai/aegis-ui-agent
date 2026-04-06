@@ -55,11 +55,6 @@ export interface ChatPanelProps {
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
   reasoningMap?: Record<string, string>
-  enableReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'medium' | 'high' | 'extended' | 'adaptive'
-  onChangeReasoningEffort?: (effort: 'medium' | 'high' | 'extended' | 'adaptive') => void
-  currentModelSupportsReasoning?: boolean
   provider: string
   model: string
   agentMode: AgentModeId
@@ -1189,7 +1184,7 @@ function InputBarCursor({
           </label>
         </div>
 
-        <SuggestionChips onSelectSuggestion={(templateId) => onSelectSuggestion(templateId)} onOpenGallery={onOpenGallery} />
+        <SuggestionChips onSelectSuggestion={onSelectSuggestion} onOpenGallery={onOpenGallery} />
 
         <div className='flex items-center gap-1.5'>
         {/* + button */}

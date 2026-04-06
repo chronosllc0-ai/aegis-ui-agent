@@ -3137,6 +3137,29 @@
 - Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
 - Ran `npm --prefix frontend run build`; passed.
 
+## 2026-04-06 — PR nitpick cleanup (stale ChatPanel reasoning props + callback passthrough)
+
+### What changed
+- Removed stale reasoning-related prop passing from `frontend/src/App.tsx` into `ChatPanel`:
+  - `enableReasoning`
+  - `onToggleReasoning`
+  - `reasoningEffort`
+  - `onChangeReasoningEffort`
+  - `currentModelSupportsReasoning`
+- Removed the matching stale prop declarations from `frontend/src/components/ChatPanel.tsx` `ChatPanelProps` interface.
+- Simplified `SuggestionChips` callback wiring from:
+  - `onSelectSuggestion={(templateId) => onSelectSuggestion(templateId)}`
+  to:
+  - `onSelectSuggestion={onSelectSuggestion}`
+
+### Why
+- These props were no longer consumed after the composer UI swap, so keeping them created dead API surface and misleading type contracts.
+- Callback passthrough simplification removes unnecessary wrapper noise.
+
+### Validation
+- Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
+- Ran `npm --prefix frontend run build`; passed.
+
 ## 2026-04-06 — PR review follow-up (state cleanup + optimistic dedup + test global cleanup)
 
 ### What changed
