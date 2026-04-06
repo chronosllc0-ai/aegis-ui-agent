@@ -1,3 +1,43 @@
+## Session 5.64 - April 6, 2026 (Telegram /mode callback edge-case review fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-follow-up pass
+
+### What Was Done
+- Addressed PR #172 review feedback for Telegram mode callback edge cases in `main.py`:
+  - callback mode events are now always consumed early (no fallthrough into generic message logging path),
+  - when callback is received without `owner_user_id`, bot now sends explicit warning feedback:
+    - `⚠️ Mode switching is only available for the owner session.`,
+  - when owner exists but runtime session is missing, bot now sends:
+    - `⚠️ No active session. Start a session first.`,
+  - normalized callback confirmation/warning `chat_id` to `str(...)` for consistency with other Telegram send paths.
+- Updated callback success test expectation to string chat id (`"777"`).
+- Added regression tests for both new edge cases:
+  - callback mode action with missing owner config returns warning and is consumed,
+  - callback mode action with owner but no runtime returns warning and is consumed.
+
+### What's Working
+- Telegram mode callback UX now gives deterministic user feedback in all reviewed edge cases.
+- Callback mode actions no longer leak into the generic webhook message pipeline when owner/runtime context is missing.
+- Targeted Telegram mode + integration tests pass.
+
+### What's NOT Working Yet
+- No new blockers discovered in this review pass.
+- Existing FastAPI startup/shutdown deprecation warnings persist in tests (pre-existing).
+
+### Next Steps
+1. Optional: include callback `answerCallbackQuery` text override for these warnings so feedback appears both as toast and chat message.
+2. Optional: add explicit audit log event when mode callback is rejected due to owner/runtime mismatch.
+
+### Decisions Made
+- Chose explicit in-chat warning replies for rejected callback mode actions to minimize user confusion.
+- Kept callback consumption behavior strict (`return {"ok": True}`) once a mode callback is detected.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.63 - April 6, 2026 (Telegram /mode inline selection UX)
 
 **Agent:** GPT-5.3-Codex  

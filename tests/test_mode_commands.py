@@ -107,10 +107,95 @@ def test_mode_callback_selection_updates_runtime_mode() -> None:
         integration.execute_tool.assert_any_await("telegram_webhook_update", {"update": update_payload})
         integration.execute_tool.assert_any_await(
             "telegram_send_message",
-            {"chat_id": 777, "text": "✅ Mode switched to *Planner*"},
+            {"chat_id": "777", "text": "✅ Mode switched to *Planner*"},
         )
     finally:
         main_mod._user_runtimes.pop(user_id, None)
+        main_mod.telegram_registry._integrations.pop(integration_id, None)
+        main_mod.telegram_registry._configs.pop(integration_id, None)
+
+
+def test_mode_callback_without_owner_is_consumed_with_feedback() -> None:
+    """Mode callback without owner mapping should be consumed with warning feedback."""
+    main_mod = import_module("main")
+    integration_id = "tg-mode-no-owner"
+    update_payload = {
+        "update_id": 101,
+        "callback_query": {
+            "id": "cb-no-owner",
+            "data": "mode:code",
+            "message": {"chat": {"id": 888}, "message_id": 2},
+        },
+    }
+
+    try:
+        from fastapi.testclient import TestClient
+
+        main_mod.telegram_registry._integrations[integration_id] = object()
+        main_mod.telegram_registry._configs[integration_id] = {"webhook_secret": ""}
+        with patch.object(main_mod.telegram_registry, "get_telegram") as mock_get_integration:
+            integration = MagicMock()
+            integration.validate_webhook_secret.return_value = True
+            integration.execute_tool = AsyncMock(return_value={"ok": True})
+            mock_get_integration.return_value = integration
+            with TestClient(main_mod.app) as test_client:
+                response = test_client.post(
+                    f"/api/integrations/telegram/webhook/{integration_id}",
+                    json=update_payload,
+                )
+
+        assert response.status_code == 200
+        assert integration.execute_tool.await_count == 2
+        integration.execute_tool.assert_any_await("telegram_webhook_update", {"update": update_payload})
+        integration.execute_tool.assert_any_await(
+            "telegram_send_message",
+            {
+                "chat_id": "888",
+                "text": "⚠️ Mode switching is only available for the owner session.",
+            },
+        )
+    finally:
+        main_mod.telegram_registry._integrations.pop(integration_id, None)
+        main_mod.telegram_registry._configs.pop(integration_id, None)
+
+
+def test_mode_callback_without_runtime_is_consumed_with_feedback() -> None:
+    """Mode callback with owner but no active runtime should return warning feedback."""
+    main_mod = import_module("main")
+    integration_id = "tg-mode-no-runtime"
+    owner_user_id = "owner-without-runtime"
+    update_payload = {
+        "update_id": 102,
+        "callback_query": {
+            "id": "cb-no-runtime",
+            "data": "mode:architect",
+            "message": {"chat": {"id": 889}, "message_id": 3},
+        },
+    }
+
+    try:
+        from fastapi.testclient import TestClient
+
+        main_mod.telegram_registry._integrations[integration_id] = object()
+        main_mod.telegram_registry._configs[integration_id] = {"webhook_secret": "", "owner_user_id": owner_user_id}
+        with patch.object(main_mod.telegram_registry, "get_telegram") as mock_get_integration:
+            integration = MagicMock()
+            integration.validate_webhook_secret.return_value = True
+            integration.execute_tool = AsyncMock(return_value={"ok": True})
+            mock_get_integration.return_value = integration
+            with TestClient(main_mod.app) as test_client:
+                response = test_client.post(
+                    f"/api/integrations/telegram/webhook/{integration_id}",
+                    json=update_payload,
+                )
+
+        assert response.status_code == 200
+        integration.execute_tool.assert_any_await("telegram_webhook_update", {"update": update_payload})
+        integration.execute_tool.assert_any_await(
+            "telegram_send_message",
+            {"chat_id": "889", "text": "⚠️ No active session. Start a session first."},
+        )
+    finally:
         main_mod.telegram_registry._integrations.pop(integration_id, None)
         main_mod.telegram_registry._configs.pop(integration_id, None)
 

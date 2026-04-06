@@ -1378,18 +1378,34 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
     callback_mode = _parse_telegram_mode_callback(update)
-    if callback_mode and owner_user_id:
-        runtime = _user_runtimes.get(owner_user_id)
-        if runtime:
-            runtime.settings["agent_mode"] = callback_mode
-            mode_label = MODE_LABELS.get(callback_mode, callback_mode.title())
-            callback_message = update.get("callback_query", {}).get("message", {})
-            callback_chat_id = (callback_message.get("chat") or {}).get("id")
+    if callback_mode:
+        callback_message = update.get("callback_query", {}).get("message", {})
+        callback_chat_id = (callback_message.get("chat") or {}).get("id")
+        if not owner_user_id:
             if callback_chat_id is not None:
                 await integration.execute_tool(
                     "telegram_send_message",
-                    {"chat_id": callback_chat_id, "text": f"✅ Mode switched to *{mode_label}*"},
+                    {
+                        "chat_id": str(callback_chat_id),
+                        "text": "⚠️ Mode switching is only available for the owner session.",
+                    },
                 )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if callback_chat_id is not None:
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {"chat_id": str(callback_chat_id), "text": "⚠️ No active session. Start a session first."},
+                )
+            return {"ok": True}
+        runtime.settings["agent_mode"] = callback_mode
+        mode_label = MODE_LABELS.get(callback_mode, callback_mode.title())
+        if callback_chat_id is not None:
+            await integration.execute_tool(
+                "telegram_send_message",
+                {"chat_id": str(callback_chat_id), "text": f"✅ Mode switched to *{mode_label}*"},
+            )
         return {"ok": True}
     chat_id, text_content, platform_message_id = _extract_telegram_message(update)
 
