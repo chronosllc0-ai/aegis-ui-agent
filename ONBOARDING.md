@@ -3635,3 +3635,43 @@
 ### Validation
 - Backend tests pass for updated workflow and queue semantics.
 - Frontend status helper tests pass with the unknown-status safety case.
+
+## 2026-04-06 — VirusTotal scan pipeline hardening + risk-tag policy enforcement
+
+### What changed
+- Updated `backend/skills/service.py` VirusTotal integration to better align with skill-review security policy:
+  - added bounded retry + exponential backoff helper for transient VT/API failures,
+  - normalized VT metadata payload to store `positives`, `suspicious`, `id`, `sha256`, and stats,
+  - mapped scanner risk labels to required tags: `clean`, `suspicious`, `high-risk`, `unknown`.
+- Added queued VT scan-job creation at submission time (`submit_skill`) by recording a `SkillScanResult` with `verdict=queued` and the submission hash.
+- Added explicit scan failure state for review queue clarity:
+  - VT error now transitions submission/skill state to `scan_failed`.
+- Updated policy scanner labels to the same risk-tag model (`clean`/`suspicious`/`high-risk`).
+- Updated risk aggregation during scan completion so skill-level risk is now derived from required tags.
+- Enforced publishing policy guard:
+  - approving `suspicious` or `high-risk` submissions now requires explicit admin override reason (`notes`).
+- Updated admin review queue status filter in `backend/skills/router.py` to include `scan_failed`.
+- Added new VT retry configuration env vars in `config.py` and `.env.example`:
+  - `VIRUSTOTAL_REQUEST_MAX_RETRIES`
+  - `VIRUSTOTAL_RETRY_BASE_DELAY_SECONDS`
+
+### Tests added/updated
+- Expanded `tests/test_skills_service.py` with:
+  - clear failed-state queue coverage when VT scan errors,
+  - override-reason enforcement for suspicious/high-risk publication,
+  - mocked backoff/retry unit coverage for transient VT request failures.
+- Updated existing policy scanner expectation to new `high-risk` label taxonomy.
+
+### What's working
+- Submission now creates an explicit VT scan job record.
+- Scan failures are surfaced with a clear `scan_failed` state in admin queue APIs.
+- VT transient failures now have retry/backoff behavior.
+- Risk tags now match required vocabulary and are enforced in publish decisions.
+
+### What's not done / next
+- Frontend admin screen still needs dedicated rendering for VT summary cards and explicit deep-link display in UI components.
+- Optional enhancement: persist a separate explicit `override=true` marker in reviews/audit payload (currently inferred from decision + notes).
+
+### Decisions / blockers
+- Decision: keep verdict vocabulary (`pass`/`warn`/`fail`/`error`) for runtime gating compatibility while moving risk labels to required policy tags.
+- No blocker encountered.
