@@ -432,7 +432,12 @@ class TelegramIntegration(BaseIntegration):
 
         for chunk in chunks[1:]:
             normalized_chunk, _ = normalize_for_channel(chunk, channel="telegram", parse_mode=parse_mode)
-            await self.client.edit_message_text(chat_id=chat_id, message_id=message_id, text=normalized_chunk)
+            await self.client.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=normalized_chunk,
+                parse_mode=normalized_parse_mode,
+            )
             if delay_between_chunks > 0:
                 await asyncio.sleep(delay_between_chunks)
 

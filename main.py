@@ -711,7 +711,7 @@ async def _send_step(
     """Send step payload to frontend."""
     normalized_step = dict(step)
     if "content" in normalized_step:
-        normalized_content, _ = normalize_for_channel(str(normalized_step.get("content") or ""), channel="web")
+        normalized_content, _ = normalize_for_channel(str(normalized_step["content"] or ""), channel="web")
         normalized_step["content"] = normalized_content
     await websocket.send_json({"type": "step", "data": normalized_step})
     if runtime and session_id:

@@ -308,17 +308,20 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       if (payload.type === 'reasoning_start') {
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
-          reasoningNormalizersRef.current[stepId] = new IncrementalTextNormalizer()
-          setReasoningMap((prev) => ({ ...prev, [stepId]: '' }))
+          if (!reasoningNormalizersRef.current[stepId]) {
+            reasoningNormalizersRef.current[stepId] = new IncrementalTextNormalizer()
+          }
+          setReasoningMap((prev) => ({ ...prev, [stepId]: prev[stepId] ?? '' }))
           const nowIso = new Date().toISOString()
           const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
           const nextEntry: PersistedThinkingMessage = {
             id: `thinking-${taskId}-${stepId}`,
             role: 'thinking',
             taskId,
             stepId,
             status: 'streaming',
-            text: '',
+            text: existing?.text ?? '',
             updatedAt: nowIso,
           }
           const next = [

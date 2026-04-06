@@ -82,7 +82,16 @@ def _escape_for_telegram(text: str, parse_mode: str | None) -> tuple[str, str | 
             if segment == "```" or is_code:
                 escaped_parts.append(segment)
             else:
-                escaped_parts.append(segment.replace("_", r"\_").replace("*", r"\*").replace("`", r"\`"))
+                escaped_parts.append(
+                    segment
+                    .replace("_", r"\_")
+                    .replace("*", r"\*")
+                    .replace("`", r"\`")
+                    .replace("[", r"\[")
+                    .replace("]", r"\]")
+                    .replace("(", r"\(")
+                    .replace(")", r"\)")
+                )
         escaped = "".join(escaped_parts)
         return escaped, "Markdown"
     return text, mode
@@ -98,10 +107,10 @@ def _escape_for_discord(text: str) -> str:
         if segment == "```" or is_code:
             escaped_parts.append(segment)
         else:
-            escaped_parts.append(_DISCORD_MARKDOWN_SPECIALS_PATTERN.sub(r"\\\1", segment))
-    safe = "".join(escaped_parts)
-    safe = safe.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
-    return safe
+            escaped = _DISCORD_MARKDOWN_SPECIALS_PATTERN.sub(r"\\\1", segment)
+            escaped = escaped.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+            escaped_parts.append(escaped)
+    return "".join(escaped_parts)
 
 
 def normalize_for_channel(

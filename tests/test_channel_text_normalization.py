@@ -31,3 +31,10 @@ def test_incremental_streaming_normalizer_supports_partial_chunks_and_final_reco
     assert c2 == "Line 1\nLine 2\n```py"
     assert c3 == "Line 1\nLine 2\n```py\nprint('ok')\n```"
     assert final_text == c3
+
+
+def test_discord_mention_hardening_skips_code_fences() -> None:
+    raw = "Heads up @everyone\n```python\nprint('@everyone')\n```"
+    discord_text, _ = normalize_for_channel(raw, channel="discord")
+
+    assert discord_text == "Heads up @\u200beveryone\n```python\nprint('@everyone')\n```"

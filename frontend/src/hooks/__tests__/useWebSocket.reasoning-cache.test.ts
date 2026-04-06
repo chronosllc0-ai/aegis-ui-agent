@@ -77,4 +77,34 @@ describe('useWebSocket reasoning cache persistence', () => {
     const completed = JSON.parse(localStorage.getItem(key) ?? '[]')
     expect(completed[0].status).toBe('completed')
   })
+
+  it('keeps early reasoning deltas when reasoning_start arrives late', () => {
+    const { result } = renderHook(() => useWebSocket())
+
+    act(() => {
+      vi.runOnlyPendingTimers()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeTruthy()
+
+    act(() => {
+      result.current.send({ action: 'navigate', instruction: 'Investigate race condition' })
+    })
+
+    const taskId = result.current.activeTaskIdRef.current
+    const key = `aegis.reasoning.${taskId}`
+
+    act(() => {
+      ws.emit({ type: 'reasoning_delta', data: { step_id: 'step-race', delta: 'early ' } })
+      ws.emit({ type: 'reasoning_start', data: { step_id: 'step-race' } })
+      ws.emit({ type: 'reasoning_delta', data: { step_id: 'step-race', delta: 'late' } })
+    })
+
+    const persisted = JSON.parse(localStorage.getItem(key) ?? '[]')
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0].stepId).toBe('step-race')
+    expect(persisted[0].text).toBe('early late')
+    expect(result.current.reasoningMap['step-race']).toBe('early late')
+  })
 })

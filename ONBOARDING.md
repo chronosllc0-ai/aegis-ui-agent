@@ -3715,3 +3715,37 @@
 ### Decisions / blockers
 - Decision: preserve code-fence segments during normalization and during Telegram/Discord markdown escaping to avoid breaking fenced output.
 - No blocker encountered.
+
+## 2026-04-06 — PR #180 review follow-up fixes
+
+### What changed
+- Addressed Discord mention hardening edge case in `backend/integrations/text_normalization.py`:
+  - mention escaping (`@everyone`, `@here`) now applies only to non-code segments, preserving fenced code content verbatim.
+- Expanded Telegram legacy Markdown escaping in `backend/integrations/text_normalization.py`:
+  - now also escapes `[`, `]`, `(`, `)` in legacy Markdown mode.
+- Fixed Telegram progressive edit parse mode consistency in `integrations/telegram.py`:
+  - stream edits now pass through the same normalized parse mode used for the first chunk.
+- Hardened frontend reasoning stream race behavior in `frontend/src/hooks/useWebSocket.ts`:
+  - if `reasoning_delta` arrives before `reasoning_start`, existing normalizer/text are preserved instead of reset.
+- Minor cleanup in `main.py`:
+  - removed redundant `.get()` usage after key existence check in `_send_step`.
+
+### Tests added/updated
+- `tests/test_channel_text_normalization.py`:
+  - added coverage to ensure Discord mention hardening does not mutate mentions inside fenced code.
+- `tests/test_telegram.py`:
+  - strengthened `stream_draft_then_send` expectations to assert parse mode is preserved across edits.
+- `frontend/src/hooks/__tests__/useWebSocket.reasoning-cache.test.ts`:
+  - added race-condition coverage for delta-before-start ordering.
+
+### What's working
+- Discord code examples containing `@everyone` are no longer modified while normal prose remains hardened.
+- Telegram streamed draft edits preserve markdown parse mode across all chunks.
+- Reasoning stream text no longer drops early deltas when websocket events arrive out-of-order.
+
+### What's not done / next
+- Optional: add similar out-of-order stream tests for any other chunked websocket payload types if introduced later.
+
+### Decisions / blockers
+- Decision: treat `reasoning_start` as idempotent initialization if stream state already exists.
+- No blocker encountered.
