@@ -24,7 +24,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings as _app_settings
-from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY
+from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUCTION_KEY_PREFIX
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
 from backend.providers.base import BaseProvider, ChatMessage
@@ -600,7 +600,7 @@ async def _build_system_prompt(
                 "Do not invent repository paths or branch names. Use returned tool results.",
             ]
         )
-    rules.append(f"Active system mode: {agent_mode}. {MODE_SYSTEM_HINTS.get(agent_mode, '')}")
+    rules.append(f"Active system mode: {agent_mode}.")
     rules.extend(
         [
             "Identity: You are Aegis, an AI agent built by Chronos AI.",
@@ -635,9 +635,35 @@ async def _build_system_prompt(
     if not global_instruction:
         global_instruction = _app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION.strip()
 
+    # ── Per-mode system instruction (admin-controlled, authoritative) ────────
+    mode_instruction = ""
+    mode_instruction_key = f"{MODE_INSTRUCTION_KEY_PREFIX}{agent_mode}"
+    try:
+        from backend.database import _session_factory, PlatformSetting
+        from sqlalchemy import select as _sa_select
+        from sqlalchemy.exc import SQLAlchemyError
+        if _session_factory is not None:
+            async with _session_factory() as _db:
+                _row = (await _db.execute(
+                    _sa_select(PlatformSetting).where(PlatformSetting.key == mode_instruction_key)
+                )).scalar_one_or_none()
+                if _row and _row.value.strip():
+                    mode_instruction = _row.value.strip()
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to fetch mode system instruction from DB (SQLAlchemy): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch mode system instruction from DB: %s", exc)
+    if not mode_instruction:
+        mode_instruction = MODE_SYSTEM_HINTS.get(agent_mode, "").strip()
+
     global_block = (
         f"Global operator instructions (authoritative — always follow these):\n{global_instruction}\n\n"
         if global_instruction
+        else ""
+    )
+    mode_block = (
+        f"Mode instructions for '{agent_mode}' (authoritative after global):\n{mode_instruction}\n\n"
+        if mode_instruction
         else ""
     )
 
@@ -650,6 +676,7 @@ async def _build_system_prompt(
     )
     return (
         f"{global_block}"
+        f"{mode_block}"
         "You are Aegis, an AI agent built by Chronos AI. You can browse the web and, when enabled, use "
         "workspace, memory, automation, and GitHub repo-engineering tools while respecting runtime policy gates.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
