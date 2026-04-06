@@ -188,6 +188,7 @@ def test_websocket_user_input_response_resumes_single_pending_prompt_without_ext
     assert result["type"] == "result"
     assert result["data"]["instruction"] == "test user input flow"
     assert orchestrator.responses == ["Alpha"]
+    assert len(orchestrator.responses) == 1
     assert orchestrator.execute_calls == 1
 
 
