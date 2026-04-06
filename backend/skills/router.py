@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import _verify_session
 from backend.admin.dependencies import get_admin_user
 from backend.database import User, get_session
-from backend.skills.service import SkillService
+from backend.skills.service import REVIEW_SLA_MESSAGE, SkillService
 
 skills_router = APIRouter(tags=["skills"])
 
@@ -116,7 +116,7 @@ async def submit_user_skill(
     return {
         "ok": True,
         "workflow_action": body.workflow_action,
-        "sla_message": "Review SLA: up to 5 working days." if body.workflow_action == "submit_review" else None,
+        "sla_message": REVIEW_SLA_MESSAGE if body.workflow_action == "submit_review" else None,
         "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status},
         "submission": {"id": submission.id, "review_state": submission.review_state},
     }
@@ -178,12 +178,12 @@ async def list_admin_review_queue(
 ) -> dict[str, Any]:
     _ = admin_user
     queue = await SkillService.get_review_queue(session)
-    allowed_statuses = {"draft", "submitted", "scanning", "review", "approved", "rejected", "published_global", "published_hub"}
+    allowed_statuses = {"draft", "submitted", "scanning", "review", "rejected", "published_global", "published_hub"}
     filtered = queue
     if status:
         if status not in allowed_statuses:
             raise HTTPException(status_code=400, detail="Unsupported status filter")
-        filtered = [item for item in queue if item["submission"].review_state == status or item["skill"].status == status]
+        filtered = [item for item in queue if item["submission"].review_state == status]
     return {
         "ok": True,
         "statuses": sorted(allowed_statuses),

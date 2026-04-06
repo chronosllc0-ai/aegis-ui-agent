@@ -24,4 +24,8 @@ describe('skill submission status helpers', () => {
     const filtered = filterSkillsByStatus(skills, 'published_hub')
     expect(filtered.map((row) => row.id)).toEqual(['2'])
   })
+
+  it('falls back unknown statuses to draft instead of approved', () => {
+    expect(normalizeSkillSubmissionStatus('mystery-status')).toBe('draft')
+  })
 })

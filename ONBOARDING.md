@@ -3615,3 +3615,23 @@
 ### Decisions / blockers
 - Decision: keep review decisions (`approve_hub`/`approve_global`) while normalizing persisted/public status states to `published_*` for clearer product semantics.
 - No hard blocker encountered in this pass.
+
+## 2026-04-06 — Follow-up fixes from PR #178 review comments
+
+### What changed
+- Tightened review-queue semantics in `backend/skills/service.py`:
+  - `get_review_queue` now includes only pending states (`submitted`, `scanning`, `review`) instead of broad non-draft matching.
+- Improved ownership error messaging in both draft/save and submit/update paths:
+  - now raises `ValueError("You do not own this skill slug")` for unauthorized edits.
+- De-duplicated SLA copy by introducing a shared constant:
+  - `REVIEW_SLA_MESSAGE` in `backend/skills/service.py`
+  - router now imports and uses the same constant.
+- Tightened admin queue status filtering in `backend/skills/router.py` to use submission `review_state` as the single source of truth.
+- Hardened frontend status normalization safety in `frontend/src/lib/skillSubmissionStatus.ts`:
+  - removed unused `approved` canonical status,
+  - unknown statuses now warn and safely fall back to `draft` (never displayed as approved).
+- Added/updated tests for these review-driven fixes.
+
+### Validation
+- Backend tests pass for updated workflow and queue semantics.
+- Frontend status helper tests pass with the unknown-status safety case.

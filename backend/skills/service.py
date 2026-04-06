@@ -30,6 +30,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 APPROVED_STATUSES = {"published_global", "published_hub"}
+REVIEW_SLA_MESSAGE = "Review SLA: up to 5 working days."
 
 
 class VirusTotalScanner:
@@ -308,7 +309,7 @@ class SkillService:
             await session.flush()
         else:
             if skill.owner_user_id != owner_user_id:
-                raise ValueError("Skill slug already exists")
+                raise ValueError("You do not own this skill slug")
             submission_type = "update"
             from_status = skill.status
             skill.name = name
@@ -401,7 +402,7 @@ class SkillService:
             await session.flush()
         else:
             if skill.owner_user_id != owner_user_id:
-                raise ValueError("Skill slug already exists")
+                raise ValueError("You do not own this skill slug")
             submission_type = "update"
             from_status = skill.status
             skill.name = name
@@ -458,7 +459,7 @@ class SkillService:
                 "skill_id": skill.id,
                 "submission_id": submission.id,
                 "status": "submitted",
-                "sla_message": "Review SLA: up to 5 working days.",
+                "sla_message": REVIEW_SLA_MESSAGE,
             },
         )
         await session.flush()
@@ -579,7 +580,7 @@ class SkillService:
             select(SkillSubmission, Skill, SkillVersion)
             .join(Skill, Skill.id == SkillSubmission.skill_id)
             .join(SkillVersion, SkillVersion.id == SkillSubmission.version_id)
-            .where(SkillSubmission.review_state != "draft")
+            .where(SkillSubmission.review_state.in_(["submitted", "scanning", "review"]))
             .order_by(SkillSubmission.created_at.asc())
         )
         queue_rows = rows.all()
