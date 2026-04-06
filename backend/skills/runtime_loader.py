@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
@@ -28,7 +28,8 @@ class RuntimeSkill:
     name: str
     source: str
     content: str
-    provenance: dict[str, str]
+    provenance: dict[str, str] = field(default_factory=dict)
+    priority: int = 0
     created_at: datetime | None = None
 
 
@@ -94,6 +95,13 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
             continue
 
         remaining_budget -= estimated_tokens
+        parsed_priority = _parse_priority(metadata.get("priority"))
+        provenance = {
+            "publish_target": skill.publish_target,
+            "status": skill.status,
+            "content_sha256": version.content_sha256,
+            "installed_by": install.user_id,
+        }
         runtime.append(
             RuntimeSkill(
                 skill_id=skill.id,
@@ -101,12 +109,8 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
                 name=skill.name,
                 source=skill.publish_target,
                 content=content,
-                provenance={
-                    "publish_target": skill.publish_target,
-                    "status": skill.status,
-                    "content_sha256": version.content_sha256,
-                    "installed_by": install.user_id,
-                },
+                provenance=provenance,
+                priority=parsed_priority,
                 created_at=version.created_at,
             )
         )
@@ -120,6 +124,18 @@ def _parse_metadata(raw: str) -> dict[str, object] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_priority(raw: object) -> int:
+    """Parse runtime skill priority from metadata with safe fallback."""
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return int(raw.strip())
+        except ValueError:
+            return 0
+    return 0
 
 
 def _is_security_resolved(*, review: SkillReview | None, scans_by_engine: dict[str, SkillScanResult]) -> bool:

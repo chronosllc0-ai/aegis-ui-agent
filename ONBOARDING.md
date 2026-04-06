@@ -1,3 +1,146 @@
+## Session 5.69 - April 6, 2026 (PR #174 minor cleanup follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused cleanup + test pass
+
+### What Was Done
+- Applied a minor readability cleanup in `backend/skills/runtime_loader.py` around runtime skill construction:
+  - extracted parsed priority into `parsed_priority`,
+  - extracted provenance payload into a local `provenance` variable,
+  - then passed both into `RuntimeSkill(...)` construction.
+- Added explicit unit coverage in `tests/test_universal_navigator_runtime_skills.py` for `_parse_priority(...)` to lock behavior for:
+  - integer input,
+  - numeric string input,
+  - invalid string input,
+  - `None` input fallback.
+- Re-ran the combined navigator/runtime-skills test selection to verify no regressions.
+
+### What's Working
+- Priority parsing path is now explicitly tested and easier to audit.
+- Runtime loader construction path is cleaner and less noisy in-line.
+- Targeted test suite passes end-to-end.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: add loader-level integration test with metadata priority present/absent to validate final `RuntimeSkill.priority` on assembled runtime rows.
+
+### Decisions Made
+- Chose minimal structural cleanup + focused unit coverage instead of broader refactoring to keep this follow-up tightly scoped to review feedback.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.68 - April 6, 2026 (PR #173 review nit/suggestion follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed all three review comments in `universal_navigator.py`:
+  - removed redundant conditional branch in dependency parse fallback (`or dependency_batches is None`),
+  - clarified `_dependency_batches(...)` empty-input return as a defensive guard for future/direct callers,
+  - improved safe-tool gating by validating tool names explicitly (type + non-empty string), normalizing lowercase for allowlist checks, and logging a warning for malformed tool names before falling back to sequential execution.
+- Re-ran the same navigator test selection used during review validation.
+
+### What's Working
+- Dependency-aware batching behavior remains intact.
+- Sequential fallback behavior is now cleaner and less ambiguous in code review terms.
+- Invalid tool-name payloads are now explicitly surfaced in logs (instead of silent `str(None)` coercion).
+- Targeted navigator tests pass.
+
+### What's NOT Working Yet
+- No new issues identified in this follow-up pass.
+
+### Next Steps
+1. Optional: add a focused unit test asserting warning-log emission for malformed `tool` values in batch calls.
+
+### Decisions Made
+- Kept fail-safe sequential fallback semantics unchanged while tightening readability and input validation.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.67 - April 6, 2026 (runtime skills test compatibility fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused test-fix pass
+
+### What Was Done
+- Fixed the runtime-skills test failure reported after the dependency-aware tool-call work:
+  - updated `RuntimeSkill` dataclass in `backend/skills/runtime_loader.py` to include:
+    - `priority: int = 0`,
+    - default `provenance` via `field(default_factory=dict)` for test-friendly construction.
+- Updated loader construction path to populate `RuntimeSkill.priority` from skill metadata using a new safe parser:
+  - `_parse_priority(raw)` supports `int` and numeric `str`, falls back to `0` for invalid/missing values.
+- Re-ran the exact previously failing test command and verified green.
+
+### What's Working
+- `tests/test_universal_navigator_runtime_skills.py` now constructs `RuntimeSkill(...)` with `priority=` without constructor errors.
+- Priority-aware prompt assembly paths in `universal_navigator.py` remain compatible with loader outputs.
+- Combined navigator test selection now passes end-to-end.
+
+### What's NOT Working Yet
+- No new issues found in this pass.
+
+### Next Steps
+1. Optional: add dedicated unit coverage for `_parse_priority(...)` edge cases (`None`, whitespace, non-numeric string).
+
+### Decisions Made
+- Chose backward-compatible dataclass defaults (`provenance` + `priority`) rather than rewriting tests, because runtime prompt assembly already expects a priority field.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.66 - April 6, 2026 (dependency-aware parallel tool-call batches)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused orchestration + tests pass
+
+### What Was Done
+- Extended universal navigator batch execution to support dependency metadata on `tool_calls`:
+  - added dependency-aware DAG batching via optional `id` + `depends_on` fields,
+  - independent calls execute in parallel per DAG level,
+  - dependent calls execute only after prerequisites resolve.
+- Added strict fallback behavior:
+  - malformed dependency metadata (invalid ids, missing deps, self-deps, cycles, duplicate ids) now falls back to safe sequential execution.
+- Preserved non-idempotent safety:
+  - introduced conservative `PARALLEL_SAFE_TOOLS` gating,
+  - if any validated call in a batch is outside the safe allowlist, execution falls back to sequential mode for that batch.
+- Extended parallel batching tests with new coverage:
+  - independent 3-call batch runs concurrently,
+  - dependency chain executes in order,
+  - cyclic dependencies trigger sequential fallback behavior,
+  - unsafe/mutating tool in mixed batch forces sequential fallback.
+
+### What's Working
+- Existing batch mode behavior remains intact, with dependency-aware scheduling added as an opt-in extension (`id`/`depends_on` present).
+- Safe sequential fallback now reliably protects execution when dependency metadata is invalid or unsafe tools are present.
+- Updated parallel tool-call test suite passes.
+
+### What's NOT Working Yet
+- Unrelated pre-existing runtime-skill tests still fail in this environment due a `RuntimeSkill` constructor mismatch (`unexpected keyword argument 'priority'`); not introduced by this pass.
+
+### Next Steps
+1. Optional: expose dependency fallback reason in workflow telemetry for easier debugging (e.g., `batch_execution_mode=sequential` with reason).
+2. Optional: revisit/expand `PARALLEL_SAFE_TOOLS` allowlist as tool semantics evolve.
+
+### Decisions Made
+- Chose fail-safe sequential fallback instead of hard failure on malformed dependency graphs to preserve forward progress and prevent unsafe scheduling.
+- Kept safety gating conservative: any non-allowlisted validated tool disables parallelism for that batch.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.65 - April 6, 2026 (Telegram owner identity capture hardening)
 
 **Agent:** GPT-5.3-Codex  

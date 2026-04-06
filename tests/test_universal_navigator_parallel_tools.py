@@ -75,6 +75,134 @@ def test_accepts_valid_tool_calls_batch_of_three(monkeypatch: pytest.MonkeyPatch
     asyncio.run(_run())
 
 
+def test_dependency_free_batch_runs_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool_calls":[{"id":"a","tool":"wait","seconds":0.03},{"id":"b","tool":"wait","seconds":0.03},{"id":"c","tool":"wait","seconds":0.03}]}',
+            '{"tool":"done","summary":"ok"}',
+        ])
+
+        in_flight = 0
+        max_in_flight = 0
+        lock = asyncio.Lock()
+
+        async def fake_run(
+            self: universal_navigator.UniversalToolExecutor,
+            tool_call: dict[str, Any],
+            *,
+            skip_policy_checks: bool = False,
+        ):
+            nonlocal in_flight, max_in_flight
+            async with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(float(tool_call.get("seconds", 0)))
+            async with lock:
+                in_flight -= 1
+            return "ok", None
+
+        monkeypatch.setattr(universal_navigator.UniversalToolExecutor, "run", fake_run)
+        result = await _run_navigation(provider)
+
+        assert result["status"] == "completed"
+        assert max_in_flight >= 2
+
+    asyncio.run(_run())
+
+
+def test_dependency_chain_executes_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool_calls":[{"id":"first","tool":"wait","seconds":0.01},{"id":"second","tool":"wait","depends_on":["first"],"seconds":0.01},{"id":"third","tool":"wait","depends_on":["second"],"seconds":0.01}]}',
+            '{"tool":"done","summary":"ordered"}',
+        ])
+
+        call_order: list[str] = []
+
+        async def fake_run(
+            self: universal_navigator.UniversalToolExecutor,
+            tool_call: dict[str, Any],
+            *,
+            skip_policy_checks: bool = False,
+        ):
+            call_order.append(str(tool_call.get("id")))
+            await asyncio.sleep(float(tool_call.get("seconds", 0)))
+            return "ok", None
+
+        monkeypatch.setattr(universal_navigator.UniversalToolExecutor, "run", fake_run)
+        result = await _run_navigation(provider)
+
+        assert result["status"] == "completed"
+        assert call_order == ["first", "second", "third"]
+
+    asyncio.run(_run())
+
+
+def test_cyclic_dependencies_fallback_to_sequential(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool_calls":[{"id":"a","tool":"wait","depends_on":["b"],"seconds":0},{"id":"b","tool":"wait","depends_on":["a"],"seconds":0}]}',
+            '{"tool":"done","summary":"fallback"}',
+        ])
+
+        call_order: list[str] = []
+
+        async def fake_run(
+            self: universal_navigator.UniversalToolExecutor,
+            tool_call: dict[str, Any],
+            *,
+            skip_policy_checks: bool = False,
+        ):
+            call_order.append(str(tool_call.get("id")))
+            return "ok", None
+
+        monkeypatch.setattr(universal_navigator.UniversalToolExecutor, "run", fake_run)
+        result = await _run_navigation(provider)
+
+        assert result["status"] == "completed"
+        assert call_order == ["a", "b"]
+
+    asyncio.run(_run())
+
+
+def test_unsafe_tool_in_batch_forces_sequential_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool_calls":[{"id":"first","tool":"wait","seconds":0.02},{"id":"second","tool":"exec_shell","command":"echo hi"},{"id":"third","tool":"wait","seconds":0.02}]}',
+            '{"tool":"done","summary":"sequential"}',
+        ])
+
+        in_flight = 0
+        max_in_flight = 0
+        lock = asyncio.Lock()
+
+        async def fake_run(
+            self: universal_navigator.UniversalToolExecutor,
+            tool_call: dict[str, Any],
+            *,
+            skip_policy_checks: bool = False,
+        ):
+            nonlocal in_flight, max_in_flight
+            async with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(float(tool_call.get("seconds", 0.01)))
+            async with lock:
+                in_flight -= 1
+            return "ok", None
+
+        monkeypatch.setattr(universal_navigator.UniversalToolExecutor, "run", fake_run)
+        result = await _run_navigation(
+            provider,
+            settings={"tool_permissions": {"exec_shell": "auto"}},
+        )
+
+        assert result["status"] == "completed"
+        assert max_in_flight == 1
+
+    asyncio.run(_run())
+
+
 def test_rejects_batch_over_three_with_safe_error() -> None:
     async def _run() -> None:
         provider = _ScriptedProvider([
