@@ -1457,12 +1457,22 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
 async def register_telegram_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    session_owner_user_id = _extract_session_user_uid(request.cookies.get("aegis_session"))
+    payload_owner_user_id = str(payload.get("owner_user_id", "")).strip() or None
+    if session_owner_user_id and payload_owner_user_id and payload_owner_user_id != session_owner_user_id:
+        raise HTTPException(status_code=403, detail="owner_user_id does not match authenticated session")
+    owner_user_id = session_owner_user_id or payload_owner_user_id
+    if not owner_user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="owner_user_id is required (authenticate via aegis_session or provide owner_user_id in payload)",
+        )
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "delivery_mode": str(payload.get("delivery_mode", "polling")).strip(),
         "webhook_url": str(payload.get("webhook_url", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
-        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
+        "owner_user_id": owner_user_id,
     }
     integration = TelegramIntegration()
     connection = await integration.connect(config)

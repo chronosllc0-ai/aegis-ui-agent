@@ -244,3 +244,46 @@ def test_mode_webhook_renders_inline_keyboard_message() -> None:
         main_mod._user_runtimes.pop(user_id, None)
         main_mod.telegram_registry._integrations.pop(integration_id, None)
         main_mod.telegram_registry._configs.pop(integration_id, None)
+
+
+def test_register_telegram_requires_owner_user_id() -> None:
+    """Telegram register endpoint should require owner identity capture."""
+    main_mod = import_module("main")
+    integration_id = "tg-register-owner-required"
+    try:
+        from fastapi.testclient import TestClient
+
+        with patch.object(main_mod.TelegramIntegration, "connect", new_callable=AsyncMock) as mock_connect:
+            mock_connect.return_value = {"connected": False, "error": "Missing bot token"}
+            with TestClient(main_mod.app) as test_client:
+                response = test_client.post(
+                    f"/api/integrations/telegram/register/{integration_id}",
+                    json={"bot_token": "123:ABC"},
+                )
+        assert response.status_code == 400
+        assert "owner_user_id is required" in response.json().get("detail", "")
+        mock_connect.assert_not_called()
+    finally:
+        main_mod.telegram_registry._integrations.pop(integration_id, None)
+        main_mod.telegram_registry._configs.pop(integration_id, None)
+
+
+def test_register_telegram_accepts_owner_user_id_from_payload() -> None:
+    """Telegram register should persist payload owner_user_id when no session cookie exists."""
+    main_mod = import_module("main")
+    integration_id = "tg-register-owner-payload"
+    try:
+        from fastapi.testclient import TestClient
+
+        with patch.object(main_mod.TelegramIntegration, "connect", new_callable=AsyncMock) as mock_connect:
+            mock_connect.return_value = {"connected": False, "error": "Missing bot token"}
+            with TestClient(main_mod.app) as test_client:
+                response = test_client.post(
+                    f"/api/integrations/telegram/register/{integration_id}",
+                    json={"bot_token": "123:ABC", "owner_user_id": "password:user@example.com"},
+                )
+        assert response.status_code == 200
+        assert main_mod.telegram_registry.get_config(integration_id)["owner_user_id"] == "password:user@example.com"
+    finally:
+        main_mod.telegram_registry._integrations.pop(integration_id, None)
+        main_mod.telegram_registry._configs.pop(integration_id, None)

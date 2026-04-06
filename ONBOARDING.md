@@ -1,3 +1,39 @@
+## Session 5.65 - April 6, 2026 (Telegram owner identity capture hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend validation pass
+
+### What Was Done
+- Hardened Telegram integration registration in `main.py` to ensure owner identity is always captured:
+  - resolves owner from authenticated `aegis_session` cookie and/or `owner_user_id` payload field,
+  - rejects mismatched cookie-vs-payload owners with `403`,
+  - rejects registration when neither source provides owner identity with `400`.
+- Preserved existing behavior for valid registration and continued storing resolved `owner_user_id` in integration config.
+- Added tests:
+  - registration fails when owner identity is absent,
+  - registration succeeds and persists owner when `owner_user_id` is provided in payload (no cookie).
+
+### What's Working
+- Telegram commands/callbacks now have deterministic owner binding at registration time instead of relying on optional session state.
+- Owner-to-integration association is explicit and validated.
+- Updated targeted mode/telegram tests pass.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+- Existing FastAPI `on_event` deprecation warnings remain (pre-existing).
+
+### Next Steps
+1. Optional: add UI/API hint in connector setup flow that `owner_user_id` payload fallback exists for service-to-service registration.
+2. Optional: mirror the same strict owner-capture policy across Slack/Discord registration endpoints for parity.
+
+### Decisions Made
+- Used dual-source owner resolution (session first, payload fallback) to match common integration onboarding patterns while still enforcing strict ownership.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.64 - April 6, 2026 (Telegram /mode callback edge-case review fixes)
 
 **Agent:** GPT-5.3-Codex  
