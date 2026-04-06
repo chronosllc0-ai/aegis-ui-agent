@@ -1534,6 +1534,8 @@ def _dependency_batches(validated_calls: list[dict[str, Any]]) -> tuple[list[lis
     Returns ``(batches, malformed)`` where malformed=True means the dependency
     metadata could not be safely interpreted and caller should run sequentially.
     """
+    # Defensive guard for direct/unit callers; current orchestrator only calls
+    # this helper when at least one validated call exists.
     if not validated_calls:
         return [], False
 
@@ -1904,11 +1906,18 @@ async def run_universal_navigation(
         fallback_to_sequential = False
         dependency_batches: list[list[dict[str, Any]]] = []
         if validated_calls:
-            if any(str(item["call"].get("tool", "")) not in PARALLEL_SAFE_TOOLS for item in validated_calls):
-                fallback_to_sequential = True
-            else:
+            for item in validated_calls:
+                raw_tool_name = item["call"].get("tool")
+                if not isinstance(raw_tool_name, str) or not raw_tool_name.strip():
+                    logger.warning("Batch tool call at index %s has invalid tool name %r; falling back to sequential.", item["index"], raw_tool_name)
+                    fallback_to_sequential = True
+                    break
+                if raw_tool_name.strip().lower() not in PARALLEL_SAFE_TOOLS:
+                    fallback_to_sequential = True
+                    break
+            if not fallback_to_sequential:
                 dependency_batches, malformed_dependencies = _dependency_batches(validated_calls)
-                if malformed_dependencies or dependency_batches is None:
+                if malformed_dependencies:
                     fallback_to_sequential = True
 
         if fallback_to_sequential:
