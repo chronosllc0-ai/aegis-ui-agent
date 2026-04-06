@@ -65,6 +65,25 @@ class _UserInputOrchestrator:
         return {"status": "completed", "session_id": session_id, "instruction": instruction}
 
 
+class _StreamingNormalizationOrchestrator:
+    """Stub orchestrator that emits escaped newlines and chunked reasoning deltas."""
+
+    def __init__(self) -> None:
+        self.executor = _StubExecutor()
+
+    async def execute_task(self, session_id: str, instruction: str, on_step=None, on_reasoning_delta=None, **kwargs):
+        if on_step:
+            await on_step({"type": "message", "content": "start\\nline\\r\\nnext"})
+            await on_step({"type": "reasoning_start", "step_id": "r1", "content": "[thinking]"})
+        if on_reasoning_delta:
+            await on_reasoning_delta("r1", "part\\n")
+            await on_reasoning_delta("r1", "two")
+        if on_step:
+            await on_step({"type": "reasoning", "step_id": "r1", "content": "[reasoning] part\\ntwo"})
+            await on_step({"type": "result", "content": "done"})
+        return {"status": "completed", "session_id": session_id, "instruction": instruction}
+
+
 def test_websocket_navigate_smoke() -> None:
     """WebSocket endpoint should stream frame, step, and final result."""
     main.orchestrator = _StubOrchestrator()
@@ -204,3 +223,32 @@ def test_websocket_user_input_response_logs_unknown_request_id(caplog) -> None:
             ws.send_json({"action": "stop"})
 
     assert "unknown/expired request_id=missing-request" in caplog.text
+
+
+def test_websocket_stream_normalizes_steps_and_reasoning_deltas_incrementally() -> None:
+    """Step and reasoning stream payloads should normalize escaped newlines during streaming."""
+    main.orchestrator = _StreamingNormalizationOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()  # initial frame
+        ws.send_json({"action": "navigate", "instruction": "normalize stream"})
+        step1 = ws.receive_json()
+        step2 = ws.receive_json()
+        delta1 = ws.receive_json()
+        delta2 = ws.receive_json()
+        step3 = ws.receive_json()
+        step4 = ws.receive_json()
+        result = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert step1["type"] == "step"
+    assert step1["data"]["content"] == "start\nline\nnext"
+    assert step2["data"]["type"] == "reasoning_start"
+    assert delta1["type"] == "reasoning_delta"
+    assert delta1["data"]["delta"] == "part\n"
+    assert delta2["data"]["delta"] == "two"
+    assert step3["data"]["type"] == "reasoning"
+    assert step3["data"]["content"] == "[reasoning] part\ntwo"
+    assert step4["data"]["content"] == "done"
+    assert result["type"] == "result"

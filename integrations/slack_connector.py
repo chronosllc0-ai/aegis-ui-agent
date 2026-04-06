@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 from integrations.idempotency import DeliveryDeduper
 
@@ -116,8 +117,9 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             return {"ok": False, "tool": "slack_send_message", "error": "Channel is required"}
         if not text.strip():
             return {"ok": False, "tool": "slack_send_message", "error": "Text is required"}
+        normalized_text, _ = normalize_for_channel(text, channel="slack")
 
-        payload: dict[str, Any] = {"channel": channel, "text": text}
+        payload: dict[str, Any] = {"channel": channel, "text": normalized_text}
         if metadata and metadata.get("thread_ts"):
             payload["thread_ts"] = str(metadata["thread_ts"])
         data = await self._request("POST", "chat.postMessage", json_payload=payload)
@@ -140,8 +142,9 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             return {"ok": False, "tool": "slack_edit_message", "error": "message_id/ts is required"}
         if not text.strip():
             return {"ok": False, "tool": "slack_edit_message", "error": "Text is required"}
+        normalized_text, _ = normalize_for_channel(text, channel="slack")
 
-        payload: dict[str, Any] = {"channel": channel, "ts": ts, "text": text}
+        payload: dict[str, Any] = {"channel": channel, "ts": ts, "text": normalized_text}
         if metadata and metadata.get("blocks"):
             payload["blocks"] = metadata["blocks"]
         data = await self._request("POST", "chat.update", json_payload=payload)

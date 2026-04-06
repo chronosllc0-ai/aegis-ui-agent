@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 
 logger = logging.getLogger(__name__)
@@ -304,9 +305,10 @@ class TelegramIntegration(BaseIntegration):
             return {"ok": False, "tool": "telegram_send_message", "error": "Text is required"}
         if reply_markup is not None and not isinstance(reply_markup, dict):
             return {"ok": False, "tool": "telegram_send_message", "error": "reply_markup must be an object"}
-        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
+        normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text}
+        if normalized_parse_mode:
+            payload["parse_mode"] = normalized_parse_mode
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         data = await self._request("sendMessage", json=payload)
@@ -422,14 +424,15 @@ class TelegramIntegration(BaseIntegration):
         if not chunks:
             return {}
         await self.client.send_chat_action(chat_id, "typing")
-
-        first = await self.client.send_message(chat_id=chat_id, text=chunks[0], parse_mode=parse_mode)
+        first_chunk, normalized_parse_mode = normalize_for_channel(chunks[0], channel="telegram", parse_mode=parse_mode)
+        first = await self.client.send_message(chat_id=chat_id, text=first_chunk, parse_mode=normalized_parse_mode)
         message_id = int(first.get("message_id") or draft_id or 0)
         if message_id <= 0:
             raise TelegramAPIError(None, "Missing message_id for progressive updates")
 
         for chunk in chunks[1:]:
-            await self.client.edit_message_text(chat_id=chat_id, message_id=message_id, text=chunk)
+            normalized_chunk, _ = normalize_for_channel(chunk, channel="telegram", parse_mode=parse_mode)
+            await self.client.edit_message_text(chat_id=chat_id, message_id=message_id, text=normalized_chunk)
             if delay_between_chunks > 0:
                 await asyncio.sleep(delay_between_chunks)
 

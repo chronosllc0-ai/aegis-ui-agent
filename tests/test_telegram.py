@@ -204,7 +204,8 @@ def test_telegram_send_message_supports_reply_markup() -> None:
                 "telegram_send_message",
                 {
                     "chat_id": 1,
-                    "text": "choose mode",
+                    "text": "choose\\nmode",
+                    "parse_mode": "MarkdownV2",
                     "reply_markup": {
                         "inline_keyboard": [[{"text": "Code", "callback_data": "mode:code"}]],
                     },
@@ -215,7 +216,8 @@ def test_telegram_send_message_supports_reply_markup() -> None:
                 "sendMessage",
                 json={
                     "chat_id": 1,
-                    "text": "choose mode",
+                    "text": "choose\nmode",
+                    "parse_mode": "MarkdownV2",
                     "reply_markup": {
                         "inline_keyboard": [[{"text": "Code", "callback_data": "mode:code"}]],
                     },
