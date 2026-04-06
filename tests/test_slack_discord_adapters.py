@@ -76,7 +76,9 @@ def test_slack_send_edit_file_and_rate_limit_backoff() -> None:
 
         with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = {"ok": True, "ts": "1.2"}
-            edited = await integration.edit_text("C1", "1.2", "updated")
+            edited = await integration.edit_text("C1", "1.2", "updated <danger>")
+            sent_payload = mock_request.await_args.kwargs["json_payload"]
+            assert sent_payload["text"] == "updated &lt;danger&gt;"
         assert edited["ok"] is True
 
         with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request, patch(
@@ -105,7 +107,9 @@ def test_discord_connect_send_edit_file_interaction_event() -> None:
 
         with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = {"id": "m1", "content": "hello"}
-            sent = await integration.send_text("c1", "hello")
+            sent = await integration.send_text("c1", "@everyone **hello**")
+            sent_payload = mock_request.await_args.kwargs["json_payload"]
+            assert sent_payload["content"] == "@\u200beveryone \\*\\*hello\\*\\*"
         assert sent["ok"] is True
 
         with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:

@@ -5,6 +5,7 @@ import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
+import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
 import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
 import { PromptGallery } from './PromptGallery'
@@ -198,7 +199,8 @@ function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
-    const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+    const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+    const msg = normalizeTextPreservingMarkdown(rawMessage)
 
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
@@ -207,16 +209,17 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
         const parsed = JSON.parse(jsonStr)
+        const normalizedQuestion = normalizeTextPreservingMarkdown(String(parsed.question ?? jsonStr))
         msgs.push({
           id: entry.id,
           role: 'user_input',
-          text: parsed.question ?? jsonStr,
-          question: parsed.question,
+          text: normalizedQuestion,
+          question: normalizedQuestion,
           options: normalizeAskUserInputOptions(parsed.options),
           requestId: parsed.request_id,
         })
       } catch {
-        msgs.push({ id: entry.id, role: 'user_input', text: msg.replace('[ask_user_input]', '').trim(), options: [] })
+        msgs.push({ id: entry.id, role: 'user_input', text: normalizeTextPreservingMarkdown(msg.replace('[ask_user_input]', '').trim()), options: [] })
       }
       continue
     }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 
 export type SteeringMode = 'steer' | 'interrupt' | 'queue'
 
@@ -136,6 +137,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const pingIntervalRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
+  const reasoningNormalizersRef = useRef<Record<string, IncrementalTextNormalizer>>({})
   const lastStepAtRef = useRef(0)
   const lastNotConnectedAtRef = useRef(0)
   const connectRef = useRef<() => void>(() => undefined)
@@ -306,16 +308,20 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       if (payload.type === 'reasoning_start') {
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
-          setReasoningMap((prev) => ({ ...prev, [stepId]: '' }))
+          if (!reasoningNormalizersRef.current[stepId]) {
+            reasoningNormalizersRef.current[stepId] = new IncrementalTextNormalizer()
+          }
+          setReasoningMap((prev) => ({ ...prev, [stepId]: prev[stepId] ?? '' }))
           const nowIso = new Date().toISOString()
           const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
           const nextEntry: PersistedThinkingMessage = {
             id: `thinking-${taskId}-${stepId}`,
             role: 'thinking',
             taskId,
             stepId,
             status: 'streaming',
-            text: '',
+            text: existing?.text ?? '',
             updatedAt: nowIso,
           }
           const next = [
@@ -337,9 +343,13 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         const stepId = String(payload.data?.step_id ?? '')
         const delta = String(payload.data?.delta ?? '')
         if (stepId && delta) {
+          const normalizer = reasoningNormalizersRef.current[stepId] ?? new IncrementalTextNormalizer()
+          reasoningNormalizersRef.current[stepId] = normalizer
+          const normalizedCumulative = normalizer.push(delta)
+          const normalizedDelta = normalizeTextPreservingMarkdown(delta)
           setReasoningMap((prev) => ({
             ...prev,
-            [stepId]: (prev[stepId] ?? '') + delta,
+            [stepId]: normalizedCumulative,
           }))
           const nowIso = new Date().toISOString()
           const persisted = readPersistedThinking(taskId)
@@ -348,7 +358,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
             ? {
                 ...existing,
                 status: existing.status === 'completed' ? 'completed' : 'streaming',
-                text: `${existing.text}${delta}`,
+                text: normalizedCumulative,
                 updatedAt: nowIso,
               }
             : {
@@ -357,7 +367,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
                 taskId,
                 stepId,
                 status: 'streaming',
-                text: delta,
+                text: normalizedDelta,
                 updatedAt: nowIso,
               }
           const next = [
@@ -373,18 +383,20 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         const stepId = String(payload.data?.step_id ?? '')
         const content = String(payload.data?.content ?? '')
         if (stepId) {
+          const normalizer = reasoningNormalizersRef.current[stepId]
+          const finalContent = content ? normalizeTextPreservingMarkdown(content) : (normalizer?.finalize() ?? '')
           const nowIso = new Date().toISOString()
           const persisted = readPersistedThinking(taskId)
           const existing = persisted.find((item) => item.stepId === stepId)
           const nextEntry: PersistedThinkingMessage = existing
-            ? { ...existing, text: content || existing.text, status: 'completed', updatedAt: nowIso }
+            ? { ...existing, text: finalContent || existing.text, status: 'completed', updatedAt: nowIso }
             : {
                 id: `thinking-${taskId}-${stepId}`,
                 role: 'thinking',
                 taskId,
                 stepId,
                 status: 'completed',
-                text: content,
+                text: finalContent,
                 updatedAt: nowIso,
               }
           const next = [
@@ -395,10 +407,11 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
           setLogs((prev) =>
             prev.map((e) =>
               e.stepId === stepId
-                ? { ...e, type: 'reasoning', status: 'completed', message: content }
+                ? { ...e, type: 'reasoning', status: 'completed', message: finalContent }
                 : e,
             ),
           )
+          delete reasoningNormalizersRef.current[stepId]
         }
         return
       }
@@ -536,6 +549,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     setReasoningMap({})
     setSubAgents([])
     setSubAgentSteps({})
+    reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
   }, [])
 

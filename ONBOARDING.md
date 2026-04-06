@@ -3675,3 +3675,77 @@
 ### Decisions / blockers
 - Decision: keep verdict vocabulary (`pass`/`warn`/`fail`/`error`) for runtime gating compatibility while moving risk labels to required policy tags.
 - No blocker encountered.
+
+## 2026-04-06 — Stream-safe response normalization + channel adapters
+
+### What changed
+- Added shared incremental normalization/adapter module at `backend/integrations/text_normalization.py`:
+  - newline normalization (`\r\n`, `\r`, escaped `\\n` artifacts),
+  - control-character stripping,
+  - markdown/code-fence-aware preservation,
+  - channel adapters for `web`, `telegram`, `slack`, and `discord`.
+- Wired normalization into integration send/edit paths:
+  - `integrations/telegram.py` now normalizes + parse-mode-safe escapes for Telegram sends and stream draft edits.
+  - `integrations/slack_connector.py` now applies mrkdwn-safe escaping (`&`, `<`, `>`) for send/edit.
+  - `integrations/discord.py` now applies markdown-safe escaping + mention hardening for `@everyone`/`@here`.
+- Wired normalization into WebSocket stream handling in `main.py`:
+  - step payload content normalization before sending,
+  - reasoning delta normalization for chunk updates,
+  - integration send_message REST paths (Telegram/Slack/Discord) normalize before dispatch,
+  - bot-triggered completion replies are normalized per destination channel.
+- Added frontend web-normalization utility `frontend/src/lib/textNormalization.ts` and integrated it with:
+  - `frontend/src/components/ChatPanel.tsx` (message + ask_user_input text normalization),
+  - `frontend/src/hooks/useWebSocket.ts` reasoning streaming with incremental chunk normalization and final reconciliation pass.
+
+### Tests added/updated
+- Added `tests/test_channel_text_normalization.py` snapshot-like channel normalization expectations + incremental streaming reconcile assertions.
+- Updated `tests/test_main_websocket.py` with stream normalization test for step/reasoning chunk behavior.
+- Updated `tests/test_slack_discord_adapters.py` assertions to validate adapter escaping behavior.
+- Updated `tests/test_telegram.py` send-message coverage for escaped newline normalization and parse-mode propagation.
+
+### What's working
+- Streamed deltas now normalize incrementally and reconcile cleanly at completion.
+- Channel-specific escaping is centralized and consistent across send paths.
+- Markdown/code fences are preserved through normalization.
+
+### What's not done / next
+- Optional: apply the same shared normalization utility to any future email/SMS adapters to avoid drift.
+- Optional: add frontend unit snapshots for `ChatPanel` rendered markdown/code-card normalization specifics.
+
+### Decisions / blockers
+- Decision: preserve code-fence segments during normalization and during Telegram/Discord markdown escaping to avoid breaking fenced output.
+- No blocker encountered.
+
+## 2026-04-06 — PR #180 review follow-up fixes
+
+### What changed
+- Addressed Discord mention hardening edge case in `backend/integrations/text_normalization.py`:
+  - mention escaping (`@everyone`, `@here`) now applies only to non-code segments, preserving fenced code content verbatim.
+- Expanded Telegram legacy Markdown escaping in `backend/integrations/text_normalization.py`:
+  - now also escapes `[`, `]`, `(`, `)` in legacy Markdown mode.
+- Fixed Telegram progressive edit parse mode consistency in `integrations/telegram.py`:
+  - stream edits now pass through the same normalized parse mode used for the first chunk.
+- Hardened frontend reasoning stream race behavior in `frontend/src/hooks/useWebSocket.ts`:
+  - if `reasoning_delta` arrives before `reasoning_start`, existing normalizer/text are preserved instead of reset.
+- Minor cleanup in `main.py`:
+  - removed redundant `.get()` usage after key existence check in `_send_step`.
+
+### Tests added/updated
+- `tests/test_channel_text_normalization.py`:
+  - added coverage to ensure Discord mention hardening does not mutate mentions inside fenced code.
+- `tests/test_telegram.py`:
+  - strengthened `stream_draft_then_send` expectations to assert parse mode is preserved across edits.
+- `frontend/src/hooks/__tests__/useWebSocket.reasoning-cache.test.ts`:
+  - added race-condition coverage for delta-before-start ordering.
+
+### What's working
+- Discord code examples containing `@everyone` are no longer modified while normal prose remains hardened.
+- Telegram streamed draft edits preserve markdown parse mode across all chunks.
+- Reasoning stream text no longer drops early deltas when websocket events arrive out-of-order.
+
+### What's not done / next
+- Optional: add similar out-of-order stream tests for any other chunked websocket payload types if introduced later.
+
+### Decisions / blockers
+- Decision: treat `reasoning_start` as idempotent initialization if stream state already exists.
+- No blocker encountered.

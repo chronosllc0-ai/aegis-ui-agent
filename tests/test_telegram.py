@@ -145,11 +145,14 @@ def test_stream_draft_then_send_uses_edit_api() -> None:
                 chunks=["Thinking...", "Thinking... found data", "Here are your results: ..."],
                 draft_id=1,
                 delay_between_chunks=0.01,
+                parse_mode="MarkdownV2",
             )
 
             mock_action.assert_called_once_with(12345, "typing")
-            mock_send.assert_called_once_with(chat_id=12345, text="Thinking...", parse_mode=None)
+            mock_send.assert_called_once_with(chat_id=12345, text="Thinking\\.\\.\\.", parse_mode="MarkdownV2")
             assert mock_edit.call_count == 2
+            for call in mock_edit.await_args_list:
+                assert call.kwargs["parse_mode"] == "MarkdownV2"
             assert result == {"message_id": 33}
         await integration.disconnect()
 
@@ -204,7 +207,8 @@ def test_telegram_send_message_supports_reply_markup() -> None:
                 "telegram_send_message",
                 {
                     "chat_id": 1,
-                    "text": "choose mode",
+                    "text": "choose\\nmode",
+                    "parse_mode": "MarkdownV2",
                     "reply_markup": {
                         "inline_keyboard": [[{"text": "Code", "callback_data": "mode:code"}]],
                     },
@@ -215,7 +219,8 @@ def test_telegram_send_message_supports_reply_markup() -> None:
                 "sendMessage",
                 json={
                     "chat_id": 1,
-                    "text": "choose mode",
+                    "text": "choose\nmode",
+                    "parse_mode": "MarkdownV2",
                     "reply_markup": {
                         "inline_keyboard": [[{"text": "Code", "callback_data": "mode:code"}]],
                     },

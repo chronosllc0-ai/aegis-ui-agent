@@ -33,6 +33,7 @@ from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
 from backend.modes import MODE_LABELS, normalize_agent_mode
+from backend.integrations.text_normalization import normalize_for_channel
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
@@ -708,14 +709,18 @@ async def _send_step(
     session_id: str | None = None,
 ) -> None:
     """Send step payload to frontend."""
-    await websocket.send_json({"type": "step", "data": step})
+    normalized_step = dict(step)
+    if "content" in normalized_step:
+        normalized_content, _ = normalize_for_channel(str(normalized_step["content"] or ""), channel="web")
+        normalized_step["content"] = normalized_content
+    await websocket.send_json({"type": "step", "data": normalized_step})
     if runtime and session_id:
         await _log_web_message(
             runtime,
             session_id,
             "assistant",
-            str(step.get("content") or step.get("type") or "Step update"),
-            metadata={"source": "websocket", "action": "step", "step": step},
+            str(normalized_step.get("content") or normalized_step.get("type") or "Step update"),
+            metadata={"source": "websocket", "action": "step", "step": normalized_step},
         )
 
 
@@ -934,11 +939,12 @@ async def _run_navigation_task(
             runtime.pending_user_inputs.pop(request_id, None)
 
     async def _on_reasoning_delta(step_id: str, delta_text: str) -> None:
+        normalized_delta, _ = normalize_for_channel(delta_text, channel="web")
         await websocket.send_json({
             "type": "reasoning_delta",
             "data": {
                 "step_id": step_id,
-                "delta": delta_text,
+                "delta": normalized_delta,
             },
         })
 
@@ -1502,9 +1508,14 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid chat_id")
     text = str(payload.get("text", "")).strip()
+    parse_mode = str(payload.get("parse_mode", "")).strip() or None
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text})
+    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
+    tool_payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text}
+    if normalized_parse_mode:
+        tool_payload["parse_mode"] = normalized_parse_mode
+    result = await integration.execute_tool("telegram_send_message", tool_payload)
     config = telegram_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1512,7 +1523,7 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
             platform="telegram",
             platform_chat_id=str(chat_id),
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Telegram {chat_id}",
             metadata={"integration_id": integration_id, "source": "send_message", "draft": False},
         )
@@ -1529,9 +1540,14 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid chat_id")
     text = str(payload.get("text", "")).strip()
+    parse_mode = str(payload.get("parse_mode", "")).strip() or None
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text, "draft": True})
+    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
+    tool_payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text, "draft": True}
+    if normalized_parse_mode:
+        tool_payload["parse_mode"] = normalized_parse_mode
+    result = await integration.execute_tool("telegram_send_message", tool_payload)
     config = telegram_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1539,7 +1555,7 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
             platform="telegram",
             platform_chat_id=str(chat_id),
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Telegram {chat_id}",
             metadata={"integration_id": integration_id, "source": "send_message", "draft": True},
         )
@@ -1580,7 +1596,8 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
         raise HTTPException(status_code=400, detail="Channel is required")
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("slack_send_message", {"channel": channel, "text": text})
+    normalized_text, _ = normalize_for_channel(text, channel="slack")
+    result = await integration.execute_tool("slack_send_message", {"channel": channel, "text": normalized_text})
     config = slack_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1588,7 +1605,7 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
             platform="slack",
             platform_chat_id=channel,
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Slack {channel}",
             metadata={"integration_id": integration_id, "source": "send_message"},
         )
@@ -1628,7 +1645,8 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
         raise HTTPException(status_code=400, detail="Channel is required")
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": text})
+    normalized_text, _ = normalize_for_channel(text, channel="discord")
+    result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": normalized_text})
     config = discord_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1636,7 +1654,7 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
             platform="discord",
             platform_chat_id=channel,
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Discord {channel}",
             metadata={"integration_id": integration_id, "source": "send_message"},
         )
@@ -1901,11 +1919,13 @@ async def _run_navigation_task_from_bot(
     if platform == "telegram":
         integration = telegram_registry.get_telegram(integration_id)
         if integration:
-            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": reply})
+            normalized_reply, _ = normalize_for_channel(reply, channel="telegram")
+            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": normalized_reply})
     elif platform == "discord":
         integration = discord_registry.get_discord(integration_id)
         if integration:
-            await integration.execute_tool("discord_send_message", {"channel": str(chat_id), "text": reply})
+            normalized_reply, _ = normalize_for_channel(reply, channel="discord")
+            await integration.execute_tool("discord_send_message", {"channel": str(chat_id), "text": normalized_reply})
 
 
 def _get_telegram_sender_id(update: dict[str, Any]) -> str:

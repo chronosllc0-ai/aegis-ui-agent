@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 from integrations.idempotency import DeliveryDeduper
 
@@ -128,8 +129,9 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             return {"ok": False, "tool": "discord_send_message", "error": "Channel is required"}
         if not text.strip():
             return {"ok": False, "tool": "discord_send_message", "error": "Text is required"}
+        normalized_text, _ = normalize_for_channel(text, channel="discord")
 
-        payload: dict[str, Any] = {"content": text}
+        payload: dict[str, Any] = {"content": normalized_text}
         if metadata and metadata.get("tts"):
             payload["tts"] = bool(metadata["tts"])
         data = await self._request("POST", f"/channels/{channel}/messages", json_payload=payload)
@@ -153,8 +155,9 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             return {"ok": False, "tool": "discord_edit_message", "error": "message_id is required"}
         if not text.strip():
             return {"ok": False, "tool": "discord_edit_message", "error": "Text is required"}
+        normalized_text, _ = normalize_for_channel(text, channel="discord")
 
-        payload: dict[str, Any] = {"content": text}
+        payload: dict[str, Any] = {"content": normalized_text}
         if metadata and metadata.get("allowed_mentions"):
             payload["allowed_mentions"] = metadata["allowed_mentions"]
         data = await self._request("PATCH", f"/channels/{channel}/messages/{msg_id}", json_payload=payload)
