@@ -3087,3 +3087,94 @@
 
 ### Validation
 - Ran `cd frontend && npm run build`; TypeScript + Vite build pass.
+
+## 2026-04-05 — Single-composer UX: browser panel view-only + ScreenView direct send
+
+### What changed
+- Updated `frontend/src/App.tsx` to remove the browser-mode `InputBar` mount so browser mode is now strictly view/log focused.
+- Switched `ScreenView` example prompt behavior to call:
+  - `handleSend(prompt, 'steer', { task_label_source: 'chat', task_label: prompt })`
+  directly, instead of routing via `examplePrompt` state.
+- Removed browser-only `examplePrompt` plumbing in `App.tsx` and removed the related `examplePrompt` / `onExampleHandled` props + handling in `frontend/src/components/InputBar.tsx`.
+- Added optimistic chat-message bridging in `App.tsx` (`optimisticMessagesByTask`) so externally-triggered sends (including ScreenView examples) still show a user bubble in chat.
+- Kept the browser-mode stop button path unchanged so stop remains available while active execution is running.
+- Added UX coverage in `frontend/src/App.browser-example.test.tsx` validating:
+  1. example click triggers a chat-sourced navigate send payload,
+  2. user bubble appears in chat,
+  3. no action-log noise is introduced.
+
+### Why
+- Aligns UI with a single execution entry surface (ChatPanel composer) while keeping browser mode focused on visualization and controls.
+- Removes split input behavior that was causing confusion between browser and chat workflows.
+
+### Validation
+- Ran `npm --prefix frontend run build`; build passed.
+- Ran `npm --prefix frontend run test -- src/App.browser-example.test.tsx`; new UX test passed.
+
+## 2026-04-05 — Chat composer parity update (moved browser-input controls into ChatPanel)
+
+### What changed
+- Updated `frontend/src/components/ChatPanel.tsx` composer surface to include browser-panel style controls:
+  - agent mode selector
+  - provider picker
+  - model picker
+  - gallery chips + Prompt Gallery modal trigger
+- Removed chat composer footer tags/buttons that were requested to be replaced:
+  - removed Plan button
+  - removed Brainstorm button
+  - removed `⚡ GPT-5.4` chip
+  - removed reasoning-effort tag from the input footer strip
+- Wired the new controls through `ChatPanel` props and `App.tsx`:
+  - pass `provider`, `model`, `agentMode`
+  - pass `onProviderChange`, `onModelChange`, `onAgentModeChange`
+- Kept browser panel view-only behavior and stop-button accessibility from the previous pass.
+
+### Tests/updates
+- Added/retained coverage in `frontend/src/App.browser-example.test.tsx` for browser example click execution path.
+- Updated `frontend/src/components/ChatPanel.test.tsx` to satisfy new required props and removed obsolete Plan-button expectation.
+
+### Validation
+- Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
+- Ran `npm --prefix frontend run build`; passed.
+
+## 2026-04-06 — PR nitpick cleanup (stale ChatPanel reasoning props + callback passthrough)
+
+### What changed
+- Removed stale reasoning-related prop passing from `frontend/src/App.tsx` into `ChatPanel`:
+  - `enableReasoning`
+  - `onToggleReasoning`
+  - `reasoningEffort`
+  - `onChangeReasoningEffort`
+  - `currentModelSupportsReasoning`
+- Removed the matching stale prop declarations from `frontend/src/components/ChatPanel.tsx` `ChatPanelProps` interface.
+- Simplified `SuggestionChips` callback wiring from:
+  - `onSelectSuggestion={(templateId) => onSelectSuggestion(templateId)}`
+  to:
+  - `onSelectSuggestion={onSelectSuggestion}`
+
+### Why
+- These props were no longer consumed after the composer UI swap, so keeping them created dead API surface and misleading type contracts.
+- Callback passthrough simplification removes unnecessary wrapper noise.
+
+### Validation
+- Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
+- Ran `npm --prefix frontend run build`; passed.
+
+## 2026-04-06 — PR review follow-up (state cleanup + optimistic dedup + test global cleanup)
+
+### What changed
+- Addressed review nitpick in `frontend/src/App.tsx` by replacing:
+  - `const [mode] = useState<SteeringMode>('steer')`
+  with:
+  - `const mode: SteeringMode = 'steer'`
+- Addressed optimistic/server duplicate risk in `mergedChatMessages`:
+  - now filters optimistic user messages whose trimmed content already exists in server user messages before merge.
+- Addressed optimistic message map lifecycle cleanup:
+  - clears deleted task entries in `onDeleteTask`
+  - resets `optimisticMessagesByTask` in `newSession`
+- Addressed test global leak nitpick in `frontend/src/App.browser-example.test.tsx`:
+  - added `afterEach(() => { vi.unstubAllGlobals() })` after using `vi.stubGlobal('fetch', ...)`.
+
+### Validation
+- Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
+- Ran `npm --prefix frontend run build`; passed.

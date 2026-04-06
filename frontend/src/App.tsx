@@ -7,7 +7,6 @@ import { TermsPage } from './components/TermsPage'
 import { useNotifications } from './context/NotificationContext'
 import { AuthPage } from './components/AuthPage'
 // CostEstimator removed from main UI - credit details live in Settings > Usage
-import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
 import { OnboardingWizard, isOnboardingComplete } from './components/OnboardingWizard'
 import { ProductTour, isTourComplete } from './components/ProductTour'
@@ -35,7 +34,7 @@ import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSo
 import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
-import { PROVIDERS, providerById, modelInfo } from './lib/models'
+import { PROVIDERS, modelInfo } from './lib/models'
 import { normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
@@ -88,16 +87,13 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [mode, setMode] = useState<SteeringMode>('steer')
-  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
+  const mode: SteeringMode = 'steer'
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [showWorkflow, setShowWorkflow] = useState(false)
   const [urlInput, setUrlInput] = useState('about:blank')
-  const [sending, setSending] = useState(false)
-  const [examplePrompt, setExamplePrompt] = useState<string | null>(null)
   const [showSubAgentModal, setShowSubAgentModal] = useState(false)
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
@@ -110,6 +106,7 @@ function App() {
   const taskToConvRef = useRef<Map<string, string>>(new Map())
   // Server messages loaded for the selected conversation
   const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
+  const [optimisticMessagesByTask, setOptimisticMessagesByTask] = useState<Record<string, ServerMessage[]>>({})
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const browserGridRef = useRef<HTMLDivElement>(null)
   const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
@@ -148,7 +145,7 @@ function App() {
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
-  const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
+  const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
 
   useEffect(() => {
@@ -518,6 +515,19 @@ function App() {
     return scoped
   }, [scopedSubAgents, subAgentSteps])
 
+  const mergedChatMessages = useMemo(() => {
+    if (!selectedTaskId) return serverMessages
+    const optimistic = optimisticMessagesByTask[selectedTaskId] ?? []
+    if (!optimistic.length) return serverMessages
+    const dedupedOptimistic = optimistic.filter((optimisticMsg) => (
+      !serverMessages.some((serverMsg) => (
+        serverMsg.role === 'user' &&
+        serverMsg.content.trim() === optimisticMsg.content.trim()
+      ))
+    ))
+    return [...dedupedOptimistic, ...serverMessages]
+  }, [optimisticMessagesByTask, selectedTaskId, serverMessages])
+
   const visibleLogs: LogEntry[] = useMemo(() => {
     if (!selectedTaskId) return logs
     const filtered = logs.filter((entry) => entry.taskId === selectedTaskId)
@@ -655,13 +665,10 @@ function App() {
     const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
     const finalInstruction = cleanedInstruction || trimmed
 
-    setSending(true)
-    window.setTimeout(() => setSending(false), 280)
     const selectedAgentMode = normalizeAgentMode(settings.agentMode)
     send({ action: 'config', settings: wsConfig })
 
     if (selectedMode === 'queue') {
-      setQueuedMessages((prev) => [...prev, trimmed])
       send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
@@ -711,6 +718,23 @@ function App() {
         ? metadata.task_label.trim()
         : finalInstruction
       const newEntry: TaskHistoryItem = { id: taskId, title: lockedTitle, dateLabel, instruction: finalInstruction, labelSource }
+      setOptimisticMessagesByTask((prev) => {
+        const existing = prev[taskId] ?? []
+        if (existing.some((msg) => msg.role === 'user' && msg.content.trim() === finalInstruction.trim())) {
+          return prev
+        }
+        const optimisticMessage: ServerMessage = {
+          id: `optimistic-${taskId}-${existing.length + 1}`,
+          role: 'user',
+          content: finalInstruction,
+          metadata: null,
+          created_at: new Date().toISOString(),
+        }
+        return {
+          ...prev,
+          [taskId]: [...existing, optimisticMessage],
+        }
+      })
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
@@ -769,17 +793,23 @@ function App() {
     const convId = taskToConvRef.current.get(id)
     if (convId) { void deleteConversation(convId); taskToConvRef.current.delete(id) }
     if (selectedTaskId === id) setSelectedTaskId(null)
+    setOptimisticMessagesByTask((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const newSession = () => {
     send({ action: 'stop' })
-    setQueuedMessages([])
     setTaskStartedAt(null)
     setDurationSeconds(0)
     resetClientState()
     resetUsageSession()
     contextMeter.reset()
     setSelectedTaskId(null)
+    setOptimisticMessagesByTask({})
     setShowWorkflow(false)
     void stopVoice()
   }
@@ -1146,17 +1176,21 @@ function App() {
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 activeTaskId={selectedTaskId}
-                serverMessages={serverMessages}
+                serverMessages={mergedChatMessages}
                 onStop={() => send({ action: 'stop' })}
                 onUserInputResponse={handleUserInputResponse}
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
                 reasoningMap={reasoningMap}
-                enableReasoning={settings.enableReasoning}
-                onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}
-                reasoningEffort={settings.reasoningEffort}
-                onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
-                currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
+                provider={settings.provider}
+                model={settings.model}
+                agentMode={settings.agentMode}
+                onProviderChange={(nextProvider) => {
+                  const providerMeta = PROVIDERS.find((item) => item.id === nextProvider) ?? PROVIDERS[0]
+                  patchSettings({ provider: nextProvider, model: providerMeta.models[0].id })
+                }}
+                onModelChange={(nextModel) => patchSettings({ model: nextModel })}
+                onAgentModeChange={(nextMode) => patchSettings({ agentMode: nextMode })}
                 contextSnapshot={{
                   tokensUsed: contextMeter.current.tokensUsed,
                   contextLimit: contextMeter.current.contextLimit,
@@ -1178,7 +1212,14 @@ function App() {
                   {showWorkflow ? (
                     <WorkflowView steps={workflowSteps} />
                   ) : (
-                    <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' lastClickCoords={lastClickCoords} />
+                    <ScreenView
+                      frameSrc={latestFrame}
+                      isWorking={isWorking}
+                      steeringFlashKey={steeringFlashKey}
+                      onExampleClick={(prompt) => handleSend(prompt, 'steer', { task_label_source: 'chat', task_label: prompt })}
+                      dataTour='screen-view'
+                      lastClickCoords={lastClickCoords}
+                    />
                   )}
                 </div>
 
@@ -1221,40 +1262,6 @@ function App() {
             </div>
           )}
 
-          {!showSettings && !showAutomations && appMode === 'browser' && (
-            <div data-tour='input-bar'>
-              <InputBar
-                mode={mode}
-                voiceActive={voiceActive}
-                voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
-                voiceError={voiceError}
-                isConnected={connectionStatus === 'connected'}
-                isWorking={isWorking}
-                onToggleVoice={toggleVoice}
-                sending={sending}
-                onModeChange={setMode}
-                onSend={handleSend}
-                agentMode={settings.agentMode}
-                onAgentModeChange={(nextMode) => patchSettings({ agentMode: nextMode })}
-                onDecomposePlan={handleDecomposePlan}
-                provider={settings.provider}
-                model={settings.model}
-                onProviderChange={(nextProvider) => {
-                  const p = providerById(nextProvider) ?? PROVIDERS[0]
-                  patchSettings({ provider: nextProvider, model: p.models[0].id })
-                }}
-                onModelChange={(nextModel) => patchSettings({ model: nextModel })}
-                queuedMessages={queuedMessages}
-                onDeleteQueueItem={(index) => {
-                  setQueuedMessages((prev) => prev.filter((_, i) => i !== index))
-                  send({ action: 'dequeue', index })
-                }}
-                examplePrompt={examplePrompt}
-                onExampleHandled={() => setExamplePrompt(null)}
-                transcripts={transcripts}
-              />
-            </div>
-          )}
           <SpendingAlert balance={balance} />
         </section>
       </div>
@@ -1277,7 +1284,7 @@ function App() {
           onTryNow={() => {
             localStorage.setItem('aegis_seen_subagent_modal', '1')
             setShowSubAgentModal(false)
-            setExamplePrompt('spawn sub-agents: ')
+            setAppMode('chat')
           }}
         />
       )}
