@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const sendSpy = vi.fn()
 
@@ -127,6 +127,10 @@ vi.mock('./components/ChangelogModal', () => ({
 }))
 
 describe('App browser example click UX', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     sendSpy.mockReset()
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

@@ -3136,3 +3136,22 @@
 ### Validation
 - Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
 - Ran `npm --prefix frontend run build`; passed.
+
+## 2026-04-06 — PR review follow-up (state cleanup + optimistic dedup + test global cleanup)
+
+### What changed
+- Addressed review nitpick in `frontend/src/App.tsx` by replacing:
+  - `const [mode] = useState<SteeringMode>('steer')`
+  with:
+  - `const mode: SteeringMode = 'steer'`
+- Addressed optimistic/server duplicate risk in `mergedChatMessages`:
+  - now filters optimistic user messages whose trimmed content already exists in server user messages before merge.
+- Addressed optimistic message map lifecycle cleanup:
+  - clears deleted task entries in `onDeleteTask`
+  - resets `optimisticMessagesByTask` in `newSession`
+- Addressed test global leak nitpick in `frontend/src/App.browser-example.test.tsx`:
+  - added `afterEach(() => { vi.unstubAllGlobals() })` after using `vi.stubGlobal('fetch', ...)`.
+
+### Validation
+- Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
+- Ran `npm --prefix frontend run build`; passed.

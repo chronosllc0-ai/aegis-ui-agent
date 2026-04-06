@@ -87,7 +87,7 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [mode] = useState<SteeringMode>('steer')
+  const mode: SteeringMode = 'steer'
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
@@ -519,7 +519,13 @@ function App() {
     if (!selectedTaskId) return serverMessages
     const optimistic = optimisticMessagesByTask[selectedTaskId] ?? []
     if (!optimistic.length) return serverMessages
-    return [...optimistic, ...serverMessages]
+    const dedupedOptimistic = optimistic.filter((optimisticMsg) => (
+      !serverMessages.some((serverMsg) => (
+        serverMsg.role === 'user' &&
+        serverMsg.content.trim() === optimisticMsg.content.trim()
+      ))
+    ))
+    return [...dedupedOptimistic, ...serverMessages]
   }, [optimisticMessagesByTask, selectedTaskId, serverMessages])
 
   const visibleLogs: LogEntry[] = useMemo(() => {
@@ -787,6 +793,12 @@ function App() {
     const convId = taskToConvRef.current.get(id)
     if (convId) { void deleteConversation(convId); taskToConvRef.current.delete(id) }
     if (selectedTaskId === id) setSelectedTaskId(null)
+    setOptimisticMessagesByTask((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const newSession = () => {
@@ -797,6 +809,7 @@ function App() {
     resetUsageSession()
     contextMeter.reset()
     setSelectedTaskId(null)
+    setOptimisticMessagesByTask({})
     setShowWorkflow(false)
     void stopVoice()
   }
