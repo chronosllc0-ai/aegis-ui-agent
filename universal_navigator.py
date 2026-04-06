@@ -427,7 +427,7 @@ def _connected_integrations(settings: dict[str, Any]) -> set[str]:
     return connected
 
 
-def _normalize_tool_name_list(raw_values: Any) -> set[str]:
+def _normalize_tool_names(raw_values: Any) -> set[str]:
     """Normalize a raw array-like tool name payload into lowercase tool ids."""
     if not isinstance(raw_values, list):
         return set()
@@ -447,8 +447,8 @@ def _resolve_skill_tool_policy(settings: dict[str, Any]) -> tuple[set[str] | Non
     Allow list is treated as an intersection when provided by one or more skills.
     Deny list is always treated as a union, and deny always wins.
     """
-    allow_set = _normalize_tool_name_list(settings.get("skill_allow_tools"))
-    deny_set = _normalize_tool_name_list(settings.get("skill_deny_tools"))
+    allow_set = _normalize_tool_names(settings.get("skill_allow_tools"))
+    deny_set = _normalize_tool_names(settings.get("skill_deny_tools"))
     return (allow_set if allow_set else None), deny_set
 
 
@@ -474,9 +474,9 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
             continue
         if name in disabled_tools:
             continue
-        if skill_allow_tools is not None and name not in skill_allow_tools:
-            continue
         if name in skill_deny_tools:
+            continue
+        if skill_allow_tools is not None and name not in skill_allow_tools:
             continue
         required_integration = tool.get("requires_integration")
         if required_integration and required_integration not in connected_integrations:
@@ -1031,15 +1031,15 @@ class UniversalToolExecutor:
                 f"Tool '{tool}' is unavailable in '{self._agent_mode}' mode.",
                 {"policy_source": "mode", "agent_mode": self._agent_mode},
             )
-        if self._skill_allow_tools is not None and tool not in self._skill_allow_tools:
-            return (
-                f"Tool '{tool}' is blocked by active skill policy allowlist.",
-                {"policy_source": "skill_policy", "policy_rule": "allow_intersection"},
-            )
         if tool in self._skill_deny_tools:
             return (
                 f"Tool '{tool}' is blocked by active skill policy denylist.",
                 {"policy_source": "skill_policy", "policy_rule": "deny_union"},
+            )
+        if self._skill_allow_tools is not None and tool not in self._skill_allow_tools:
+            return (
+                f"Tool '{tool}' is blocked by active skill policy allowlist.",
+                {"policy_source": "skill_policy", "policy_rule": "allow_intersection"},
             )
         if tool in self._disabled_tools:
             return f"Tool '{tool}' is currently disabled in Settings → Tools.", {"policy_source": "settings"}

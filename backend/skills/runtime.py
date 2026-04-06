@@ -64,6 +64,7 @@ def _extract_policy(metadata_json: str) -> tuple[set[str], set[str]]:
     try:
         metadata = json.loads(metadata_json or "{}")
     except json.JSONDecodeError:
+        logger.warning("Failed to parse skill metadata_json while extracting runtime policy: %r", (metadata_json or "")[:120])
         return set(), set()
     if not isinstance(metadata, dict):
         return set(), set()

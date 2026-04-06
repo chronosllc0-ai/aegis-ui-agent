@@ -76,6 +76,18 @@ def test_tool_unavailable_reason_prioritizes_skill_policy() -> None:
     assert "skill policy denylist" in reason
 
 
+def test_tool_unavailable_reason_prefers_deny_over_allow_with_both_present() -> None:
+    """Denylist reason should win even when allowlist would also block the same tool."""
+    executor = UniversalToolExecutor(
+        SimpleNamespace(),
+        session_id="sess-2",
+        settings={"agent_mode": "code", "skill_allow_tools": ["read_file"], "skill_deny_tools": ["web_search"]},
+    )
+    reason = executor._tool_unavailable_reason("web_search")
+    assert reason is not None
+    assert "skill policy denylist" in reason
+
+
 def test_no_skill_policy_keeps_default_manifest_behavior() -> None:
     """Sessions without skill policy should match baseline mode-gated tool availability."""
     baseline = {tool["name"] for tool in _available_tools({"agent_mode": "code"}, is_subagent=False)}

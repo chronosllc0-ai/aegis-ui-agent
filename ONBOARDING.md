@@ -1,3 +1,40 @@
+## Session 5.75 - April 6, 2026 (post-review fixes: deny precedence + metadata parse observability)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-follow-up pass
+
+### What Was Done
+- Addressed review warning about deny/allow ordering in `universal_navigator.py`:
+  - in `_available_tools(...)`, moved denylist filtering before allowlist filtering so deny is evaluated first in all cases,
+  - in `_tool_unavailable_reason_with_meta(...)`, moved denylist reason checks before allowlist checks so `deny_union` can surface even when allowlist is present.
+- Addressed review suggestion on malformed skill metadata observability in `backend/skills/runtime.py`:
+  - `_extract_policy(...)` now logs a warning when `metadata_json` fails to parse.
+- Addressed naming nit for duplicated helper intent:
+  - renamed navigator helper to `_normalize_tool_names` so naming matches runtime resolver helper and avoids ambiguous divergence.
+- Added regression tests for the reviewed edge cases:
+  - deny reason precedence when both skill allow+deny are present,
+  - workflow `denial_debug` reports `deny_union` when both allow+deny exist,
+  - malformed metadata JSON warning emission in `_extract_policy(...)`.
+
+### What's Working
+- Deny precedence is now enforced consistently across availability gating and unavailable-reason reporting.
+- Skill-policy observability now includes malformed metadata warnings.
+- Expanded targeted regression suite passes.
+
+### What's NOT Working Yet
+- No new issues identified in this follow-up pass.
+
+### Next Steps
+1. Optional: centralize shared normalization helpers into a common utility module if a third caller emerges.
+
+### Decisions Made
+- Kept the duplication local for now, but normalized helper naming to reduce maintenance confusion.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.74 - April 6, 2026 (runtime tool gating now enforces skill policies)
 
 **Agent:** GPT-5.3-Codex  

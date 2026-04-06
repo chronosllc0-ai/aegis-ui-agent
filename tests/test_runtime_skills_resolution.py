@@ -7,6 +7,7 @@ import json
 
 from backend import database
 from backend.database import RuntimeSkillInstallation, Skill, SkillToggle, SkillVersion, User, get_session
+from backend.skills import runtime as runtime_module
 from backend.skills.runtime import resolve_runtime_skills
 
 
@@ -144,3 +145,11 @@ def test_runtime_skill_policy_allow_intersection_and_deny_union(tmp_path) -> Non
         assert context.skill_deny_tools == ["exec_shell", "write_file"]
 
     asyncio.run(_run())
+
+
+def test_extract_policy_logs_warning_on_malformed_json(caplog) -> None:
+    caplog.set_level("WARNING")
+    allow, deny = runtime_module._extract_policy("{bad-json")
+    assert allow == set()
+    assert deny == set()
+    assert "Failed to parse skill metadata_json while extracting runtime policy" in caplog.text
