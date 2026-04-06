@@ -297,11 +297,19 @@ class TelegramIntegration(BaseIntegration):
         chat_id = params.get("chat_id")
         text = str(params.get("text", "")).strip()
         parse_mode = str(params.get("parse_mode", "")).strip() or None
+        reply_markup = params.get("reply_markup")
         if chat_id is None:
             return {"ok": False, "tool": "telegram_send_message", "error": "chat_id is required"}
         if not text:
             return {"ok": False, "tool": "telegram_send_message", "error": "Text is required"}
-        data = await self._request("sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode})
+        if reply_markup is not None and not isinstance(reply_markup, dict):
+            return {"ok": False, "tool": "telegram_send_message", "error": "reply_markup must be an object"}
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        data = await self._request("sendMessage", json=payload)
         return {"ok": bool(data.get("ok")), "tool": "telegram_send_message", "result": data}
 
     async def _send_image(self, params: dict[str, Any]) -> dict[str, Any]:

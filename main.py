@@ -1377,6 +1377,36 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
+    callback_mode = _parse_telegram_mode_callback(update)
+    if callback_mode:
+        callback_message = update.get("callback_query", {}).get("message", {})
+        callback_chat_id = (callback_message.get("chat") or {}).get("id")
+        if not owner_user_id:
+            if callback_chat_id is not None:
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": str(callback_chat_id),
+                        "text": "⚠️ Mode switching is only available for the owner session.",
+                    },
+                )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if callback_chat_id is not None:
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {"chat_id": str(callback_chat_id), "text": "⚠️ No active session. Start a session first."},
+                )
+            return {"ok": True}
+        runtime.settings["agent_mode"] = callback_mode
+        mode_label = MODE_LABELS.get(callback_mode, callback_mode.title())
+        if callback_chat_id is not None:
+            await integration.execute_tool(
+                "telegram_send_message",
+                {"chat_id": str(callback_chat_id), "text": f"✅ Mode switched to *{mode_label}*"},
+            )
+        return {"ok": True}
     chat_id, text_content, platform_message_id = _extract_telegram_message(update)
 
     # Slash command handling
@@ -1398,7 +1428,17 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             ack_reaction=ack_reaction,
         )
         if cmd_response:
-            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
+            if isinstance(cmd_response, dict):
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": chat_id,
+                        "text": str(cmd_response.get("text", "")),
+                        "reply_markup": cmd_response.get("reply_markup"),
+                    },
+                )
+            else:
+                await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
         return {"ok": True}
 
     if chat_id and text_content:
@@ -1417,12 +1457,22 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
 async def register_telegram_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    session_owner_user_id = _extract_session_user_uid(request.cookies.get("aegis_session"))
+    payload_owner_user_id = str(payload.get("owner_user_id", "")).strip() or None
+    if session_owner_user_id and payload_owner_user_id and payload_owner_user_id != session_owner_user_id:
+        raise HTTPException(status_code=403, detail="owner_user_id does not match authenticated session")
+    owner_user_id = session_owner_user_id or payload_owner_user_id
+    if not owner_user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="owner_user_id is required (authenticate via aegis_session or provide owner_user_id in payload)",
+        )
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "delivery_mode": str(payload.get("delivery_mode", "polling")).strip(),
         "webhook_url": str(payload.get("webhook_url", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
-        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
+        "owner_user_id": owner_user_id,
     }
     integration = TelegramIntegration()
     connection = await integration.connect(config)
@@ -1900,7 +1950,7 @@ async def _handle_slash_command(
     integration_id: str,
     chat_id: Any,
     ack_reaction: str = "",
-) -> str | None:
+) -> str | dict[str, Any] | None:
     """Parse a slash command and execute the appropriate action. Returns a reply string or None."""
     parts = text.strip().split(None, 1)
     cmd = parts[0].lstrip("/").lower().split("@")[0]  # strip bot username suffix
@@ -1956,7 +2006,10 @@ async def _handle_slash_command(
             return "⚪ No active session."
         if not arg:
             active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-            return f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+            message = f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+            if platform == "telegram":
+                return {"text": message, "reply_markup": _telegram_mode_reply_markup()}
+            return message
         requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
         runtime.settings["agent_mode"] = requested_mode
         return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
@@ -2067,6 +2120,25 @@ async def _handle_slash_command(
             )
 
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
+
+
+def _telegram_mode_reply_markup() -> dict[str, Any]:
+    """Build Telegram inline keyboard for all available modes."""
+    return {
+        "inline_keyboard": [
+            [{"text": label, "callback_data": f"mode:{mode_name}"}]
+            for mode_name, label in MODE_LABELS.items()
+        ]
+    }
+
+
+def _parse_telegram_mode_callback(update: dict[str, Any]) -> str | None:
+    """Parse Telegram callback payload for mode selection actions."""
+    callback = update.get("callback_query") or {}
+    data = str(callback.get("data", "")).strip()
+    if not data.startswith("mode:"):
+        return None
+    return normalize_agent_mode(data[5:])
 
 
 # ── Bot config endpoints ─────────────────────────────────────────────

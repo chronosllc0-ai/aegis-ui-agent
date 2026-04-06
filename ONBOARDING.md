@@ -1,3 +1,123 @@
+## Session 5.65 - April 6, 2026 (Telegram owner identity capture hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend validation pass
+
+### What Was Done
+- Hardened Telegram integration registration in `main.py` to ensure owner identity is always captured:
+  - resolves owner from authenticated `aegis_session` cookie and/or `owner_user_id` payload field,
+  - rejects mismatched cookie-vs-payload owners with `403`,
+  - rejects registration when neither source provides owner identity with `400`.
+- Preserved existing behavior for valid registration and continued storing resolved `owner_user_id` in integration config.
+- Added tests:
+  - registration fails when owner identity is absent,
+  - registration succeeds and persists owner when `owner_user_id` is provided in payload (no cookie).
+
+### What's Working
+- Telegram commands/callbacks now have deterministic owner binding at registration time instead of relying on optional session state.
+- Owner-to-integration association is explicit and validated.
+- Updated targeted mode/telegram tests pass.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+- Existing FastAPI `on_event` deprecation warnings remain (pre-existing).
+
+### Next Steps
+1. Optional: add UI/API hint in connector setup flow that `owner_user_id` payload fallback exists for service-to-service registration.
+2. Optional: mirror the same strict owner-capture policy across Slack/Discord registration endpoints for parity.
+
+### Decisions Made
+- Used dual-source owner resolution (session first, payload fallback) to match common integration onboarding patterns while still enforcing strict ownership.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.64 - April 6, 2026 (Telegram /mode callback edge-case review fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-follow-up pass
+
+### What Was Done
+- Addressed PR #172 review feedback for Telegram mode callback edge cases in `main.py`:
+  - callback mode events are now always consumed early (no fallthrough into generic message logging path),
+  - when callback is received without `owner_user_id`, bot now sends explicit warning feedback:
+    - `⚠️ Mode switching is only available for the owner session.`,
+  - when owner exists but runtime session is missing, bot now sends:
+    - `⚠️ No active session. Start a session first.`,
+  - normalized callback confirmation/warning `chat_id` to `str(...)` for consistency with other Telegram send paths.
+- Updated callback success test expectation to string chat id (`"777"`).
+- Added regression tests for both new edge cases:
+  - callback mode action with missing owner config returns warning and is consumed,
+  - callback mode action with owner but no runtime returns warning and is consumed.
+
+### What's Working
+- Telegram mode callback UX now gives deterministic user feedback in all reviewed edge cases.
+- Callback mode actions no longer leak into the generic webhook message pipeline when owner/runtime context is missing.
+- Targeted Telegram mode + integration tests pass.
+
+### What's NOT Working Yet
+- No new blockers discovered in this review pass.
+- Existing FastAPI startup/shutdown deprecation warnings persist in tests (pre-existing).
+
+### Next Steps
+1. Optional: include callback `answerCallbackQuery` text override for these warnings so feedback appears both as toast and chat message.
+2. Optional: add explicit audit log event when mode callback is rejected due to owner/runtime mismatch.
+
+### Decisions Made
+- Chose explicit in-chat warning replies for rejected callback mode actions to minimize user confusion.
+- Kept callback consumption behavior strict (`return {"ok": True}`) once a mode callback is detected.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.63 - April 6, 2026 (Telegram /mode inline selection UX)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend + test pass
+
+### What Was Done
+- Upgraded Telegram `/mode` command UX in `main.py`:
+  - `/mode` with no args now returns a Telegram-specific payload containing:
+    - current mode text, and
+    - inline keyboard buttons for all available modes (`orchestrator`, `planner`, `architect`, `deep_research`, `code`).
+  - Preserved existing `/mode <name>` behavior for power users (direct text-based mode switch).
+- Added Telegram callback mode selection handling in webhook flow:
+  - parses callback payloads in the form `mode:<mode_name>`,
+  - updates `runtime.settings["agent_mode"]` for the integration owner session,
+  - sends confirmation message with selected mode label.
+- Extended Telegram send-message tool path in `integrations/telegram.py` to accept/forward optional `reply_markup` objects to Telegram `sendMessage`.
+- Added acceptance-focused tests:
+  - `/mode` text path,
+  - `/mode` inline keyboard render path (direct command return + webhook send payload),
+  - callback selection path updates runtime mode and emits confirmation,
+  - Telegram send-message reply_markup forwarding coverage.
+
+### What's Working
+- Telegram `/mode` now supports inline selection UX while keeping text mode-switch compatibility.
+- Callback selection updates owner runtime mode as required.
+- Targeted tests for mode and Telegram integration paths pass.
+
+### What's NOT Working Yet
+- No new functional blockers identified in this pass.
+- Existing FastAPI `on_event` deprecation warnings still appear during test runs (pre-existing, unrelated to this change).
+
+### Next Steps
+1. Optional UX refinement: edit the original mode picker message on callback to visually mark selected mode.
+2. Optional hardening: add callback sender/owner parity checks for stricter multi-user bot safety when needed.
+
+### Decisions Made
+- Implemented callback mode selection handling in `main.py` webhook layer (session-aware), while keeping `integrations/telegram.py` generic and transport-focused.
+- Kept callback payload format simple and stable: `mode:<normalized_mode>`.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.62 - April 6, 2026 (post-review nitpick cleanup: redundant assertion)
 
 **Agent:** GPT-5.3-Codex  
