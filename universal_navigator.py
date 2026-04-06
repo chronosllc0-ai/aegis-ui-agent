@@ -620,7 +620,6 @@ async def _build_system_prompt(
     try:
         from backend.database import _session_factory, PlatformSetting
         from sqlalchemy import select as _sa_select
-        from sqlalchemy.exc import SQLAlchemyError
         if _session_factory is not None:
             async with _session_factory() as _db:
                 _row = (await _db.execute(
@@ -641,7 +640,6 @@ async def _build_system_prompt(
     try:
         from backend.database import _session_factory, PlatformSetting
         from sqlalchemy import select as _sa_select
-        from sqlalchemy.exc import SQLAlchemyError
         if _session_factory is not None:
             async with _session_factory() as _db:
                 _row = (await _db.execute(

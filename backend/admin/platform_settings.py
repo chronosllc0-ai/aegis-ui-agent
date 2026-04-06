@@ -28,10 +28,9 @@ class PatchPlatformSettingsBody(BaseModel):
     def _validate_mode_map(cls, value: dict[str, str] | None) -> dict[str, str] | None:
         if value is None:
             return value
-        allowed_modes = set(MODE_LABELS)
         for mode in value:
             normalized = normalize_agent_mode(mode)
-            if mode != normalized or mode not in allowed_modes:
+            if mode != normalized:
                 raise ValueError(f"Unsupported mode key: {mode}")
         return value
 
@@ -50,7 +49,6 @@ async def _set_value(db: AsyncSession, key: str, value: str, admin_uid: str) -> 
         row.updated_by = admin_uid
     else:
         db.add(PlatformSetting(key=key, value=value, updated_by=admin_uid))
-    await db.commit()
 
 
 def _mode_instruction_key(mode: str) -> str:
@@ -88,6 +86,7 @@ async def patch_platform_settings(
     if body.mode_system_instructions is not None:
         for mode, instruction in body.mode_system_instructions.items():
             await _set_value(db, _mode_instruction_key(mode), instruction, admin.uid)
+    await db.commit()
     mode_map = await _get_mode_instruction_map(db)
     return {
         "global_system_instruction": body.global_system_instruction,

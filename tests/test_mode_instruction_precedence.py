@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from backend import database
@@ -53,11 +54,13 @@ def test_prompt_precedence_orders_global_then_mode_then_runtime(tmp_path: Path) 
     asyncio.run(_run())
 
 
-def test_prompt_uses_default_mode_hint_when_admin_mode_instruction_missing(tmp_path: Path) -> None:
+def test_prompt_uses_default_mode_hint_when_admin_mode_instruction_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Mode block should fall back to built-in mode hints when DB has no mode override."""
     _init_test_db(tmp_path)
-    original_global = universal_navigator._app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION
-    universal_navigator._app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION = ""
+    monkeypatch.setattr(universal_navigator._app_settings, "AEGIS_GLOBAL_SYSTEM_INSTRUCTION", "")
 
     async def _run() -> None:
         async with database._session_factory() as session:  # type: ignore[union-attr]
@@ -81,7 +84,4 @@ def test_prompt_uses_default_mode_hint_when_admin_mode_instruction_missing(tmp_p
         assert "Mode instructions for 'architect'" in prompt
         assert "Provide architecture decisions, tradeoffs, and implementation blueprints" in prompt
 
-    try:
-        asyncio.run(_run())
-    finally:
-        universal_navigator._app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION = original_global
+    asyncio.run(_run())

@@ -45,6 +45,8 @@ type AuditEntry = {
 
 const ADMIN_TABS = ['Dashboard', 'Users', 'Agent Config', 'Messaging', 'Emailing', 'Audit Log'] as const
 type AdminTab = (typeof ADMIN_TABS)[number]
+const MODE_IDS = ['orchestrator', 'planner', 'architect', 'deep_research', 'code'] as const
+type ModeId = (typeof MODE_IDS)[number]
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -587,8 +589,6 @@ function UsersTab() {
 /* ─── Agent Config Tab ───────────────────────────────────────────────── */
 
 function AgentConfigTab() {
-  const MODE_IDS = ['orchestrator', 'planner', 'architect', 'deep_research', 'code'] as const
-  type ModeId = (typeof MODE_IDS)[number]
   const [instruction, setInstruction] = useState('')
   const [modeInstructions, setModeInstructions] = useState<Record<ModeId, string>>({
     orchestrator: '',
