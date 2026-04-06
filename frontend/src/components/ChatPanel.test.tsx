@@ -33,18 +33,20 @@ function makeAskUserInputLog(): LogEntry {
 describe('ChatPanel ask_user_input reply flow', () => {
   it('creates one local user bubble and invokes user_input_response callback exactly once', async () => {
     const onUserInputResponse = vi.fn()
+    const onSend = vi.fn()
 
     render(
       <ChatPanel
         logs={[makeAskUserInputLog()]}
         isWorking={false}
-        onSend={vi.fn()}
+        onSend={onSend}
         onDecomposePlan={vi.fn()}
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
         latestFrame={null}
         serverMessages={[]}
+        activeTaskId='task-1'
         onUserInputResponse={onUserInputResponse}
         {...baseChatPanelProps}
       />,
@@ -58,12 +60,17 @@ describe('ChatPanel ask_user_input reply flow', () => {
 
     expect(onUserInputResponse).toHaveBeenCalledTimes(1)
     expect(onUserInputResponse).toHaveBeenCalledWith('Custom answer from user', 'req-123')
+    expect(onSend).not.toHaveBeenCalled()
 
     const userBubbleTexts = screen
       .getAllByTestId('user-bubble')
       .map((node) => node.textContent ?? '')
       .filter((text) => text.includes('Custom answer from user'))
     expect(userBubbleTexts).toHaveLength(1)
+
+    const persisted = JSON.parse(localStorage.getItem('aegis.chat.task-1') ?? '[]') as Array<{ metadata?: Record<string, unknown> }>
+    const localAskReply = persisted.find((msg) => (msg.metadata?.request_id as string | undefined) === 'req-123')
+    expect(localAskReply?.metadata?.source).toBe('ask_user_input')
   })
 })
 
@@ -91,6 +98,7 @@ describe('ChatPanel plan intent UX', () => {
         logs={[]}
         isWorking={false}
         onSend={onSend}
+        onUserInputResponse={vi.fn()}
         onDecomposePlan={onDecomposePlan}
         connectionStatus='connected'
         transcripts={[]}

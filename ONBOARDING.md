@@ -1,77 +1,32 @@
-## Session 5.62 - April 6, 2026 (Review follow-up: atomic mode writes + cleanup)
+## Session 5.61 - April 6, 2026 (ask_user_input websocket reply routing hardening)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 targeted review-fix pass
+**Duration:** ~1 focused frontend/backend regression pass
 
 ### What Was Done
-- Addressed PR review warning in `backend/admin/platform_settings.py` about partial commits during per-mode writes:
-  - removed commit from `_set_value(...)`,
-  - now upserts all global/mode keys first,
-  - commits once at the end of `patch_platform_settings(...)` for atomic request-level persistence.
-- Addressed validation nitpick by simplifying mode key validation condition to the meaningful check (`mode != normalize_agent_mode(mode)`).
-- Addressed import nitpick in `universal_navigator.py` by removing redundant in-function `SQLAlchemyError` re-imports and using module-level import.
-- Addressed frontend suggestion by hoisting `MODE_IDS` and `ModeId` to module scope in `frontend/src/components/admin/AdminPanel.tsx` to avoid recreating constants on each render.
-- Addressed testing suggestion by replacing direct global settings mutation with `monkeypatch` in `tests/test_mode_instruction_precedence.py`.
-- Re-ran targeted backend tests and frontend build to verify no regressions.
+- Updated `frontend/src/components/ChatPanel.tsx` ask-user-input reply flow so responses always go through the dedicated `onUserInputResponse(answer, requestId)` callback and never fall back to generic `onSend(..., "steer", ...)`.
+- Made `ChatPanel`’s `onUserInputResponse` prop required to enforce explicit wiring from `App.tsx`.
+- Preserved local optimistic user bubble insertion and ensured metadata remains tagged as `{ source: "ask_user_input", request_id }` for dedupe-safe replay behavior.
+- Confirmed `frontend/src/App.tsx` already sends ask-user replies via websocket payload `{ action: "user_input_response", request_id, response }` and kept that path as the concrete callback implementation.
+- Added/extended regression coverage:
+  - `frontend/src/components/ChatPanel.test.tsx` now asserts one callback event, no generic `onSend` fallback invocation, one local user bubble, and persisted `source: "ask_user_input"` metadata.
+  - `tests/test_main_websocket.py` user-input resume test now additionally asserts result instruction continuity and single continuation response semantics while maintaining `execute_calls == 1`.
+- Fixed a test-file import typo in `frontend/src/components/__tests__/ChatPanel.thinking-persistence.test.tsx` encountered during validation.
 
 ### What's Working
-- Platform settings PATCH now commits once, preventing partial persisted state if a later mode upsert fails.
-- Mode validation remains strict for supported mode IDs.
-- Prompt assembly behavior and RBAC tests continue to pass.
-- Admin panel builds successfully with hoisted mode constants.
+- Ask-user-input replies now follow a dedicated websocket response path end-to-end and avoid accidental steer task injection from the chat composer path.
+- Backend `user_input_response` handling continues to resolve `pending_user_inputs[request_id]` without spawning an extra task.
+- Updated targeted frontend/backend regression tests pass.
 
 ### What's NOT Working Yet
-- No additional issues identified in this review-follow-up pass.
+- Unrelated pre-existing frontend tests in `ChatPanel.thinking-persistence` and `ChatPanel.thread-hydration` currently fail under this environment’s run due to loading-state/timing assumptions; not introduced by this pass.
 
 ### Next Steps
-1. Optional: add explicit DB transaction failure simulation test to assert rollback semantics under injected exceptions.
+1. Stabilize thinking/thread-hydration tests by awaiting thread-ready render state before asserting thought chips.
+2. Optionally add a dedicated App-level websocket send spy test asserting exactly one outbound `user_input_response` message for ask-user-input replies.
 
 ### Decisions Made
-- Kept `_set_value(...)` as a no-commit upsert helper and centralized transaction commit in route handler for clearer transactional boundaries.
-
-### Blockers
-- None.
-
----
-
-## Session 5.61 - April 6, 2026 (Admin-managed mode instruction precedence)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 backend + frontend + tests pass
-
-### What Was Done
-- Implemented admin-managed per-mode instruction persistence for all runtime modes (`orchestrator`, `planner`, `architect`, `deep_research`, `code`) in `backend/admin/platform_settings.py` using `PlatformSetting` key namespace `aegis_mode_system_instruction:<mode>`.
-- Extended admin platform-settings API payloads:
-  - `GET /api/admin/platform-settings` now returns both `global_system_instruction` and `mode_system_instructions` map.
-  - `PATCH /api/admin/platform-settings` now accepts and persists `mode_system_instructions` (validated mode keys), still admin-only.
-- Updated prompt assembly in `universal_navigator.py` to enforce authoritative ordering:
-  1) global instruction block,
-  2) mode instruction block,
-  3) user runtime instruction block.
-- Kept mode tool-gating policy unchanged (`backend/modes.py` untouched).
-- Added admin UI controls in `frontend/src/components/admin/AdminPanel.tsx`:
-  - new Agent Config internal sub-tabs (`Global Instruction` and `Mode Instructions`),
-  - editable textareas for each supported mode,
-  - save flow now persists both global + mode maps in one PATCH call.
-- Added backend tests:
-  - `tests/test_mode_instruction_precedence.py` for prompt precedence and mode fallback behavior,
-  - `tests/test_admin_platform_settings.py` for admin-only write enforcement and persistence correctness.
-
-### What's Working
-- Admins can now define platform-level instructions per mode via API + UI.
-- Prompt assembly now applies authoritative instruction precedence exactly as required.
-- Non-admin writes to platform settings are denied with RBAC 403.
-- Existing mode gating remains intact.
-
-### What's NOT Working Yet
-- No dedicated frontend unit tests were added for the new Agent Config mode-instruction editor interactions in this pass.
-
-### Next Steps
-1. Add frontend tests for Agent Config sub-tab switching and payload serialization (`mode_system_instructions`).
-2. Optional: add audit-log entries for mode-instruction mutation granularity (which specific modes changed).
-
-### Decisions Made
-- Reused existing `PlatformSetting` table with key namespacing to avoid schema migration overhead while still persisting per-mode definitions cleanly.
+- Enforced a required callback contract in `ChatPanel` instead of keeping optional fallback behavior, to make ask-user-input routing unambiguous and regression-resistant.
 
 ### Blockers
 - None.

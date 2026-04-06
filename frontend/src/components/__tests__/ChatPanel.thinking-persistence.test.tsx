@@ -1,4 +1,4 @@
-qqimport { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type React from 'react'
 
@@ -18,6 +18,7 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof ChatPanel>> = 
     activeTaskId: 'task-a',
     serverMessages: [],
     reasoningMap: {},
+    onUserInputResponse: vi.fn(),
     ...overrides,
   }
 }
