@@ -1,3 +1,53 @@
+## Session 5.72 - April 6, 2026 (server-authoritative runtime skill scaffolding)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend+ws scaffolding pass
+
+### What Was Done
+- Added runtime skill scaffolding data model updates in `backend/database.py`:
+  - extended `skills` schema model with `visibility` and `created_by`,
+  - extended `skill_versions` with `markdown_content`,
+  - added new tables/models: `skill_installations` and `skill_toggles`,
+  - added lightweight startup schema sync helper `_ensure_skill_columns_sync(...)` for backward-compatible local migration.
+- Added new backend runtime resolver module `backend/skills/runtime.py`:
+  - introduced `RuntimeSkillContext`,
+  - implemented `resolve_runtime_skills(user_uid, requested_ids)` that resolves only installed + toggle-enabled + runtime-status-allowed skills,
+  - includes cache-safe metadata (`version_hashes`, policy refs, resolved timestamp),
+  - gracefully degrades to empty context on unauthenticated sessions or DB unavailability.
+- Extended websocket config handling in `main.py`:
+  - validates `enabled_skill_ids` shape when `action=config`,
+  - resolves effective runtime skills server-side,
+  - persists server-authoritative `resolved_skill_ids` + metadata into `runtime.settings` (instead of trusting client-provided IDs).
+- Extended frontend websocket settings payload in `frontend/src/hooks/useSettings.ts`:
+  - added `enabledSkillIds` app setting (default `[]`),
+  - emits `enabled_skill_ids` in the ws config payload (optional-by-default behavior via empty list).
+- Added tests:
+  - new unit suite `tests/test_runtime_skills_resolution.py` covering installed/enabled resolution, non-installed ignore, disabled/revoked exclusion, and unauthenticated empty context,
+  - websocket protocol tests in `tests/test_main_websocket.py` for config resolution persistence and invalid `enabled_skill_ids` rejection.
+
+### What's Working
+- Runtime skill enablement is now server-authoritative at websocket config time.
+- Invalid client payload shapes for `enabled_skill_ids` are rejected with protocol errors.
+- Resolver degrades safely to empty context when auth/DB context is unavailable.
+- New runtime resolution and websocket config tests pass in targeted runs.
+
+### What's NOT Working Yet
+- No UI for managing skill toggles/installations was added in this pass (intentionally out of scope).
+
+### Next Steps
+1. Wire `resolved_skill_ids` and metadata deeper into runtime prompt assembly/execution paths where needed for strict per-turn enforcement and observability.
+2. Add API/admin endpoints (or reuse existing skills APIs) for managing `skill_installations` and `skill_toggles` records end-to-end.
+3. Add integration tests covering full auth + DB-backed websocket config flow with real session cookies.
+
+### Decisions Made
+- Chose graceful-degradation defaults (empty resolved skills) over hard-failing websocket config when user auth is missing or DB is unavailable.
+- Kept migration strategy lightweight and startup-synchronized to remain backward-compatible without introducing a full migration framework in this pass.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.71 - April 6, 2026 (post-merge priority parser polish: bool + truncation intent)
 
 **Agent:** GPT-5.3-Codex  
