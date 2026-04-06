@@ -1,3 +1,38 @@
+## Session 5.61 - April 6, 2026 (ask_user_input websocket reply routing hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend regression pass
+
+### What Was Done
+- Updated `frontend/src/components/ChatPanel.tsx` ask-user-input reply flow so responses always go through the dedicated `onUserInputResponse(answer, requestId)` callback and never fall back to generic `onSend(..., "steer", ...)`.
+- Made `ChatPanel`’s `onUserInputResponse` prop required to enforce explicit wiring from `App.tsx`.
+- Preserved local optimistic user bubble insertion and ensured metadata remains tagged as `{ source: "ask_user_input", request_id }` for dedupe-safe replay behavior.
+- Confirmed `frontend/src/App.tsx` already sends ask-user replies via websocket payload `{ action: "user_input_response", request_id, response }` and kept that path as the concrete callback implementation.
+- Added/extended regression coverage:
+  - `frontend/src/components/ChatPanel.test.tsx` now asserts one callback event, no generic `onSend` fallback invocation, one local user bubble, and persisted `source: "ask_user_input"` metadata.
+  - `tests/test_main_websocket.py` user-input resume test now additionally asserts result instruction continuity and single continuation response semantics while maintaining `execute_calls == 1`.
+- Fixed a test-file import typo in `frontend/src/components/__tests__/ChatPanel.thinking-persistence.test.tsx` encountered during validation.
+
+### What's Working
+- Ask-user-input replies now follow a dedicated websocket response path end-to-end and avoid accidental steer task injection from the chat composer path.
+- Backend `user_input_response` handling continues to resolve `pending_user_inputs[request_id]` without spawning an extra task.
+- Updated targeted frontend/backend regression tests pass.
+
+### What's NOT Working Yet
+- Unrelated pre-existing frontend tests in `ChatPanel.thinking-persistence` and `ChatPanel.thread-hydration` currently fail under this environment’s run due to loading-state/timing assumptions; not introduced by this pass.
+
+### Next Steps
+1. Stabilize thinking/thread-hydration tests by awaiting thread-ready render state before asserting thought chips.
+2. Optionally add a dedicated App-level websocket send spy test asserting exactly one outbound `user_input_response` message for ask-user-input replies.
+
+### Decisions Made
+- Enforced a required callback contract in `ChatPanel` instead of keeping optional fallback behavior, to make ask-user-input routing unambiguous and regression-resistant.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.60 - April 5, 2026 (Discord retry_after micro-optimization follow-up)
 
 **Agent:** GPT-5.3-Codex  

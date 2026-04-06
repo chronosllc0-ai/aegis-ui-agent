@@ -51,7 +51,7 @@ export interface ChatPanelProps {
   activeTaskId?: string | null
   serverMessages?: ServerMessage[]
   onStop?: () => void
-  onUserInputResponse?: (answer: string, requestId: string) => void
+  onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
   reasoningMap?: Record<string, string>
@@ -1564,7 +1564,7 @@ export function ChatPanel({
       return next
     })
     setUserInputAnswered(requestId)
-    onUserInputResponse?.(trimmed, requestId)
+    onUserInputResponse(trimmed, requestId)
   }
 
   const handleToggleThinkingOpen = useCallback((stepId: string) => {
@@ -1687,8 +1687,7 @@ export function ChatPanel({
                 requestId={requestId}
                 answered={threadUi.answeredUserInputIds.includes(requestId)}
                 onRespond={(answer, reqId) => {
-                  if (onUserInputResponse) handleUserInputReply(answer, reqId)
-                  else onSend(answer, 'steer')
+                  handleUserInputReply(answer, reqId)
                 }}
               />
             )
