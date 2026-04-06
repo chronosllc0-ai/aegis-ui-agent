@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import _verify_session
 from backend.admin.dependencies import get_admin_user
 from backend.database import User, get_session
-from backend.skills.service import SkillService
+from backend.skills.service import REVIEW_SLA_MESSAGE, SkillService
 
 skills_router = APIRouter(tags=["skills"])
 
@@ -37,6 +37,7 @@ class SkillSubmitRequest(BaseModel):
     publish_target: str = Field(default="hub", pattern="^(global|hub)$")
     metadata_json: dict[str, Any] = Field(default_factory=dict)
     skill_md: str = Field(min_length=1)
+    workflow_action: str = Field(default="submit_review", pattern="^(save_draft|submit_review)$")
 
 
 class SkillReviewDecisionRequest(BaseModel):
@@ -81,24 +82,41 @@ async def submit_user_skill(
 ) -> dict[str, Any]:
     try:
         publish_target = body.publish_target if current_user.role in {"admin", "superadmin"} else "hub"
-        skill, submission = await SkillService.submit_skill(
-            session,
-            slug=body.slug,
-            name=body.name,
-            description=body.description,
-            owner_user_id=current_user.uid,
-            owner_type="admin" if current_user.role in {"admin", "superadmin"} else "user",
-            publish_target=publish_target,
-            metadata_json=body.metadata_json,
-            skill_markdown=body.skill_md,
-            submitted_by=current_user.uid,
-        )
+        owner_type = "admin" if current_user.role in {"admin", "superadmin"} else "user"
+        if body.workflow_action == "save_draft":
+            skill, submission = await SkillService.save_draft(
+                session,
+                slug=body.slug,
+                name=body.name,
+                description=body.description,
+                owner_user_id=current_user.uid,
+                owner_type=owner_type,
+                publish_target=publish_target,
+                metadata_json=body.metadata_json,
+                skill_markdown=body.skill_md,
+                submitted_by=current_user.uid,
+            )
+        else:
+            skill, submission = await SkillService.submit_skill(
+                session,
+                slug=body.slug,
+                name=body.name,
+                description=body.description,
+                owner_user_id=current_user.uid,
+                owner_type=owner_type,
+                publish_target=publish_target,
+                metadata_json=body.metadata_json,
+                skill_markdown=body.skill_md,
+                submitted_by=current_user.uid,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     await session.commit()
     return {
         "ok": True,
+        "workflow_action": body.workflow_action,
+        "sla_message": REVIEW_SLA_MESSAGE if body.workflow_action == "submit_review" else None,
         "skill": {"id": skill.id, "slug": skill.slug, "status": skill.status},
         "submission": {"id": submission.id, "review_state": submission.review_state},
     }
@@ -156,11 +174,19 @@ async def list_installed_skills(
 async def list_admin_review_queue(
     admin_user: User = Depends(get_admin_user),
     session: AsyncSession = Depends(get_session),
+    status: str | None = None,
 ) -> dict[str, Any]:
     _ = admin_user
     queue = await SkillService.get_review_queue(session)
+    allowed_statuses = {"draft", "submitted", "scanning", "review", "rejected", "published_global", "published_hub"}
+    filtered = queue
+    if status:
+        if status not in allowed_statuses:
+            raise HTTPException(status_code=400, detail="Unsupported status filter")
+        filtered = [item for item in queue if item["submission"].review_state == status]
     return {
         "ok": True,
+        "statuses": sorted(allowed_statuses),
         "items": [
             {
                 "submission": {
@@ -198,7 +224,7 @@ async def list_admin_review_queue(
                     for scan in item["scans"]
                 ],
             }
-            for item in queue
+            for item in filtered
         ],
     }
 

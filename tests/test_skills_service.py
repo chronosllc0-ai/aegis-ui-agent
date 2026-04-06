@@ -82,7 +82,7 @@ def test_skill_version_is_immutable_and_increments_on_update(tmp_path) -> None:
     asyncio.run(_run())
 
 
-def test_workflow_transitions_submit_scan_review_and_new_badge(tmp_path) -> None:
+def test_workflow_transitions_submit_scan_review_and_publish_with_notification_sla(tmp_path) -> None:
     async def _run() -> None:
         await _init_db(tmp_path)
         await _seed_users()
@@ -101,8 +101,8 @@ def test_workflow_transitions_submit_scan_review_and_new_badge(tmp_path) -> None
                 submitted_by="user-1",
             )
             await session.commit()
-            assert skill.status == "pending_scan"
-            assert submission.review_state == "pending_scan"
+            assert skill.status == "submitted"
+            assert submission.review_state == "submitted"
 
             result = await SkillService.run_scans_for_submission(
                 session,
@@ -122,7 +122,7 @@ def test_workflow_transitions_submit_scan_review_and_new_badge(tmp_path) -> None
             )
             await session.commit()
 
-            assert reviewed.status == "approved_hub"
+            assert reviewed.status == "published_hub"
             assert reviewed.publish_target == "hub"
             assert reviewed.is_new is True
             assert reviewed.new_until is not None
@@ -131,7 +131,7 @@ def test_workflow_transitions_submit_scan_review_and_new_badge(tmp_path) -> None
         async for session in get_session():
             db_submission = await session.get(SkillSubmission, submission.id)
             assert db_submission is not None
-            assert db_submission.review_state == "approved_hub"
+            assert db_submission.review_state == "published_hub"
             break
 
     asyncio.run(_run())
@@ -181,6 +181,183 @@ def test_new_badge_expires_after_threshold(tmp_path) -> None:
             row = await session.execute(select(Skill).where(Skill.slug == "expiry-skill"))
             persisted = row.scalar_one()
             assert persisted.is_new is False
+            break
+
+    asyncio.run(_run())
+
+
+def test_draft_then_submit_full_status_transitions(tmp_path) -> None:
+    async def _run() -> None:
+        await _init_db(tmp_path)
+        await _seed_users()
+
+        async for session in get_session():
+            skill, draft = await SkillService.save_draft(
+                session,
+                slug="draft-transition",
+                name="Draft Transition",
+                description="desc",
+                owner_user_id="user-1",
+                owner_type="user",
+                publish_target="hub",
+                metadata_json={},
+                skill_markdown="# Draft",
+                submitted_by="user-1",
+            )
+            assert skill.status == "draft"
+            assert draft.review_state == "draft"
+
+            submitted_skill, submitted = await SkillService.submit_skill(
+                session,
+                slug="draft-transition",
+                name="Draft Transition",
+                description="desc",
+                owner_user_id="user-1",
+                owner_type="user",
+                publish_target="hub",
+                metadata_json={},
+                skill_markdown="# Draft\nUpdated",
+                submitted_by="user-1",
+            )
+            assert submitted_skill.status == "submitted"
+            assert submitted.review_state == "submitted"
+
+            scan_result = await SkillService.run_scans_for_submission(
+                session,
+                submission_id=submitted.id,
+                actor_id="admin-1",
+                actor_type="admin",
+            )
+            assert scan_result["submission_id"] == submitted.id
+            assert submitted_skill.status == "review"
+            assert submitted.review_state == "review"
+
+            reviewed = await SkillService.apply_review_decision(
+                session,
+                submission_id=submitted.id,
+                reviewer_admin_id="admin-1",
+                decision="approve_hub",
+                notes="approved",
+            )
+            assert reviewed.status == "published_hub"
+            await session.commit()
+            break
+
+    asyncio.run(_run())
+
+
+def test_creator_cannot_self_approve(tmp_path) -> None:
+    async def _run() -> None:
+        await _init_db(tmp_path)
+        await _seed_users()
+
+        async for session in get_session():
+            _skill, submission = await SkillService.submit_skill(
+                session,
+                slug="self-approve-blocked",
+                name="Self Approve",
+                description="desc",
+                owner_user_id="admin-1",
+                owner_type="admin",
+                publish_target="hub",
+                metadata_json={},
+                skill_markdown="# Safe",
+                submitted_by="admin-1",
+            )
+            await SkillService.run_scans_for_submission(
+                session,
+                submission_id=submission.id,
+                actor_id="admin-1",
+                actor_type="admin",
+            )
+            try:
+                await SkillService.apply_review_decision(
+                    session,
+                    submission_id=submission.id,
+                    reviewer_admin_id="admin-1",
+                    decision="approve_hub",
+                    notes=None,
+                )
+                raise AssertionError("expected self-approve to fail")
+            except ValueError as exc:
+                assert str(exc) == "Creator cannot self-approve"
+            break
+
+    asyncio.run(_run())
+
+
+def test_review_queue_excludes_draft_and_terminal_states(tmp_path) -> None:
+    async def _run() -> None:
+        await _init_db(tmp_path)
+        await _seed_users()
+
+        async for session in get_session():
+            # Draft should not appear in review queue.
+            await SkillService.save_draft(
+                session,
+                slug="queue-draft",
+                name="Queue Draft",
+                description="desc",
+                owner_user_id="user-1",
+                owner_type="user",
+                publish_target="hub",
+                metadata_json={},
+                skill_markdown="# Draft",
+                submitted_by="user-1",
+            )
+
+            # Review should appear.
+            _review_skill, review_submission = await SkillService.submit_skill(
+                session,
+                slug="queue-review",
+                name="Queue Review",
+                description="desc",
+                owner_user_id="user-1",
+                owner_type="user",
+                publish_target="hub",
+                metadata_json={},
+                skill_markdown="# Safe",
+                submitted_by="user-1",
+            )
+            await SkillService.run_scans_for_submission(
+                session,
+                submission_id=review_submission.id,
+                actor_id="admin-1",
+                actor_type="admin",
+            )
+
+            # Published should not appear.
+            _published_skill, published_submission = await SkillService.submit_skill(
+                session,
+                slug="queue-published",
+                name="Queue Published",
+                description="desc",
+                owner_user_id="user-1",
+                owner_type="user",
+                publish_target="hub",
+                metadata_json={},
+                skill_markdown="# Safe",
+                submitted_by="user-1",
+            )
+            await SkillService.run_scans_for_submission(
+                session,
+                submission_id=published_submission.id,
+                actor_id="admin-1",
+                actor_type="admin",
+            )
+            await SkillService.apply_review_decision(
+                session,
+                submission_id=published_submission.id,
+                reviewer_admin_id="admin-1",
+                decision="approve_hub",
+                notes=None,
+            )
+
+            queue = await SkillService.get_review_queue(session)
+            queued_ids = {item["submission"].id for item in queue}
+            assert review_submission.id in queued_ids
+            assert published_submission.id not in queued_ids
+            await session.commit()
             break
 
     asyncio.run(_run())

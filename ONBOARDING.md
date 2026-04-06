@@ -3568,3 +3568,70 @@
 ### Validation
 - Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
 - Ran `npm --prefix frontend run build`; passed.
+
+## 2026-04-06 — Skill hub submission + admin review queue workflow (draft/submit/scanning/review/publish)
+
+### What changed
+- Expanded the skill workflow state machine in `backend/skills/service.py` to support a user-hub lifecycle with explicit states:
+  - `draft` → `submitted` → `scanning` → `review` → `published_hub` / `published_global` or `rejected`.
+- Added a dedicated `save_draft` service path so creators can save work without entering review.
+- Updated submission flow (`submit_skill`) to return/record `submitted` state and emit a phase-1 notification hook payload including SLA context.
+- Added phase-1 notification hooks (logger-based placeholder) on submit and review events.
+- Hardened moderation permissions by blocking creator self-approval in `apply_review_decision`.
+- Updated catalog/runtime approval semantics to published statuses (`published_hub` / `published_global`) and retained review decision signals.
+- Added creator attribution enrichment in published catalog payload (`owner.username` + `owner.avatar_url`).
+- Updated `backend/skills/router.py` submission API to support `workflow_action`:
+  - `save_draft`
+  - `submit_review` (default, returns SLA message: up to 5 working days)
+- Expanded admin queue endpoint to support status filtering and include the full allowed status list for UI badges/filters.
+- Added frontend status badge/filter helpers in `frontend/src/lib/skillSubmissionStatus.ts` with legacy-state normalization mappings for compatibility.
+
+### Tests added/updated
+- Updated and expanded backend workflow tests in:
+  - `tests/test_skills_service.py`
+    - e2e transitions including draft → submit → scan → review → publish
+    - self-approval permission block
+- Expanded API coverage in:
+  - `tests/test_skills_api.py`
+    - draft save via API
+    - SLA message check on submit
+    - admin queue status filter + supported statuses list
+- Updated runtime loader status expectations in:
+  - `tests/test_runtime_loader.py`
+- Added frontend unit tests for badge/filter logic:
+  - `frontend/src/lib/skillSubmissionStatus.test.ts`
+
+### What's working
+- End-to-end state transitions for hub workflow are covered and passing.
+- Permission guard preventing creator self-approval is covered and passing.
+- Admin queue now exposes status list/filter for UI status badge/filter implementations.
+- Published payload now includes creator attribution fields required for card rendering.
+
+### What's not done / next
+- UI integration of `skillSubmissionStatus` helpers into a concrete skills/admin screen still needs implementation (helpers + tests are in place).
+- Notification hooks are placeholders (logger emit); wire to actual email/in-app channels in phase 2.
+- Consider adding DB migration/backfill strategy if legacy statuses exist in persistent prod data.
+
+### Decisions / blockers
+- Decision: keep review decisions (`approve_hub`/`approve_global`) while normalizing persisted/public status states to `published_*` for clearer product semantics.
+- No hard blocker encountered in this pass.
+
+## 2026-04-06 — Follow-up fixes from PR #178 review comments
+
+### What changed
+- Tightened review-queue semantics in `backend/skills/service.py`:
+  - `get_review_queue` now includes only pending states (`submitted`, `scanning`, `review`) instead of broad non-draft matching.
+- Improved ownership error messaging in both draft/save and submit/update paths:
+  - now raises `ValueError("You do not own this skill slug")` for unauthorized edits.
+- De-duplicated SLA copy by introducing a shared constant:
+  - `REVIEW_SLA_MESSAGE` in `backend/skills/service.py`
+  - router now imports and uses the same constant.
+- Tightened admin queue status filtering in `backend/skills/router.py` to use submission `review_state` as the single source of truth.
+- Hardened frontend status normalization safety in `frontend/src/lib/skillSubmissionStatus.ts`:
+  - removed unused `approved` canonical status,
+  - unknown statuses now warn and safely fall back to `draft` (never displayed as approved).
+- Added/updated tests for these review-driven fixes.
+
+### Validation
+- Backend tests pass for updated workflow and queue semantics.
+- Frontend status helper tests pass with the unknown-status safety case.

@@ -23,6 +23,7 @@ def _init_db_sync(tmp_path) -> None:
             session.add_all(
                 [
                     User(uid="admin-1", email="admin@example.com", role="admin", status="active"),
+                    User(uid="admin-2", email="admin2@example.com", role="admin", status="active"),
                     User(uid="user-1", email="user@example.com", role="user", status="active"),
                 ]
             )
@@ -57,7 +58,7 @@ def _seed_approved_skill_sync() -> str:
             await SkillService.apply_review_decision(
                 session,
                 submission_id=submission.id,
-                reviewer_admin_id="admin-1",
+                reviewer_admin_id="admin-2",
                 decision="approve_hub",
                 notes=None,
             )
@@ -117,6 +118,47 @@ def test_admin_review_actions_require_admin_role(tmp_path) -> None:
         assert queue_response.json()["detail"] == "Admin access required"
 
 
+def test_admin_review_queue_status_filter_and_badges(tmp_path) -> None:
+    _init_db_sync(tmp_path)
+    app = FastAPI()
+    app.include_router(skills_router)
+
+    with (
+        TestClient(app) as client,
+        patch("auth._verify_session", side_effect=_mock_verify_session),
+        patch("backend.skills.router._verify_session", side_effect=_mock_verify_session),
+    ):
+        client.cookies.set("aegis_session", "user-1")
+        submit = client.post(
+            "/api/skills/submit",
+            json={
+                "slug": "queue-status-skill",
+                "name": "Queue Status Skill",
+                "description": "desc",
+                "publish_target": "hub",
+                "metadata_json": {},
+                "skill_md": "# Safe",
+            },
+        )
+        assert submit.status_code == 200
+        submission_id = submit.json()["submission"]["id"]
+
+        client.cookies.set("aegis_session", "admin-1")
+        scan = client.post(f"/api/admin/skills/{submission_id}/scan")
+        assert scan.status_code == 200
+
+        queue = client.get("/api/admin/skills/review-queue?status=review")
+        assert queue.status_code == 200
+        data = queue.json()
+        assert "statuses" in data
+        assert "submitted" in data["statuses"]
+        assert "published_hub" in data["statuses"]
+        assert len(data["items"]) >= 1
+
+        bad_filter = client.get("/api/admin/skills/review-queue?status=not_real")
+        assert bad_filter.status_code == 400
+
+
 def test_non_admin_submit_forces_hub_publish_target(tmp_path) -> None:
     _init_db_sync(tmp_path)
     app = FastAPI()
@@ -140,6 +182,7 @@ def test_non_admin_submit_forces_hub_publish_target(tmp_path) -> None:
             },
         )
         assert response.status_code == 200
+        assert response.json()["sla_message"] == "Review SLA: up to 5 working days."
 
     async def _assert_saved() -> None:
         async for session in get_session():
@@ -149,3 +192,32 @@ def test_non_admin_submit_forces_hub_publish_target(tmp_path) -> None:
             break
 
     asyncio.run(_assert_saved())
+
+
+def test_user_can_save_draft_from_submission_api(tmp_path) -> None:
+    _init_db_sync(tmp_path)
+    app = FastAPI()
+    app.include_router(skills_router)
+
+    with (
+        TestClient(app) as client,
+        patch("auth._verify_session", side_effect=_mock_verify_session),
+        patch("backend.skills.router._verify_session", side_effect=_mock_verify_session),
+    ):
+        client.cookies.set("aegis_session", "user-1")
+        response = client.post(
+            "/api/skills/submit",
+            json={
+                "slug": "saved-draft-api",
+                "name": "Saved Draft API",
+                "description": "desc",
+                "publish_target": "hub",
+                "workflow_action": "save_draft",
+                "metadata_json": {},
+                "skill_md": "# Draft",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["workflow_action"] == "save_draft"
+        assert response.json()["sla_message"] is None
+        assert response.json()["skill"]["status"] == "draft"

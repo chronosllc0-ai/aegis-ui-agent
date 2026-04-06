@@ -29,7 +29,8 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-APPROVED_STATUSES = {"approved_global", "approved_hub"}
+APPROVED_STATUSES = {"published_global", "published_hub"}
+REVIEW_SLA_MESSAGE = "Review SLA: up to 5 working days."
 
 
 class VirusTotalScanner:
@@ -217,6 +218,21 @@ class SkillService:
         return datetime.now(timezone.utc)
 
     @staticmethod
+    async def emit_notification_hook(
+        *,
+        event_type: str,
+        recipient_user_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Phase 1 placeholder notification hook for email/in-app adapters."""
+        logger.info(
+            "Skill notification hook emitted: event=%s recipient=%s payload=%s",
+            event_type,
+            recipient_user_id,
+            payload,
+        )
+
+    @staticmethod
     async def latest_version(session: AsyncSession, skill_id: str) -> SkillVersion | None:
         result = await session.execute(
             select(SkillVersion).where(SkillVersion.skill_id == skill_id).order_by(desc(SkillVersion.version)).limit(1)
@@ -253,6 +269,99 @@ class SkillService:
         )
 
     @staticmethod
+    async def save_draft(
+        session: AsyncSession,
+        *,
+        slug: str,
+        name: str,
+        description: str,
+        owner_user_id: str,
+        owner_type: str,
+        publish_target: str,
+        metadata_json: dict[str, Any],
+        skill_markdown: str,
+        submitted_by: str,
+    ) -> tuple[Skill, SkillSubmission]:
+        """Create/update a skill draft and append immutable version history."""
+        now = SkillService._now()
+        normalized_slug = slug.strip().lower()
+        existing = await session.execute(select(Skill).where(Skill.slug == normalized_slug))
+        skill = existing.scalar_one_or_none()
+
+        submission_type = "new"
+        from_status = "draft"
+        if skill is None:
+            skill = Skill(
+                slug=normalized_slug,
+                name=name,
+                description=description,
+                owner_user_id=owner_user_id,
+                owner_type=owner_type,
+                publish_target=publish_target,
+                status="draft",
+                risk_label="low",
+                is_new=False,
+                new_until=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(skill)
+            await session.flush()
+        else:
+            if skill.owner_user_id != owner_user_id:
+                raise ValueError("You do not own this skill slug")
+            submission_type = "update"
+            from_status = skill.status
+            skill.name = name
+            skill.description = description
+            skill.publish_target = publish_target
+            skill.status = "draft"
+            skill.updated_at = now
+
+        latest_version = await SkillService.latest_version(session, skill.id)
+        next_version = (latest_version.version + 1) if latest_version else 1
+        content_sha256 = hashlib.sha256(skill_markdown.encode("utf-8")).hexdigest()
+
+        version = SkillVersion(
+            skill_id=skill.id,
+            version=next_version,
+            content_sha256=content_sha256,
+            storage_path=f"inline://skill_versions/{content_sha256}",
+            metadata_json=json.dumps({"metadata": metadata_json, "skill_md": skill_markdown}),
+            created_by=submitted_by,
+            created_at=now,
+        )
+        session.add(version)
+        await session.flush()
+
+        submission = SkillSubmission(
+            skill_id=skill.id,
+            version_id=version.id,
+            submitted_by=submitted_by,
+            submission_type=submission_type,
+            review_state="draft",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(submission)
+        await session.flush()
+
+        await SkillService._record_event(
+            session,
+            skill_id=skill.id,
+            version_id=version.id,
+            submission_id=submission.id,
+            from_status=from_status,
+            to_status="draft",
+            actor_id=submitted_by,
+            actor_type=owner_type,
+            reason="saved_draft",
+        )
+        await session.flush()
+        await session.refresh(skill)
+        return skill, submission
+
+    @staticmethod
     async def submit_skill(
         session: AsyncSession,
         *,
@@ -282,7 +391,7 @@ class SkillService:
                 owner_user_id=owner_user_id,
                 owner_type=owner_type,
                 publish_target=publish_target,
-                status="pending_scan",
+                status="submitted",
                 risk_label="medium",
                 is_new=False,
                 new_until=None,
@@ -293,13 +402,13 @@ class SkillService:
             await session.flush()
         else:
             if skill.owner_user_id != owner_user_id:
-                raise ValueError("Skill slug already exists")
+                raise ValueError("You do not own this skill slug")
             submission_type = "update"
             from_status = skill.status
             skill.name = name
             skill.description = description
             skill.publish_target = publish_target
-            skill.status = "pending_scan"
+            skill.status = "submitted"
             skill.is_new = False
             skill.new_until = None
             skill.updated_at = now
@@ -325,7 +434,7 @@ class SkillService:
             version_id=version.id,
             submitted_by=submitted_by,
             submission_type=submission_type,
-            review_state="pending_scan",
+            review_state="submitted",
             created_at=now,
             updated_at=now,
         )
@@ -338,10 +447,20 @@ class SkillService:
             version_id=version.id,
             submission_id=submission.id,
             from_status=from_status,
-            to_status="pending_scan",
+            to_status="submitted",
             actor_id=submitted_by,
             actor_type=owner_type,
             reason="submitted",
+        )
+        await SkillService.emit_notification_hook(
+            event_type="skill_submitted",
+            recipient_user_id=owner_user_id,
+            payload={
+                "skill_id": skill.id,
+                "submission_id": submission.id,
+                "status": "submitted",
+                "sla_message": REVIEW_SLA_MESSAGE,
+            },
         )
         await session.flush()
         await session.refresh(skill)
@@ -374,8 +493,8 @@ class SkillService:
         now = SkillService._now()
 
         from_status = skill.status
-        skill.status = "pending_scan"
-        submission.review_state = "pending_scan"
+        skill.status = "scanning"
+        submission.review_state = "scanning"
 
         vt_result = await VirusTotalScanner.scan_content(file_name=f"{skill.slug}.md", content=skill_md.encode("utf-8"))
         session.add(
@@ -392,15 +511,15 @@ class SkillService:
         )
 
         if vt_result["verdict"] == "error":
-            skill.status = "pending_scan"
-            submission.review_state = "pending_scan"
+            skill.status = "scanning"
+            submission.review_state = "scanning"
             await SkillService._record_event(
                 session,
                 skill_id=skill.id,
                 version_id=version.id,
                 submission_id=submission.id,
                 from_status=from_status,
-                to_status="pending_scan",
+                to_status="scanning",
                 actor_id=actor_id,
                 actor_type=actor_type,
                 reason="vt_scan_error",
@@ -408,8 +527,8 @@ class SkillService:
             await session.flush()
             return {"skill_id": skill.id, "submission_id": submission.id, "version_id": version.id, "vt": vt_result}
 
-        skill.status = "pending_policy"
-        submission.review_state = "pending_policy"
+        skill.status = "scanning"
+        submission.review_state = "scanning"
 
         policy_result = PolicyScanner.scan_text(skill_md)
         session.add(
@@ -430,8 +549,8 @@ class SkillService:
                 "medium" if "medium" in {vt_result["risk_label"], policy_result["risk_label"]} else "low"
             )
         )
-        skill.status = "pending_review"
-        submission.review_state = "pending_review"
+        skill.status = "review"
+        submission.review_state = "review"
         skill.updated_at = now
         submission.updated_at = now
 
@@ -441,7 +560,7 @@ class SkillService:
             version_id=version.id,
             submission_id=submission.id,
             from_status=from_status,
-            to_status="pending_review",
+            to_status="review",
             actor_id=actor_id,
             actor_type=actor_type,
             reason="scan_and_policy_complete",
@@ -461,7 +580,7 @@ class SkillService:
             select(SkillSubmission, Skill, SkillVersion)
             .join(Skill, Skill.id == SkillSubmission.skill_id)
             .join(SkillVersion, SkillVersion.id == SkillSubmission.version_id)
-            .where(SkillSubmission.review_state == "pending_review")
+            .where(SkillSubmission.review_state.in_(["submitted", "scanning", "review"]))
             .order_by(SkillSubmission.created_at.asc())
         )
         queue_rows = rows.all()
@@ -506,6 +625,8 @@ class SkillService:
         skill = await session.get(Skill, submission.skill_id)
         if skill is None:
             raise ValueError("Skill not found")
+        if skill.owner_user_id == reviewer_admin_id:
+            raise ValueError("Creator cannot self-approve")
 
         version = await session.get(SkillVersion, submission.version_id)
         if version is None:
@@ -515,17 +636,17 @@ class SkillService:
         from_status = skill.status
 
         if decision == "approve_global":
-            skill.status = "approved_global"
+            skill.status = "published_global"
             skill.publish_target = "global"
             skill.is_new = True
             skill.new_until = now + timedelta(days=7)
-            submission.review_state = "approved_global"
+            submission.review_state = "published_global"
         elif decision == "approve_hub":
-            skill.status = "approved_hub"
+            skill.status = "published_hub"
             skill.publish_target = "hub"
             skill.is_new = True
             skill.new_until = now + timedelta(days=7)
-            submission.review_state = "approved_hub"
+            submission.review_state = "published_hub"
         elif decision == "reject":
             skill.status = "rejected"
             skill.is_new = False
@@ -535,7 +656,7 @@ class SkillService:
             skill.status = "draft"
             skill.is_new = False
             skill.new_until = None
-            submission.review_state = "needs_changes"
+            submission.review_state = "draft"
         else:
             raise ValueError("Unsupported decision")
 
@@ -564,6 +685,16 @@ class SkillService:
             actor_type="admin",
             reason=notes or decision,
         )
+        await SkillService.emit_notification_hook(
+            event_type="skill_reviewed",
+            recipient_user_id=skill.owner_user_id,
+            payload={
+                "skill_id": skill.id,
+                "submission_id": submission.id,
+                "decision": decision,
+                "status": skill.status,
+            },
+        )
         await session.flush()
         await session.refresh(skill)
         return skill
@@ -581,7 +712,7 @@ class SkillService:
 
     @staticmethod
     async def list_catalog(session: AsyncSession, *, publish_target: str) -> list[dict[str, Any]]:
-        approved_status = "approved_global" if publish_target == "global" else "approved_hub"
+        approved_status = "published_global" if publish_target == "global" else "published_hub"
         rows = await session.execute(
             select(Skill, User)
             .join(User, User.uid == Skill.owner_user_id, isouter=True)
@@ -603,6 +734,7 @@ class SkillService:
                     "new_until": skill.new_until,
                     "owner": {
                         "user_id": skill.owner_user_id,
+                        "username": getattr(owner, "name", None) or (getattr(owner, "email", None) or "").split("@")[0],
                         "name": getattr(owner, "name", None),
                         "avatar_url": getattr(owner, "avatar_url", None),
                     },
