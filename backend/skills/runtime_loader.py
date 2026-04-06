@@ -95,11 +95,13 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
             continue
 
         remaining_budget -= estimated_tokens
-        raw_priority = metadata.get("priority", 0)
-        try:
-            priority = int(raw_priority)
-        except (TypeError, ValueError):
-            priority = 0
+        parsed_priority = _parse_priority(metadata.get("priority"))
+        provenance = {
+            "publish_target": skill.publish_target,
+            "status": skill.status,
+            "content_sha256": version.content_sha256,
+            "installed_by": install.user_id,
+        }
         runtime.append(
             RuntimeSkill(
                 skill_id=skill.id,
@@ -107,13 +109,8 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
                 name=skill.name,
                 source=skill.publish_target,
                 content=content,
-                provenance={
-                    "publish_target": skill.publish_target,
-                    "status": skill.status,
-                    "content_sha256": version.content_sha256,
-                    "installed_by": install.user_id,
-                },
-                priority=_parse_priority(metadata.get("priority")),
+                provenance=provenance,
+                priority=parsed_priority,
                 created_at=version.created_at,
             )
         )

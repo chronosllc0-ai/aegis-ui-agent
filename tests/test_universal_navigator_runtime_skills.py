@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from backend.providers.base import BaseProvider, ChatMessage, ChatResponse, StreamChunk
+from backend.skills import runtime_loader
 from backend.skills.runtime_loader import RuntimeSkill
 import universal_navigator
 
@@ -65,6 +66,13 @@ def test_zero_budget_excludes_all_skills(monkeypatch) -> None:
     assert section == ""
     assert included == []
     assert excluded == [{"skill_id": "s1", "reason": "budget_exceeded"}]
+
+
+def test_parse_priority_handles_supported_and_invalid_shapes() -> None:
+    assert runtime_loader._parse_priority(7) == 7
+    assert runtime_loader._parse_priority("9") == 9
+    assert runtime_loader._parse_priority(" nope ") == 0
+    assert runtime_loader._parse_priority(None) == 0
 
 
 def test_run_startup_includes_skill_section_once(monkeypatch) -> None:
