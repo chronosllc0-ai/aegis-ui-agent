@@ -186,6 +186,7 @@ def test_websocket_user_input_response_resumes_single_pending_prompt_without_ext
     assert after_step["type"] == "step"
     assert after_step["data"]["content"] == "after-user-input:Alpha"
     assert result["type"] == "result"
+    assert result["data"]["instruction"] == "test user input flow"
     assert orchestrator.responses == ["Alpha"]
     assert orchestrator.execute_calls == 1
 
