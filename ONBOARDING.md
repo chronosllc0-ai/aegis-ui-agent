@@ -3110,3 +3110,29 @@
 ### Validation
 - Ran `npm --prefix frontend run build`; build passed.
 - Ran `npm --prefix frontend run test -- src/App.browser-example.test.tsx`; new UX test passed.
+
+## 2026-04-05 — Chat composer parity update (moved browser-input controls into ChatPanel)
+
+### What changed
+- Updated `frontend/src/components/ChatPanel.tsx` composer surface to include browser-panel style controls:
+  - agent mode selector
+  - provider picker
+  - model picker
+  - gallery chips + Prompt Gallery modal trigger
+- Removed chat composer footer tags/buttons that were requested to be replaced:
+  - removed Plan button
+  - removed Brainstorm button
+  - removed `⚡ GPT-5.4` chip
+  - removed reasoning-effort tag from the input footer strip
+- Wired the new controls through `ChatPanel` props and `App.tsx`:
+  - pass `provider`, `model`, `agentMode`
+  - pass `onProviderChange`, `onModelChange`, `onAgentModeChange`
+- Kept browser panel view-only behavior and stop-button accessibility from the previous pass.
+
+### Tests/updates
+- Added/retained coverage in `frontend/src/App.browser-example.test.tsx` for browser example click execution path.
+- Updated `frontend/src/components/ChatPanel.test.tsx` to satisfy new required props and removed obsolete Plan-button expectation.
+
+### Validation
+- Ran `npm --prefix frontend run test -- src/components/ChatPanel.test.tsx src/App.browser-example.test.tsx`; passed.
+- Ran `npm --prefix frontend run build`; passed.

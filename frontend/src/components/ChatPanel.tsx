@@ -5,6 +5,10 @@ import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
+import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
+import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
+import { PromptGallery } from './PromptGallery'
+import { SuggestionChips } from './SuggestionChips'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -56,6 +60,12 @@ export interface ChatPanelProps {
   reasoningEffort?: 'medium' | 'high' | 'extended' | 'adaptive'
   onChangeReasoningEffort?: (effort: 'medium' | 'high' | 'extended' | 'adaptive') => void
   currentModelSupportsReasoning?: boolean
+  provider: string
+  model: string
+  agentMode: AgentModeId
+  onProviderChange: (provider: string) => void
+  onModelChange: (model: string) => void
+  onAgentModeChange: (mode: AgentModeId) => void
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
     tokensUsed: number
@@ -1047,8 +1057,14 @@ interface InputBarCursorProps {
   onStop: () => void
   onMicClick: () => void
   onPlusClick: () => void
-  onPlanClick: () => void
-  onBrainstormClick?: () => void
+  onOpenGallery: () => void
+  onSelectSuggestion: (templateId: string) => void
+  provider: string
+  model: string
+  agentMode: AgentModeId
+  onProviderChange: (provider: string) => void
+  onModelChange: (model: string) => void
+  onAgentModeChange: (mode: AgentModeId) => void
   isWorking: boolean
   isDisabled: boolean
   micIsActive: boolean
@@ -1059,28 +1075,17 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
-  planIntent?: boolean
-  modelChipLabel?: string
-  effortChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
-  currentModelSupportsReasoning?: boolean
-  enableReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
 }
 
 function InputBarCursor({
-  input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick, onBrainstormClick,
+  input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
+  provider, model, agentMode, onProviderChange, onModelChange, onAgentModeChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments,
-  planIntent = false,
-  modelChipLabel = 'GPT-5.4',
-  effortChipLabel = 'Reasoning: Adaptive',
   isLocalOnly = true,
   hasFullAccess = true,
-  currentModelSupportsReasoning = false,
-  enableReasoning = false,
-  onToggleReasoning,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
 
@@ -1132,58 +1137,67 @@ function InputBarCursor({
         )}
       </div>
 
-      <div className='flex items-center gap-1.5 border-t border-[#242424] px-2.5 py-2'>
+      <div className='space-y-2 border-t border-[#242424] px-2.5 py-2'>
+        <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+          <span className='hidden text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:inline'>Mode</span>
+          <select
+            value={agentMode}
+            onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
+            className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+            aria-label='Agent mode'
+          >
+            {AGENT_MODES.map((option) => (
+              <option key={option.id} value={option.id} className='bg-[#0f0f0f] text-zinc-100'>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className='grid grid-cols-2 gap-2'>
+          <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+            <span className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-xs'>
+              {renderProviderIcon(providerById(provider) ?? PROVIDERS[0])}
+            </span>
+            <select
+              value={provider}
+              onChange={(event) => onProviderChange(event.target.value)}
+              className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+              aria-label='Provider'
+            >
+              {PROVIDERS.map((item) => (
+                <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
+                  {item.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+            <select
+              value={model}
+              onChange={(event) => onModelChange(event.target.value)}
+              className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+              aria-label='Model'
+            >
+              {(providerById(provider) ?? PROVIDERS[0]).models.map((item) => (
+                <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <SuggestionChips onSelectSuggestion={(templateId) => onSelectSuggestion(templateId)} onOpenGallery={onOpenGallery} />
+
+        <div className='flex items-center gap-1.5'>
         {/* + button */}
         <button type='button' onClick={onPlusClick} disabled={isDisabled}
           className='flex items-center justify-center h-7 w-7 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0'
           aria-label='Add files or connectors'>
           <Icons.plus className='h-4 w-4' />
         </button>
-
-        {/* Plan button */}
-        <button type='button' onClick={onPlanClick} disabled={isDisabled}
-          aria-pressed={planIntent}
-          className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium ${
-            planIntent
-              ? 'bg-blue-500/15 text-blue-300'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
-          }`}>
-          <IcoPlan className='h-3.5 w-3.5' />
-          Plan
-        </button>
-
-        {/* Brainstorm button */}
-        {onBrainstormClick && (
-          <button type='button' onClick={onBrainstormClick} disabled={isDisabled}
-            title='Brainstorm: agent will think through options before acting'
-            className='flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-zinc-500 hover:text-violet-300 hover:bg-violet-500/10 disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium'>
-            <span className='flex h-3.5 w-3.5 items-center justify-center rounded-full border border-current text-[9px] font-bold'>?</span>
-            Brainstorm
-          </button>
-        )}
-
-        {modelChipLabel && (
-          <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
-        )}
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>{effortChipLabel}</span>
-        <span className='rounded-lg px-2 py-1 text-xs text-cyan-500/80'>IDE context</span>
-
-        {/* Think harder toggle — only for capable models */}
-        {currentModelSupportsReasoning && (
-          <button type='button'
-            onClick={() => onToggleReasoning?.(!enableReasoning)}
-            className={`flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs font-medium transition-colors flex-shrink-0 ${
-              enableReasoning
-                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a]'
-            }`}>
-            <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-              <path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5' />
-              <path d='M9 18h6' /><path d='M10 22h4' />
-            </svg>
-            Think
-          </button>
-        )}
 
         <div className='flex-1' />
 
@@ -1196,6 +1210,7 @@ function InputBarCursor({
           <IcoMic className='h-3.5 w-3.5' />
         </button>
 
+      </div>
       </div>
 
       <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
@@ -1226,10 +1241,12 @@ export function ChatPanel({
   onPlanConfirm,
   onPlanReject,
   reasoningMap,
-  enableReasoning = false,
-  onToggleReasoning,
-  reasoningEffort = 'adaptive',
-  currentModelSupportsReasoning = false,
+  provider,
+  model,
+  agentMode,
+  onProviderChange,
+  onModelChange,
+  onAgentModeChange,
   contextSnapshot,
   userName,
   subAgentNames = [],
@@ -1237,7 +1254,6 @@ export function ChatPanel({
   onDismissBrowsePrompt,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
-  const [planIntent, setPlanIntent] = useState(false)
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
 
   // ── Conversation persistence ──────────────────────────────────────────────
@@ -1319,6 +1335,7 @@ export function ChatPanel({
 
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
   const [approvedIds, setApprovedIds]   = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds]   = useState<Set<string>>(new Set())
 
@@ -1436,7 +1453,7 @@ export function ChatPanel({
   const handleSend = (forcePlan = false) => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
-    const parsed = resolveComposerSubmission(trimmed, forcePlan || planIntent)
+    const parsed = resolveComposerSubmission(trimmed, forcePlan)
     const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
     const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1466,7 +1483,6 @@ export function ChatPanel({
       })
     }
     setInput('')
-    setPlanIntent(false)
     setAttachments([])
     setActiveConnector(null)
     if (textareaRef.current) { textareaRef.current.style.height = 'auto' }
@@ -1476,21 +1492,19 @@ export function ChatPanel({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const handlePlanClick = () => {
-    const prompt = input.trim()
-    if (prompt) {
-      handleSend(true)
-    } else {
-      setPlanIntent((prev) => !prev)
+  const handleSuggestionSelect = async (templateId: string) => {
+    try {
+      const response = await fetch(apiUrl(`/api/gallery/${templateId}`), { credentials: 'include' })
+      const data = await response.json()
+      if (data?.ok && typeof data?.template?.prompt === 'string') setInput(data.template.prompt)
+    } catch {
+      // non-fatal
     }
-    textareaRef.current?.focus()
   }
 
-  const handleBrainstormClick = () => {
-    const prompt = input.trim()
-    if (prompt) setInput(`/brainstorm ${prompt}`)
-    else setInput('/brainstorm ')
-    textareaRef.current?.focus()
+  const handleTemplateSelect = (prompt: string) => {
+    setInput(prompt)
+    setGalleryOpen(false)
   }
 
   const handleConnectorSelect = (connector: ConnectorMeta) => {
@@ -1579,11 +1593,6 @@ export function ChatPanel({
   const firstName = userName ? userName.split(' ')[0] : null
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
-  const modelChipLabel = 'GPT-5.4'
-  const normalizedReasoningEffort = reasoningEffort.trim()
-  const effortChipLabel = normalizedReasoningEffort.length > 0
-    ? `Reasoning: ${normalizedReasoningEffort[0].toUpperCase()}${normalizedReasoningEffort.slice(1)}`
-    : 'Reasoning: Off'
   const isLocalOnly = true
   const hasFullAccess = true
 
@@ -1809,8 +1818,14 @@ export function ChatPanel({
           onStop={() => onStop?.()}
           onMicClick={handleMicClick}
           onPlusClick={() => setShowPlusMenu((v) => !v)}
-          onPlanClick={handlePlanClick}
-          onBrainstormClick={handleBrainstormClick}
+          onOpenGallery={() => setGalleryOpen(true)}
+          onSelectSuggestion={handleSuggestionSelect}
+          provider={provider}
+          model={model}
+          agentMode={agentMode}
+          onProviderChange={onProviderChange}
+          onModelChange={onModelChange}
+          onAgentModeChange={onAgentModeChange}
           isWorking={isWorking}
           isDisabled={isDisabled}
           micIsActive={micIsActive}
@@ -1827,14 +1842,8 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
-          planIntent={planIntent}
-          modelChipLabel={modelChipLabel}
-          effortChipLabel={effortChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
-          currentModelSupportsReasoning={currentModelSupportsReasoning}
-          enableReasoning={enableReasoning}
-          onToggleReasoning={onToggleReasoning}
         />
 
         {/* Hidden file input */}
@@ -1846,6 +1855,13 @@ export function ChatPanel({
           </p>
         )}
       </div>
+      {galleryOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
+          <div className='h-[85vh] w-full max-w-6xl'>
+            <PromptGallery onSelectTemplate={handleTemplateSelect} onClose={() => setGalleryOpen(false)} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

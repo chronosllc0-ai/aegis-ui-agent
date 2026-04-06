@@ -4,6 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel, resolveComposerSubmission } from './ChatPanel'
 import type { LogEntry } from '../hooks/useWebSocket'
 
+const baseChatPanelProps = {
+  provider: 'google',
+  model: 'gemini-2.5-pro',
+  agentMode: 'orchestrator' as const,
+  onProviderChange: vi.fn(),
+  onModelChange: vi.fn(),
+  onAgentModeChange: vi.fn(),
+}
+
 afterEach(() => {
   cleanup()
 })
@@ -37,6 +46,7 @@ describe('ChatPanel ask_user_input reply flow', () => {
         latestFrame={null}
         serverMessages={[]}
         onUserInputResponse={onUserInputResponse}
+        {...baseChatPanelProps}
       />,
     )
 
@@ -72,28 +82,6 @@ describe('resolveComposerSubmission', () => {
 })
 
 describe('ChatPanel plan intent UX', () => {
-  it('does not inject /plan text into empty composer when Plan is clicked', () => {
-    render(
-      <ChatPanel
-        logs={[]}
-        isWorking={false}
-        onSend={vi.fn()}
-        onDecomposePlan={vi.fn()}
-        connectionStatus='connected'
-        transcripts={[]}
-        onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
-        serverMessages={[]}
-      />,
-    )
-
-    const planButtons = screen.getAllByRole('button', { name: 'Plan' })
-    fireEvent.click(planButtons[planButtons.length - 1])
-    const composers = screen.getAllByPlaceholderText('Ask for a task, research, or code…') as HTMLTextAreaElement[]
-    const composer = composers[composers.length - 1]
-    expect(composer.value).toBe('')
-  })
-
   it('strips /plan token from visible bubble and routes to plan decompose', async () => {
     const onDecomposePlan = vi.fn()
     const onSend = vi.fn()
@@ -109,6 +97,7 @@ describe('ChatPanel plan intent UX', () => {
         onSwitchToBrowser={vi.fn()}
         latestFrame={null}
         serverMessages={[]}
+        {...baseChatPanelProps}
       />,
     )
 

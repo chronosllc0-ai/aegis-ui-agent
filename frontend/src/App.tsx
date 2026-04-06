@@ -34,7 +34,7 @@ import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSo
 import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
-import { modelInfo } from './lib/models'
+import { PROVIDERS, modelInfo } from './lib/models'
 import { normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
@@ -1174,6 +1174,15 @@ function App() {
                 reasoningEffort={settings.reasoningEffort}
                 onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
                 currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
+                provider={settings.provider}
+                model={settings.model}
+                agentMode={settings.agentMode}
+                onProviderChange={(nextProvider) => {
+                  const providerMeta = PROVIDERS.find((item) => item.id === nextProvider) ?? PROVIDERS[0]
+                  patchSettings({ provider: nextProvider, model: providerMeta.models[0].id })
+                }}
+                onModelChange={(nextModel) => patchSettings({ model: nextModel })}
+                onAgentModeChange={(nextMode) => patchSettings({ agentMode: nextMode })}
                 contextSnapshot={{
                   tokensUsed: contextMeter.current.tokensUsed,
                   contextLimit: contextMeter.current.contextLimit,
