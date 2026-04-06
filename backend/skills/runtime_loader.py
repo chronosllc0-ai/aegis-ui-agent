@@ -128,9 +128,12 @@ def _parse_metadata(raw: str) -> dict[str, object] | None:
 
 def _parse_priority(raw: object) -> int:
     """Parse runtime skill priority from metadata with safe fallback."""
+    if isinstance(raw, bool):
+        return 0
     if isinstance(raw, int):
         return raw
     if isinstance(raw, float):
+        # Intentionally truncate toward zero for backward compatibility.
         return int(raw)
     if isinstance(raw, str):
         try:

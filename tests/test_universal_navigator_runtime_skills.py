@@ -69,8 +69,10 @@ def test_zero_budget_excludes_all_skills(monkeypatch) -> None:
 
 
 def test_parse_priority_handles_supported_and_invalid_shapes() -> None:
+    assert runtime_loader._parse_priority(True) == 0
     assert runtime_loader._parse_priority(7) == 7
     assert runtime_loader._parse_priority(1.0) == 1
+    assert runtime_loader._parse_priority(1.9) == 1
     assert runtime_loader._parse_priority("9") == 9
     assert runtime_loader._parse_priority(" nope ") == 0
     assert runtime_loader._parse_priority(None) == 0

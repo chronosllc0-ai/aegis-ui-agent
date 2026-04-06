@@ -1,3 +1,36 @@
+## Session 5.71 - April 6, 2026 (post-merge priority parser polish: bool + truncation intent)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-follow-up pass
+
+### What Was Done
+- Addressed two post-merge review findings in `backend/skills/runtime_loader.py`:
+  - added explicit `bool` guard in `_parse_priority(...)` so `True`/`False` do not pass through the `int` branch,
+  - documented float coercion behavior with an inline comment clarifying truncation (`int(raw)`) is intentional for backward compatibility.
+- Extended `_parse_priority` test coverage in `tests/test_universal_navigator_runtime_skills.py`:
+  - `True` now asserted to map to `0`,
+  - non-integer float (`1.9`) asserted to truncate to `1`.
+- Re-ran the combined targeted navigator/runtime-skills test selection.
+
+### What's Working
+- Boolean JSON-like values can no longer silently become non-zero priorities.
+- Float parsing behavior is now explicit and test-locked.
+- Targeted test suite remains fully green.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: define/encode an explicit accepted priority range contract (e.g., clamp 0-10) if product semantics require bounded values.
+
+### Decisions Made
+- Kept truncation semantics unchanged to avoid behavioral drift, but documented intent to prevent future confusion/refactors.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.70 - April 6, 2026 (post-merge float priority regression fix)
 
 **Agent:** GPT-5.3-Codex  
