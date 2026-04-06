@@ -1,3 +1,77 @@
+## Session 5.67 - April 6, 2026 (runtime skills test breakage fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend compatibility pass
+
+### What Was Done
+- Fixed runtime skill model compatibility to unblock failing runtime-skill tests:
+  - added `priority` to `RuntimeSkill` with a safe default (`0`) so prompt assembly sorting can consistently consume runtime objects,
+  - added default `provenance` via `field(default_factory=dict)` to keep lightweight test construction valid without requiring explicit provenance payloads.
+- Updated runtime skill loading path to populate `RuntimeSkill.priority` from skill metadata (`priority`) with robust fallback to `0` on malformed/non-numeric values.
+- Re-ran the previously failing combined test command and confirmed all targeted suites are now green.
+
+### What's Working
+- `RuntimeSkill(...)` test fixtures that pass `priority` now instantiate correctly.
+- Runtime loader now forwards priority data into prompt assembly ordering logic.
+- Combined navigator parallel/system-prompt/runtime-skill test set passes.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Optional: add a focused unit test around metadata priority parsing fallback behavior (`priority=\"high\"` => `0`).
+2. Optional: document runtime-skill metadata schema fields (`priority`, `skill_md`) in developer docs.
+
+### Decisions Made
+- Kept fix minimal and backward-compatible by adding defaults rather than forcing provenance in all call sites/tests.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.66 - April 6, 2026 (dependency-aware parallel tool-call batches)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused orchestration + tests pass
+
+### What Was Done
+- Extended universal navigator batch execution to support dependency metadata on `tool_calls`:
+  - added dependency-aware DAG batching via optional `id` + `depends_on` fields,
+  - independent calls execute in parallel per DAG level,
+  - dependent calls execute only after prerequisites resolve.
+- Added strict fallback behavior:
+  - malformed dependency metadata (invalid ids, missing deps, self-deps, cycles, duplicate ids) now falls back to safe sequential execution.
+- Preserved non-idempotent safety:
+  - introduced conservative `PARALLEL_SAFE_TOOLS` gating,
+  - if any validated call in a batch is outside the safe allowlist, execution falls back to sequential mode for that batch.
+- Extended parallel batching tests with new coverage:
+  - independent 3-call batch runs concurrently,
+  - dependency chain executes in order,
+  - cyclic dependencies trigger sequential fallback behavior,
+  - unsafe/mutating tool in mixed batch forces sequential fallback.
+
+### What's Working
+- Existing batch mode behavior remains intact, with dependency-aware scheduling added as an opt-in extension (`id`/`depends_on` present).
+- Safe sequential fallback now reliably protects execution when dependency metadata is invalid or unsafe tools are present.
+- Updated parallel tool-call test suite passes.
+
+### What's NOT Working Yet
+- Unrelated pre-existing runtime-skill tests still fail in this environment due a `RuntimeSkill` constructor mismatch (`unexpected keyword argument 'priority'`); not introduced by this pass.
+
+### Next Steps
+1. Optional: expose dependency fallback reason in workflow telemetry for easier debugging (e.g., `batch_execution_mode=sequential` with reason).
+2. Optional: revisit/expand `PARALLEL_SAFE_TOOLS` allowlist as tool semantics evolve.
+
+### Decisions Made
+- Chose fail-safe sequential fallback instead of hard failure on malformed dependency graphs to preserve forward progress and prevent unsafe scheduling.
+- Kept safety gating conservative: any non-allowlisted validated tool disables parallelism for that batch.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.65 - April 6, 2026 (Telegram owner identity capture hardening)
 
 **Agent:** GPT-5.3-Codex  
