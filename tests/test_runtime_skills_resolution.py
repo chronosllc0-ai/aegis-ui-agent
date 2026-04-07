@@ -14,6 +14,8 @@ from backend.skills.runtime import resolve_runtime_skills
 _RUNNER = asyncio.Runner()
 
 
+T = typing.TypeVar("T")
+
 def _run_async(coro: typing.Awaitable[T]) -> T:
     return _RUNNER.run(coro)
 
