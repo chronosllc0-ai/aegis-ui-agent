@@ -184,7 +184,7 @@ async def set_skill_enabled(
 
 @skills_router.post("/api/skills/toggle")
 async def toggle_skill(
-    body: dict[str, Any],
+    body: SkillToggleRequest,
     current_user: User = Depends(_get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
