@@ -28,6 +28,7 @@ from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUC
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
 from backend.providers.base import BaseProvider, ChatMessage
+from backend.skills.parser import extract_runtime_guidance_block
 from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
 from backend.session_workspace import (
     ensure_session_workspace,
@@ -498,47 +499,71 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _format_runtime_skill_block(skill: RuntimeSkill) -> str:
+    """Create bounded runtime guidance block text for a single skill."""
+    raw_markdown = _normalize_skill_content(skill.content)
+    if not raw_markdown:
+        raise ValueError("empty skill markdown")
+
+    frontmatter, runtime_guidance = extract_runtime_guidance_block(raw_markdown)
+    if not frontmatter and not runtime_guidance:
+        raise ValueError("missing runtime guidance")
+
+    slug = skill.skill_slug or skill.skill_id
+    version_label = skill.version_label or skill.version_id or "unknown"
+    source_label = f"{slug}@{version_label}"
+    header = f"[skill:{source_label} source={skill.source} version_id={skill.version_id}]"
+    parts: list[str] = [header]
+    if frontmatter:
+        parts.append("Frontmatter:\n" + frontmatter)
+    if runtime_guidance:
+        parts.append("Runtime Guidance:\n" + runtime_guidance)
+    block = "\n\n".join(parts).strip()
+
+    per_skill_max_chars = max(int(getattr(_app_settings, "SKILLS_MAX_BLOCK_CHARS", 2_000)), 200)
+    if len(block) > per_skill_max_chars:
+        return f"{block[:per_skill_max_chars].rstrip()}\n... [truncated per-skill guidance]"
+    return block
+
+
 def _assemble_runtime_skills_section(
     runtime_skills: list[RuntimeSkill],
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    """Build runtime skill prompt section using priority-based token budgeting."""
+    """Build runtime skill prompt section using priority-aware deterministic budgeting."""
     raw_budget = getattr(_app_settings, "SKILLS_MAX_TOKENS", getattr(_app_settings, "SKILLS_MAX_TOKEN", 10_000))
     budget = max(int(raw_budget), 0)
     min_priority = getattr(_app_settings, "SKILLS_MIN_PRIORITY", None)
-    baseline = datetime.min.replace(tzinfo=timezone.utc)
     sorted_skills = sorted(
         runtime_skills,
         key=lambda item: (
-            item.priority,
-            item.created_at or baseline,
+            -int(item.priority),
+            item.skill_slug or item.skill_id,
+            item.version_label or item.version_id,
             item.version_id,
         ),
-        reverse=True,
     )
 
     included: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
     chunks: list[str] = []
+    budget_excluded_labels: list[str] = []
     used_tokens = 0
-    budget_exceeded = False
     for skill in sorted_skills:
         if min_priority is not None and skill.priority < min_priority:
             excluded.append({"skill_id": skill.skill_id, "reason": "below_min_priority"})
             continue
-
-        content = _normalize_skill_content(skill.content)
-        if not content:
-            excluded.append({"skill_id": skill.skill_id, "reason": "empty_or_malformed"})
+        try:
+            chunk = _format_runtime_skill_block(skill)
+        except Exception:  # noqa: BLE001
+            excluded.append({"skill_id": skill.skill_id, "reason": "parse_failed"})
             continue
 
-        header = (
-            f"[skill:{skill.skill_id}@{skill.version_id} source={skill.source} priority={skill.priority}]"
-        )
-        chunk = f"{header}\n{content}\n"
         estimated_tokens = _estimate_tokens(chunk)
         if used_tokens + estimated_tokens > budget:
             excluded.append({"skill_id": skill.skill_id, "reason": "budget_exceeded"})
-            budget_exceeded = True
+            slug = skill.skill_slug or skill.skill_id
+            version_label = skill.version_label or skill.version_id or "unknown"
+            budget_excluded_labels.append(f"{slug}@{version_label}")
             continue
         used_tokens += estimated_tokens
         chunks.append(chunk)
@@ -546,6 +571,8 @@ def _assemble_runtime_skills_section(
             {
                 "skill_id": skill.skill_id,
                 "version": skill.version_id,
+                "slug": skill.skill_slug,
+                "version_label": skill.version_label,
                 "source": skill.source,
                 "priority": skill.priority,
             }
@@ -555,8 +582,12 @@ def _assemble_runtime_skills_section(
         return "", included, excluded
 
     body = "\n".join(chunks).strip()
-    if budget_exceeded:
-        body = f"{body}\n... [truncated due to skills token budget]"
+    if budget_excluded_labels:
+        overflow_summary = ", ".join(sorted(budget_excluded_labels))
+        body = (
+            f"{body}\n\n[skills-warning] Aggregate skill token budget exceeded; "
+            f"some skills were omitted. Omitted: {overflow_summary}"
+        )
     return f"\n\n### Active Skills (read-only directives)\n{body}\n", included, excluded
 
 
@@ -718,11 +749,11 @@ async def _build_system_prompt(
     return (
         f"{global_block}"
         f"{mode_block}"
+        f"{runtime_skills_section}"
         "You are Aegis, an AI agent built by Chronos AI. You can browse the web and, when enabled, use "
         "workspace, memory, automation, and GitHub repo-engineering tools while respecting runtime policy gates.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
         f"Rules:\n{chr(10).join(f'{index + 1}. {rule}' for index, rule in enumerate(rules))}"
-        f"{runtime_skills_section}"
         f"{custom_block}"
     )
 

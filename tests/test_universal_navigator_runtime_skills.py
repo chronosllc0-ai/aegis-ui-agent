@@ -45,22 +45,91 @@ def test_budget_truncation_by_priority_is_deterministic(monkeypatch) -> None:
     monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 500)
     monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MIN_PRIORITY", None)
     skills = [
-        RuntimeSkill(skill_id="low", version_id="v1", name="low", source="global", priority=1, content="A" * 1600),
-        RuntimeSkill(skill_id="high", version_id="v2", name="high", source="global", priority=10, content="B" * 1600),
-        RuntimeSkill(skill_id="mid", version_id="v3", name="mid", source="hub", priority=5, content="C" * 1600),
+        RuntimeSkill(
+            skill_id="low",
+            skill_slug="aaa-low",
+            version_id="v1",
+            version_label="v1",
+            name="low",
+            source="global",
+            priority=1,
+            content="---\nowner: team\n---\n## Runtime Guidance\n" + ("A" * 1600),
+        ),
+        RuntimeSkill(
+            skill_id="high",
+            skill_slug="zzz-high",
+            version_id="v2",
+            version_label="v2",
+            name="high",
+            source="global",
+            priority=10,
+            content="## Runtime Guidance\n" + ("B" * 1600),
+        ),
+        RuntimeSkill(
+            skill_id="mid",
+            skill_slug="mmm-mid",
+            version_id="v3",
+            version_label="v3",
+            name="mid",
+            source="hub",
+            priority=5,
+            content="## Runtime Guidance\n" + ("C" * 1600),
+        ),
     ]
 
     section, included, excluded = universal_navigator._assemble_runtime_skills_section(skills)
     included_ids = [item["skill_id"] for item in included]
     assert included_ids[0] == "high"
-    assert "truncated due to skills token budget" in section
+    assert "[skills-warning] Aggregate skill token budget exceeded" in section
     assert any(item["reason"] == "budget_exceeded" for item in excluded)
+
+
+def test_min_priority_filter_excludes_lower_priority_skills(monkeypatch) -> None:
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 10_000)
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MIN_PRIORITY", 5)
+    skills = [
+        RuntimeSkill(
+            skill_id="low",
+            skill_slug="aaa-low",
+            version_id="v1",
+            version_label="v1",
+            name="low",
+            source="global",
+            priority=1,
+            content="## Runtime Guidance\nlow",
+        ),
+        RuntimeSkill(
+            skill_id="high",
+            skill_slug="zzz-high",
+            version_id="v2",
+            version_label="v2",
+            name="high",
+            source="global",
+            priority=8,
+            content="## Runtime Guidance\nhigh",
+        ),
+    ]
+
+    section, included, excluded = universal_navigator._assemble_runtime_skills_section(skills)
+    assert "high@v2" in section
+    assert "low@v1" not in section
+    assert [item["skill_id"] for item in included] == ["high"]
+    assert {"skill_id": "low", "reason": "below_min_priority"} in excluded
 
 
 def test_zero_budget_excludes_all_skills(monkeypatch) -> None:
     monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 0)
     skills = [
-        RuntimeSkill(skill_id="s1", version_id="v1", name="s1", source="global", priority=10, content="abc"),
+        RuntimeSkill(
+            skill_id="s1",
+            skill_slug="s1",
+            version_id="v1",
+            version_label="v1",
+            name="s1",
+            source="global",
+            priority=10,
+            content="## Runtime Guidance\nabc",
+        ),
     ]
     section, included, excluded = universal_navigator._assemble_runtime_skills_section(skills)
     assert section == ""
@@ -92,6 +161,38 @@ def test_run_startup_includes_skill_section_once(monkeypatch) -> None:
         assert prompt.count("### Active Skills (read-only directives)") == 1
 
     asyncio.run(_run())
+
+
+def test_malformed_skill_content_is_skipped_without_crashing(monkeypatch) -> None:
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 2_000)
+    skills = [
+        RuntimeSkill(
+            skill_id="broken",
+            skill_slug="broken",
+            version_id="v1",
+            version_label="v1",
+            name="broken",
+            source="hub",
+            priority=1,
+            content="This has no runtime section",
+        ),
+        RuntimeSkill(
+            skill_id="good",
+            skill_slug="good",
+            version_id="v2",
+            version_label="v2",
+            name="good",
+            source="hub",
+            priority=1,
+            content="## Runtime Guidance\nUse concise bullets.",
+        ),
+    ]
+
+    section, included, excluded = universal_navigator._assemble_runtime_skills_section(skills)
+    assert "good@v2" in section
+    assert "broken@v1" not in section
+    assert included[0]["skill_id"] == "good"
+    assert {"skill_id": "broken", "reason": "parse_failed"} in excluded
 
 
 def test_risky_tool_still_requires_confirmation_even_with_skill_directive(monkeypatch) -> None:

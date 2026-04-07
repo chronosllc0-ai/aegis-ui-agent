@@ -42,14 +42,15 @@ def test_prompt_precedence_orders_global_then_mode_then_runtime(tmp_path: Path) 
             session_id="session-precedence",
             settings={"agent_mode": "planner", "system_instruction": "USER RULE"},
             is_subagent=False,
-            runtime_skills_section="",
+            runtime_skills_section="\n\n### Active Skills (read-only directives)\n[skill:test@v1 source=hub version_id=v1]\nRuntime Guidance:\nSKILL RULE\n",
         )
 
         global_index = prompt.index("GLOBAL RULE")
         mode_index = prompt.index("PLANNER RULE")
+        skill_index = prompt.index("SKILL RULE")
         runtime_index = prompt.index("USER RULE")
 
-        assert global_index < mode_index < runtime_index
+        assert global_index < mode_index < skill_index < runtime_index
 
     asyncio.run(_run())
 

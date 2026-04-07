@@ -24,7 +24,9 @@ class RuntimeSkill:
     """Skill payload prepared for runtime prompt injection."""
 
     skill_id: str
+    skill_slug: str
     version_id: str
+    version_label: str
     name: str
     source: str
     content: str
@@ -105,7 +107,9 @@ async def get_active_runtime_skills(session: AsyncSession, user_id: str, session
         runtime.append(
             RuntimeSkill(
                 skill_id=skill.id,
+                skill_slug=skill.slug,
                 version_id=version.id,
+                version_label=f"v{version.version}",
                 name=skill.name,
                 source=skill.publish_target,
                 content=content,
