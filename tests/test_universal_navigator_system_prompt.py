@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 
+from backend import database
 import universal_navigator
 
 
 def test_build_system_prompt_uses_global_and_optional_user_instructions(monkeypatch) -> None:
     """System prompt should always include global instruction and optionally append user instruction."""
     monkeypatch.setattr(universal_navigator, "_session_factory", None, raising=False)
+    monkeypatch.setattr(database, "_session_factory", None, raising=False)
+    monkeypatch.setattr(database, "_engine", None, raising=False)
     monkeypatch.setattr(
         universal_navigator._app_settings,
         "AEGIS_GLOBAL_SYSTEM_INSTRUCTION",
