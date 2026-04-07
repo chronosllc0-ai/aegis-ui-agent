@@ -67,6 +67,7 @@ export function useSkills(isAdmin: boolean) {
   const toggleSkill = useCallback(async (skillId: string, enabled: boolean) => {
     const previous = installedSkills
     setInstalledSkills((prev) => prev.map((skill) => (skill.skill_id === skillId ? { ...skill, enabled } : skill)))
+    setInstalledSkills((prev) => prev.map((skill) => (skill.skill_id === skillId ? { ...skill, enabled } : skill)))
     try {
       const response = await fetch(apiUrl('/api/skills/toggle'), {
         method: 'POST',
