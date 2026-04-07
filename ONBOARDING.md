@@ -1,3 +1,34 @@
+## Session 5.79 - April 7, 2026 (PR #183 follow-up: typing fix in async test helper)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick review-fix pass
+
+### What Was Done
+- Addressed review warning in `tests/test_runtime_skills_resolution.py` for `_run_async(...)` typing:
+  - added `import typing`,
+  - added `T = typing.TypeVar("T")`,
+  - typed helper signature as `def _run_async(coro: typing.Awaitable[T]) -> T`.
+- Tightened `teardown_module(...)` signature to `module: object` (removed the previous ANN ignore).
+- Re-ran the targeted runtime-skill + prompt test suite to ensure no regression.
+
+### What's Working
+- Type-hint issue from review is resolved and helper signatures now satisfy project typing expectations.
+- Targeted suite remains green (`19 passed`).
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: run full lint/type-check pipeline in CI gate if not already required pre-merge.
+
+### Decisions Made
+- Used `typing.Awaitable[T] -> T` to keep helper precise but simple for test code.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.78 - April 7, 2026 (PR #183 review follow-up: restore priority semantics)
 
 **Agent:** GPT-5.3-Codex  

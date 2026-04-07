@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import typing
 
 from backend import database
 from backend.database import RuntimeSkillInstallation, Skill, SkillToggle, SkillVersion, User, get_session
@@ -12,15 +13,14 @@ from backend.skills.runtime import resolve_runtime_skills
 
 
 _RUNNER = asyncio.Runner()
-
-
 T = typing.TypeVar("T")
+
 
 def _run_async(coro: typing.Awaitable[T]) -> T:
     return _RUNNER.run(coro)
 
 
-def teardown_module(module) -> None:  # noqa: ANN001
+def teardown_module(module: object) -> None:
     _RUNNER.close()
 
 
