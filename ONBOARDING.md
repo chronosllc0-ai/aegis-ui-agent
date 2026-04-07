@@ -1,3 +1,50 @@
+## Session 5.76 - April 7, 2026 (runtime skill prompt precedence + bounded extraction)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused runtime-skill prompt composition pass
+
+### What Was Done
+- Added bounded runtime skill prompt parsing in new `backend/skills/parser.py`:
+  - extracts YAML-style frontmatter (when present at top of markdown),
+  - extracts only the `Runtime Guidance` markdown section,
+  - fail-soft behavior for malformed or partial markdown (never raises to caller).
+- Updated runtime skill prompt assembly in `universal_navigator.py`:
+  - parses each skill into a labeled block (`slug@version` + source/version traceability),
+  - enforces per-skill truncation (`SKILLS_MAX_BLOCK_CHARS`, default 2000 chars),
+  - enforces aggregate skills token budget deterministically,
+  - on aggregate overflow, includes warning + deterministic omitted-skill summary list in prompt context,
+  - skips malformed/unparseable skills (`parse_failed`) without failing the run.
+- Updated system prompt precedence in `_build_system_prompt(...)`:
+  - runtime skill blocks are now inserted after global+mode authoritative blocks and before user runtime instructions.
+- Extended runtime loader metadata in `backend/skills/runtime_loader.py`:
+  - runtime payload now carries `skill_slug` and `version_label` for traceable prompt labels.
+- Added/updated regression tests:
+  - precedence ordering now validates `global -> mode -> skill -> user`,
+  - deterministic over-budget behavior with warning note,
+  - malformed skill content skipped safely without crash.
+
+### What's Working
+- Runtime skill guidance is now bounded, traceable, deterministic, and inserted with the intended authority ordering.
+- Over-budget behavior now keeps context via omission summary instead of silently dropping content.
+- Malformed skill markdown no longer risks prompt build failure.
+- Targeted runtime prompt/runtime loader test suites pass.
+
+### What's NOT Working Yet
+- Existing `aiosqlite` event-loop shutdown warning still appears in one runtime skills resolution test (pre-existing test-environment warning, non-blocking).
+
+### Next Steps
+1. Optionally expose `SKILLS_MAX_BLOCK_CHARS` as an explicit admin/platform setting in UI/API if product needs dynamic tuning.
+2. Consider adding an explicit parser unit test file (`tests/test_skill_parser.py`) for frontmatter/heading edge-case coverage.
+
+### Decisions Made
+- Chose strict bounded extraction scope (`frontmatter` + `Runtime Guidance`) to reduce prompt injection surface and keep runtime behavior predictable.
+- Kept parse failures fail-open at skill granularity (skip bad skill, continue session).
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.75 - April 6, 2026 (post-review fixes: deny precedence + metadata parse observability)
 
 **Agent:** GPT-5.3-Codex  
