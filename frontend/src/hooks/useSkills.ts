@@ -97,7 +97,7 @@ export function useSkills(isAdmin: boolean) {
     }
   }, [installedSkills])
 
-  const updatePolicy = useCallback(async (next: Partial<AdminSkillsPolicy>) => {
+    setPolicy((prev) => ({ ...prev, ...next }))
     const merged = { ...policy, ...next }
     setPolicy(merged)
     try {
