@@ -1,3 +1,37 @@
+## Session 5.78 - April 7, 2026 (PR #183 review follow-up: restore priority semantics)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed PR #183 review feedback in `universal_navigator.py`:
+  - restored **priority-aware** deterministic skill ordering in `_assemble_runtime_skills_section(...)` by sorting with priority first, then slug/version as deterministic tie-breakers,
+  - restored `SKILLS_MIN_PRIORITY` filtering with explicit `below_min_priority` exclusion reason.
+- Updated runtime-skill tests in `tests/test_universal_navigator_runtime_skills.py`:
+  - strengthened `test_budget_truncation_by_priority_is_deterministic` so slug order intentionally conflicts with priority and the test still verifies priority-first behavior,
+  - added `test_min_priority_filter_excludes_lower_priority_skills` to lock `SKILLS_MIN_PRIORITY` semantics.
+- Hardened async test stability in `tests/test_runtime_skills_resolution.py` by running coroutines through a module-level `asyncio.Runner()` (single loop lifecycle per module) and keeping explicit DB teardown, which removes intermittent loop-close/thread callback races.
+- Isolated global-instruction fallback regression in `tests/test_universal_navigator_system_prompt.py` by explicitly monkeypatching `backend.database` engine/session globals for that test path.
+
+### What's Working
+- Runtime skill inclusion is now deterministic **and** respects priority under token pressure.
+- `SKILLS_MIN_PRIORITY` is active again and covered by regression tests.
+- Targeted prompt/runtime test suite passes cleanly (`19 passed`) with no loop-closure warnings.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: add a tiny doc note in developer docs clarifying sort precedence (`priority -> slug -> version`) to prevent future regressions.
+
+### Decisions Made
+- Kept deterministic tie-breakers (slug/version) while restoring priority as the primary criterion, matching prior behavior and review expectations.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.77 - April 7, 2026 (test stability fix for async runtime skill resolution)
 
 **Agent:** GPT-5.3-Codex  

@@ -529,12 +529,14 @@ def _format_runtime_skill_block(skill: RuntimeSkill) -> str:
 def _assemble_runtime_skills_section(
     runtime_skills: list[RuntimeSkill],
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    """Build runtime skill prompt section using deterministic ordering and budgeting."""
+    """Build runtime skill prompt section using priority-aware deterministic budgeting."""
     raw_budget = getattr(_app_settings, "SKILLS_MAX_TOKENS", getattr(_app_settings, "SKILLS_MAX_TOKEN", 10_000))
     budget = max(int(raw_budget), 0)
+    min_priority = getattr(_app_settings, "SKILLS_MIN_PRIORITY", None)
     sorted_skills = sorted(
         runtime_skills,
         key=lambda item: (
+            -int(item.priority),
             item.skill_slug or item.skill_id,
             item.version_label or item.version_id,
             item.version_id,
@@ -547,6 +549,9 @@ def _assemble_runtime_skills_section(
     budget_excluded_labels: list[str] = []
     used_tokens = 0
     for skill in sorted_skills:
+        if min_priority is not None and skill.priority < min_priority:
+            excluded.append({"skill_id": skill.skill_id, "reason": "below_min_priority"})
+            continue
         try:
             chunk = _format_runtime_skill_block(skill)
         except Exception:  # noqa: BLE001

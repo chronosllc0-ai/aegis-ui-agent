@@ -43,10 +43,11 @@ async def _run_navigation(provider: BaseProvider, **kwargs: Any) -> dict[str, An
 
 def test_budget_truncation_by_priority_is_deterministic(monkeypatch) -> None:
     monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 500)
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MIN_PRIORITY", None)
     skills = [
         RuntimeSkill(
             skill_id="low",
-            skill_slug="zzz-low",
+            skill_slug="aaa-low",
             version_id="v1",
             version_label="v1",
             name="low",
@@ -56,7 +57,7 @@ def test_budget_truncation_by_priority_is_deterministic(monkeypatch) -> None:
         ),
         RuntimeSkill(
             skill_id="high",
-            skill_slug="aaa-high",
+            skill_slug="zzz-high",
             version_id="v2",
             version_label="v2",
             name="high",
@@ -81,6 +82,39 @@ def test_budget_truncation_by_priority_is_deterministic(monkeypatch) -> None:
     assert included_ids[0] == "high"
     assert "[skills-warning] Aggregate skill token budget exceeded" in section
     assert any(item["reason"] == "budget_exceeded" for item in excluded)
+
+
+def test_min_priority_filter_excludes_lower_priority_skills(monkeypatch) -> None:
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MAX_TOKENS", 10_000)
+    monkeypatch.setattr(universal_navigator._app_settings, "SKILLS_MIN_PRIORITY", 5)
+    skills = [
+        RuntimeSkill(
+            skill_id="low",
+            skill_slug="aaa-low",
+            version_id="v1",
+            version_label="v1",
+            name="low",
+            source="global",
+            priority=1,
+            content="## Runtime Guidance\nlow",
+        ),
+        RuntimeSkill(
+            skill_id="high",
+            skill_slug="zzz-high",
+            version_id="v2",
+            version_label="v2",
+            name="high",
+            source="global",
+            priority=8,
+            content="## Runtime Guidance\nhigh",
+        ),
+    ]
+
+    section, included, excluded = universal_navigator._assemble_runtime_skills_section(skills)
+    assert "high@v2" in section
+    assert "low@v1" not in section
+    assert [item["skill_id"] for item in included] == ["high"]
+    assert {"skill_id": "low", "reason": "below_min_priority"} in excluded
 
 
 def test_zero_budget_excludes_all_skills(monkeypatch) -> None:

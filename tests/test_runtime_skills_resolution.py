@@ -11,6 +11,17 @@ from backend.skills import runtime as runtime_module
 from backend.skills.runtime import resolve_runtime_skills
 
 
+_RUNNER = asyncio.Runner()
+
+
+def _run_async(coro):
+    return _RUNNER.run(coro)
+
+
+def teardown_module(module) -> None:  # noqa: ANN001
+    _RUNNER.close()
+
+
 async def _init_db(tmp_path) -> None:
     database.init_db(f"sqlite+aiosqlite:///{tmp_path / 'runtime-skills.db'}")
     await database.create_tables()
@@ -90,7 +101,7 @@ def test_valid_installed_and_enabled_skill_is_resolved(tmp_path) -> None:
         finally:
             await _shutdown_db()
 
-    asyncio.run(_run())
+    _run_async(_run())
 
 
 def test_non_installed_requested_skill_is_ignored(tmp_path) -> None:
@@ -106,7 +117,7 @@ def test_non_installed_requested_skill_is_ignored(tmp_path) -> None:
         finally:
             await _shutdown_db()
 
-    asyncio.run(_run())
+    _run_async(_run())
 
 
 def test_disabled_or_revoked_skill_is_not_resolved(tmp_path) -> None:
@@ -123,7 +134,7 @@ def test_disabled_or_revoked_skill_is_not_resolved(tmp_path) -> None:
         finally:
             await _shutdown_db()
 
-    asyncio.run(_run())
+    _run_async(_run())
 
 
 def test_unauthenticated_user_gets_empty_skill_context() -> None:
@@ -133,7 +144,7 @@ def test_unauthenticated_user_gets_empty_skill_context() -> None:
         assert context.resolved_skill_ids == []
         assert context.requested_skill_ids == ["skill-z"]
 
-    asyncio.run(_run())
+    _run_async(_run())
 
 
 def test_runtime_skill_policy_allow_intersection_and_deny_union(tmp_path) -> None:
@@ -164,7 +175,7 @@ def test_runtime_skill_policy_allow_intersection_and_deny_union(tmp_path) -> Non
         finally:
             await _shutdown_db()
 
-    asyncio.run(_run())
+    _run_async(_run())
 
 
 def test_extract_policy_logs_warning_on_malformed_json(caplog) -> None:
