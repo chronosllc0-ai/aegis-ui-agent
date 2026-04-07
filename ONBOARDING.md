@@ -1,3 +1,32 @@
+## Session 5.77 - April 7, 2026 (test stability fix for async runtime skill resolution)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused test-stability pass
+
+### What Was Done
+- Fixed intermittent async teardown failure/warning in `tests/test_runtime_skills_resolution.py`:
+  - added `_shutdown_db()` helper to dispose the async engine and reset DB globals after each DB-backed async test,
+  - wrapped DB-backed test bodies in `try/finally` so cleanup always runs, even on assertion failures.
+- Re-ran the full targeted runtime-skill/prompt test selection to validate both the new prompt-precedence changes and async stability improvements.
+
+### What's Working
+- Targeted suite now runs cleanly without the prior `RuntimeError: Event loop is closed` teardown issue from `aiosqlite` worker threads.
+- Runtime skill prompt precedence/budget/parse behavior remains green.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: consider a shared DB test fixture that centralizes engine lifecycle management across all async DB test modules.
+
+### Decisions Made
+- Kept the fix local to `tests/test_runtime_skills_resolution.py` to unblock branch stability quickly without broader fixture refactors.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.76 - April 7, 2026 (runtime skill prompt precedence + bounded extraction)
 
 **Agent:** GPT-5.3-Codex  
