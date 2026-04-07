@@ -7,6 +7,7 @@ import json
 
 from backend import database
 from backend.database import RuntimeSkillInstallation, Skill, SkillToggle, SkillVersion, User, get_session
+from backend.skills import runtime as runtime_module
 from backend.skills.runtime import resolve_runtime_skills
 
 
@@ -29,6 +30,7 @@ async def _seed_skill(
     owner_user_id: str = "user-1",
     installed: bool,
     enabled: bool,
+    metadata_json: dict[str, object] | None = None,
 ) -> None:
     async for session in get_session():
         skill = Skill(
@@ -43,6 +45,9 @@ async def _seed_skill(
             publish_target="hub",
         )
         session.add(skill)
+        metadata_payload = {"skill_md": f"# {skill_id}"}
+        if metadata_json:
+            metadata_payload.update(metadata_json)
         session.add(
             SkillVersion(
                 id=f"v-{skill_id}",
@@ -51,7 +56,7 @@ async def _seed_skill(
                 content_sha256=f"hash-{skill_id}",
                 storage_path=f"skills/{skill_id}/v1.md",
                 markdown_content=f"# {skill_id}",
-                metadata_json=json.dumps({"skill_md": f"# {skill_id}"}),
+                metadata_json=json.dumps(metadata_payload),
                 created_by=owner_user_id,
             )
         )
@@ -112,3 +117,39 @@ def test_unauthenticated_user_gets_empty_skill_context() -> None:
         assert context.requested_skill_ids == ["skill-z"]
 
     asyncio.run(_run())
+
+
+def test_runtime_skill_policy_allow_intersection_and_deny_union(tmp_path) -> None:
+    async def _run() -> None:
+        await _init_db(tmp_path)
+        await _seed_user()
+        await _seed_skill(
+            skill_id="skill-e",
+            status="published_hub",
+            installed=True,
+            enabled=True,
+            metadata_json={"skill_allow_tools": ["read_file", "web_search"], "skill_deny_tools": ["exec_shell"]},
+        )
+        await _seed_skill(
+            skill_id="skill-f",
+            status="published_hub",
+            installed=True,
+            enabled=True,
+            metadata_json={"skill_allow_tools": ["read_file", "list_files"], "skill_deny_tools": ["write_file"]},
+        )
+
+        context = await resolve_runtime_skills("user-1", ["skill-e", "skill-f"])
+
+        assert context.resolved_skill_ids == ["skill-e", "skill-f"]
+        assert context.skill_allow_tools == ["read_file"]
+        assert context.skill_deny_tools == ["exec_shell", "write_file"]
+
+    asyncio.run(_run())
+
+
+def test_extract_policy_logs_warning_on_malformed_json(caplog) -> None:
+    caplog.set_level("WARNING")
+    allow, deny = runtime_module._extract_policy("{bad-json")
+    assert allow == set()
+    assert deny == set()
+    assert "Failed to parse skill metadata_json while extracting runtime policy" in caplog.text

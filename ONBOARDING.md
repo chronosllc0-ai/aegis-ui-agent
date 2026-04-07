@@ -1,3 +1,87 @@
+## Session 5.75 - April 6, 2026 (post-review fixes: deny precedence + metadata parse observability)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-follow-up pass
+
+### What Was Done
+- Addressed review warning about deny/allow ordering in `universal_navigator.py`:
+  - in `_available_tools(...)`, moved denylist filtering before allowlist filtering so deny is evaluated first in all cases,
+  - in `_tool_unavailable_reason_with_meta(...)`, moved denylist reason checks before allowlist checks so `deny_union` can surface even when allowlist is present.
+- Addressed review suggestion on malformed skill metadata observability in `backend/skills/runtime.py`:
+  - `_extract_policy(...)` now logs a warning when `metadata_json` fails to parse.
+- Addressed naming nit for duplicated helper intent:
+  - renamed navigator helper to `_normalize_tool_names` so naming matches runtime resolver helper and avoids ambiguous divergence.
+- Added regression tests for the reviewed edge cases:
+  - deny reason precedence when both skill allow+deny are present,
+  - workflow `denial_debug` reports `deny_union` when both allow+deny exist,
+  - malformed metadata JSON warning emission in `_extract_policy(...)`.
+
+### What's Working
+- Deny precedence is now enforced consistently across availability gating and unavailable-reason reporting.
+- Skill-policy observability now includes malformed metadata warnings.
+- Expanded targeted regression suite passes.
+
+### What's NOT Working Yet
+- No new issues identified in this follow-up pass.
+
+### Next Steps
+1. Optional: centralize shared normalization helpers into a common utility module if a third caller emerges.
+
+### Decisions Made
+- Kept the duplication local for now, but normalized helper naming to reduce maintenance confusion.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.74 - April 6, 2026 (runtime tool gating now enforces skill policies)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused policy-gating + regression-test pass
+
+### What Was Done
+- Added runtime skill tool-policy support in `backend/skills/runtime.py`:
+  - introduced optional `skill_allow_tools` and `skill_deny_tools` on `RuntimeSkillContext`,
+  - parse policy keys from skill-version `metadata_json`,
+  - merged policies across resolved skills with **allowlist intersection** and **denylist union**,
+  - enforced deny-overrides-allow precedence by removing denied tools from effective allow set,
+  - persisted effective policy keys into websocket runtime settings via `as_settings_fragment()`.
+- Updated runtime tool manifest gating in `universal_navigator.py`:
+  - `_available_tools(settings, is_subagent)` now applies skill-policy constraints in addition to existing disabled tools, mode blocking, integration gates, and subagent allowlist.
+- Improved tool unavailability clarity in `universal_navigator.py`:
+  - added explicit reason attribution for mode blocks vs settings-disabled vs skill-policy blocks,
+  - added `_tool_unavailable_reason_with_meta(...)` helper so denial source can be surfaced safely.
+- Added skill-policy observability in batch workflow events:
+  - when a tool is denied by skill policy, `batch_tool_result` now includes minimal non-secret `denial_debug` metadata (`policy_source`, `policy_rule`).
+- Expanded test coverage:
+  - runtime skill policy merge behavior (allow intersection + deny union),
+  - skill deny blocking even when mode allows,
+  - allowlist narrowing,
+  - deny-overrides-allow precedence,
+  - no-skill-policy behavior parity,
+  - workflow denial debug metadata emission.
+
+### What's Working
+- Effective tool availability now enforces: base tool set ∩ mode policy ∩ user/tool settings ∩ skill policy (with deny precedence).
+- Tool denial reasons are now clearer and source-specific.
+- Existing mode gating and parallel batch behavior remain green under regression tests.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Consider extending websocket config validation to hard-validate `skill_allow_tools`/`skill_deny_tools` shapes when sent from trusted internal paths.
+2. Optionally expose aggregated skill-policy diagnostics in admin telemetry for easier support triage.
+
+### Decisions Made
+- Kept skill policy keys optional and fail-open when absent, preserving behavior for no-skill sessions.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.73 - April 6, 2026 (PR #181 review fixes: runtime skill resolver hardening)
 
 **Agent:** GPT-5.3-Codex  

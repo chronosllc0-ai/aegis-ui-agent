@@ -245,6 +245,54 @@ def test_preserves_result_ordering_with_async_completion(monkeypatch: pytest.Mon
     asyncio.run(_run())
 
 
+def test_skill_policy_denial_emits_debug_metadata() -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool_calls":[{"tool":"web_search","query":"aegis"}]}',
+            '{"tool":"done","summary":"blocked"}',
+        ])
+        workflow_events: list[dict[str, Any]] = []
+
+        async def capture_workflow(step: dict[str, Any]) -> None:
+            workflow_events.append(step)
+
+        result = await _run_navigation(
+            provider,
+            settings={"agent_mode": "code", "skill_deny_tools": ["web_search"]},
+            on_workflow_step=capture_workflow,
+        )
+
+        assert result["status"] == "completed"
+        denied = next(step for step in workflow_events if step.get("type") == "batch_tool_result")
+        assert denied.get("denial_debug") == {"policy_source": "skill_policy", "policy_rule": "deny_union"}
+
+    asyncio.run(_run())
+
+
+def test_skill_policy_denial_debug_prefers_deny_rule_when_allow_also_present() -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool_calls":[{"tool":"web_search","query":"aegis"}]}',
+            '{"tool":"done","summary":"blocked"}',
+        ])
+        workflow_events: list[dict[str, Any]] = []
+
+        async def capture_workflow(step: dict[str, Any]) -> None:
+            workflow_events.append(step)
+
+        result = await _run_navigation(
+            provider,
+            settings={"agent_mode": "code", "skill_allow_tools": ["read_file"], "skill_deny_tools": ["web_search"]},
+            on_workflow_step=capture_workflow,
+        )
+
+        assert result["status"] == "completed"
+        denied = next(step for step in workflow_events if step.get("type") == "batch_tool_result")
+        assert denied.get("denial_debug") == {"policy_source": "skill_policy", "policy_rule": "deny_union"}
+
+    asyncio.run(_run())
+
+
 def test_mixed_pass_fail_returns_consolidated_message(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         provider = _ScriptedProvider([
