@@ -337,6 +337,20 @@ class SkillToggle(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class OrgSkillPolicy(Base):
+    """Organization-wide skill governance policy managed by admins."""
+
+    __tablename__ = "org_skill_policies"
+
+    id = Column(String(255), primary_key=True, default="default")
+    allow_global_skills = Column(Boolean, nullable=False, default=True)
+    allow_hub_skills = Column(Boolean, nullable=False, default=True)
+    require_approval_before_install = Column(Boolean, nullable=False, default=False)
+    default_enabled_skill_ids_json = Column(Text, nullable=False, default="[]")
+    updated_by = Column(String(255), ForeignKey("users.uid"), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ImpersonationSession(Base):
     """Track when admins impersonate user accounts."""
 

@@ -53,6 +53,15 @@ class SkillEnableRequest(BaseModel):
     enabled: bool
 
 
+class AdminSkillPolicyRequest(BaseModel):
+    """Admin managed org-wide policy for skill governance."""
+
+    allow_global_skills: bool | None = None
+    allow_hub_skills: bool | None = None
+    require_approval_before_install: bool | None = None
+    default_enabled_skill_ids: list[str] | None = None
+
+
 async def _get_current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
     token = request.cookies.get("aegis_session")
     payload = _verify_session(token)
@@ -147,6 +156,17 @@ async def uninstall_skill(
     return {"ok": True, "removed": removed}
 
 
+@skills_router.delete("/api/skills/{skill_id}")
+async def uninstall_skill_v2(
+    skill_id: str,
+    current_user: User = Depends(_get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    removed = await SkillService.uninstall_skill(session, user_id=current_user.uid, skill_id=skill_id)
+    await session.commit()
+    return {"ok": True, "removed": removed}
+
+
 @skills_router.patch("/api/skills/{skill_id}/enable")
 async def set_skill_enabled(
     skill_id: str,
@@ -162,12 +182,78 @@ async def set_skill_enabled(
     return {"ok": True, "skill_id": install.skill_id, "enabled": install.enabled}
 
 
+@skills_router.post("/api/skills/toggle")
+async def toggle_skill(
+    body: dict[str, Any],
+    current_user: User = Depends(_get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    skill_id = str(body.get("skill_id", "")).strip()
+    enabled = bool(body.get("enabled"))
+    if not skill_id:
+        raise HTTPException(status_code=400, detail="skill_id is required")
+    try:
+        install = await SkillService.set_skill_enabled(session, user_id=current_user.uid, skill_id=skill_id, enabled=enabled)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {"ok": True, "skill_id": install.skill_id, "enabled": install.enabled}
+
+
 @skills_router.get("/api/skills/installed")
 async def list_installed_skills(
     current_user: User = Depends(_get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     return {"ok": True, "skills": await SkillService.list_installed_skills(session, user_id=current_user.uid)}
+
+
+@skills_router.get("/api/admin/skills/policy")
+async def get_admin_skill_policy(
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    _ = admin_user
+    policy = await SkillService.get_org_policy(session)
+    return {
+        "ok": True,
+        "policy": {
+            "allow_global_skills": bool(policy.allow_global_skills),
+            "allow_hub_skills": bool(policy.allow_hub_skills),
+            "require_approval_before_install": bool(policy.require_approval_before_install),
+            "default_enabled_skill_ids": _safe_json_loads(policy.default_enabled_skill_ids_json, default=[]),
+            "updated_at": policy.updated_at,
+            "updated_by": policy.updated_by,
+        },
+    }
+
+
+@skills_router.post("/api/admin/skills/policy")
+async def update_admin_skill_policy(
+    body: AdminSkillPolicyRequest,
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    policy = await SkillService.update_org_policy(
+        session,
+        actor_uid=admin_user.uid,
+        allow_global_skills=body.allow_global_skills,
+        allow_hub_skills=body.allow_hub_skills,
+        require_approval_before_install=body.require_approval_before_install,
+        default_enabled_skill_ids=body.default_enabled_skill_ids,
+    )
+    await session.commit()
+    return {
+        "ok": True,
+        "policy": {
+            "allow_global_skills": bool(policy.allow_global_skills),
+            "allow_hub_skills": bool(policy.allow_hub_skills),
+            "require_approval_before_install": bool(policy.require_approval_before_install),
+            "default_enabled_skill_ids": _safe_json_loads(policy.default_enabled_skill_ids_json, default=[]),
+            "updated_at": policy.updated_at,
+            "updated_by": policy.updated_by,
+        },
+    }
 
 
 @skills_router.get("/api/admin/skills/review-queue")

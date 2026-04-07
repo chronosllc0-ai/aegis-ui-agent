@@ -1,3 +1,49 @@
+## Session 5.80 - April 7, 2026 (skills management settings UI + API wiring)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added a new **Skills** tab to the Settings navigation and settings-route mapping so `/settings/skills` deep-links correctly.
+- Implemented `frontend/src/components/settings/SkillsTab.tsx` with:
+  - user pane: installed skill list, enable/disable toggle, uninstall action, and metadata chips (version/source/updated/risk),
+  - admin-only pane: org allow/block toggles, require-approval-before-install switch, and org default-enabled skill set input.
+- Added `frontend/src/hooks/useSkills.ts` for skills fetch/mutation flows:
+  - load installed skills,
+  - optimistic toggle + rollback on failure,
+  - optimistic uninstall + rollback on failure,
+  - admin policy get/update.
+- Wired role-awareness into settings by passing `authUser.role` from `App.tsx` into `SettingsPage` and then into `SkillsTab`.
+- Added backend API alignment in `backend/skills/router.py`:
+  - `GET /api/skills/installed` (existing),
+  - `POST /api/skills/toggle` (new),
+  - `DELETE /api/skills/{skill_id}` (new alias for uninstall),
+  - `GET/POST /api/admin/skills/policy` (new admin policy endpoints).
+- Added org policy persistence model `OrgSkillPolicy` in `backend/database.py` and service helpers in `backend/skills/service.py`.
+- Extended installed skill payload with UI metadata (`version`, `source`).
+
+### What's Working
+- Skills tab is now available in Settings UI and routed.
+- Non-admin users only see user-facing skills controls.
+- Toggle/uninstall operations are optimistic in UI with rollback on API failure paths.
+- Admin policy state persists server-side via DB-backed org policy record.
+
+### What's NOT Working Yet
+- No known blockers from this pass; final validation depends on local/frontend build checks.
+
+### Next Steps
+1. Optional: add dedicated backend tests for new `toggle`, `delete`, and admin policy endpoints.
+2. Optional: connect admin default-enabled IDs to install-time automation if product requires automatic rollout behavior.
+
+### Decisions Made
+- Implemented required DELETE/toggle endpoints as additive routes to preserve existing skill API compatibility.
+- Kept WebSocket settings payload shape backward-compatible (no wsConfig breaking changes).
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.79 - April 7, 2026 (PR #183 follow-up: typing fix in async test helper)
 
 **Agent:** GPT-5.3-Codex  

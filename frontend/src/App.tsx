@@ -64,6 +64,7 @@ const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   invoices: 'Invoices',
   connections: 'Connections',
   workflows: 'Workflows',
+  skills: 'Skills',
   memory: 'Memory',
   observability: 'Observability',
   support: 'Support',
@@ -1151,6 +1152,7 @@ function App() {
                 onRunWorkflow={(instruction) => handleSend(instruction, 'steer')}
                 initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
                 isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+                authRole={authUser?.role}
                 onTabChange={(tab) => {
                   const base = isAdminPath ? '/admin' : '/settings'
                   navigateTo(`${base}/${settingsSlugForTab(tab)}`)

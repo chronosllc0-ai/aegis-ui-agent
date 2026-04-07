@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from backend.database import (
+    OrgSkillPolicy,
     Skill,
     SkillAuditEvent,
     SkillInstall,
@@ -881,9 +882,11 @@ class SkillService:
                 {
                     "skill_id": skill.id,
                     "version_id": version.id,
+                    "version": version.version,
                     "slug": skill.slug,
                     "name": skill.name,
                     "publish_target": skill.publish_target,
+                    "source": skill.publish_target,
                     "risk_label": skill.risk_label,
                     "status": skill.status,
                     "enabled": install.enabled,
@@ -899,3 +902,37 @@ class SkillService:
             select(SkillAuditEvent).where(SkillAuditEvent.skill_id == skill_id).order_by(desc(SkillAuditEvent.created_at))
         )
         return rows.scalars().all()
+
+    @staticmethod
+    async def get_org_policy(session: AsyncSession) -> OrgSkillPolicy:
+        policy = await session.get(OrgSkillPolicy, "default")
+        if policy is None:
+            policy = OrgSkillPolicy(id="default")
+            session.add(policy)
+            await session.flush()
+        return policy
+
+    @staticmethod
+    async def update_org_policy(
+        session: AsyncSession,
+        *,
+        actor_uid: str,
+        allow_global_skills: bool | None = None,
+        allow_hub_skills: bool | None = None,
+        require_approval_before_install: bool | None = None,
+        default_enabled_skill_ids: list[str] | None = None,
+    ) -> OrgSkillPolicy:
+        policy = await SkillService.get_org_policy(session)
+        if allow_global_skills is not None:
+            policy.allow_global_skills = allow_global_skills
+        if allow_hub_skills is not None:
+            policy.allow_hub_skills = allow_hub_skills
+        if require_approval_before_install is not None:
+            policy.require_approval_before_install = require_approval_before_install
+        if default_enabled_skill_ids is not None:
+            cleaned_ids = [skill_id.strip() for skill_id in default_enabled_skill_ids if isinstance(skill_id, str) and skill_id.strip()]
+            policy.default_enabled_skill_ids_json = json.dumps(list(dict.fromkeys(cleaned_ids)))
+        policy.updated_by = actor_uid
+        policy.updated_at = SkillService._now()
+        await session.flush()
+        return policy
