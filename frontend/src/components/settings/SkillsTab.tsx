@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { apiRequest } from '../../lib/api'
+import { ReviewQueue } from '../skills-hub/ReviewQueue'
+import { SubmissionForm } from '../skills-hub/SubmissionForm'
+import { SubmissionStatusTimeline } from '../skills-hub/SubmissionStatusTimeline'
+import type { HubSubmission } from '../skills-hub/types'
 import { useSettingsContext } from '../../context/useSettingsContext'
 import { useSkills, type AdminSkillsPolicy, type InstalledSkill } from '../../hooks/useSkills'
 import { useToast } from '../../hooks/useToast'
@@ -31,6 +36,9 @@ export function SkillsTab({ role }: SkillsTabProps) {
   } = useSkills(isAdmin)
 
   const [savingPolicy, setSavingPolicy] = useState(false)
+  const [expandedSkillId, setExpandedSkillId] = useState<string | null>(null)
+  const [activeSubmission, setActiveSubmission] = useState<HubSubmission | null>(null)
+  const [allowedTransitions, setAllowedTransitions] = useState<string[]>([])
 
   const enabledSkillIds = useMemo(() => installed.filter((skill) => skill.enabled).map((skill) => skill.skill_id), [installed])
 
@@ -74,6 +82,18 @@ export function SkillsTab({ role }: SkillsTabProps) {
     }
   }
 
+
+  const transitionSubmission = async (nextState: string) => {
+    if (!activeSubmission) return
+    const data = await apiRequest<{ submission: HubSubmission; allowed_transitions: string[] }>(`/api/skills/hub/submissions/${encodeURIComponent(activeSubmission.id)}/transition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ next_state: nextState }),
+    })
+    setActiveSubmission(data.submission)
+    setAllowedTransitions(data.allowed_transitions ?? [])
+  }
+
   return (
     <div className='grid gap-4 lg:grid-cols-2'>
       <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
@@ -112,11 +132,32 @@ export function SkillsTab({ role }: SkillsTabProps) {
                   <span className='rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-300'>risk: {skill.risk_label ?? 'unknown'}</span>
                 </div>
 
-                <div className='mt-3'>
+                <div className='mt-3 flex flex-wrap gap-2'>
+                  <button type='button' onClick={() => setExpandedSkillId((prev) => (prev === skill.skill_id ? null : skill.skill_id))} className='rounded border border-cyan-500/40 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/10'>
+                    Submit to Hub
+                  </button>
+
                   <button type='button' onClick={() => void onDeleteSkill(skill.skill_id)} className='rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10'>
                     Uninstall
                   </button>
                 </div>
+
+                {expandedSkillId === skill.skill_id ? (
+                  <div className='mt-2 space-y-2'>
+                    <SubmissionForm
+                      skillId={skill.skill_id}
+                      slug={skill.slug}
+                      title={skill.name}
+                      onCreated={(submission) => {
+                        setActiveSubmission(submission)
+                        setAllowedTransitions(submission.current_state === 'draft' ? ['submitted'] : [])
+                      }}
+                    />
+                    {activeSubmission && activeSubmission.skill_id === skill.skill_id ? (
+                      <SubmissionStatusTimeline submission={activeSubmission} allowedTransitions={allowedTransitions} onTransition={(state) => void transitionSubmission(state)} />
+                    ) : null}
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -164,6 +205,8 @@ export function SkillsTab({ role }: SkillsTabProps) {
           )}
         </section>
       )}
+
+      <ReviewQueue isAdmin={isAdmin} />
     </div>
   )
 }

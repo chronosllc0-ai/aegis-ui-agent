@@ -39,6 +39,7 @@ from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
 from backend.research.router import research_router
 from backend.skills.router import skills_router
+from backend.skills_hub.router import skills_hub_router
 from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
@@ -97,6 +98,7 @@ app.include_router(executor_router)
 app.include_router(research_router)
 app.include_router(tasks_router)
 app.include_router(skills_router)
+app.include_router(skills_hub_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
