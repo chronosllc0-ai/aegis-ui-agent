@@ -1,3 +1,38 @@
+## Session 5.83 - April 8, 2026 (fix test mismatch + deterministic scan mocks)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Fixed a policy default mismatch in `backend/skills/policy_store.py`:
+  - `set_skills_policy(...)` now defaults `block_high_risk_skills` to `False` to match the declared default policy shape used elsewhere.
+- Completed the prior “next step” to stabilize scan-related API tests under environments where VirusTotal is disabled:
+  - added async mock scanner helper in `tests/test_skills_api.py`,
+  - patched `VirusTotalScanner.scan_content` in:
+    - `_seed_approved_skill_sync()` path,
+    - `test_admin_review_queue_status_filter_and_badges`,
+  - this makes review-queue status assertions deterministic (`review` no longer depends on external VT availability/config).
+- Re-ran the affected test slices and a broader skills test set.
+
+### What's Working
+- Previously failing review-queue status test now passes reliably.
+- Skills API + admin controls + install policy test set is green (`8 passed`).
+
+### What's NOT Working Yet
+- No new blockers discovered in this pass.
+
+### Next Steps
+1. Optional: apply the same deterministic scan-mocking pattern to any remaining VT-sensitive tests outside `tests/test_skills_api.py` to reduce CI flake risk further.
+
+### Decisions Made
+- Preferred deterministic unit/integration mocking in tests instead of changing runtime scan behavior.
+- Kept production scan workflow untouched; only test-time behavior is stabilized.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.82 - April 8, 2026 (SkillsTab Admin Controls + backend RBAC/persistence)
 
 **Agent:** GPT-5.3-Codex  

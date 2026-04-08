@@ -53,7 +53,7 @@ async def set_skills_policy(db: AsyncSession, *, policy: dict[str, Any], admin_u
     """Persist org skills policy and return normalized value."""
     normalized = {
         "allow_unreviewed_installs": bool(policy.get("allow_unreviewed_installs", False)),
-        "block_high_risk_skills": bool(policy.get("block_high_risk_skills", True)),
+        "block_high_risk_skills": bool(policy.get("block_high_risk_skills", False)),
         "require_approval_before_install": bool(policy.get("require_approval_before_install", False)),
         "default_enabled_skill_ids": [skill_id.strip() for skill_id in policy.get("default_enabled_skill_ids", []) if isinstance(skill_id, str) and skill_id.strip()],
     }
