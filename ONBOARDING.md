@@ -1,3 +1,35 @@
+## Session 5.55 - April 8, 2026 (Fireworks task-runner incorrectly requiring Gemini key fix)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused debugging + backend fix pass
+
+### What Was Done
+- Investigated provider/key flow for plan decomposition + execution and found two root causes behind provider-mismatch failures:
+  1. Plan step assignment was hardcoded by task type to mixed providers (Google/Anthropic/OpenAI), even when the user explicitly selected another provider such as Fireworks.
+  2. Planner/provider fallback maps were incomplete for Fireworks during decompose and execution fallback resolution.
+- Updated `backend/planner/service.py` so persisted task steps now inherit the user-selected plan provider/model instead of forcing cross-provider assignments from task type.
+- Updated `backend/planner/router.py` fallback map to include `fireworks -> FIREWORKS_API_KEY`.
+- Updated `backend/planner/agent_runner.py` fallback map to include `xai`, `openrouter`, and `fireworks` platform keys.
+
+### What's Working
+- Plan execution no longer silently pivots steps onto Google/Anthropic/OpenAI when a user selected Fireworks.
+- Fireworks can now resolve server fallback keys correctly in both decomposition and execution flows.
+- This eliminates the false "Gemini key missing" class of errors caused by provider drift inside plan steps.
+
+### What's NOT Working Yet
+- Full repository test suite still fails at collection due to a pre-existing import issue in `backend.modes` (`ADMIN_EDITABLE_MODE_METADATA_FIELDS`), unrelated to this fix.
+
+### Next Steps
+1. Deploy this backend patch and verify with a real Fireworks session (`/plan` and standard task run) that no Gemini-key error appears.
+2. Separately fix the existing `backend.modes` export/import break so full CI tests can run cleanly.
+
+### Decisions Made
+- Chose provider consistency (respect explicit user provider/model per plan) over task-type-driven provider switching, because switching providers mid-plan requires multiple valid keys and caused user-facing failures.
+
+### Blockers
+- None for this bugfix itself; only unrelated pre-existing test-collection failure remains.
+
+---
 ## Session 5.54 - April 8, 2026 (Netlify deploy TS2353 settings type fix)
 
 **Agent:** GPT-5.3-Codex

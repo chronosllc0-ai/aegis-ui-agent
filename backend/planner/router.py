@@ -52,6 +52,7 @@ async def decompose_prompt_endpoint(
             "anthropic": getattr(settings, "ANTHROPIC_API_KEY", ""),
             "xai": getattr(settings, "XAI_API_KEY", ""),
             "openrouter": getattr(settings, "OPENROUTER_API_KEY", ""),
+            "fireworks": getattr(settings, "FIREWORKS_API_KEY", ""),
         }
         api_key = fallback_keys.get(provider_name, "")
     if not api_key:
