@@ -174,7 +174,7 @@ export function useSkills(isAdmin: boolean) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextPolicy),
       })
-      setPolicy({ ...DEFAULT_POLICY, ...nextPolicy, ...(data.policy ?? {}) })
+      setPolicy({ ...DEFAULT_POLICY, ...(data.policy ?? {}) })
     } catch (error) {
       // Keep previous state untouched on failure so UI never drifts from persisted policy.
       throw error

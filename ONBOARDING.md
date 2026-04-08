@@ -1,3 +1,43 @@
+## Session 5.84 - April 8, 2026 (Post-merge PR #192 fixes on main + next-step test coverage)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused stabilization + test pass
+
+### What Was Done
+- Fixed all three reviewer findings from merged PR #192:
+  1. `frontend/src/hooks/useSkills.ts` policy merge bug:
+     - `savePolicy(...)` now trusts server canonical normalization and applies `setPolicy({ ...DEFAULT_POLICY, ...(data.policy ?? {}) })` only.
+  2. `backend/skills/router.py` commit placement:
+     - moved commit handling into successful write paths (initial write path + retry path after `IntegrityError`) to avoid committing an error-state session.
+  3. `frontend/src/lib/api.ts` JSON parse hardening:
+     - wrapped successful-response `json()` parsing in try/catch and throw a meaningful error if parse fails.
+- Worked through the prior ONBOARDING “next steps / not yet working” direction by adding targeted backend API tests:
+  - new `tests/test_admin_skills_policy.py` validating normalization + persistence + admin authorization behavior for skills policy endpoints.
+
+### What's Working
+- Skills policy UI now reflects server-normalized policy values exactly (no client-side overwrite drift).
+- Admin policy persistence path is safer around transaction error states.
+- API helper now fails with clear error text for malformed JSON responses.
+- New admin skills policy tests pass (`2 passed`).
+- Frontend build still succeeds after fixes.
+
+### What's NOT Working Yet
+- Full folder/file payload persistence for skill publishing (beyond SKILL.md extraction) remains a future enhancement.
+- Full ClawHub-style file/compare/version detail sub-tabs are still partial in the current UI.
+
+### Next Steps
+1. Implement backend upload storage + manifest persistence for full dropped folder payloads.
+2. Extend skill detail view with Files/Compare/Versions real data tabs.
+3. Add API tests for concurrent first-write policy race path (forced IntegrityError simulation).
+
+### Decisions Made
+- Kept fixes minimal and post-merge safe: no endpoint shape changes, only correctness/robustness adjustments.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.83 - April 8, 2026 (PR #192 review follow-up: policy response normalization + race-safe save)
 
 **Agent:** GPT-5.3-Codex  

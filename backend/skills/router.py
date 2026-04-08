@@ -109,6 +109,7 @@ async def _set_admin_skills_policy(session: AsyncSession, *, admin_uid: str, pol
             row.value = serialized
             row.updated_by = admin_uid
             await session.flush()
+        await session.commit()
     except IntegrityError:
         await session.rollback()
         result = await session.execute(select(PlatformSetting).where(PlatformSetting.key == _ADMIN_SKILLS_POLICY_KEY))
@@ -118,7 +119,7 @@ async def _set_admin_skills_policy(session: AsyncSession, *, admin_uid: str, pol
         row.value = serialized
         row.updated_by = admin_uid
         await session.flush()
-    await session.commit()
+        await session.commit()
     return await _get_admin_skills_policy(session)
 
 
