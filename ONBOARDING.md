@@ -2910,3 +2910,60 @@
 ### Validation
 - `pytest -q tests/test_universal_navigator_parallel_tools.py` passed (15/15).
 - `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_orchestrator_startup.py tests/test_universal_navigator_parallel_tools.py` passed (18/18).
+
+## 2026-04-08 — Idle steering/queue start fix + Gemini key check fix
+
+### What changed
+- Fixed a critical settings shadowing bug in `orchestrator.py` where the `execute_task(..., settings=...)` argument hid the imported config settings object. This caused Gemini key validation to inspect the session dict instead of `config.settings`, producing incorrect “No Gemini API key configured” failures.
+- Updated `orchestrator.py` to reference `settings_module` (import alias) consistently for server keys/secrets and to use `session_settings` as the per-request payload name to avoid future collisions.
+- Hardened `/ws/navigate` action semantics in `main.py`:
+  - `steer`, `queue`, and `interrupt` now **start a normal task** when the runtime is idle (`task_running == False`).
+  - These actions only retain their control semantics while a task is actively running.
+  - This aligns behavior with UX intent: any prompt while idle should start work; only in-flight prompts can steer/interrupt/queue.
+- Added websocket regression tests in `tests/test_main_websocket.py`:
+  - `test_idle_steer_starts_task_instead_of_only_buffering_steering`
+  - `test_idle_queue_starts_task_instead_of_queuing`
+- Added orchestrator regression test in `tests/test_orchestrator_startup.py`:
+  - `test_gemini_path_uses_module_settings_not_session_dict`
+
+### Why
+- Users reported tasks never starting across providers/models. Two root causes were addressed:
+  1. Idle control-action prompts could be swallowed as steering/queue state instead of starting execution.
+  2. Gemini key checks were reading the wrong object due to variable shadowing, leading to misleading provider/model behavior.
+
+### Validation
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing tests/test_orchestrator_startup.py::test_gemini_path_uses_module_settings_not_session_dict` passed.
+
+## 2026-04-08 — Follow-up refactor from PR review (DRY idle-control path)
+
+### What changed
+- Refactored duplicated idle-control task-start logic in `main.py` into a single helper:
+  - `_start_idle_navigation_from_control_action(...)`
+- Replaced three copy-pasted blocks under websocket actions `steer`, `interrupt`, and `queue` with calls to the helper.
+- Preserved behavior exactly:
+  - While idle: those actions start a normal navigation task.
+  - While active: they retain steering/interrupt/queue semantics.
+
+### Why
+- Addressed PR review feedback about 3 duplicated 18-line blocks.
+- Reduces maintenance risk and keeps idle-control semantics consistent across all three actions.
+
+### Validation
+- `pytest -q tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_orchestrator_startup.py::test_gemini_path_uses_module_settings_not_session_dict` passed.
+
+## 2026-04-08 — Follow-up hardening: remove execute_task `settings` shadowing entirely
+
+### What changed
+- Updated `AgentOrchestrator.execute_task(...)` signature to use `session_settings` as the primary argument name and accept legacy `settings=` via `**kwargs` for backward compatibility.
+- Added compatibility merge logic:
+  - Prefer explicit `session_settings` when provided.
+  - Fall back to legacy `settings` from `kwargs`.
+  - Ignore/log any unexpected extra kwargs safely.
+- This fully removes the parameter-level `settings` name collision while preserving existing call sites that still pass `settings=...`.
+
+### Why
+- Although the earlier fix switched internal key lookups to `settings_module`, keeping a function parameter named `settings` could still trigger confusion/review noise.
+- This follow-up makes the shadowing class of bug structurally impossible in `execute_task` while maintaining API compatibility.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing` passed.

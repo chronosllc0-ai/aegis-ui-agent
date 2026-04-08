@@ -16,12 +16,14 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 
 from analyzer import ScreenshotAnalyzer, detect_available_model
-from config import settings
+from config import settings as settings_module
 from executor import ActionExecutor
 from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
+# Backward-compatible alias used by existing tests/importers.
+settings = settings_module
 
 # Models supported by the Gemini ADK navigator path
 SUPPORTED_GEMINI_MODELS = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-2.5-pro-preview-03-25"}
@@ -80,7 +82,7 @@ class AgentOrchestrator:
         self.analyzer: ScreenshotAnalyzer | None = None
         self.navigator: NavigatorAgent | None = None
         self.session_service = InMemorySessionService()
-        self.default_model_name = settings.GEMINI_MODEL
+        self.default_model_name = settings_module.GEMINI_MODEL
         self.model_name = self.default_model_name
         self.agent: Agent | None = None
         self.mcp_client = MCPClient()
@@ -88,7 +90,7 @@ class AgentOrchestrator:
     def _ensure_gemini_stack(self) -> None:
         """Initialize Gemini-dependent components lazily when needed."""
         if self.client is None:
-            self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            self.client = genai.Client(api_key=settings_module.GEMINI_API_KEY)
         if self.analyzer is None:
             self.analyzer = ScreenshotAnalyzer(self.client)
         if self.navigator is None:
@@ -158,7 +160,7 @@ class AgentOrchestrator:
         self._ensure_gemini_stack()
         assert self.client is not None
         assert self.analyzer is not None
-        key = settings.GEMINI_API_KEY.strip()
+        key = settings_module.GEMINI_API_KEY.strip()
         has_real_key = bool(key) and "your-gemini" not in key.lower()
         if has_real_key:
             self.model_name = await detect_available_model(self.client)
@@ -192,7 +194,7 @@ class AgentOrchestrator:
         # ── Chronos Gateway — route via platform OpenRouter key ───────
         CHRONOS_GATEWAY = "chronos"
         if provider_name == CHRONOS_GATEWAY:
-            api_key = settings.OPENROUTER_API_KEY.strip()
+            api_key = settings_module.OPENROUTER_API_KEY.strip()
             if not api_key:
                 return None  # no platform key configured
             from backend.providers import get_provider
@@ -208,7 +210,7 @@ class AgentOrchestrator:
             try:
                 from backend.database import get_session as _get_session
                 from backend.key_management import KeyManager
-                _km = KeyManager(settings.ENCRYPTION_SECRET)
+                _km = KeyManager(settings_module.ENCRYPTION_SECRET)
                 async for db_session in _get_session():
                     api_key = await _km.get_key(db_session, user_uid, provider_name)
                     break
@@ -218,11 +220,11 @@ class AgentOrchestrator:
         # Fall back to server-side env key
         if not api_key:
             env_keys: dict[str, str] = {
-                "openai": settings.OPENAI_API_KEY,
-                "anthropic": settings.ANTHROPIC_API_KEY,
-                "xai": settings.XAI_API_KEY,
-                "openrouter": settings.OPENROUTER_API_KEY,
-                "fireworks": settings.FIREWORKS_API_KEY,
+                "openai": settings_module.OPENAI_API_KEY,
+                "anthropic": settings_module.ANTHROPIC_API_KEY,
+                "xai": settings_module.XAI_API_KEY,
+                "openrouter": settings_module.OPENROUTER_API_KEY,
+                "fireworks": settings_module.FIREWORKS_API_KEY,
             }
             api_key = env_keys.get(provider_name, "").strip()
 
@@ -241,7 +243,7 @@ class AgentOrchestrator:
         on_frame: Callable[[str], Awaitable[None]] | None = None,
         cancel_event: asyncio.Event | None = None,
         steering_context: list[str] | None = None,
-        settings: dict[str, Any] | None = None,
+        session_settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         user_uid: str | None = None,
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
@@ -249,15 +251,20 @@ class AgentOrchestrator:
         on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
         on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
         is_subagent: bool = False,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction.
 
         Automatically routes to the Gemini ADK path or the universal
         vision+tool-calling navigator depending on the requested provider.
         """
-        configured_settings = settings or {}
-        model_id = str(configured_settings.get("model", "")).strip()
-        raw_provider = str(configured_settings.get("provider", "")).strip()
+        legacy_settings = kwargs.pop("settings", None)
+        if kwargs:
+            logger.debug("Unused execute_task kwargs: %s", sorted(kwargs.keys()))
+        resolved_session_settings = session_settings if session_settings is not None else legacy_settings
+        session_settings = resolved_session_settings if isinstance(resolved_session_settings, dict) else {}
+        model_id = str(session_settings.get("model", "")).strip()
+        raw_provider = str(session_settings.get("provider", "")).strip()
         provider_name = _normalize_provider_name(raw_provider, model_id)
         if not provider_name:
             provider_name = "chronos"
@@ -265,7 +272,7 @@ class AgentOrchestrator:
 
         # ── Non-Gemini path ────────────────────────────────────────────
         if not is_gemini_path:
-            resolved = await self._resolve_provider_for_navigation({**configured_settings, "provider": provider_name}, user_uid)
+            resolved = await self._resolve_provider_for_navigation({**session_settings, "provider": provider_name}, user_uid)
             if resolved is None:
                 # No API key available — surface a clear error
                 missing_key_msg = (
@@ -279,8 +286,8 @@ class AgentOrchestrator:
             _, provider_instance, model_id = resolved
             logger.info("Using universal navigator for provider=%s model=%s", provider_name, model_id)
 
-            enable_reasoning = bool((settings or {}).get("enable_reasoning", False))
-            reasoning_effort = str((settings or {}).get("reasoning_effort", "medium"))
+            enable_reasoning = bool(session_settings.get("enable_reasoning", False))
+            reasoning_effort = str(session_settings.get("reasoning_effort", "medium"))
 
             from universal_navigator import run_universal_navigation
             return await run_universal_navigation(
@@ -289,7 +296,7 @@ class AgentOrchestrator:
                 executor=self.executor,
                 session_id=session_id,
                 instruction=instruction,
-                settings=settings,
+                settings=session_settings,
                 on_step=on_step,
                 on_frame=on_frame,
                 cancel_event=cancel_event,
@@ -307,7 +314,7 @@ class AgentOrchestrator:
 
         # ── Gemini / ADK path (original) ───────────────────────────────
         # Verify we have a working Gemini API key before attempting ADK
-        gemini_key = settings.GEMINI_API_KEY.strip() if hasattr(settings, "GEMINI_API_KEY") else ""
+        gemini_key = settings_module.GEMINI_API_KEY.strip()
         has_real_gemini_key = bool(gemini_key) and "your-gemini" not in gemini_key.lower()
         if not has_real_gemini_key:
             missing_key_msg = (
@@ -321,10 +328,10 @@ class AgentOrchestrator:
 
         if self.agent is None:
             await self.initialize()
-        await self._apply_session_settings(settings)
+        await self._apply_session_settings(session_settings)
         assert self.agent is not None
 
-        session_agent, _ = await self._resolve_session_agent(settings)
+        session_agent, _ = await self._resolve_session_agent(session_settings)
 
         runner = Runner(agent=session_agent, app_name="aegis", session_service=self.session_service)
         user_id = session_id
