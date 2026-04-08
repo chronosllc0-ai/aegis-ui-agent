@@ -3151,3 +3151,16 @@
 ### Validation
 - `cd frontend && npm run build` passed.
 - `cd frontend && npm run test -- src/components/ChatPanel.test.tsx src/components/__tests__/ChatPanel.thinking-persistence.test.tsx src/hooks/__tests__/useWebSocket.reasoning-cache.test.ts` passed.
+
+## 2026-04-08 — Follow-up nit fix from PR review (activity reducer)
+
+### What changed
+- Removed redundant `updatedAt` override in `frontend/src/lib/activityState.ts` for the idle transition path on `result`/`error`/`interrupt`.
+- `reduceActivityState(...)` now directly returns `createIdleActivityState(now)` for that branch, eliminating duplicate timestamp assignment.
+
+### Why
+- Addressed review feedback noting duplicate timestamp writes were unnecessary.
+- Keeps reducer logic cleaner without changing runtime behavior.
+
+### Validation
+- `cd frontend && npm run test -- src/hooks/__tests__/useWebSocket.reasoning-cache.test.ts` passed.

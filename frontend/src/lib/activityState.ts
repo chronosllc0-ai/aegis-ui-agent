@@ -79,10 +79,7 @@ export function reduceActivityState(state: ActivityState, payload: WebSocketPayl
   const timestamp = new Date(now).toISOString()
 
   if (payload.type === 'result' || payload.type === 'error' || payload.type === 'interrupt') {
-    return {
-      ...createIdleActivityState(now),
-      updatedAt: timestamp,
-    }
+    return createIdleActivityState(now)
   }
 
   if (payload.type === 'reasoning_start') {
