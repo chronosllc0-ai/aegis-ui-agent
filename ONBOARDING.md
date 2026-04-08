@@ -1,3 +1,34 @@
+## Session 5.96 - April 8, 2026 (npm prefix issue follow-up + workspace scripts)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 config + validation pass
+
+### What Was Done
+- Addressed npm prefix workflow friction by adding root workspace-aware scripts in `package.json`:
+  - `frontend:build`
+  - `frontend:test`
+  - `frontend:lint`
+- Added npm workspace configuration at the repo root (`"workspaces": ["frontend"]`) so frontend commands can run from root without `npm --prefix ...`.
+
+### What's Working
+- `npm run frontend:build` now successfully builds the frontend from the repo root.
+- `npm run frontend:test -- App.browser-example.test.tsx --run` executes the targeted frontend test successfully from root (with an npm CLI warning about argument forwarding).
+
+### What's NOT Working Yet
+- Passing extra Vitest flags through the new `frontend:test` script without npm warnings requires explicit `--` separator usage (e.g., `npm run frontend:test -- --run <pattern>`).
+
+### Next Steps
+1. If desired, add dedicated root scripts for common targeted test patterns to avoid argument-forwarding warnings.
+2. Optionally normalize npm environment config warnings (`http-proxy`) in CI/shell profile.
+
+### Decisions Made
+- Chose workspace scripts over repeated `npm --prefix frontend ...` invocation to make branch checks simpler and less error-prone.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.95 - April 8, 2026 (thread+user scoped browser frame cache isolation)
 
 **Agent:** GPT-5.3-Codex  
