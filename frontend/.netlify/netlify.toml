@@ -1,0 +1,59 @@
+headersOrigin = "config"
+redirectsOrigin = "config"
+plugins = []
+
+[functions]
+
+[functions."*"]
+
+[build]
+publish = "/opt/build/repo/frontend/dist"
+publishOrigin = "config"
+commandOrigin = "config"
+command = "npm ci && npm run -w frontend build"
+base = "/opt/build/repo"
+
+[build.environment]
+NODE_VERSION = "22"
+VITE_APP_VERSION = "1.2.0"
+VITE_API_URL = "https://web-production-89bf4.up.railway.app"
+VITE_WS_URL = "wss://web-production-89bf4.up.railway.app/ws/navigate"
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[[headers]]
+for = "/*"
+
+[headers.values]
+X-Frame-Options = "DENY"
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "strict-origin-when-cross-origin"
+Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
+
+[[headers]]
+for = "/assets/*"
+
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200.0
+force = false
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]

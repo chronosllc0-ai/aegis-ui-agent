@@ -1,3 +1,69 @@
+## Session 5.54 - April 8, 2026 (Netlify deploy TS2353 settings type fix)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused implementation pass
+
+### What Was Done
+- Fixed the Netlify TypeScript failure in `frontend/src/components/settings/SkillsTab.tsx` caused by `patchSettings({ enabledSkillIds })` not matching `Partial<AppSettings>`.
+- Updated `frontend/src/hooks/useSettings.ts` to add `enabledSkillIds: string[]` to `AppSettings`.
+- Added `enabledSkillIds: []` to `DEFAULT_SETTINGS` so the field always exists.
+- Hardened settings hydration in `loadInitialSettings()` by normalizing `enabledSkillIds` to a string array.
+- Included `enabled_skill_ids` in `wsConfig` so runtime config mirrors the UI setting payload.
+
+### What's Working
+- `patchSettings({ enabledSkillIds })` in `SkillsTab` is now type-safe against `Partial<AppSettings>`.
+- The exact TS2353 error from the Netlify log is resolved at the type-definition source.
+
+### What's NOT Working Yet
+- Build execution was intentionally not run in-session due to repository instructions prohibiting build commands during this task.
+
+### Next Steps
+1. Let Netlify re-run `npm ci && npm run -w frontend build` to confirm no further TypeScript errors surface.
+2. If additional compile errors appear, apply targeted type/import fixes in the next failing file.
+
+### Decisions Made
+- Preserved the existing Skills tab behavior by aligning central settings types instead of removing the `enabledSkillIds` patch call.
+
+### Blockers
+- None.
+
+---
+## Session 5.53 - April 8, 2026 (Netlify frontend TypeScript deploy fix)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused implementation pass
+
+### What Was Done
+- Fixed missing frontend symbol imports that were breaking `tsc` during Netlify deploy.
+- Updated `frontend/src/components/ChatPanel.tsx` imports to pull:
+  - `AGENT_MODES`, `normalizeAgentMode`, `AgentModeId` from `lib/agentModes`
+  - `PROVIDERS`, `providerById`, `renderProviderIcon` from `lib/models`
+  - `normalizeTextPreservingMarkdown` from `lib/textNormalization`
+  - `SuggestionChips` and `PromptGallery` components
+- Removed dead `latestThinkingId` state in `ChatPanel.tsx` to resolve the unused-local TypeScript error.
+- Updated `frontend/src/App.tsx` to import `PROVIDERS` from `lib/models` for provider selection logic.
+- Removed unused `currentAgentModeLabel` declaration in `App.tsx` to resolve the unused-local TypeScript error.
+
+### What's Working
+- Previously reported missing-name errors in `App.tsx` and `ChatPanel.tsx` now have matching imports from existing modules in the repo.
+- Previously reported implicit-any callbacks tied to unresolved arrays (`AGENT_MODES`, `PROVIDERS`) now type-infer from typed exports.
+- Reported unused-variable failures for `currentAgentModeLabel` and `latestThinkingId` are addressed.
+
+### What's NOT Working Yet
+- Full compile/deploy validation was not run in-session because project rules for this environment disallow running build commands.
+
+### Next Steps
+1. Let CI/Netlify re-run the build to confirm `tsc` passes end-to-end.
+2. If any new TypeScript errors appear, address the next surfaced file/symbol set in the same targeted import-first pattern.
+
+### Decisions Made
+- Applied narrow source fixes (imports + dead-code cleanup) instead of changing `tsconfig` strictness, to preserve existing type-safety expectations.
+
+### Blockers
+- None identified from source inspection.
+
+---
+
 ## Session 5.52 - April 8, 2026 (Thread/browser UX regression prompt pack)
 
 **Agent:** GPT-5.3-Codex

@@ -4,7 +4,12 @@ import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
+import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
+import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
+import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
+import { SuggestionChips } from './SuggestionChips'
+import { PromptGallery } from './PromptGallery'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -1438,13 +1443,6 @@ export function ChatPanel({
     })
     return [...sentMessages, ...dedupedBase]
   }, [sentMessages, baseMessages])
-  const latestThinkingId = useMemo(() => {
-    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
-      if (allMessages[i].role === 'thinking') return allMessages[i].id
-    }
-    return null
-  }, [allMessages])
-
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
   // eslint-disable-next-line react-hooks/exhaustive-deps
