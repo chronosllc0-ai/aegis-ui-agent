@@ -1,70 +1,35 @@
-## Session 5.57 - April 8, 2026 (PR #209 follow-up cleanup)
+## Session 5.56 - April 8, 2026 (Permanent browser-action exclusion in chat live + rehydration)
 
 **Agent:** GPT-5.3-Codex
-**Duration:** ~1 focused polish pass
+**Duration:** ~1 focused frontend filtering + test pass
 
 ### What Was Done
-- Addressed code-review feedback from PR #209 and update-branch review notes:
-  1. Removed unreachable fallback branch in `backend/modes.py::serialize_mode_definition()` (after normalization, the mode key is always valid, so fallback could never trigger).
-  2. Removed redundant duplicate mode-permission check in `universal_navigator.py::_available_tools()` because mode-blocked tools are already merged into `disabled_tools` before the loop.
+- Added a shared browser-event filter helper at `frontend/src/lib/browserOnlyEvents.ts` with `isBrowserOnlyEvent(...)`.
+- Centralized browser-only + silent tool detection (including `extract_page`, `go_back`, `click`, `go_to_url`, `type_text`, `scroll`, `screenshot`, and related aliases) into that helper.
+- Updated `frontend/src/components/ChatPanel.tsx` live log path to call the shared helper via `isBrowserOnlyEntry(...)`.
+- Updated `ChatPanel.tsx` server-message hydration path (`serverMessages` mapping) to apply the same shared helper before rendering chat messages.
+- Expanded frontend tests with historical browser fixtures in both live and hydration contexts:
+  - `frontend/src/components/ChatPanel.test.tsx`
+  - `frontend/src/components/__tests__/ChatPanel.thread-hydration.test.tsx`
 
 ### What's Working
-- Startup/import crash fix from prior pass remains intact.
-- Mode/admin regression suite still passes after cleanup.
-- Tool-filter behavior remains unchanged functionally, now with less duplication and cleaner control flow.
+- Browser-action tool events are filtered from chat in live stream rendering.
+- The same browser-action events are filtered from persisted message rehydration after thread switch/refresh.
+- Non-browser tool cards (e.g., shell/code tools) still render in chat as before.
+- Action Log behavior is unchanged and continues to show full workflow events.
 
 ### What's NOT Working Yet
-- Full-suite runtime characteristics remain unchanged (targeted suites validated in this pass).
+- No known functional blockers from this pass.
 
 ### Next Steps
-1. Merge PR after this cleanup if no new review comments appear.
-2. Run full CI suite in pipeline for broader confidence.
+1. Run the broader frontend suite to confirm no neighboring regression outside ChatPanel-focused tests.
+2. If backend persists additional browser-only prefixes in future, extend `browserOnlyEvents.ts` once and keep both chat pipelines in sync automatically.
 
 ### Decisions Made
-- Preferred simplification over adding guards that are unreachable by construction.
+- Chose a single shared helper to eliminate drift between live and rehydration filtering logic.
 
 ### Blockers
 - None.
-
----
-## Session 5.56 - April 8, 2026 (Railway crash fix + mode tests recovery)
-
-**Agent:** GPT-5.3-Codex
-**Duration:** ~1 focused debugging + stabilization pass
-
-### What Was Done
-- Investigated Railway deploy logs showing startup crash at import-time:
-  - `ImportError: cannot import name 'ADMIN_EDITABLE_MODE_METADATA_FIELDS' from 'backend.modes'`
-  - Crash path: `main.py -> backend.admin -> backend.admin.platform_settings -> backend.modes`.
-- Restored missing mode-registry APIs and metadata exports in `backend/modes.py`:
-  - Added `ADMIN_EDITABLE_MODE_METADATA_FIELDS`.
-  - Added immutable `ModeDefinition` dataclass.
-  - Added `mode_definitions()` and `serialize_mode_definition()` helpers expected by admin platform-settings route.
-- Fixed additional runtime/test regression in `universal_navigator.py`:
-  - Added missing `skill_allow_tools/skill_deny_tools` resolution wiring inside `_available_tools`.
-  - Added missing `is_tool_allowed_for_mode()` helper used by tool filtering.
-
-### What's Working
-- App import/startup no longer fails on the missing `backend.modes` symbol path.
-- Targeted failing test modules now pass:
-  - `tests/test_admin_platform_settings.py`
-  - `tests/test_mode_instruction_precedence.py`
-  - `tests/test_modes.py`
-- Local import sanity check `import main` succeeds (warning only for unset `SESSION_SECRET` in this environment).
-
-### What's NOT Working Yet
-- Full-suite `pytest -q` appears long-running/hanging in this environment, so this pass validated with focused regression suites tied directly to the reported crash and policy/tool-filtering regressions.
-
-### Next Steps
-1. Deploy this patch to Railway and confirm `/health` goes green.
-2. Run full CI test suite in pipeline with normal time budgets; inspect for any unrelated long-tail failures.
-3. If full suite remains slow/hanging, isolate the long-running test group and add timeouts/markers.
-
-### Decisions Made
-- Kept fixes minimal and backward-compatible by restoring missing exports expected by existing admin routes/tests rather than changing admin import contracts.
-
-### Blockers
-- None for the production crash fix itself.
 
 ---
 ## Session 5.55 - April 8, 2026 (Fireworks task-runner incorrectly requiring Gemini key fix)

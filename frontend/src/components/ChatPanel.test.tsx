@@ -167,6 +167,46 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         message: 'Model response: Visible assistant text',
         elapsedSeconds: 2,
       },
+      {
+        id: 'browser-log-1',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: '[extract_page] Reading page structure',
+        elapsedSeconds: 2,
+      },
+      {
+        id: 'browser-log-2',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: '[go_back] Going back',
+        elapsedSeconds: 2,
+      },
+      {
+        id: 'browser-log-3',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: '[click] Clicking button',
+        elapsedSeconds: 2,
+      },
+      {
+        id: 'browser-log-4',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: '[go_to_url] Opening https://example.com',
+        elapsedSeconds: 2,
+      },
     ]
 
     render(
@@ -184,6 +224,10 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         serverMessages={[
           { id: 'srv-noise-1', role: 'assistant', content: 'Model response (no tool call): hidden' },
           { id: 'srv-noise-2', role: 'assistant', content: 'Workflow step update' },
+          { id: 'srv-browser-1', role: 'assistant', content: '[extract_page] historical fixture' },
+          { id: 'srv-browser-2', role: 'assistant', content: '[go_back] historical fixture' },
+          { id: 'srv-browser-3', role: 'assistant', content: '[click] historical fixture' },
+          { id: 'srv-browser-4', role: 'assistant', content: '[go_to_url] historical fixture' },
           { id: 'srv-clean-1', role: 'assistant', content: 'Visible from server' },
         ]}
         {...baseChatPanelProps}
@@ -196,6 +240,10 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
     expect(screen.queryByText(/model response \(no tool call\):/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/session settings updated/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/workflow step update/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[extract_page\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_back\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[click\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_to_url\]/i)).not.toBeInTheDocument()
   })
 
   it('matches visual regression snapshot for thinking row alignment classes', async () => {
