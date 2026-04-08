@@ -107,12 +107,14 @@ class Settings(BaseSettings):
     RAILWAY_ENVIRONMENT: str = ""
     RAILWAY_PUBLIC_DOMAIN: str = ""
     VIRUSTOTAL_TIMEOUT_SECONDS: int = 30
+    VIRUSTOTAL_ENABLED: bool = False
     VIRUSTOTAL_MAX_FILE_BYTES: int = 1048576
     VIRUSTOTAL_POLL_INTERVAL_SECONDS: int = 5
     VIRUSTOTAL_MAX_POLLS: int = 12
     VIRUSTOTAL_REQUEST_MAX_RETRIES: int = 2
     VIRUSTOTAL_RETRY_BASE_DELAY_SECONDS: float = 0.5
     VIRUSTOTAL_REQUIRED: bool = False
+    VIRUSTOTAL_FALLBACK_POLICY: str = "warn_allow"
     SKILLS_MAX_TOKENS: int = 10_000
     SKILLS_MIN_PRIORITY: int | None = None
     # Backward-compatible singular alias requested in some deployments.

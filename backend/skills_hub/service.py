@@ -10,6 +10,8 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import Skill, SkillHubSubmission, SkillHubTransition
+from backend.security.virustotal import fetch_scan_report, submit_file_for_scan
+from config import settings
 
 _ALLOWED_TRANSITIONS: dict[str, tuple[str, ...]] = {
     "draft": ("submitted",),
@@ -42,11 +44,13 @@ class SkillHubService:
         session: AsyncSession,
         *,
         submitter_id: str,
+        actor_role: str,
         skill_id: str | None,
         skill_slug: str,
         title: str,
         description: str,
-        risk_label: str,
+        risk_label: str | None,
+        admin_override: bool,
         previous_submission_id: str | None,
         submit_now: bool,
     ) -> SkillHubSubmission:
@@ -58,12 +62,27 @@ class SkillHubService:
                 raise ValueError("Previous submission not found")
             revision = previous.revision + 1
 
+        scan_payload = f"{title}\n\n{description}".encode("utf-8")
+        scan_submit = await submit_file_for_scan(file_name=f"{skill_slug}.txt", content=scan_payload)
+        scan_report = await fetch_scan_report(
+            analysis_id=scan_submit.get("analysis_id"),
+            sha256=scan_submit.get("sha256"),
+        )
+        computed_risk = str(scan_report.get("risk_tag") or scan_submit.get("risk_tag") or "scan_failed")
+        final_risk_label = computed_risk if not risk_label else risk_label
+        if final_risk_label == "malicious":
+            raise ValueError("Malicious submission blocked by policy")
+        if final_risk_label == "suspicious" and not (actor_role in {"admin", "superadmin"} and admin_override):
+            raise ValueError("Suspicious submission requires explicit admin override")
+        if final_risk_label in {"scan_pending", "scan_failed"} and settings.VIRUSTOTAL_FALLBACK_POLICY == "block":
+            raise ValueError(f"Submission blocked due to scan status: {final_risk_label}")
+
         submission = SkillHubSubmission(
             skill_id=skill_id,
             skill_slug=skill_slug,
             title=title,
             description=description,
-            risk_label=risk_label,
+            risk_label=final_risk_label,
             revision=revision,
             submitted_by=submitter_id,
             current_state="draft",

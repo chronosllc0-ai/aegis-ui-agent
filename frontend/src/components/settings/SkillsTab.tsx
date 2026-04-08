@@ -39,12 +39,19 @@ export function SkillsTab({ role }: SkillsTabProps) {
   const [expandedSkillId, setExpandedSkillId] = useState<string | null>(null)
   const [activeSubmission, setActiveSubmission] = useState<HubSubmission | null>(null)
   const [allowedTransitions, setAllowedTransitions] = useState<string[]>([])
+  const [marketplaceSkills, setMarketplaceSkills] = useState<Array<{ id: string; name: string; slug: string; description: string; risk_label?: string }>>([])
+  const [marketplaceError, setMarketplaceError] = useState<string>('')
 
   const enabledSkillIds = useMemo(() => installed.filter((skill) => skill.enabled).map((skill) => skill.skill_id), [installed])
 
   useEffect(() => {
     patchSettings({ enabledSkillIds })
   }, [enabledSkillIds, patchSettings])
+
+  useEffect(() => {
+    void apiRequest<{ skills?: Array<{ id: string; name: string; slug: string; description: string; risk_label?: string }> }>('/api/skills/hub')
+      .then((data) => setMarketplaceSkills(data.skills ?? []))
+  }, [])
 
   const onToggleSkill = async (skill: InstalledSkill) => {
     const nextEnabled = !skill.enabled
@@ -66,6 +73,18 @@ export function SkillsTab({ role }: SkillsTabProps) {
     } catch (error) {
       setInstalled(previous)
       toast.error('Failed to uninstall skill', error instanceof Error ? error.message : 'Please retry.')
+    }
+  }
+
+  const onInstallMarketplaceSkill = async (skillId: string) => {
+    try {
+      await apiRequest(`/api/skills/${encodeURIComponent(skillId)}/install`, { method: 'POST' })
+      setMarketplaceError('')
+      await refreshInstalled()
+      toast.success('Skill installed')
+    } catch (error) {
+      setMarketplaceError(error instanceof Error ? error.message : 'Install blocked by policy')
+      toast.error('Skill install blocked', error instanceof Error ? error.message : 'Install blocked by policy')
     }
   }
 
@@ -207,6 +226,27 @@ export function SkillsTab({ role }: SkillsTabProps) {
       )}
 
       <ReviewQueue isAdmin={isAdmin} />
+      <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4 lg:col-span-2'>
+        <h3 className='mb-3 text-sm font-semibold'>Marketplace</h3>
+        {marketplaceError ? <p className='mb-2 text-xs text-red-300'>{marketplaceError}</p> : null}
+        <div className='grid gap-2 md:grid-cols-2'>
+          {marketplaceSkills.map((skill) => (
+            <article key={skill.id} className='rounded-lg border border-[#2a2a2a] bg-[#171717] p-3'>
+              <div className='flex items-center justify-between gap-2'>
+                <div>
+                  <h4 className='text-sm font-medium text-zinc-100'>{skill.name}</h4>
+                  <p className='text-[11px] text-zinc-500'>{skill.slug}</p>
+                </div>
+                <span className='rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300'>{skill.risk_label ?? 'scan_pending'}</span>
+              </div>
+              <p className='mt-2 line-clamp-2 text-xs text-zinc-400'>{skill.description || 'No description provided.'}</p>
+              <button type='button' onClick={() => void onInstallMarketplaceSkill(skill.id)} className='mt-2 rounded border border-cyan-500/40 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/10'>
+                Install
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
