@@ -1,3 +1,37 @@
+## Session 5.58 - April 8, 2026 (Fix failing SkillsTab test and restore frontend green)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused test-repair pass
+
+### What Was Done
+- Reproduced the failing frontend suite and identified a broken unit test at `frontend/src/components/settings/SkillsTab.test.tsx`.
+- Root cause: the mocked `useSkills()` payload in the test no longer matched `SkillsTab` runtime expectations (`hubSkills` and related fields were missing), causing `hubSkills.filter(...)` to throw.
+- Updated the test mock to provide the full hook shape used by `SkillsTab` (`hubSkills`, `installSkill`, refresh/review helpers, queue fields, etc.).
+- Updated assertions to align with current UI behavior:
+  - no longer expects obsolete literal `"malicious"` badge text,
+  - uses the current CTA label `Install skill`,
+  - verifies blocked install via `toast.error('Failed to install skill', 'Install blocked: malicious scan result')`.
+- Ran targeted and full frontend tests; all passing.
+
+### What's Working
+- `SkillsTab` marketplace install UX test is passing with current component behavior.
+- Full frontend test suite is green.
+- Frontend production build remains successful.
+
+### What's NOT Working Yet
+- No blockers found in this pass.
+
+### Next Steps
+1. Keep SkillsTab tests resilient by asserting stable outcomes (CTA/action/toast) rather than brittle internal badge wording.
+2. If risk-badge copy is product-critical, add explicit test IDs in component markup for stronger selectors.
+
+### Decisions Made
+- Chose to fix the test fixture/mock and assertions (not component code) because failure came from stale test assumptions, not a product regression.
+
+### Blockers
+- None.
+
+---
 ## Session 5.57 - April 8, 2026 (Single live activity accordion in ChatPanel)
 
 **Agent:** GPT-5.3-Codex

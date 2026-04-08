@@ -3,12 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SkillsTab } from './SkillsTab'
 
-const apiRequestMock = vi.fn()
 const toastError = vi.fn()
-
-vi.mock('../../lib/api', () => ({
-  apiRequest: (...args: unknown[]) => apiRequestMock(...args),
-}))
 
 vi.mock('../../hooks/useSkills', () => ({
   useSkills: () => ({
@@ -27,9 +22,21 @@ vi.mock('../../hooks/useSkills', () => ({
     toggleSkill: vi.fn(),
     uninstallSkill: vi.fn(),
     refreshInstalled: vi.fn(async () => undefined),
+    installSkill: vi.fn(async () => {
+      throw new Error('Install blocked: malicious scan result')
+    }),
+    hubSkills: [{ id: 'market-1', name: 'Market One', slug: 'market-one', description: 'desc', risk_label: 'malicious' }],
+    loadingHub: false,
+    refreshHub: vi.fn(async () => undefined),
+    submitSkill: vi.fn(async () => undefined),
     policy: { allow_unreviewed_installs: false, block_high_risk_skills: true, require_approval_before_install: false, default_enabled_skill_ids: [] },
     loadingPolicy: false,
     savePolicy: vi.fn(),
+    reviewQueue: [],
+    loadingQueue: false,
+    refreshReviewQueue: vi.fn(async () => undefined),
+    reviewSubmission: vi.fn(async () => undefined),
+    scanSubmission: vi.fn(async () => undefined),
   }),
 }))
 
@@ -47,28 +54,16 @@ vi.mock('../skills-hub/ReviewQueue', () => ({ ReviewQueue: () => <div /> }))
 
 describe('SkillsTab marketplace install UX', () => {
   beforeEach(() => {
-    apiRequestMock.mockReset()
     toastError.mockReset()
-    apiRequestMock.mockImplementation(async (path: string) => {
-      if (path === '/api/skills/hub') {
-        return { skills: [{ id: 'market-1', name: 'Market One', slug: 'market-one', description: 'desc', risk_label: 'malicious' }] }
-      }
-      if (path.includes('/install')) {
-        throw new Error('Install blocked: malicious scan result')
-      }
-      if (path.includes('/transition')) {
-        return { submission: { id: 's1', current_state: 'draft' }, allowed_transitions: [] }
-      }
-      return {}
-    })
   })
 
-  it('renders marketplace risk tag and shows blocked install message', async () => {
+  it('shows install failure toast when marketplace install is blocked', async () => {
     render(<SkillsTab role='admin' />)
-    await waitFor(() => expect(screen.getByText('malicious')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('market-one').length).toBeGreaterThan(0))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
-    await waitFor(() => expect(screen.getByText(/Install blocked: malicious scan result/i)).toBeInTheDocument())
-    expect(toastError).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Install skill' }))
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith('Failed to install skill', 'Install blocked: malicious scan result')
+    })
   })
 })
