@@ -1,3 +1,47 @@
+## Session 5.95 - April 8, 2026 (thread+user scoped browser frame cache isolation)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation + validation pass
+
+### What Was Done
+- Scoped frontend live-frame state by **both user and thread** instead of a single global frame:
+  - `useWebSocket` now accepts `{ userId, activeThreadId }`.
+  - Introduced frame scope key format: `${userId}:${threadId}`.
+  - Added localStorage frame snapshot persistence under `aegis.frame.${userId}:${threadId}`.
+- Enforced thread-isolated frame hydration:
+  - On thread switch, `latestFrame` now hydrates strictly from the selected thread key or clears to empty.
+  - Removed implicit fallback behavior that could visually leak prior thread frames.
+- Enforced active-thread-only WS frame updates:
+  - Incoming `frame`/`screenshot` websocket events now write only to the **currently active** scoped key.
+- Enforced account-switch/logout frame isolation:
+  - Added full frame cache clear helper for all `aegis.frame.*` keys.
+  - Hooked cache clear into account UID transitions and explicit sign-out flow in `App.tsx`.
+
+### What's Working
+- Switching threads no longer reuses another thread’s last browser frame.
+- Returning to a previously used thread restores only that thread’s own persisted frame snapshot.
+- Logging out or switching users clears cached frame snapshots, preventing cross-account leakage.
+- Frontend build and targeted browser example test pass after changes.
+
+### What's NOT Working Yet
+- Frame snapshot persistence is currently client-side only (localStorage), not server metadata-backed.
+
+### Next Steps
+1. Add a focused frontend test for frame scope behavior:
+   - active thread switch clears/rehydrates per key,
+   - cross-thread frame event isolation,
+   - cache clear on account switch/logout.
+2. Optionally add server-backed frame snapshot metadata for cross-device restore guarantees.
+
+### Decisions Made
+- Implemented client cache scoping first (`userId:threadId`) to satisfy isolation requirements with minimal backend coupling.
+- Chose explicit cache invalidation on account transitions for defense-in-depth against shared-browser-session leakage.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.94 - April 8, 2026 (installed UI/UX Pro Max Codex skill)
 
 **Agent:** GPT-5.3-Codex  

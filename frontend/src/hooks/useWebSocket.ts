@@ -68,6 +68,42 @@ type WebSocketPayload = {
 }
 
 const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
+const FRAME_CACHE_PREFIX = 'aegis.frame.'
+const FRAME_CACHE_KEY = (scopeKey: string) => `${FRAME_CACHE_PREFIX}${scopeKey}`
+
+function readPersistedFrame(scopeKey: string): string {
+  if (!scopeKey || typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(FRAME_CACHE_KEY(scopeKey)) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function persistFrame(scopeKey: string, frameDataUrl: string): void {
+  if (!scopeKey || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(FRAME_CACHE_KEY(scopeKey), frameDataUrl)
+  } catch {
+    // Ignore localStorage quota/sandbox issues.
+  }
+}
+
+function clearPersistedFrameCache(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const keysToDelete: string[] = []
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (key && key.startsWith(FRAME_CACHE_PREFIX)) {
+        keysToDelete.push(key)
+      }
+    }
+    keysToDelete.forEach((key) => window.localStorage.removeItem(key))
+  } catch {
+    // Ignore localStorage access issues.
+  }
+}
 
 function readPersistedThinking(taskId: string): PersistedThinkingMessage[] {
   if (!taskId || typeof window === 'undefined') return []
@@ -117,7 +153,16 @@ function guessStepKind(message: string): LogEntry['stepKind'] {
   return 'other'
 }
 
-export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => void) {
+type UseWebSocketOptions = {
+  onUsageMessage?: (msg: Record<string, unknown>) => void
+  userId?: string | null
+  activeThreadId?: string | null
+}
+
+export function useWebSocket(options?: UseWebSocketOptions) {
+  const onUsageMessage = options?.onUsageMessage
+  const userId = options?.userId ?? null
+  const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [isWorking, setIsWorking] = useState(false)
   const [latestFrame, setLatestFrame] = useState('')
@@ -137,6 +182,7 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const pingIntervalRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
+  const activeFrameScopeKeyRef = useRef('')
   const reasoningNormalizersRef = useRef<Record<string, IncrementalTextNormalizer>>({})
   const lastStepAtRef = useRef(0)
   const lastNotConnectedAtRef = useRef(0)
@@ -161,6 +207,14 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     },
     [],
   )
+
+  useEffect(() => {
+    const normalizedUserId = (userId ?? '').trim() || 'anon'
+    const normalizedThreadId = (activeThreadId ?? '').trim()
+    const scopeKey = normalizedThreadId ? `${normalizedUserId}:${normalizedThreadId}` : ''
+    activeFrameScopeKeyRef.current = scopeKey
+    setLatestFrame(scopeKey ? readPersistedFrame(scopeKey) : '')
+  }, [activeThreadId, userId])
 
   const connect = useCallback(function connectSocket() {
     setConnectionStatus('connecting')
@@ -267,12 +321,22 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       }
       if (payload.type === 'frame') {
         const image = String(payload.data?.image ?? '')
-        if (image) setLatestFrame(`data:image/png;base64,${image}`)
+        const frameDataUrl = image ? `data:image/png;base64,${image}` : ''
+        const scopeKey = activeFrameScopeKeyRef.current
+        if (frameDataUrl && scopeKey) {
+          persistFrame(scopeKey, frameDataUrl)
+          setLatestFrame(frameDataUrl)
+        }
         return
       }
       if (payload.type === 'screenshot') {
         const image = String(payload.data ?? '')
-        if (image) setLatestFrame(`data:image/png;base64,${image}`)
+        const frameDataUrl = image ? `data:image/png;base64,${image}` : ''
+        const scopeKey = activeFrameScopeKeyRef.current
+        if (frameDataUrl && scopeKey) {
+          persistFrame(scopeKey, frameDataUrl)
+          setLatestFrame(frameDataUrl)
+        }
         return
       }
       if (payload.type === 'workflow_step') {
@@ -553,6 +617,11 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     activeTaskIdRef.current = 'idle'
   }, [])
 
+  const clearFrameCache = useCallback(() => {
+    clearPersistedFrameCache()
+    setLatestFrame('')
+  }, [])
+
   const spawnSubAgent = useCallback((instruction: string, model: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'spawn_subagent', instruction, model }))
@@ -577,5 +646,5 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     return false
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }
