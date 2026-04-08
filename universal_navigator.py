@@ -26,14 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUCTION_KEY_PREFIX
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
-from backend.modes import (
-    MODE_SYSTEM_HINTS,
-    allowed_tool_alternatives,
-    blocked_tools_for_mode,
-    is_tool_allowed_for_mode,
-    normalize_agent_mode,
-)
-from backend.orchestrator_mode import OrchestratorModeRouter, build_synthesis
+from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.skills.parser import extract_runtime_guidance_block
 from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
@@ -391,6 +384,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 ]
 TOOL_INDEX = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
 
+# Tools that are safe to execute concurrently when the model emits a batch.
+# Keep this conservative: read-only or bounded side-effect operations only.
+PARALLEL_SAFE_TOOLS = {
+    "web_search",
+    "extract_page",
+    "list_files",
+    "read_file",
+    "memory_search",
+    "memory_read",
+    "github_get_file",
+    "github_get_issues",
+    "github_get_pull_requests",
+    "github_list_repos",
+}
+
 
 def _truncate(text: str, limit: int = RESULT_CHAR_LIMIT) -> str:
     """Trim long tool results before sending them back to the model."""
@@ -464,9 +472,7 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
     """Resolve the current tool manifest after permissions and integration gating."""
     disabled_tools = {str(item) for item in settings.get("disabled_tools", []) or []}
     agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
-    mode_blocked_tools = {str(item) for item in blocked_tools_for_mode(agent_mode)}
-    disabled_tools.update(mode_blocked_tools)
-    skill_allow_tools, skill_deny_tools = _resolve_skill_tool_policy(settings)
+    disabled_tools.update(blocked_tools_for_mode(agent_mode))
     connected_integrations = _connected_integrations(settings)
     subagent_allowlist: set[str] | None = None
     if is_subagent:
@@ -655,7 +661,7 @@ async def _build_system_prompt(
     agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
 
     rules: list[str] = [
-        "Return exactly ONE JSON tool call per message and nothing else.",
+        "Return JSON only: either one tool call object, or a {\"tool_calls\": [...]} batch for parallel-safe tools.",
         "Only use tools listed below. If a tool is not listed, it is not available in this session.",
         "Use concise, efficient steps and finish with the done tool when the task is complete.",
     ]
@@ -683,7 +689,7 @@ async def _build_system_prompt(
                 "Do not invent repository paths or branch names. Use returned tool results.",
             ]
         )
-    rules.append(f"Active system mode: {agent_mode}.")
+    rules.append(f"Active system mode: {agent_mode}. {MODE_SYSTEM_HINTS.get(agent_mode, '')}")
     rules.extend(
         [
             "Identity: You are Aegis, an AI agent built by Chronos AI.",
@@ -1604,112 +1610,41 @@ def _parse_tool_call(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _parse_tool_calls(parsed: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, bool]:
-    """Return normalized batch calls and whether tool_calls was malformed."""
-    if "tool_calls" not in parsed:
-        return None, False
-    raw_calls = parsed.get("tool_calls")
-    if not isinstance(raw_calls, list) or not raw_calls:
-        return None, True
-    if len(raw_calls) > MAX_BATCH_TOOL_CALLS:
-        return None, True
+def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse model output into one or more tool calls.
 
-    calls: list[dict[str, Any]] = []
-    for raw_call in raw_calls:
-        if not isinstance(raw_call, dict):
-            return None, True
-        tool_name = raw_call.get("tool")
-        if not isinstance(tool_name, str) or not tool_name.strip():
-            return None, True
-        normalized = dict(raw_call)
-        normalized["tool"] = tool_name.strip().lower()
-        calls.append(normalized)
-    return calls, False
-
-
-def _normalize_single_tool_call(parsed: dict[str, Any]) -> dict[str, Any] | None:
-    """Return a normalized legacy single-call payload when present."""
-    tool_name = parsed.get("tool")
-    if not isinstance(tool_name, str) or not tool_name.strip():
-        return None
-    normalized = dict(parsed)
-    normalized["tool"] = tool_name.strip().lower()
-    return normalized
-
-
-def _dependency_batches(validated_calls: list[dict[str, Any]]) -> tuple[list[list[dict[str, Any]]] | None, bool]:
-    """Build dependency-aware execution batches.
-
-    Returns ``(batches, malformed)`` where malformed=True means the dependency
-    metadata could not be safely interpreted and caller should run sequentially.
+    Supported formats:
+    - {"tool": "...", ...}
+    - {"tool_calls": [{"tool": "..."}, ...]}
+    - [{"tool": "..."}, ...]
     """
-    # Defensive guard for direct/unit callers; current orchestrator only calls
-    # this helper when at least one validated call exists.
-    if not validated_calls:
-        return [], False
+    single = _parse_tool_call(text)
+    if not single:
+        return []
 
-    id_to_call: dict[str, dict[str, Any]] = {}
-    dependency_map: dict[str, set[str]] = {}
+    if isinstance(single.get("tool"), str):
+        return [single]
 
-    for item in validated_calls:
-        call = item["call"]
-        index = int(item["index"])
-        raw_id = call.get("id")
-        if raw_id is None:
-            call_id = f"idx:{index}"
-        elif isinstance(raw_id, str) and raw_id.strip():
-            call_id = raw_id.strip()
-        elif isinstance(raw_id, int):
-            call_id = str(raw_id)
-        else:
-            return None, True
+    raw_calls = single.get("tool_calls")
+    if isinstance(raw_calls, list):
+        parsed_calls: list[dict[str, Any]] = []
+        for candidate in raw_calls:
+            if isinstance(candidate, dict) and isinstance(candidate.get("tool"), str):
+                parsed_calls.append(candidate)
+        return parsed_calls
 
-        if call_id in id_to_call:
-            return None, True
+    return []
 
-        depends_on_raw = call.get("depends_on", [])
-        if depends_on_raw is None:
-            depends_on_raw = []
-        if not isinstance(depends_on_raw, list):
-            return None, True
 
-        depends_on: set[str] = set()
-        for dep in depends_on_raw:
-            if isinstance(dep, str) and dep.strip():
-                dep_id = dep.strip()
-            elif isinstance(dep, int):
-                dep_id = str(dep)
-            else:
-                return None, True
-            depends_on.add(dep_id)
-
-        if call_id in depends_on:
-            return None, True
-
-        id_to_call[call_id] = item
-        dependency_map[call_id] = depends_on
-    known_ids = set(id_to_call)
-    for deps in dependency_map.values():
-        if not deps.issubset(known_ids):
-            return None, True
-
-    # Topological level scheduling: each level can run in parallel.
-    remaining_deps = {call_id: set(deps) for call_id, deps in dependency_map.items()}
-    batches: list[list[dict[str, Any]]] = []
-    resolved: set[str] = set()
-
-    while len(resolved) < len(validated_calls):
-        ready = [call_id for call_id, deps in remaining_deps.items() if call_id not in resolved and not deps]
-        if not ready:
-            return None, True
-        ready_sorted = sorted(ready, key=lambda rid: int(id_to_call[rid]["index"]))
-        batches.append([id_to_call[rid] for rid in ready_sorted])
-        for rid in ready_sorted:
-            resolved.add(rid)
-        for deps in remaining_deps.values():
-            deps.difference_update(ready_sorted)
-
-    return batches, False
+def _can_run_tool_calls_in_parallel(tool_calls: list[dict[str, Any]]) -> bool:
+    """Return whether a batch of tool calls can be executed concurrently."""
+    if len(tool_calls) < 2:
+        return False
+    for call in tool_calls:
+        tool_name = str(call.get("tool", "")).strip()
+        if tool_name not in PARALLEL_SAFE_TOOLS:
+            return False
+    return True
 
 
 async def run_universal_navigation(
@@ -2002,61 +1937,50 @@ async def run_universal_navigation(
             }
 
         messages.append(ChatMessage(role="assistant", content=reply))
-        parsed_reply = _parse_tool_call(reply)
-        if not parsed_reply:
+        tool_calls = _parse_tool_calls(reply)
+        if not tool_calls:
             await emit_step(f"Model response (no tool call): {reply[:200]}")
-            messages.append(ChatMessage(role="user", content="Please return exactly one JSON tool call to continue."))
+            messages.append(
+                ChatMessage(
+                    role="user",
+                    content="Please return JSON tool call(s): either one tool object or a {\"tool_calls\": [...]} array.",
+                )
+            )
             continue
+        # Fast path: done/error as a single terminal call.
+        if len(tool_calls) == 1:
+            tool_call = tool_calls[0]
+            tool_name = str(tool_call.get("tool", "unknown"))
+            if tool_name == "done":
+                summary = str(tool_call.get("summary", "Task completed."))
+                await emit_step(summary, step_type="result")
+                return {
+                    "status": "completed",
+                    "instruction": instruction,
+                    "steps": steps,
+                    "summary": summary,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                }
+            if tool_name == "error":
+                error_message = str(tool_call.get("message", "Unknown error."))
+                await emit_step(f"Error: {error_message}", step_type="error")
+                return {
+                    "status": "failed",
+                    "instruction": instruction,
+                    "steps": steps,
+                    "error": error_message,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                }
 
-        batch_calls, batch_malformed = _parse_tool_calls(parsed_reply)
-        tool_calls: list[dict[str, Any]]
-        if batch_calls is not None:
-            tool_calls = batch_calls
-        else:
-            single_call = _normalize_single_tool_call(parsed_reply)
-            if single_call:
-                tool_calls = [single_call]
-            elif batch_malformed:
-                await emit_step("Model returned malformed tool_calls payload; no valid legacy tool call found.", step_type="error")
-                messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
-                continue
-            else:
-                await emit_step(f"Model response (no valid tool call): {reply[:200]}")
-                messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
-                continue
+        run_in_parallel = _can_run_tool_calls_in_parallel(tool_calls)
+        if len(tool_calls) > 1:
+            mode_text = "parallel" if run_in_parallel else "sequential"
+            await emit_step(f"Processing {len(tool_calls)} tool calls ({mode_text})", step_type="step")
 
-        primary_tool = str(tool_calls[0].get("tool", "unknown"))
-        if len(tool_calls) == 1 and primary_tool == "done":
-            summary = str(tool_calls[0].get("summary", "Task completed."))
-            await emit_step(summary, step_type="result")
-            return {
-                "status": "completed",
-                "instruction": instruction,
-                "steps": steps,
-                "summary": summary,
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
-            }
-        if len(tool_calls) == 1 and primary_tool == "error":
-            error_message = str(tool_calls[0].get("message", "Unknown error."))
-            await emit_step(f"Error: {error_message}", step_type="error")
-            return {
-                "status": "failed",
-                "instruction": instruction,
-                "steps": steps,
-                "error": error_message,
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
-            }
-
-        validated_calls: list[dict[str, Any]] = []
-        payload_by_index: dict[int, dict[str, Any]] = {}
-        immediate_results: list[dict[str, Any]] = []
-        for index, raw_call in enumerate(tool_calls):
-            tool_call = dict(raw_call)
-            tool_name = str(tool_call.get("tool", "")).strip().lower()
-            tool_call["tool"] = tool_name
-            payload_by_index[index] = tool_call
+        async def _execute_single_tool_call(tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
+            tool_name = str(tool_call.get("tool", "unknown"))
             if tool_name == "ask_user_input":
                 question = str(tool_call.get("question", ""))
                 options = [str(item) for item in list(tool_call.get("options", []))]
@@ -2072,163 +1996,34 @@ async def run_universal_navigation(
                 steps.append(special_step)
                 if on_step:
                     await on_step(special_step)
-                immediate_results.append(
-                    {
-                        "index": index,
-                        "tool": tool_name,
-                        "ok": True,
-                        "result_text": f"Awaiting user response to: {question}",
-                        "screenshot_bytes": None,
-                        "error": None,
-                        "duration_ms": 0,
-                    }
+            else:
+                await emit_step(f"[{tool_name}] {json.dumps({key: value for key, value in tool_call.items() if key != 'tool'})[:220]}")
+            return await tool_executor.run(tool_call)
+
+        if run_in_parallel:
+            execution_results = await asyncio.gather(*(_execute_single_tool_call(tool_call) for tool_call in tool_calls))
+        else:
+            execution_results: list[tuple[str, bytes | None]] = []
+            for tool_call in tool_calls:
+                execution_results.append(await _execute_single_tool_call(tool_call))
+
+        result_fragments: list[str] = []
+        screenshot_frames: list[bytes] = []
+        for index, (result_text, screenshot_bytes) in enumerate(execution_results, start=1):
+            result_fragments.append(f"Tool #{index} result: {result_text}")
+            if screenshot_bytes:
+                screenshot_frames.append(screenshot_bytes)
+                if on_frame:
+                    await on_frame(base64.b64encode(screenshot_bytes).decode())
+
+        follow_up_content = "\n\n".join(result_fragments)
+        if screenshot_frames:
+            messages.append(
+                ChatMessage(
+                    role="user",
+                    content=f"{follow_up_content}\n\nCurrent screenshot attached. Decide your next action.",
+                    images=[screenshot_frames[-1]],
                 )
-                continue
-            unavailable_reason, unavailable_meta = tool_executor._tool_unavailable_reason_with_meta(tool_name)
-            if unavailable_reason:
-                denial_meta: dict[str, Any] = {}
-                if isinstance(unavailable_meta, dict):
-                    denial_meta = dict(unavailable_meta)
-                refusal_payload = denial_meta.get("refusal")
-                if isinstance(refusal_payload, dict):
-                    alternatives = refusal_payload.get("allowed_alternatives", [])
-                    alternatives_text = ", ".join(str(item) for item in alternatives[:6]) if isinstance(alternatives, list) else ""
-                    if alternatives_text:
-                        unavailable_reason = f"{unavailable_reason} Allowed alternatives: {alternatives_text}."
-                immediate_results.append(
-                    {
-                        "index": index,
-                        "tool": tool_name,
-                        "ok": False,
-                        "result_text": "",
-                        "screenshot_bytes": None,
-                        "error": unavailable_reason,
-                        "duration_ms": 0,
-                        "debug": denial_meta,
-                    }
-                )
-                continue
-            blocked_by_approval = await tool_executor._confirm_if_needed(tool_call)
-            if blocked_by_approval:
-                immediate_results.append(
-                    {
-                        "index": index,
-                        "tool": tool_name,
-                        "ok": False,
-                        "result_text": "",
-                        "screenshot_bytes": None,
-                        "error": blocked_by_approval,
-                        "duration_ms": 0,
-                    }
-                )
-                continue
-            validated_calls.append({"index": index, "call": tool_call})
-
-        if not validated_calls and not immediate_results:
-            await emit_step("No valid tool call in batch.", step_type="error")
-            messages.append(ChatMessage(role="user", content="No valid tool call found. Return valid JSON with tool or tool_calls."))
-            continue
-
-        batch_start_event = {"type": "batch_tool_start", "task_id": session_id, "count": len(tool_calls)}
-        logger.info("batch_tool_start %s", json.dumps(batch_start_event, ensure_ascii=False))
-        if on_workflow_step:
-            await on_workflow_step(batch_start_event)
-
-        semaphore = asyncio.Semaphore(MAX_BATCH_TOOL_CALLS)
-
-        async def _run_one(call: dict[str, Any], idx: int) -> dict[str, Any]:
-            started_at = asyncio.get_running_loop().time()
-            async with semaphore:
-                result_text, screenshot_bytes = await tool_executor.run(call, skip_policy_checks=True)
-            duration_ms = int((asyncio.get_running_loop().time() - started_at) * 1000)
-            lowered = result_text.lower()
-            is_error = lowered.startswith(("error: ", "tool error (", "unknown tool: ", "user declined tool "))
-            if not is_error and re.match(r"^[a-z0-9_]+ error: ", lowered):
-                is_error = True
-            return {
-                "index": idx,
-                "tool": str(call.get("tool", "unknown")),
-                "ok": not is_error,
-                "result_text": result_text,
-                "screenshot_bytes": screenshot_bytes,
-                "error": None if not is_error else result_text,
-                "duration_ms": duration_ms,
-            }
-
-        executed_results: list[dict[str, Any]] = []
-        fallback_to_sequential = False
-        dependency_batches: list[list[dict[str, Any]]] = []
-        if validated_calls:
-            for item in validated_calls:
-                raw_tool_name = item["call"].get("tool")
-                if not isinstance(raw_tool_name, str) or not raw_tool_name.strip():
-                    logger.warning("Batch tool call at index %s has invalid tool name %r; falling back to sequential.", item["index"], raw_tool_name)
-                    fallback_to_sequential = True
-                    break
-                if raw_tool_name.strip().lower() not in PARALLEL_SAFE_TOOLS:
-                    fallback_to_sequential = True
-                    break
-            if not fallback_to_sequential:
-                dependency_batches, malformed_dependencies = _dependency_batches(validated_calls)
-                if malformed_dependencies:
-                    fallback_to_sequential = True
-
-        if fallback_to_sequential:
-            dependency_batches = [[item] for item in validated_calls]
-
-        for batch in dependency_batches:
-            pending = [asyncio.create_task(_run_one(item["call"], int(item["index"]))) for item in batch]
-            if not pending:
-                continue
-            raw_results = await asyncio.gather(*pending, return_exceptions=True)
-            for item, raw in zip(batch, raw_results, strict=False):
-                if isinstance(raw, Exception):
-                    executed_results.append(
-                        {
-                            "index": int(item["index"]),
-                            "tool": str(item["call"].get("tool", "unknown")),
-                            "ok": False,
-                            "result_text": "",
-                            "screenshot_bytes": None,
-                            "error": str(raw),
-                            "duration_ms": 0,
-                        }
-                    )
-                else:
-                    executed_results.append(raw)
-
-        all_results = sorted([*immediate_results, *executed_results], key=lambda item: int(item["index"]))
-        for result in all_results:
-            status = "ok" if result["ok"] else "error"
-            batch_result_event = {
-                "type": "batch_tool_result",
-                "task_id": session_id,
-                "index": result["index"],
-                "tool": result["tool"],
-                "status": status,
-                "duration_ms": result["duration_ms"],
-            }
-            debug = result.get("debug")
-            if isinstance(debug, dict) and debug.get("policy_source") == "skill_policy":
-                batch_result_event["denial_debug"] = {
-                    "policy_source": "skill_policy",
-                    "policy_rule": str(debug.get("policy_rule", "")),
-                }
-            elif isinstance(debug, dict) and debug.get("policy_source") == "mode":
-                batch_result_event["denial_debug"] = {
-                    "policy_source": "mode",
-                    "agent_mode": str(debug.get("agent_mode", "")),
-                    "allowed_alternatives": list(debug.get("allowed_alternatives", []) or []),
-                }
-                refusal_payload = debug.get("refusal")
-                if isinstance(refusal_payload, dict):
-                    batch_result_event["refusal"] = refusal_payload
-            logger.info("batch_tool_result %s", json.dumps(batch_result_event, ensure_ascii=False))
-            if on_workflow_step:
-                await on_workflow_step(batch_result_event)
-            payload_preview = payload_by_index.get(int(result["index"]), {})
-            await emit_step(
-                f"[{result['tool']}] {json.dumps({k: v for k, v in payload_preview.items() if k != 'tool'})[:220]}",
             )
 
         batch_complete_event = {
@@ -2259,7 +2054,7 @@ async def run_universal_navigation(
                 await on_frame(base64.b64encode(screenshot_bytes).decode())
             messages.append(ChatMessage(role="user", content=follow_up_text, images=[screenshot_bytes]))
         else:
-            messages.append(ChatMessage(role="user", content=follow_up_text))
+            messages.append(ChatMessage(role="user", content=f"{follow_up_content}\n\nDecide your next action."))
 
     await emit_step("Reached maximum step limit without completing task.", step_type="error")
     return {

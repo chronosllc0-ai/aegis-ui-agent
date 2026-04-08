@@ -32,16 +32,7 @@ from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
-from backend.modes import (
-    MODE_LABELS,
-    allowed_tool_alternatives,
-    blocked_tools_for_mode,
-    mode_definitions,
-    normalize_agent_mode,
-    serialize_mode_definition,
-    validate_requested_mode,
-)
-from backend.integrations.text_normalization import normalize_for_channel
+from backend.modes import MODE_LABELS, normalize_agent_mode
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
@@ -390,22 +381,16 @@ class SessionRuntime:
         self.subagent_manager: SubAgentManager = SubAgentManager()
 
 
-def _normalize_runtime_mode(settings: dict[str, Any]) -> str:
-    """Normalize and persist the active mode in runtime settings."""
-    normalized = normalize_agent_mode(settings.get("agent_mode", ""))
-    settings["agent_mode"] = normalized
-    return normalized
-
-
-def _mode_refusal_payload(*, requested_mode: object, effective_mode: str, reason: str) -> dict[str, Any]:
-    """Create a structured mode refusal payload for websocket clients."""
-    return {
-        "type": "mode_policy_refusal",
-        "requested_mode": str(requested_mode),
-        "effective_mode": effective_mode,
-        "reason": reason,
-        "allowed_modes": list(MODE_LABELS.keys()),
-    }
+def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Merge websocket config payload with defaults without dropping prior settings."""
+    merged = {**current, **incoming}
+    provider = str(merged.get("provider", "")).strip().lower()
+    if not provider:
+        merged["provider"] = "chronos"
+    model = str(merged.get("model", "")).strip()
+    if not model:
+        merged["model"] = "nvidia/nemotron-3-super-120b-a12b:free"
+    return merged
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -1294,34 +1279,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if not isinstance(candidate_settings, dict):
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
-                requested_mode_raw = candidate_settings.get("agent_mode", runtime.settings.get("agent_mode", active_mode))
-                requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw, apply=False)
-                if not mode_valid:
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "data": _mode_refusal_payload(
-                                requested_mode=requested_mode_raw,
-                                effective_mode=requested_mode,
-                                reason="invalid_mode",
-                            ),
-                        }
-                    )
-                    continue
-                requested_skill_ids_raw = candidate_settings.get("enabled_skill_ids", [])
-                if requested_skill_ids_raw is None:
-                    requested_skill_ids_raw = []
-                if not isinstance(requested_skill_ids_raw, list) or any(not isinstance(item, str) for item in requested_skill_ids_raw):
-                    await websocket.send_json(
-                        {"type": "error", "data": {"message": "Invalid config payload: enabled_skill_ids must be an array of strings"}}
-                    )
-                    continue
-                requested_skill_ids = [item.strip() for item in requested_skill_ids_raw if item.strip()]
-                runtime_skill_context = await resolve_runtime_skills(runtime.user_uid, requested_skill_ids)
-                candidate_settings["enabled_skill_ids"] = requested_skill_ids
-                candidate_settings["agent_mode"] = requested_mode
-                candidate_settings.update(runtime_skill_context.as_settings_fragment())
-                runtime.settings = candidate_settings
+                runtime.settings = _merge_runtime_settings(runtime.settings, candidate_settings)
                 await _send_step(
                     websocket,
                     {"type": "config", "content": "Session settings updated"},
@@ -2349,19 +2307,9 @@ async def _handle_slash_command(
             return "⚪ No active session."
         if not arg:
             active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-            mode_label = MODE_LABELS.get(active_mode, active_mode.title())
-            message = f"🧭 Current mode: *{mode_label}*"
-            if platform == "telegram":
-                return {"text": message, "reply_markup": _telegram_mode_reply_markup()}
-            if platform == "slack":
-                return {"text": message, "blocks": SlackIntegration.mode_selector_blocks(current_mode_label=mode_label, mode_labels=MODE_LABELS)}
-            if platform == "discord":
-                return {"text": message, "components": DiscordIntegration.mode_selector_components(MODE_LABELS)}
-            return message
-        requested_mode_raw = arg.replace("-", "_").replace(" ", "_")
-        requested_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, requested_mode_raw)
-        if not mode_valid:
-            return f"❌ {mode_error}"
+            return f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+        requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
+        runtime.settings["agent_mode"] = requested_mode
         return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
 
     if cmd == "models":

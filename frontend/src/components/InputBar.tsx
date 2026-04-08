@@ -94,7 +94,7 @@ function AgentModePicker({ mode, onChange }: { mode: AgentModeId; onChange: (mod
       <select
         value={mode}
         onChange={(event) => onChange(normalizeAgentMode(event.target.value))}
-        className='w-full min-w-0 max-w-[150px] rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+        className='w-full min-w-0 max-w-[112px] truncate rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none sm:max-w-[150px]'
         aria-label='Agent mode'
       >
         {AGENT_MODES.map((option) => (

@@ -5,11 +5,6 @@ import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
-import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
-import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
-import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
-import { PromptGallery } from './PromptGallery'
-import { SuggestionChips } from './SuggestionChips'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -154,6 +149,7 @@ const CHAT_HARD_DENY_PREFIXES = [
  */
 const BROWSER_TOOL_NAMES = new Set([
   'navigate_browser', 'navigate', 'go_to_url', 'open_url', 'load_url',
+  'extract_page', 'go_back', 'wait',
   'click_element', 'click', 'left_click', 'right_click', 'double_click',
   'type_text', 'type', 'input_text', 'fill_input', 'clear_and_type',
   'scroll_page', 'scroll', 'scroll_down', 'scroll_up', 'scroll_to_element',
@@ -177,6 +173,13 @@ const SILENT_TOOL_NAMES = new Set([
   'set_next_step', 'plan_step', 'record_thought',
 ])
 
+const BROWSER_STATUS_PATTERNS: RegExp[] = [
+  /^session settings updated/i,
+  /^workflow step update/i,
+  /^starting task:/i,
+  /^task (completed|interrupted|failed)/i,
+]
+
 /**
  * Returns true if this log entry should be hidden from the chat conversation.
  *
@@ -190,6 +193,9 @@ const SILENT_TOOL_NAMES = new Set([
  * pass through and render as ShellCards in chat.
  */
 function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
+  const normalized = msg.trim()
+
+  if (BROWSER_STATUS_PATTERNS.some((pattern) => pattern.test(normalized))) return true
   if (entry.stepKind === 'click' || entry.stepKind === 'type' || entry.stepKind === 'scroll') return true
   if (entry.stepKind === 'navigate' && entry.elapsedSeconds > 0) return true
 
@@ -232,12 +238,11 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
         const parsed = JSON.parse(jsonStr)
-        const normalizedQuestion = normalizeTextPreservingMarkdown(String(parsed.question ?? jsonStr))
         msgs.push({
           id: entry.id,
           role: 'user_input',
-          text: normalizedQuestion,
-          question: normalizedQuestion,
+          text: parsed.question ?? jsonStr,
+          question: parsed.question,
           options: normalizeAskUserInputOptions(parsed.options),
           requestId: parsed.request_id,
         })
@@ -1433,6 +1438,12 @@ export function ChatPanel({
     })
     return [...sentMessages, ...dedupedBase]
   }, [sentMessages, baseMessages])
+  const latestThinkingId = useMemo(() => {
+    for (let i = allMessages.length - 1; i >= 0; i -= 1) {
+      if (allMessages[i].role === 'thinking') return allMessages[i].id
+    }
+    return null
+  }, [allMessages])
 
   useEffect(() => {
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
