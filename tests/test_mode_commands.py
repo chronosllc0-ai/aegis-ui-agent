@@ -246,6 +246,113 @@ def test_mode_webhook_renders_inline_keyboard_message() -> None:
         main_mod.telegram_registry._configs.pop(integration_id, None)
 
 
+def test_mode_command_renders_slack_and_discord_selectors() -> None:
+    """/mode should render channel-native selectors where supported."""
+    main_mod = import_module("main")
+    runtime = main_mod.SessionRuntime()
+    user_id = "mode-cross-channel-user"
+    main_mod._user_runtimes[user_id] = runtime
+
+    try:
+        slack_reply = asyncio.run(
+            main_mod._handle_slash_command(
+                text="/mode",
+                owner_uid=user_id,
+                platform="slack",
+                integration_id="sl-1",
+                chat_id="C1",
+            )
+        )
+        assert isinstance(slack_reply, dict)
+        assert isinstance(slack_reply.get("blocks"), list)
+        assert "Current mode" in str(slack_reply.get("text", ""))
+
+        discord_reply = asyncio.run(
+            main_mod._handle_slash_command(
+                text="/mode",
+                owner_uid=user_id,
+                platform="discord",
+                integration_id="dc-1",
+                chat_id="100",
+            )
+        )
+        assert isinstance(discord_reply, dict)
+        assert isinstance(discord_reply.get("components"), list)
+        assert "Current mode" in str(discord_reply.get("text", ""))
+    finally:
+        main_mod._user_runtimes.pop(user_id, None)
+
+
+def test_mode_command_invalid_mode_returns_helpful_error() -> None:
+    """/mode should return explicit invalid-mode guidance."""
+    main_mod = import_module("main")
+    runtime = main_mod.SessionRuntime()
+    user_id = "mode-invalid-user"
+    main_mod._user_runtimes[user_id] = runtime
+
+    try:
+        reply = asyncio.run(
+            main_mod._handle_slash_command(
+                text="/mode made-up-mode",
+                owner_uid=user_id,
+                platform="telegram",
+                integration_id="tg-1",
+                chat_id=123,
+            )
+        )
+        assert isinstance(reply, str)
+        assert "Invalid mode" in reply
+        assert "Allowed modes" in reply
+    finally:
+        main_mod._user_runtimes.pop(user_id, None)
+
+
+def test_mode_callback_invalid_selection_returns_error_message() -> None:
+    """Invalid callback mode should return a descriptive error without mutating mode."""
+    main_mod = import_module("main")
+    runtime = main_mod.SessionRuntime()
+    runtime.settings["agent_mode"] = "planner"
+    user_id = "mode-invalid-callback"
+    integration_id = "tg-mode-invalid-callback"
+    main_mod._user_runtimes[user_id] = runtime
+
+    update_payload = {
+        "update_id": 55,
+        "callback_query": {
+            "id": "cb-bad",
+            "data": "mode:not_a_mode",
+            "message": {"chat": {"id": 701}, "message_id": 4},
+        },
+    }
+
+    try:
+        from fastapi.testclient import TestClient
+
+        main_mod.telegram_registry._integrations[integration_id] = object()
+        main_mod.telegram_registry._configs[integration_id] = {"owner_user_id": user_id, "webhook_secret": ""}
+        with patch.object(main_mod.telegram_registry, "get_telegram") as mock_get_integration:
+            integration = MagicMock()
+            integration.validate_webhook_secret.return_value = True
+            integration.execute_tool = AsyncMock(return_value={"ok": True})
+            mock_get_integration.return_value = integration
+            with TestClient(main_mod.app) as test_client:
+                response = test_client.post(
+                    f"/api/integrations/telegram/webhook/{integration_id}",
+                    json=update_payload,
+                )
+
+        assert response.status_code == 200
+        assert runtime.settings.get("agent_mode") == "planner"
+        integration.execute_tool.assert_any_await(
+            "telegram_send_message",
+            {"chat_id": "701", "text": "❌ Invalid mode selection. Allowed modes: orchestrator, planner, architect, deep_research, code"},
+        )
+    finally:
+        main_mod._user_runtimes.pop(user_id, None)
+        main_mod.telegram_registry._integrations.pop(integration_id, None)
+        main_mod.telegram_registry._configs.pop(integration_id, None)
+
+
 def test_register_telegram_requires_owner_user_id() -> None:
     """Telegram register endpoint should require owner identity capture."""
     main_mod = import_module("main")

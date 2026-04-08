@@ -72,6 +72,32 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             {"name": "discord_handle_event", "description": "Normalize and process Discord interactions/events"},
         ]
 
+    @staticmethod
+    def mode_selector_components(mode_labels: dict[str, str]) -> list[dict[str, Any]]:
+        """Build Discord button component rows for mode selection."""
+        buttons = [
+            {
+                "type": 2,
+                "style": 2,
+                "label": label,
+                "custom_id": f"mode:{mode_name}",
+            }
+            for mode_name, label in mode_labels.items()
+        ]
+        if not buttons:
+            return []
+        return [{"type": 1, "components": buttons[:5]}]
+
+    @staticmethod
+    def extract_mode_selection(payload: dict[str, Any]) -> str | None:
+        """Extract raw mode token from Discord interaction payloads."""
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        custom_id = str(data.get("custom_id") or "").strip()
+        if custom_id.startswith("mode:"):
+            raw_mode = custom_id[5:].strip().lower().replace("-", "_").replace(" ", "_")
+            return raw_mode or None
+        return None
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if tool_name == "discord_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
@@ -134,6 +160,8 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         payload: dict[str, Any] = {"content": normalized_text}
         if metadata and metadata.get("tts"):
             payload["tts"] = bool(metadata["tts"])
+        if metadata and isinstance(metadata.get("components"), list):
+            payload["components"] = metadata["components"]
         data = await self._request("POST", f"/channels/{channel}/messages", json_payload=payload)
         ok = bool(data.get("id")) if isinstance(data, dict) else False
         return {"ok": ok, "tool": "discord_send_message", "result": data}

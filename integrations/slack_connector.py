@@ -74,6 +74,41 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             {"name": "slack_handle_event", "description": "Normalize and process inbound Slack events"},
         ]
 
+    @staticmethod
+    def mode_selector_blocks(*, current_mode_label: str, mode_labels: dict[str, str]) -> list[dict[str, Any]]:
+        """Render Slack Block Kit payload for current mode + selector actions."""
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Current mode:* {current_mode_label}"},
+            }
+        ]
+        action_elements = [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": label},
+                "value": f"mode:{mode_name}",
+                "action_id": "mode_select",
+            }
+            for mode_name, label in mode_labels.items()
+        ]
+        if action_elements:
+            blocks.append({"type": "actions", "elements": action_elements})
+        return blocks
+
+    @staticmethod
+    def extract_mode_selection(payload: dict[str, Any]) -> str | None:
+        """Extract raw mode token from a Slack interaction payload."""
+        actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_value = str(action.get("value") or "").strip()
+            if action_value.startswith("mode:"):
+                raw_mode = action_value[5:].strip().lower().replace("-", "_").replace(" ", "_")
+                return raw_mode or None
+        return None
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if tool_name == "slack_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
@@ -122,6 +157,8 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         payload: dict[str, Any] = {"channel": channel, "text": normalized_text}
         if metadata and metadata.get("thread_ts"):
             payload["thread_ts"] = str(metadata["thread_ts"])
+        if metadata and isinstance(metadata.get("blocks"), list):
+            payload["blocks"] = metadata["blocks"]
         data = await self._request("POST", "chat.postMessage", json_payload=payload)
         return {"ok": bool(data.get("ok")), "tool": "slack_send_message", "result": data}
 

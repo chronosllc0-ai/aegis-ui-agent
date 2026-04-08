@@ -259,6 +259,25 @@ class TelegramIntegration(BaseIntegration):
             {"name": "telegram_webhook_update", "description": "Handle inbound webhook update"},
         ]
 
+    @staticmethod
+    def mode_selector_reply_markup(mode_labels: dict[str, str]) -> dict[str, Any]:
+        """Build a Telegram inline keyboard payload for mode selection."""
+        return {
+            "inline_keyboard": [
+                [{"text": label, "callback_data": f"mode:{mode_name}"}]
+                for mode_name, label in mode_labels.items()
+            ]
+        }
+
+    @staticmethod
+    def extract_mode_selection(callback_data: object) -> str | None:
+        """Extract raw mode token from Telegram callback data."""
+        data = str(callback_data or "").strip()
+        if not data.startswith("mode:"):
+            return None
+        raw_mode = data[5:].strip().lower().replace("-", "_").replace(" ", "_")
+        return raw_mode or None
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if tool_name == "telegram_webhook_update":
             return await self._handle_webhook_tool(params)

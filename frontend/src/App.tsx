@@ -35,7 +35,7 @@ import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { PROVIDERS, modelInfo } from './lib/models'
-import { normalizeAgentMode } from './lib/agentModes'
+import { AGENT_MODES, normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
 import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
@@ -139,6 +139,7 @@ function App() {
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
+  const currentAgentModeLabel = AGENT_MODES.find((modeOption) => modeOption.id === normalizeAgentMode(settings.agentMode))?.label ?? 'Orchestrator'
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
@@ -1120,6 +1121,9 @@ function App() {
                 )}
               </div>
               <div className='flex items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
+                <span className='inline-flex items-center gap-1 rounded-full border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 text-blue-200 sm:px-2 sm:py-1'>
+                  <span className='hidden xs:inline'>Mode</span> {currentAgentModeLabel}
+                </span>
                 <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-1.5 py-0.5 sm:px-2 sm:py-1'>
                   <span className={`h-2 w-2 rounded-full sm:h-2.5 sm:w-2.5 ${connectionLabel.cls}`} /> <span className='hidden xs:inline'>{connectionLabel.label}</span>
                 </span>
