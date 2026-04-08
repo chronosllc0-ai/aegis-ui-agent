@@ -1,3 +1,43 @@
+## Session 5.85 - April 8, 2026 (Immutable system mode registry + admin-audited mode edits)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Implemented a **canonical immutable mode registry** in `backend/modes.py` with ordered system modes:
+  - `orchestrator`, `planner`, `architect`, `deep_research`, `code`.
+- Added a frozen `ModeDefinition` model and derived policy views (`MODE_LABELS`, `MODE_SYSTEM_HINTS`, read-only/tool-block behavior) from the single registry source of truth.
+- Marked modes as **system-owned immutable nodes** (`immutable=True`, `owner="system"` in serialized mode definitions).
+- Added server-side mode mutation enforcement in `main.py`:
+  - new `GET /api/modes` to expose canonical registry,
+  - explicit rejection endpoints for `POST /api/modes`, `PATCH /api/modes/{mode_key}`, and `DELETE /api/modes/{mode_key}` with `403`.
+- Extended admin platform settings in `backend/admin/platform_settings.py`:
+  - supports persisting only admin-editable per-mode instruction text + safe metadata (`description`, `emoji`, `sort_order`),
+  - rejects attempted edits to immutable mode policy payloads (`mode_policy`),
+  - returns canonical registry data alongside persisted admin instruction/metadata.
+- Added admin audit logging for mode edits via `log_admin_action(..., action="mode_registry.admin_edit")`.
+
+### What's Working
+- Canonical mode registry is code-defined and stable across restarts.
+- Non-admin attempts to create/delete/mutate mode policy fields through mode mutation routes are rejected.
+- Admin mode instruction/metadata edits are persisted and now produce audit events.
+
+### What's NOT Working Yet
+- No dedicated migration/backfill currently normalizes pre-existing malformed mode metadata rows; invalid JSON is safely ignored at read time.
+
+### Next Steps
+1. Add explicit API tests for `/api/modes` mutation rejection semantics and admin audit event assertions for mode edit patches.
+2. Optionally split `PATCH /api/admin/platform-settings` into narrower endpoints (`/modes/instructions`, `/modes/metadata`) for cleaner RBAC and audit granularity.
+
+### Decisions Made
+- Kept mode policy fields fully immutable and code-owned to satisfy registry stability requirements.
+- Limited persisted per-mode metadata to a strict safe allowlist.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.84 - April 8, 2026 (PR #189 review fixes: policy semantics + exception transaction safety)
 
 **Agent:** GPT-5.3-Codex  

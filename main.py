@@ -32,7 +32,7 @@ from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
-from backend.modes import MODE_LABELS, normalize_agent_mode
+from backend.modes import MODE_LABELS, mode_definitions, normalize_agent_mode, serialize_mode_definition
 from backend.integrations.text_normalization import normalize_for_channel
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
@@ -370,6 +370,36 @@ class SessionRuntime:
 async def get_providers() -> dict[str, Any]:
     """List all supported LLM providers and their models."""
     return {"ok": True, "providers": list_providers()}
+
+
+@app.get("/api/modes")
+async def get_modes(request: Request) -> dict[str, Any]:
+    """Return the canonical immutable mode registry."""
+    _get_current_user(request)
+    return {"ok": True, "modes": [serialize_mode_definition(mode.key) for mode in mode_definitions()]}
+
+
+@app.post("/api/modes")
+async def create_mode(_: dict[str, Any], request: Request) -> None:
+    """Reject mode creation; modes are immutable system-owned nodes."""
+    _get_current_user(request)
+    raise HTTPException(status_code=403, detail="Modes are immutable system-level nodes controlled only by admins")
+
+
+@app.patch("/api/modes/{mode_key}")
+async def patch_mode(mode_key: str, _: dict[str, Any], request: Request) -> None:
+    """Reject mode mutation; protected mode policy fields are immutable."""
+    _get_current_user(request)
+    _ = mode_key
+    raise HTTPException(status_code=403, detail="Protected mode policy fields are immutable")
+
+
+@app.delete("/api/modes/{mode_key}")
+async def delete_mode(mode_key: str, request: Request) -> None:
+    """Reject mode deletion; canonical mode registry is fixed."""
+    _get_current_user(request)
+    _ = mode_key
+    raise HTTPException(status_code=403, detail="Modes are immutable system-level nodes controlled only by admins")
 
 
 @app.get("/api/keys")
