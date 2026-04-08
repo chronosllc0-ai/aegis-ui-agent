@@ -1,3 +1,56 @@
+## Session 5.81 - April 8, 2026 (Skill Hub submission/review deterministic state machine)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added a new backend Skill Hub workflow package (`backend/skills_hub/`) with explicit submission schemas, deterministic transition rules, service logic, and API routes.
+- Implemented deterministic transition matrix with server-side enforcement (`allowed_transitions(current_state)`), including terminal behavior for `rejected` and revision-based resubmission support.
+- Added persistent audit trail + reviewer notes storage via new DB models:
+  - `SkillHubSubmission`
+  - `SkillHubTransition`
+- Added Skill Hub API endpoints:
+  - `POST /api/skills/hub/submissions`
+  - `GET /api/skills/hub/submissions/{id}`
+  - `POST /api/skills/hub/submissions/{id}/transition`
+  - `GET /api/skills/hub/review-queue` (admin)
+- Wired the new Skill Hub router into `main.py`.
+- Added frontend Skill Hub components under `frontend/src/components/skills-hub/`:
+  - `SubmissionForm.tsx`
+  - `SubmissionStatusTimeline.tsx`
+  - `ReviewQueue.tsx`
+- Integrated Skills tab UX updates:
+  - Added **Submit to Hub** action per skill row.
+  - Added timeline rendering with exact state badges and reviewer note history.
+  - Added client-side disabling for impossible transition actions using `allowed_transitions` from backend.
+- Added tests:
+  - `tests/test_skills_hub_states.py` (legal/illegal transitions, rejected terminal + new revision)
+  - `tests/test_skills_hub_permissions.py` (admin queue access and transition permissions)
+
+### What's Working
+- Transition matrix is enforced server-side with deterministic next-state validation.
+- Reviewer notes and immutable transition history are persisted and returned in submission detail payloads.
+- Admin review queue endpoint supports state/risk/date filtering.
+- Client UI disables impossible actions while still relying on server validation.
+- Targeted backend tests pass and frontend production build passes.
+
+### What's NOT Working Yet
+- Existing marketplace listing endpoints still rely on legacy skill status semantics; the new Skill Hub `published`/visibility coupling is in place for transitioned linked skills, but legacy list surfaces may need harmonization if both workflows are used simultaneously.
+
+### Next Steps
+1. Unify legacy skill publication states with new Skill Hub states across all listing/install endpoints.
+2. Add dedicated UI navigation to inspect existing submission IDs outside the inline per-row workflow.
+3. Add API docs/examples for the new review queue filters and revision resubmission flow.
+
+### Decisions Made
+- Implemented Skill Hub as a dedicated package (`backend/skills_hub`) to keep workflow logic isolated from legacy skill-pipeline behavior.
+- Kept transition permissions strict: only admins can perform moderation/publishing states; users can only move their own records through submit/resubmit transitions.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.80 - April 7, 2026 (Settings Skills management UI + API compatibility routes)
 
 **Agent:** GPT-5.3-Codex  

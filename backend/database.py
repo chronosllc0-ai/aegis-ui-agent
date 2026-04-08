@@ -304,6 +304,40 @@ class SkillAuditEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
+class SkillHubSubmission(Base):
+    """Skill Hub submission revision tracked by deterministic workflow state."""
+
+    __tablename__ = "skill_hub_submissions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=True, index=True)
+    skill_slug = Column(String(120), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    risk_label = Column(String(30), nullable=False, default="unknown")
+    revision = Column(Integer, nullable=False, default=1)
+    submitted_by = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    current_state = Column(String(40), nullable=False, default="draft", index=True)
+    reviewer_notes_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillHubTransition(Base):
+    """Immutable transition event for Skill Hub submissions."""
+
+    __tablename__ = "skill_hub_transitions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    submission_id = Column(String(255), ForeignKey("skill_hub_submissions.id"), nullable=False, index=True)
+    from_state = Column(String(40), nullable=False)
+    to_state = Column(String(40), nullable=False)
+    actor_id = Column(String(255), nullable=False, index=True)
+    actor_role = Column(String(20), nullable=False)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class RuntimeSkillInstallation(Base):
     """Lightweight per-user skill installation record for runtime resolution."""
 
