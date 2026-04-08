@@ -3,6 +3,14 @@ import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../l
 
 export type SteeringMode = 'steer' | 'interrupt' | 'queue'
 
+export type ActivityPhase = 'idle' | 'thinking' | 'browsing' | 'calling_tool' | 'generating'
+
+export type TaskActivity = {
+  phase: ActivityPhase
+  detail?: string
+  updatedAt: string
+}
+
 export type LogEntry = {
   id: string
   taskId: string
@@ -162,6 +170,43 @@ function guessStepKind(message: string): LogEntry['stepKind'] {
   return 'other'
 }
 
+const BROWSER_TOOL_NAMES = new Set([
+  'click',
+  'type',
+  'type_text',
+  'scroll',
+  'go_to_url',
+  'go_back',
+  'wait',
+  'screenshot',
+  'extract_page',
+])
+
+const ACTIVITY_FALLBACK_LABEL = 'Aegis is working…'
+
+function getToolNameFromStep(content: string): string | null {
+  const match = content.trim().match(/^\[([\w_]+)\]/)
+  return match?.[1]?.toLowerCase() ?? null
+}
+
+function inferActivityFromStep(content: string): Omit<TaskActivity, 'updatedAt'> {
+  const normalized = content.trim().toLowerCase()
+  const toolName = getToolNameFromStep(content)
+  if (toolName) {
+    if (toolName === 'thinking') return { phase: 'thinking', detail: content }
+    if (BROWSER_TOOL_NAMES.has(toolName)) return { phase: 'browsing', detail: content }
+    if (/(model response|assistant response|generating|drafting)/i.test(content)) return { phase: 'generating', detail: content }
+    return { phase: 'calling_tool', detail: content }
+  }
+  if (/(model response|assistant response|generating|drafting)/i.test(content)) {
+    return { phase: 'generating', detail: content }
+  }
+  if (/(thinking|reasoning|analyzing|planning)/i.test(normalized)) {
+    return { phase: 'thinking', detail: content }
+  }
+  return { phase: 'generating', detail: ACTIVITY_FALLBACK_LABEL }
+}
+
 type UseWebSocketOptions = {
   onUsageMessage?: (msg: Record<string, unknown>) => void
   userId?: string | null
@@ -174,6 +219,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [isWorking, setIsWorking] = useState(false)
+  const [taskActivity, setTaskActivity] = useState<TaskActivity>({ phase: 'idle', updatedAt: new Date().toISOString() })
   const [latestFrame, setLatestFrame] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
@@ -294,6 +340,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const nonExecutionStepTypes = new Set(['queue', 'steer', 'config'])
         if (!nonExecutionStepTypes.has(stepType)) {
           setIsWorking(true)
+          const inferred = inferActivityFromStep(String(payload.data?.content ?? payload.data?.type ?? ''))
+          setTaskActivity({ ...inferred, updatedAt: new Date().toISOString() })
         }
         const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
@@ -308,6 +356,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'result') {
         setIsWorking(false)
+        setTaskActivity({ phase: 'idle', updatedAt: new Date().toISOString() })
         const persisted = readPersistedThinking(taskId)
         if (persisted.length > 0) {
           const nowIso = new Date().toISOString()
@@ -379,6 +428,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'reasoning_start') {
+        setTaskActivity({ phase: 'thinking', detail: 'reasoning_start', updatedAt: new Date().toISOString() })
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
           if (!reasoningNormalizersRef.current[stepId]) {
@@ -402,17 +452,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             nextEntry,
           ]
           persistThinking(taskId, next)
-          appendLog({
-            message: '[thinking]',
-            taskId,
-            type: 'reasoning_start',
-            status: 'in_progress',
-            stepId,
-          })
         }
         return
       }
       if (payload.type === 'reasoning_delta') {
+        setTaskActivity({ phase: 'thinking', detail: String(payload.data?.delta ?? 'reasoning_delta'), updatedAt: new Date().toISOString() })
         const stepId = String(payload.data?.step_id ?? '')
         const delta = String(payload.data?.delta ?? '')
         if (stepId && delta) {
@@ -485,6 +529,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             ),
           )
           delete reasoningNormalizersRef.current[stepId]
+          setTaskActivity({ phase: 'generating', detail: 'reasoning_completed', updatedAt: nowIso })
         }
         return
       }
@@ -536,6 +581,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'error') {
         setIsWorking(false)
+        setTaskActivity({ phase: 'idle', updatedAt: new Date().toISOString() })
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
       }
     }
@@ -573,6 +619,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           const nextTaskId = crypto.randomUUID()
           activeTaskIdRef.current = nextTaskId
           setIsWorking(true)
+          setTaskActivity({ phase: 'thinking', detail: String(message.instruction ?? 'New task'), updatedAt: new Date().toISOString() })
           appendLog({
             message: String(message.instruction ?? 'New task'),
             taskId: nextTaskId,
@@ -617,6 +664,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setLatestFrame('')
     setCurrentUrl('about:blank')
     setIsWorking(false)
+    setTaskActivity({ phase: 'idle', updatedAt: new Date().toISOString() })
     setWorkflowSteps([])
     setTranscripts([])
     setReasoningMap({})
@@ -666,5 +714,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     return false
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, isWorking, taskActivity, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

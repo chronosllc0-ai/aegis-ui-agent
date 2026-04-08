@@ -23,6 +23,19 @@
   animation: shimmer-sweep 1.8s ease-in-out infinite;
 }
 
+/* ── Activity beam: brighter sweep for live "Aegis is …" accordion status ─── */
+.activity-beam::after {
+  background: linear-gradient(
+    105deg,
+    transparent 22%,
+    rgba(125, 211, 252, 0.45) 45%,
+    rgba(255, 255, 255, 0.75) 50%,
+    rgba(59, 130, 246, 0.35) 56%,
+    transparent 78%
+  );
+  animation-duration: 1.5s;
+}
+
 /* ── Agent name shimmer: colored streak across subagent name ─────────────── */
 .agent-name-shimmer {
   position: relative;

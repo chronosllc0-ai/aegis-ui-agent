@@ -109,7 +109,6 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
         activeTaskId='task-A'
         serverMessages={makeServerMessages('A')}
         onUserInputResponse={onUserInputResponse}
-        reasoningMap={{ 'A-step-1': 'Reasoning A details' }}
       />,
     )
 
@@ -119,8 +118,7 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
     expect(screen.queryByText(/\[click\]/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/\[go_to_url\]/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Thinking'))
-    expect(screen.getByText('Reasoning A details')).toBeInTheDocument()
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '1. Option A' }))
     expect(onUserInputResponse).toHaveBeenCalledWith('Option A', 'req-A')
@@ -142,13 +140,11 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
         activeTaskId='task-B'
         serverMessages={makeServerMessages('B')}
         onUserInputResponse={onUserInputResponse}
-        reasoningMap={{ 'B-step-1': 'Reasoning B details' }}
       />,
     )
 
     await screen.findByText('Thread B assistant')
     expect(screen.queryByText('Thread A assistant')).not.toBeInTheDocument()
-    expect(screen.queryByText('Reasoning A details')).not.toBeInTheDocument()
     expect(screen.queryByText(/\[extract_page\]/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/\[go_back\]/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/\[click\]/i)).not.toBeInTheDocument()
@@ -167,19 +163,17 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
         activeTaskId='task-A'
         serverMessages={makeServerMessages('A')}
         onUserInputResponse={onUserInputResponse}
-        reasoningMap={{ 'A-step-1': 'Reasoning A details' }}
       />,
     )
 
     await screen.findByText('Thread A assistant')
 
-    expect(screen.getByText('Reasoning A details')).toBeInTheDocument()
     expect(screen.getByText('You answered this question.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Ranrun code echo thread-A/i })).toBeInTheDocument()
 
     await waitFor(() => {
       expect(screen.queryByText('Thread B assistant')).not.toBeInTheDocument()
-      expect(screen.queryByText('Reasoning B details')).not.toBeInTheDocument()
+      expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
     })
 
     expect(screen.getAllByText('Thread A user')).toHaveLength(1)
@@ -191,12 +185,12 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
         .sort(),
       answered: !!screen.queryByText('You answered this question.'),
       toolCollapsed: !!screen.queryByRole('button', { name: /Ranrun code echo thread-A/i }),
-      reasoningOpen: !!screen.queryByText('Reasoning A details'),
+      reasoningOpen: !!screen.queryByText('Thinking'),
     }
     expect(renderSignature).toMatchInlineSnapshot(`
       {
         "answered": true,
-        "reasoningOpen": true,
+        "reasoningOpen": false,
         "toolCollapsed": true,
         "userBubbles": [
           "Option ATIME",

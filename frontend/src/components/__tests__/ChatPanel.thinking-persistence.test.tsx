@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type React from 'react'
 
@@ -17,7 +17,6 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof ChatPanel>> = 
     latestFrame: null,
     activeTaskId: 'task-a',
     serverMessages: [],
-    reasoningMap: {},
     onUserInputResponse: vi.fn(),
     ...overrides,
   }
@@ -45,7 +44,7 @@ describe('ChatPanel thinking persistence', () => {
     localStorage.clear()
   })
 
-  it('restores thinking rows on A/B/A task switch without rendering raw [thinking] token', () => {
+  it('does not render repeated thinking rows on A/B/A task switch', () => {
     saveThinking('task-a')
     const logs: LogEntry[] = [
       {
@@ -61,45 +60,26 @@ describe('ChatPanel thinking persistence', () => {
     ]
 
     const { rerender } = render(<ChatPanel {...baseProps({ logs, activeTaskId: 'task-a' })} />)
-    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
     expect(screen.queryByText('[thinking]')).not.toBeInTheDocument()
 
     rerender(<ChatPanel {...baseProps({ logs: [], activeTaskId: 'task-b' })} />)
     expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
 
     rerender(<ChatPanel {...baseProps({ logs, activeTaskId: 'task-a' })} />)
-    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
   })
 
-  it('restores from local cache after refresh and flips from streaming to completed visual state', () => {
+  it('renders exactly one live activity accordion while working', () => {
     saveThinking('task-a', 'step-1', 'streaming')
 
-    const { unmount } = render(
-      <ChatPanel {...baseProps({ activeTaskId: 'task-a', reasoningMap: { 'step-1': 'live reasoning' }, isWorking: true })} />,
+    render(
+      <ChatPanel
+        {...baseProps({ activeTaskId: 'task-a', isWorking: true })}
+        taskActivity={{ phase: 'thinking', detail: 'live reasoning', updatedAt: '2026-04-03T00:00:00.000Z' }}
+      />,
     )
-    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0)
-
-    unmount()
-    const { rerender } = render(
-      <ChatPanel {...baseProps({ activeTaskId: 'task-a', reasoningMap: { 'step-1': 'live reasoning' }, isWorking: true })} />,
-    )
-    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0)
-
-    saveThinking('task-a', 'step-1', 'completed')
-    rerender(<ChatPanel {...baseProps({ activeTaskId: 'task-a', reasoningMap: { 'step-1': 'done reasoning' }, isWorking: false })} />)
-    expect(screen.getByText('Thought')).toBeInTheDocument()
-  })
-
-  it('persists thinking accordion open state per task', () => {
-    saveThinking('task-a', 'step-open', 'streaming')
-    render(<ChatPanel {...baseProps({ activeTaskId: 'task-a', reasoningMap: { 'step-open': 'expanded text' } })} />)
-
-    for (const chip of screen.getAllByText('Thinking')) {
-      fireEvent.click(chip)
-    }
-
-    const openIds = JSON.parse(localStorage.getItem('aegis.chat.ui.task-a.openThinkingIds') ?? '[]') as string[]
-    expect(openIds).toContain('step-open')
-    expect(screen.getByText('expanded text')).toBeInTheDocument()
+    expect(screen.getAllByText('Aegis is thinking…')).toHaveLength(1)
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
   })
 })

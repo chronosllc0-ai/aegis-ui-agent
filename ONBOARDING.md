@@ -1,3 +1,46 @@
+## Session 5.57 - April 8, 2026 (Single live activity accordion in ChatPanel)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend UX/state pass
+
+### What Was Done
+- Added a per-task live activity model in `frontend/src/hooks/useWebSocket.ts`:
+  - `idle | thinking | browsing | calling_tool | generating`
+  - optional `detail`
+  - `updatedAt` timestamp.
+- Implemented websocket activity transition mapping:
+  - `reasoning_start`/`reasoning_delta` → `thinking`
+  - browser primitive tool steps (`click`, `type_text`, `scroll`, `go_to_url`, `go_back`, `wait`, `screenshot`, `extract_page`) → `browsing`
+  - non-browser tool calls → `calling_tool`
+  - model-response style steps → `generating`
+  - `result`/`error` and reset paths → `idle`.
+- Removed chat spam source by stopping insertion of `[thinking]` log rows from websocket reasoning-start events.
+- Updated `ChatPanel` to render exactly one live activity accordion while `isWorking`, with Aegis avatar and live status labels.
+- Added secure fallback label (`Aegis is working…`) when mapping is ambiguous.
+- Added shimmer-beam styling for the live activity line in `frontend/src/index.css`.
+- Updated ChatPanel tests to validate single-accordion behavior and remove legacy thinking-row assumptions.
+
+### What's Working
+- During active tasks, chat now shows one live “Aegis is …” activity accordion instead of stacked repeated thinking chips.
+- Activity labels now switch live between thinking/browsing/calling tools/generating states.
+- On completion/error, activity state resets to idle and the live accordion disappears.
+- Existing shell/tool card behavior remains intact; chat no longer surfaces raw `[thinking]` entries.
+
+### What's NOT Working Yet
+- No known blockers from this pass.
+
+### Next Steps
+1. Optionally surface richer `detail` text in a debug-only mode if deeper operator visibility is needed.
+2. Consider adding an explicit websocket event for `model_generation_start` for even tighter `generating` transitions.
+
+### Decisions Made
+- Kept reasoning persistence internal (for debug compatibility) while removing user-facing repeated thinking rows.
+- Used defensive fallback to `Aegis is working…` to avoid blank/incorrect labels on unknown events.
+
+### Blockers
+- None.
+
+---
 ## Session 5.56 - April 8, 2026 (Permanent browser-action exclusion in chat live + rehydration)
 
 **Agent:** GPT-5.3-Codex
