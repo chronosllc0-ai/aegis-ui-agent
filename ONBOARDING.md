@@ -3122,3 +3122,32 @@
 
 ### Validation
 - `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing` passed.
+
+## 2026-04-08 — Frontend activity reducer unification for chat status
+
+### What changed
+- Added `frontend/src/lib/activityState.ts` with a typed, deterministic activity reducer and selector surface:
+  - `reduceActivityState(state, payload)` handles `step`, `result`, `error`, `interrupt`, `reasoning_start`, `reasoning_delta`, `reasoning`, and `tool-call`.
+  - `selectActivityView(...)` derives `activityStatusLabel`, `activityDetail`, and `isActivityVisible`.
+  - Added stale-event timeout fallback so active work with no recent events shows `Aegis is processing…`.
+- Refactored `frontend/src/hooks/useWebSocket.ts` to route websocket activity updates through the new reducer instead of ad-hoc `setTaskActivity(...)` writes spread across handlers.
+- Added hook-level derived outputs (`activityStatusLabel`, `activityDetail`, `isActivityVisible`) and wired periodic selector refresh while `isWorking` is true for timeout-safety behavior.
+- Updated `frontend/src/components/ChatPanel.tsx` to consume only derived selector props for activity UI rendering, removing local label resolution logic and preventing duplicate status emitters.
+- Wired `frontend/src/App.tsx` to pass the selector outputs into `ChatPanel`.
+- Updated chat panel tests to use selector props instead of `taskActivity` writes.
+
+### What's working
+- Activity card visibility/label/detail is now centralized and deterministic from a single reducer+selector flow.
+- Reasoning/tool/step/result/error/interrupt transitions no longer rely on multiple component-level emitters.
+- Targeted frontend build and tests pass.
+
+### What's not / caveats
+- Full frontend test suite was not run in this pass; only targeted suites related to activity status and websocket reasoning cache were executed.
+
+### Next steps
+- If desired, add unit tests specifically for `activityState.ts` reducer transitions and stale-timeout selector behavior to lock semantics.
+- Consider migrating any remaining activity-like UI badges outside chat to consume the same selector contract for cross-surface consistency.
+
+### Validation
+- `cd frontend && npm run build` passed.
+- `cd frontend && npm run test -- src/components/ChatPanel.test.tsx src/components/__tests__/ChatPanel.thinking-persistence.test.tsx src/hooks/__tests__/useWebSocket.reasoning-cache.test.ts` passed.

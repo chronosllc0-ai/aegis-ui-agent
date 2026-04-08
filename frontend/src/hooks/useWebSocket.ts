@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../lib/textNormalization'
+import { createIdleActivityState, reduceActivityState, selectActivityView, type ActivitySelector, type ActivityState } from '../lib/activityState'
 
 export type SteeringMode = 'steer' | 'interrupt' | 'queue'
 
@@ -69,8 +70,8 @@ export interface PersistedThinkingMessage {
   updatedAt: string
 }
 
-type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list'
+export type WebSocketPayload = {
+  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -170,43 +171,6 @@ function guessStepKind(message: string): LogEntry['stepKind'] {
   return 'other'
 }
 
-const BROWSER_TOOL_NAMES = new Set([
-  'click',
-  'type',
-  'type_text',
-  'scroll',
-  'go_to_url',
-  'go_back',
-  'wait',
-  'screenshot',
-  'extract_page',
-])
-
-const ACTIVITY_FALLBACK_LABEL = 'Aegis is working…'
-
-function getToolNameFromStep(content: string): string | null {
-  const match = content.trim().match(/^\[([\w_]+)\]/)
-  return match?.[1]?.toLowerCase() ?? null
-}
-
-function inferActivityFromStep(content: string): Omit<TaskActivity, 'updatedAt'> {
-  const normalized = content.trim().toLowerCase()
-  const toolName = getToolNameFromStep(content)
-  if (toolName) {
-    if (toolName === 'thinking') return { phase: 'thinking', detail: content }
-    if (BROWSER_TOOL_NAMES.has(toolName)) return { phase: 'browsing', detail: content }
-    if (/(model response|assistant response|generating|drafting)/i.test(content)) return { phase: 'generating', detail: content }
-    return { phase: 'calling_tool', detail: content }
-  }
-  if (/(model response|assistant response|generating|drafting)/i.test(content)) {
-    return { phase: 'generating', detail: content }
-  }
-  if (/(thinking|reasoning|analyzing|planning)/i.test(normalized)) {
-    return { phase: 'thinking', detail: content }
-  }
-  return { phase: 'calling_tool', detail: ACTIVITY_FALLBACK_LABEL }
-}
-
 type UseWebSocketOptions = {
   onUsageMessage?: (msg: Record<string, unknown>) => void
   userId?: string | null
@@ -219,8 +183,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [isWorking, setIsWorking] = useState(false)
-  const [taskActivity, setTaskActivity] = useState<TaskActivity>({ phase: 'idle', updatedAt: new Date().toISOString() })
+  const [taskActivity, setTaskActivity] = useState<ActivityState>(() => createIdleActivityState())
   const [latestFrame, setLatestFrame] = useState('')
+  const [activityView, setActivityView] = useState<ActivitySelector>(() => selectActivityView(createIdleActivityState(), false))
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
   const [currentUrl, setCurrentUrl] = useState('about:blank')
@@ -329,6 +294,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     ws.onmessage = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as WebSocketPayload
       const taskId = activeTaskIdRef.current
+      setTaskActivity((prev) => reduceActivityState(prev, payload, Date.now()))
 
       if (payload.type === 'conversation_id') {
         const convId = String(payload.data?.conversation_id ?? '')
@@ -340,8 +306,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const nonExecutionStepTypes = new Set(['queue', 'steer', 'config'])
         if (!nonExecutionStepTypes.has(stepType)) {
           setIsWorking(true)
-          const inferred = inferActivityFromStep(String(payload.data?.content ?? payload.data?.type ?? ''))
-          setTaskActivity({ ...inferred, updatedAt: new Date().toISOString() })
         }
         const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
@@ -354,9 +318,28 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         })
         return
       }
+      if (payload.type === 'interrupt') {
+        setIsWorking(false)
+        appendLog({
+          message: String(payload.data?.message ?? 'Task interrupted'),
+          taskId,
+          type: 'interrupt',
+          status: 'completed',
+        })
+        return
+      }
+      if (payload.type === 'tool-call') {
+        setIsWorking(true)
+        appendLog({
+          message: String(payload.data?.content ?? payload.data?.tool ?? 'Tool call'),
+          taskId,
+          type: 'step',
+          status: 'in_progress',
+        })
+        return
+      }
       if (payload.type === 'result') {
         setIsWorking(false)
-        setTaskActivity({ phase: 'idle', updatedAt: new Date().toISOString() })
         const persisted = readPersistedThinking(taskId)
         if (persisted.length > 0) {
           const nowIso = new Date().toISOString()
@@ -428,7 +411,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'reasoning_start') {
-        setTaskActivity({ phase: 'thinking', detail: 'reasoning_start', updatedAt: new Date().toISOString() })
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
           if (!reasoningNormalizersRef.current[stepId]) {
@@ -456,7 +438,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'reasoning_delta') {
-        setTaskActivity({ phase: 'thinking', detail: String(payload.data?.delta ?? 'reasoning_delta'), updatedAt: new Date().toISOString() })
         const stepId = String(payload.data?.step_id ?? '')
         const delta = String(payload.data?.delta ?? '')
         if (stepId && delta) {
@@ -529,7 +510,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             ),
           )
           delete reasoningNormalizersRef.current[stepId]
-          setTaskActivity({ phase: 'generating', detail: 'reasoning_completed', updatedAt: nowIso })
         }
         return
       }
@@ -581,8 +561,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'error') {
         setIsWorking(false)
-        setTaskActivity({ phase: 'idle', updatedAt: new Date().toISOString() })
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
+        return
       }
     }
   }, [appendLog, onUsageMessage])
@@ -619,7 +599,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           const nextTaskId = crypto.randomUUID()
           activeTaskIdRef.current = nextTaskId
           setIsWorking(true)
-          setTaskActivity({ phase: 'thinking', detail: String(message.instruction ?? 'New task'), updatedAt: new Date().toISOString() })
+          setTaskActivity((prev) => ({ ...prev, phase: 'thinking', detail: String(message.instruction ?? 'New task'), updatedAt: new Date().toISOString(), lastEventAt: Date.now() }))
           appendLog({
             message: String(message.instruction ?? 'New task'),
             taskId: nextTaskId,
@@ -664,7 +644,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setLatestFrame('')
     setCurrentUrl('about:blank')
     setIsWorking(false)
-    setTaskActivity({ phase: 'idle', updatedAt: new Date().toISOString() })
+    setTaskActivity(createIdleActivityState())
     setWorkflowSteps([])
     setTranscripts([])
     setReasoningMap({})
@@ -713,6 +693,18 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     }
     return false
   }, [])
+  useEffect(() => {
+    setActivityView(selectActivityView(taskActivity, isWorking))
+  }, [taskActivity, isWorking])
 
-  return { connectionStatus, isWorking, taskActivity, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  useEffect(() => {
+    if (!isWorking) return
+    const timer = window.setInterval(() => {
+      setActivityView(selectActivityView(taskActivity, true, Date.now()))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [isWorking, taskActivity])
+
+
+  return { connectionStatus, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

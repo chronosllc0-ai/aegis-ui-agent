@@ -79,7 +79,9 @@ describe('ChatPanel thinking persistence', () => {
     render(
       <ChatPanel
         {...baseProps({ activeTaskId: 'task-a', isWorking: true })}
-        taskActivity={{ phase: 'thinking', detail: 'live reasoning', updatedAt: '2026-04-03T00:00:00.000Z' }}
+        isActivityVisible
+        activityStatusLabel='Aegis is thinking…'
+        activityDetail='live reasoning'
       />,
     )
     expect(screen.getAllByText('Aegis is thinking…')).toHaveLength(1)
