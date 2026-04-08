@@ -1759,7 +1759,7 @@ async def run_universal_navigation(
             await on_workflow_step(route_trace)
 
         child_results: list[dict[str, Any]] = []
-        fallback_result: dict[str, Any] | None = None
+        delegated_fallback_result: dict[str, Any] | None = None
         primary_result: dict[str, Any] | None = None
         try:
             primary_result = await asyncio.wait_for(
@@ -1799,7 +1799,7 @@ async def run_universal_navigation(
             logger.warning("Orchestrator delegate mode failed; using fallback code mode: %s", delegate_exc)
             fallback_settings = {**resolved_settings, "agent_mode": "code"}
             try:
-                fallback_result = await run_universal_navigation(
+                delegated_fallback_result = await run_universal_navigation(
                     provider=provider,
                     model=model,
                     executor=executor,
@@ -1820,8 +1820,14 @@ async def run_universal_navigation(
                     on_message_subagent=on_message_subagent,
                     is_subagent=is_subagent,
                 )
-                primary_result = fallback_result
-                child_results.append({"ref": "child:fallback", "mode": "code", "status": fallback_result.get("status")})
+                primary_result = delegated_fallback_result
+                child_results.append(
+                    {
+                        "ref": "child:fallback",
+                        "mode": "code",
+                        "status": delegated_fallback_result.get("status"),
+                    }
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as fallback_exc:  # noqa: BLE001
@@ -1852,7 +1858,7 @@ async def run_universal_navigation(
         synthesis = build_synthesis(
             decision=route_decision,
             primary_result=primary_result,
-            fallback_result=fallback_result,
+            fallback_result=delegated_fallback_result,
         )
         child_ref_step = {"type": "child_result_refs", "content": json.dumps({"references": child_results}), "steering": []}
         if on_step:

@@ -72,6 +72,7 @@ def test_orchestrator_returns_synthesis_with_route_trace_and_child_refs() -> Non
         assert result["status"] == "completed"
         assert result["route_trace"]["selected_mode"] == "deep_research"
         assert result["child_results"][0]["ref"] == "child:primary"
+        assert all(item["ref"] != "child:fallback" for item in result["child_results"])
         assert "Orchestrator routed to" in result["summary"]
 
     asyncio.run(_run())
