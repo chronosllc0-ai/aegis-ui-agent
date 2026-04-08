@@ -1,4 +1,114 @@
+## Session 5.88 - April 8, 2026 (PR #198 review follow-up: mode-policy hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Followed up on PR #198 review comments in `backend/modes.py`:
+  - hardened `blocked_tools_for_mode(...)` to normalize blocked tool IDs to lowercase before comparison,
+  - kept tool-name normalization in `is_tool_allowed_for_mode(...)` so mode checks are consistently case-insensitive,
+  - added `ALL_MODE_POLICY_TOOLS` and changed `allowed_tool_alternatives(...)` to return the effective allowed tool set for **all** modes (including `code`), instead of returning an empty list for non-read-only modes.
+
+### What's Working
+- Mode-policy checks now explicitly normalize both sides of tool comparisons.
+- Refusal alternatives are now meaningful in every mode, including `code`.
+
+### What's NOT Working Yet
+- No additional targeted unit tests were added in this micro follow-up.
+
+### Next Steps
+1. Add unit tests for:
+   - case-insensitive `is_tool_allowed_for_mode(...)` behavior,
+   - `allowed_tool_alternatives("code")` returning non-empty allowed tools.
+
+### Decisions Made
+- Treated tool ID matching as strictly case-insensitive at policy boundary for defense-in-depth.
+- Kept policy-tool universe defined in backend mode policy module to avoid cross-module imports/cycles.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.87 - April 8, 2026 (backend mode policy enforcement hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Implemented a stricter, centralized backend mode policy in `backend/modes.py`:
+  - introduced a single capability matrix (`MODE_CAPABILITY_MATRIX`) derived from the canonical mode registry,
+  - added explicit execution/mutation tool blocklist for non-code modes,
+  - switched `orchestrator` to non-executing routing behavior (read-only tool surface),
+  - added helpers for strict mode validation (`validate_requested_mode`) and mode-aware alternatives (`allowed_tool_alternatives`).
+- Enforced server-side mode/tool policy in `universal_navigator.py`:
+  - tool availability now consults central mode policy helpers,
+  - mode-blocked tool attempts emit structured refusal metadata with allowed alternatives,
+  - batch workflow events now include mode denial diagnostics/refusal payloads.
+- Enforced per-turn mode validation in `main.py`:
+  - websocket messages with `mode` are validated each turn; invalid modes are rejected with structured refusal payloads,
+  - config updates validate `settings.agent_mode` before applying,
+  - runtime mode is normalized before task execution,
+  - direct websocket `spawn_subagent` action is blocked unless current mode policy allows it (effectively code mode only),
+  - `/mode` bot command now rejects invalid modes instead of silently coercing to default.
+
+### What's Working
+- Backend now blocks disallowed tools regardless of frontend payload mode/tool choices.
+- Only `code` mode can use execution/subagent capabilities based on central policy.
+- Orchestrator mode remains usable for routing/planning context without execution rights.
+
+### What's NOT Working Yet
+- No dedicated automated tests were added in this pass for the new refusal payload shape and websocket mode-validation branch behavior.
+
+### Next Steps
+1. Add focused tests for:
+   - invalid websocket mode payload rejection,
+   - `spawn_subagent` refusal outside `code`,
+   - structured mode denial payload fields (`type`, `reason`, `allowed_alternatives`).
+2. Consider exposing mode-policy refusal telemetry in an explicit client event type (in addition to `error`) for cleaner UI handling.
+
+### Decisions Made
+- Used acceptance criteria precedence: despite earlier orchestrator wording, execution/spawn is now code-mode only.
+- Kept one central policy source (`backend/modes.py`) and reused it across runtime tool filtering and websocket enforcement.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.86 - April 8, 2026 (PR #190 review follow-up: dead-code removal + message accuracy)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review feedback in mode immutability/admin settings changes:
+  1. **Removed redundant dead-code branch** in `backend/admin/platform_settings.py`:
+     - deleted the endpoint-level `if body.mode_policy:` guard in `patch_platform_settings(...)` because `PatchPlatformSettingsBody._reject_mode_policy_mutation(...)` already rejects truthy `mode_policy` payloads during validation.
+     - removed now-unused `HTTPException` and `PROTECTED_MODE_POLICY_FIELDS` imports accordingly.
+  2. **Corrected API rejection copy** in `main.py`:
+     - updated `POST /api/modes` and `DELETE /api/modes/{mode_key}` error details to accurately state that mode create/modify/delete is not allowed via this API for any caller.
+
+### What's Working
+- `mode_policy` mutation rejection now has a single authoritative validation path (no dead branch in handler).
+- Rejection messages for mode create/delete now match real behavior.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: add an explicit API test asserting `mode_policy` payloads fail validation before route handler logic to prevent future reintroduction of redundant checks.
+
+### Decisions Made
+- Preferred single-layer validation (Pydantic model) over duplicate handler guard when behavior is identical.
+- Kept strict mode immutability semantics unchanged; this pass only removes redundancy and improves error-message accuracy.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.85 - April 8, 2026 (Immutable system mode registry + admin-audited mode edits)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 implementation pass

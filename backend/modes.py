@@ -78,6 +78,16 @@ READ_ONLY_ALLOWED_TOOLS: Final[frozenset[str]] = frozenset(
         "error",
     }
 )
+ALL_MODE_POLICY_TOOLS: Final[frozenset[str]] = frozenset(
+    set(READ_ONLY_ALLOWED_TOOLS)
+    | set(EXECUTION_BLOCKED_TOOLS)
+    | {
+        "github_list_repos",
+        "github_get_issues",
+        "github_get_pull_requests",
+        "github_get_file",
+    }
+)
 
 CANONICAL_MODE_ORDER: Final[tuple[AgentMode, ...]] = (
     "orchestrator",
@@ -169,7 +179,8 @@ def validate_requested_mode(value: object) -> tuple[AgentMode, bool]:
 def blocked_tools_for_mode(mode: AgentMode) -> set[str]:
     """Return tools that must be blocked for the requested mode."""
     normalized_mode = normalize_agent_mode(mode)
-    return set(MODE_CAPABILITY_MATRIX[normalized_mode]["blocked_tools"])
+    blocked = MODE_CAPABILITY_MATRIX[normalized_mode]["blocked_tools"]
+    return {str(tool).strip().lower() for tool in blocked}
 
 
 def is_tool_allowed_for_mode(mode: AgentMode, tool_name: str) -> bool:
@@ -184,9 +195,8 @@ def is_tool_allowed_for_mode(mode: AgentMode, tool_name: str) -> bool:
 def allowed_tool_alternatives(mode: AgentMode, *, limit: int = 8) -> list[str]:
     """Return deterministic allowed tool suggestions for refusal payloads."""
     normalized_mode = normalize_agent_mode(mode)
-    if normalized_mode in READ_ONLY_MODES:
-        return list(sorted(READ_ONLY_ALLOWED_TOOLS))[: max(1, limit)]
-    return []
+    allowed = sorted(set(ALL_MODE_POLICY_TOOLS) - blocked_tools_for_mode(normalized_mode))
+    return allowed[: max(1, limit)]
 
 
 def mode_definitions() -> list[ModeDefinition]:
