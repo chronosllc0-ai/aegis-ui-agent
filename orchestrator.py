@@ -243,7 +243,7 @@ class AgentOrchestrator:
         on_frame: Callable[[str], Awaitable[None]] | None = None,
         cancel_event: asyncio.Event | None = None,
         steering_context: list[str] | None = None,
-        settings: dict[str, Any] | None = None,
+        session_settings: dict[str, Any] | None = None,
         on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         user_uid: str | None = None,
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
@@ -251,13 +251,18 @@ class AgentOrchestrator:
         on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
         on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
         is_subagent: bool = False,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Execute a UI navigation task from a natural language instruction.
 
         Automatically routes to the Gemini ADK path or the universal
         vision+tool-calling navigator depending on the requested provider.
         """
-        session_settings = settings or {}
+        legacy_settings = kwargs.pop("settings", None)
+        if kwargs:
+            logger.debug("Unused execute_task kwargs: %s", sorted(kwargs.keys()))
+        resolved_session_settings = session_settings if session_settings is not None else legacy_settings
+        session_settings = resolved_session_settings if isinstance(resolved_session_settings, dict) else {}
         model_id = str(session_settings.get("model", "")).strip()
         raw_provider = str(session_settings.get("provider", "")).strip()
         provider_name = _normalize_provider_name(raw_provider, model_id)

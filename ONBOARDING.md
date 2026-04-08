@@ -2950,3 +2950,20 @@
 
 ### Validation
 - `pytest -q tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_orchestrator_startup.py::test_gemini_path_uses_module_settings_not_session_dict` passed.
+
+## 2026-04-08 — Follow-up hardening: remove execute_task `settings` shadowing entirely
+
+### What changed
+- Updated `AgentOrchestrator.execute_task(...)` signature to use `session_settings` as the primary argument name and accept legacy `settings=` via `**kwargs` for backward compatibility.
+- Added compatibility merge logic:
+  - Prefer explicit `session_settings` when provided.
+  - Fall back to legacy `settings` from `kwargs`.
+  - Ignore/log any unexpected extra kwargs safely.
+- This fully removes the parameter-level `settings` name collision while preserving existing call sites that still pass `settings=...`.
+
+### Why
+- Although the earlier fix switched internal key lookups to `settings_module`, keeping a function parameter named `settings` could still trigger confusion/review noise.
+- This follow-up makes the shadowing class of bug structurally impossible in `execute_task` while maintaining API compatibility.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing` passed.
