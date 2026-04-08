@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -185,6 +186,7 @@ async def install_skill(
     try:
         install = await SkillService.install_skill(session, user_id=current_user.uid, skill_id=skill_id)
     except ValueError as exc:
+        await session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return {"ok": True, "skill_id": install.skill_id, "version_id": install.skill_version_id, "enabled": install.enabled}
