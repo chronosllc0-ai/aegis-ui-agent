@@ -89,6 +89,15 @@ function persistFrame(scopeKey: string, frameDataUrl: string): void {
   }
 }
 
+function removePersistedFrame(scopeKey: string): void {
+  if (!scopeKey || typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(FRAME_CACHE_KEY(scopeKey))
+  } catch {
+    // Ignore localStorage access issues.
+  }
+}
+
 function clearPersistedFrameCache(): void {
   if (typeof window === 'undefined') return
   try {
@@ -622,6 +631,17 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setLatestFrame('')
   }, [])
 
+  const removeFrameForThread = useCallback((threadId: string) => {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return
+    const normalizedUserId = (userId ?? '').trim() || 'anon'
+    const scopeKey = `${normalizedUserId}:${normalizedThreadId}`
+    removePersistedFrame(scopeKey)
+    if (activeFrameScopeKeyRef.current === scopeKey) {
+      setLatestFrame('')
+    }
+  }, [userId])
+
   const spawnSubAgent = useCallback((instruction: string, model: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'spawn_subagent', instruction, model }))
@@ -646,5 +666,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     return false
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

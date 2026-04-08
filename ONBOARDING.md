@@ -1,3 +1,38 @@
+## Session 5.97 - April 8, 2026 (PR review follow-up: frame cache cleanup on thread delete)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 review-fix + validation pass
+
+### What Was Done
+- Addressed PR review feedback about frame-cache hoarding:
+  - added `removePersistedFrame(scopeKey)` helper in `useWebSocket`.
+  - exposed `removeFrameForThread(threadId)` from the hook to remove the current user’s scoped frame snapshot for a deleted thread.
+- Wired thread-deletion cleanup in `App.tsx`:
+  - `onDeleteTask(id)` now calls `removeFrameForThread(id)` before removing the task/conversation mappings.
+- Kept global account-switch/logout cache clearing behavior intact (`clearFrameCache`) for cross-account isolation.
+- Normalized root workspace scripts to `npm --workspace frontend run ...` format in `package.json`.
+
+### What's Working
+- Deleting a thread now actively removes that thread’s cached frame snapshot, reducing localStorage orphan buildup.
+- Existing per-user+thread frame isolation behavior remains in place.
+- Root frontend build/test commands still execute successfully.
+
+### What's NOT Working Yet
+- npm in this environment still emits existing `http-proxy` environment warnings.
+- Passing Vitest flags through nested npm workspace scripts can still produce npm CLI warnings, though tests execute successfully.
+
+### Next Steps
+1. Optional: add a small unit test around frame-cache deletion behavior (`onDeleteTask` → localStorage key removed).
+2. Optional: introduce TTL/max-size pruning for frame cache as defense-in-depth.
+
+### Decisions Made
+- Chosen fix scope: deterministic cleanup on explicit thread deletion (low risk, directly addresses review note) without adding heavy TTL/index bookkeeping yet.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.96 - April 8, 2026 (npm prefix issue follow-up + workspace scripts)
 
 **Agent:** GPT-5.3-Codex  

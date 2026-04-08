@@ -84,7 +84,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -800,6 +800,7 @@ function App() {
   }
 
   const onDeleteTask = (id: string) => {
+    removeFrameForThread(id)
     setTaskHistory((prev) => {
       const next = prev.filter((t) => t.id !== id)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* ok */ }
