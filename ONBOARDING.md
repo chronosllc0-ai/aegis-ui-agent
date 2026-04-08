@@ -1,3 +1,113 @@
+## Session 5.59 - April 8, 2026 (Review follow-up: activity fallback + accessibility)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed two PR review findings from kilo-code-bot:
+  1. **Activity fallback correctness** in `frontend/src/hooks/useWebSocket.ts`:
+     - changed unknown/default inferred activity from `generating` to `calling_tool` to avoid misleading status text.
+  2. **Accessibility for live activity accordion** in `frontend/src/components/ChatPanel.tsx`:
+     - added `aria-expanded={activityExpanded}`
+     - added `aria-label={resolveActivityLabel(taskActivity)}`
+- Re-ran full frontend test suite and production build to verify no regressions.
+
+### What's Working
+- Unknown activity inference no longer mislabels unrecognized events as response generation.
+- Live activity accordion now has explicit accessibility metadata for assistive tech.
+- Frontend tests and build both pass after review-driven fixes.
+
+### What's NOT Working Yet
+- No blockers identified.
+
+### Next Steps
+1. If future websocket event types expand, add explicit mappings before fallback is used.
+2. Consider adding `aria-controls` with an ID for expanded detail region if we later formalize the accordion panel semantics.
+
+### Decisions Made
+- Followed review suggestion to keep default phase truthful (`calling_tool`) rather than optimistic (`generating`).
+
+### Blockers
+- None.
+
+---
+## Session 5.58 - April 8, 2026 (Fix failing SkillsTab test and restore frontend green)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused test-repair pass
+
+### What Was Done
+- Reproduced the failing frontend suite and identified a broken unit test at `frontend/src/components/settings/SkillsTab.test.tsx`.
+- Root cause: the mocked `useSkills()` payload in the test no longer matched `SkillsTab` runtime expectations (`hubSkills` and related fields were missing), causing `hubSkills.filter(...)` to throw.
+- Updated the test mock to provide the full hook shape used by `SkillsTab` (`hubSkills`, `installSkill`, refresh/review helpers, queue fields, etc.).
+- Updated assertions to align with current UI behavior:
+  - no longer expects obsolete literal `"malicious"` badge text,
+  - uses the current CTA label `Install skill`,
+  - verifies blocked install via `toast.error('Failed to install skill', 'Install blocked: malicious scan result')`.
+- Ran targeted and full frontend tests; all passing.
+
+### What's Working
+- `SkillsTab` marketplace install UX test is passing with current component behavior.
+- Full frontend test suite is green.
+- Frontend production build remains successful.
+
+### What's NOT Working Yet
+- No blockers found in this pass.
+
+### Next Steps
+1. Keep SkillsTab tests resilient by asserting stable outcomes (CTA/action/toast) rather than brittle internal badge wording.
+2. If risk-badge copy is product-critical, add explicit test IDs in component markup for stronger selectors.
+
+### Decisions Made
+- Chose to fix the test fixture/mock and assertions (not component code) because failure came from stale test assumptions, not a product regression.
+
+### Blockers
+- None.
+
+---
+## Session 5.57 - April 8, 2026 (Single live activity accordion in ChatPanel)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend UX/state pass
+
+### What Was Done
+- Added a per-task live activity model in `frontend/src/hooks/useWebSocket.ts`:
+  - `idle | thinking | browsing | calling_tool | generating`
+  - optional `detail`
+  - `updatedAt` timestamp.
+- Implemented websocket activity transition mapping:
+  - `reasoning_start`/`reasoning_delta` → `thinking`
+  - browser primitive tool steps (`click`, `type_text`, `scroll`, `go_to_url`, `go_back`, `wait`, `screenshot`, `extract_page`) → `browsing`
+  - non-browser tool calls → `calling_tool`
+  - model-response style steps → `generating`
+  - `result`/`error` and reset paths → `idle`.
+- Removed chat spam source by stopping insertion of `[thinking]` log rows from websocket reasoning-start events.
+- Updated `ChatPanel` to render exactly one live activity accordion while `isWorking`, with Aegis avatar and live status labels.
+- Added secure fallback label (`Aegis is working…`) when mapping is ambiguous.
+- Added shimmer-beam styling for the live activity line in `frontend/src/index.css`.
+- Updated ChatPanel tests to validate single-accordion behavior and remove legacy thinking-row assumptions.
+
+### What's Working
+- During active tasks, chat now shows one live “Aegis is …” activity accordion instead of stacked repeated thinking chips.
+- Activity labels now switch live between thinking/browsing/calling tools/generating states.
+- On completion/error, activity state resets to idle and the live accordion disappears.
+- Existing shell/tool card behavior remains intact; chat no longer surfaces raw `[thinking]` entries.
+
+### What's NOT Working Yet
+- No known blockers from this pass.
+
+### Next Steps
+1. Optionally surface richer `detail` text in a debug-only mode if deeper operator visibility is needed.
+2. Consider adding an explicit websocket event for `model_generation_start` for even tighter `generating` transitions.
+
+### Decisions Made
+- Kept reasoning persistence internal (for debug compatibility) while removing user-facing repeated thinking rows.
+- Used defensive fallback to `Aegis is working…` to avoid blank/incorrect labels on unknown events.
+
+### Blockers
+- None.
+
+---
 ## Session 5.56 - April 8, 2026 (Permanent browser-action exclusion in chat live + rehydration)
 
 **Agent:** GPT-5.3-Codex

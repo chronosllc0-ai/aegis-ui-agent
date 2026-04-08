@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
+import type { LogEntry, SteeringMode, TaskActivity } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
@@ -56,7 +56,6 @@ export interface ChatPanelProps {
   onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
-  reasoningMap?: Record<string, string>
   provider: string
   model: string
   agentMode: AgentModeId
@@ -76,10 +75,11 @@ export interface ChatPanelProps {
   subAgentNames?: string[]
   browseHandoffPromptVisible?: boolean
   onDismissBrowsePrompt?: () => void
+  taskActivity?: TaskActivity
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'thinking'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan'
 
 interface ChatMessage {
   id: string
@@ -104,7 +104,6 @@ interface ChatMessage {
 type ThreadUiState = {
   collapsedToolIds: string[]
   answeredUserInputIds: string[]
-  openThinkingIds: string[]
 }
 
 interface AttachedFile {
@@ -125,8 +124,20 @@ export function resolveComposerSubmission(input: string, planIntent: boolean): {
   return { mode: 'normal', text: trimmed }
 }
 
-const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
-type ThinkingState = 'streaming' | 'completed'
+function resolveActivityLabel(activity?: TaskActivity): string {
+  switch (activity?.phase) {
+    case 'thinking':
+      return 'Aegis is thinking…'
+    case 'browsing':
+      return 'Aegis is browsing…'
+    case 'calling_tool':
+      return 'Aegis is calling tools…'
+    case 'generating':
+      return 'Aegis is generating response…'
+    default:
+      return 'Aegis is working…'
+  }
+}
 
 // ─── Live connector type ───────────────────────────────────────────────────────
 interface ConnectorMeta {
@@ -164,16 +175,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     const msg = normalizeTextPreservingMarkdown(rawMessage)
     if (isDeniedChatText(msg)) continue
 
-    if (msg.trim() === '[thinking]') {
-      msgs.push({
-        id: entry.id,
-        role: 'thinking',
-        text: '',
-        stepId: entry.stepId,
-        metadata: { placeholder: true },
-      })
-      continue
-    }
+    if (msg.trim() === '[thinking]') continue
 
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
@@ -249,16 +251,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     if (isToolCall) {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
-      if (toolName.toLowerCase() === 'thinking') {
-        msgs.push({
-          id: entry.id,
-          role: 'thinking',
-          text: '',
-          stepId: entry.stepId,
-          metadata: { placeholder: true },
-        })
-        continue
-      }
+      if (toolName.toLowerCase() === 'thinking') continue
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
       let argsDisplay = argsRaw
       let result: string | undefined
@@ -537,63 +530,6 @@ function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProp
         {result && <span className='text-zinc-400'>{result}</span>}
         {isRunning && <span className='shell-cursor' />}
       </pre>
-    </div>
-  )
-}
-
-// ─── ThinkingRow — Cursor-style "Thinking" with shimmer + dropdown ────────────
-interface ThinkingRowProps {
-  stepId: string
-  reasoningText: string
-  isStreaming: boolean
-  open: boolean
-  onToggle: () => void
-}
-
-function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onToggle }: ThinkingRowProps) {
-  const contentRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (open && contentRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight
-    }
-  })
-
-  return (
-    <div className='my-0.5' data-testid='thinking-row'>
-      <button
-        type='button'
-        onClick={onToggle}
-        className='flex items-center gap-2 rounded-xl px-0 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
-        data-testid='thinking-row-trigger'
-      >
-        {isStreaming ? (
-          /* Shimmer "Thinking" tag */
-          <span
-            className='thinking-shimmer rounded-md bg-[#1e1e2e] px-2.5 py-0.5 text-xs font-semibold text-violet-300 border border-violet-500/20'
-          >
-            Thinking
-          </span>
-        ) : (
-          <span className='rounded-md bg-[#1a1a1a] px-2.5 py-0.5 text-xs font-medium text-zinc-500 border border-[#2a2a2a]'>
-            Thought
-          </span>
-        )}
-        <svg
-          className={`h-3 w-3 text-zinc-600 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-          viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'>
-          <path d='m9 18 6-6-6-6' />
-        </svg>
-      </button>
-      {open && (
-        <div
-          ref={contentRef}
-          className='mx-0 mt-0.5 max-h-48 overflow-y-auto rounded-xl border border-violet-500/15 bg-[#0e0e18] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap'
-          data-testid='thinking-row-content'
-        >
-          {reasoningText || <span className='text-zinc-600 animate-pulse'>…</span>}
-        </div>
-      )}
     </div>
   )
 }
@@ -1212,7 +1148,6 @@ export function ChatPanel({
   onUserInputResponse,
   onPlanConfirm,
   onPlanReject,
-  reasoningMap,
   provider,
   model,
   agentMode,
@@ -1224,6 +1159,7 @@ export function ChatPanel({
   subAgentNames = [],
   browseHandoffPromptVisible = false,
   onDismissBrowsePrompt,
+  taskActivity,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1234,7 +1170,6 @@ export function ChatPanel({
   const emptyThreadUiState = (): ThreadUiState => ({
     collapsedToolIds: [],
     answeredUserInputIds: [],
-    openThinkingIds: [],
   })
   const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
     if (!id) return
@@ -1313,6 +1248,7 @@ export function ChatPanel({
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [approvedIds, setApprovedIds]   = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds]   = useState<Set<string>>(new Set())
+  const [activityExpanded, setActivityExpanded] = useState(false)
 
   // ── Voice (Gemini Live + browser SR fallback) ─────────────────────────────
   type AnySR = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
@@ -1546,21 +1482,6 @@ export function ChatPanel({
     onUserInputResponse(trimmed, requestId)
   }
 
-  const handleToggleThinkingOpen = useCallback((stepId: string) => {
-    if (!activeTaskId || !stepId) return
-    setThreadUi((prev) => {
-      const next = new Set(prev.openThinkingIds)
-      if (next.has(stepId)) next.delete(stepId)
-      else next.add(stepId)
-      try {
-        localStorage.setItem(OPEN_THINKING_KEY(activeTaskId), JSON.stringify(Array.from(next)))
-      } catch {
-        // ignore localStorage write failures
-      }
-      return { ...prev, openThinkingIds: Array.from(next) }
-    })
-  }, [activeTaskId])
-
   const isDisabled = connectionStatus !== 'connected'
 
   // Personalised CTA — first name only
@@ -1693,42 +1614,31 @@ export function ChatPanel({
             return <LivePlanCard key={msg.id} steps={msg.planSteps ?? []} completedTools={subsequentTools} />
           }
 
-          if (msg.role === 'thinking') {
-            const stepId = msg.stepId ?? ''
-            const hasStructuredState = Boolean(stepId && reasoningMap?.[stepId])
-            const reasoningText = hasStructuredState
-              ? (reasoningMap?.[stepId] ?? msg.text ?? '')
-              : ''
-            const status = (msg.metadata as { status?: ThinkingState; placeholder?: boolean } | undefined)?.status
-            const placeholder = Boolean((msg.metadata as { placeholder?: boolean } | undefined)?.placeholder)
-            const isStreaming = placeholder || status !== 'completed'
-            return (
-              <div key={msg.id}>
-                <ThinkingRow
-                  stepId={stepId}
-                  reasoningText={reasoningText}
-                  isStreaming={isStreaming}
-                  open={threadUi.openThinkingIds.includes(stepId)}
-                  onToggle={() => handleToggleThinkingOpen(stepId)}
-                />
-              </div>
-            )
-          }
-
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 
-        {/* Agent working indicator — spinning Aegis shield logo like Gemini */}
-        {isWorking && !allMessages.some((m) => m.role === 'thinking' || m.role === 'tool') && (
-          <div className='flex items-center gap-3 px-3 py-2'>
-            <div className='relative flex h-7 w-7 flex-shrink-0 items-center justify-center'>
-              {/* Outer glow ring — spins */}
-              <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
-              <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-              {/* Logo itself — gentle pulse */}
-              <img src='/aegis-shield.png' alt='Aegis thinking' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
-            </div>
-            <span className='thinking-shimmer text-xs font-medium text-zinc-400'>Aegis is thinking…</span>
+        {isWorking && (
+          <div className='my-1'>
+            <button
+              type='button'
+              aria-expanded={activityExpanded}
+              aria-label={resolveActivityLabel(taskActivity)}
+              onClick={() => setActivityExpanded((prev) => !prev)}
+              className='w-full rounded-xl border border-blue-500/25 bg-[#121826] px-3 py-2 text-left hover:bg-[#141c2e] transition-colors'
+            >
+              <div className='flex items-center gap-3'>
+                <div className='relative flex h-7 w-7 flex-shrink-0 items-center justify-center'>
+                  <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
+                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                  <img src='/aegis-shield.png' alt='Aegis activity' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
+                </div>
+                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{resolveActivityLabel(taskActivity)}</span>
+                <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
+              </div>
+              {activityExpanded && taskActivity?.detail && (
+                <p className='mt-2 pl-10 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{taskActivity.detail}</p>
+              )}
+            </button>
           </div>
         )}
 

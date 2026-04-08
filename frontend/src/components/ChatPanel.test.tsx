@@ -246,7 +246,7 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
     expect(screen.queryByText(/\[go_to_url\]/i)).not.toBeInTheDocument()
   })
 
-  it('matches visual regression snapshot for thinking row alignment classes', async () => {
+  it('shows one live activity accordion instead of repeated thinking rows', async () => {
     const logs: LogEntry[] = [
       {
         id: 'thinking-log-snapshot',
@@ -271,10 +271,10 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
       },
     ]
 
-    const { findByTestId } = render(
+    render(
       <ChatPanel
         logs={logs}
-        isWorking={false}
+        isWorking
         onSend={vi.fn()}
         onUserInputResponse={vi.fn()}
         onDecomposePlan={vi.fn()}
@@ -283,14 +283,14 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         onSwitchToBrowser={vi.fn()}
         latestFrame={null}
         activeTaskId='task-snapshot'
-        reasoningMap={{ 'step-align': 'Alignment regression guard text' }}
+        taskActivity={{ phase: 'thinking', detail: 'Alignment regression guard text', updatedAt: '2026-04-03T10:00:00.000Z' }}
         serverMessages={[]}
         {...baseChatPanelProps}
       />,
     )
 
     await screen.findByText('baseline message')
-    expect(await findByTestId('thinking-row')).toMatchSnapshot()
-    expect(await findByTestId('thinking-row-trigger')).toMatchSnapshot()
+    expect(screen.getAllByText('Aegis is thinking…')).toHaveLength(1)
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
   })
 })

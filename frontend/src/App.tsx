@@ -84,7 +84,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, taskActivity, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -1201,7 +1201,7 @@ function App() {
                 onUserInputResponse={handleUserInputResponse}
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
-                reasoningMap={reasoningMap}
+                taskActivity={taskActivity}
                 provider={settings.provider}
                 model={settings.model}
                 agentMode={settings.agentMode}
