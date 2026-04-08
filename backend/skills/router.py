@@ -105,7 +105,8 @@ async def _set_admin_skills_policy(session: AsyncSession, *, admin_uid: str, pol
     else:
         row.value = serialized
         row.updated_by = admin_uid
-    return policy
+    await session.commit()
+    return await _get_admin_skills_policy(session)
 
 
 async def _get_current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
