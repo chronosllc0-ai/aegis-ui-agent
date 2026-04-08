@@ -11,6 +11,7 @@ import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
 import { SuggestionChips } from './SuggestionChips'
 import { PromptGallery } from './PromptGallery'
+import { SteeringControl } from './SteeringControl'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -41,6 +42,9 @@ const IcoSparkle     = (p: SvgProps) => <Svg {...p}><path d='M12 3v1M12 20v1M3 1
 export interface ChatPanelProps {
   logs: LogEntry[]
   isWorking: boolean
+  mode: SteeringMode
+  queuedMessages: string[]
+  onModeChange: (mode: SteeringMode) => void
   onSend: (instruction: string, mode: SteeringMode, metadata?: Record<string, unknown>) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
@@ -967,6 +971,9 @@ interface InputBarCursorProps {
   onPlusClick: () => void
   onOpenGallery: () => void
   onSelectSuggestion: (templateId: string) => void
+  mode: SteeringMode
+  queuedMessages: string[]
+  onModeChange: (mode: SteeringMode) => void
   provider: string
   model: string
   agentMode: AgentModeId
@@ -989,6 +996,7 @@ interface InputBarCursorProps {
 
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
+  mode, queuedMessages, onModeChange,
   provider, model, agentMode, onProviderChange, onModelChange, onAgentModeChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments,
@@ -1046,6 +1054,11 @@ function InputBarCursor({
       </div>
 
       <div className='space-y-2 border-t border-[#242424] px-2.5 py-2'>
+        {isWorking && (
+          <div className='flex items-center'>
+            <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+          </div>
+        )}
         <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
           <span className='hidden text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:inline'>Mode</span>
           <select
@@ -1133,6 +1146,9 @@ function InputBarCursor({
 export function ChatPanel({
   logs,
   isWorking,
+  mode,
+  queuedMessages,
+  onModeChange,
   onSend,
   onDecomposePlan,
   connectionStatus,
@@ -1382,7 +1398,7 @@ export function ChatPanel({
     if (parsed.mode === 'plan' && withContext) {
       onDecomposePlan(withContext)
     } else {
-      onSend(withContext || '(attachment)', 'steer', {
+      onSend(withContext || '(attachment)', mode, {
         attachments: attachments.length > 0 ? attachments : undefined,
         active_connector: activeConnector
           ? { id: activeConnector.id, name: activeConnector.name }
@@ -1703,6 +1719,9 @@ export function ChatPanel({
           onPlusClick={() => setShowPlusMenu((v) => !v)}
           onOpenGallery={() => setGalleryOpen(true)}
           onSelectSuggestion={handleSuggestionSelect}
+          mode={mode}
+          queuedMessages={queuedMessages}
+          onModeChange={onModeChange}
           provider={provider}
           model={model}
           agentMode={agentMode}

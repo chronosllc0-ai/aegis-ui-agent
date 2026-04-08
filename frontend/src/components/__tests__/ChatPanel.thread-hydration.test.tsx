@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatPanel } from '../ChatPanel'
 import type { ServerMessage } from '../../hooks/useConversations'
-import type { LogEntry } from '../../hooks/useWebSocket'
+import type { LogEntry, SteeringMode } from '../../hooks/useWebSocket'
 
 function makeServerMessages(thread: 'A' | 'B'): ServerMessage[] {
   return [
@@ -95,9 +95,21 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
 
   it('rehydrates on A/B/A same-length thread switching without stale rows', async () => {
     const onUserInputResponse = vi.fn()
+    const steeringProps = {
+      mode: 'steer' as SteeringMode,
+      queuedMessages: [],
+      onModeChange: vi.fn(),
+      provider: 'google',
+      model: 'gemini-2.5-pro',
+      agentMode: 'orchestrator' as const,
+      onProviderChange: vi.fn(),
+      onModelChange: vi.fn(),
+      onAgentModeChange: vi.fn(),
+    }
 
     const { rerender } = render(
       <ChatPanel
+        {...steeringProps}
         logs={makeLogs('A')}
         isWorking={false}
         onSend={vi.fn()}
@@ -129,6 +141,7 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
 
     rerender(
       <ChatPanel
+        {...steeringProps}
         logs={makeLogs('B')}
         isWorking={false}
         onSend={vi.fn()}
@@ -152,6 +165,7 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
 
     rerender(
       <ChatPanel
+        {...steeringProps}
         logs={makeLogs('A')}
         isWorking={false}
         onSend={vi.fn()}

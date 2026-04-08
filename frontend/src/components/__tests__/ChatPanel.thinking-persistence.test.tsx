@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type React from 'react'
 
 import { ChatPanel } from '../ChatPanel'
-import type { LogEntry } from '../../hooks/useWebSocket'
+import type { LogEntry, SteeringMode } from '../../hooks/useWebSocket'
 
 function baseProps(overrides: Partial<React.ComponentProps<typeof ChatPanel>> = {}): React.ComponentProps<typeof ChatPanel> {
   return {
     logs: [],
     isWorking: false,
+    mode: 'steer' as SteeringMode,
+    queuedMessages: [],
+    onModeChange: vi.fn(),
     onSend: vi.fn(),
     onDecomposePlan: vi.fn(),
     connectionStatus: 'connected',

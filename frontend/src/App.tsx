@@ -95,8 +95,8 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [mode] = useState<SteeringMode>('steer')
-  const [, setQueuedMessages] = useState<string[]>([])
+  const [mode, setMode] = useState<SteeringMode>('steer')
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
@@ -1186,6 +1186,9 @@ function App() {
               <ChatPanel
                 logs={enrichedLogs}
                 isWorking={isWorking}
+                mode={mode}
+                queuedMessages={queuedMessages}
+                onModeChange={setMode}
                 onSend={handleSend}
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
