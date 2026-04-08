@@ -25,6 +25,7 @@ import httpx
 from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
+from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.session_workspace import (
     ensure_session_workspace,
@@ -367,6 +368,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 ]
 TOOL_INDEX = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
 
+# Tools that are safe to execute concurrently when the model emits a batch.
+# Keep this conservative: read-only or bounded side-effect operations only.
+PARALLEL_SAFE_TOOLS = {
+    "web_search",
+    "extract_page",
+    "list_files",
+    "read_file",
+    "memory_search",
+    "memory_read",
+    "github_get_file",
+    "github_get_issues",
+    "github_get_pull_requests",
+    "github_list_repos",
+}
+
 
 def _truncate(text: str, limit: int = RESULT_CHAR_LIMIT) -> str:
     """Trim long tool results before sending them back to the model."""
@@ -414,6 +430,8 @@ def _connected_integrations(settings: dict[str, Any]) -> set[str]:
 def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dict[str, Any]]:
     """Resolve the current tool manifest after permissions and integration gating."""
     disabled_tools = {str(item) for item in settings.get("disabled_tools", []) or []}
+    agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
+    disabled_tools.update(blocked_tools_for_mode(agent_mode))
     connected_integrations = _connected_integrations(settings)
     subagent_allowlist: set[str] | None = None
     if is_subagent:
@@ -451,9 +469,10 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
     browser_tools_enabled = any(tool["name"] == "screenshot" for tool in available)
     github_tools_enabled = any(str(tool["name"]).startswith("github_") for tool in available)
     local_workspace_enabled = any(tool["name"] in {"list_files", "read_file", "write_file", "exec_python", "exec_javascript", "exec_shell"} for tool in available)
+    agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
 
     rules: list[str] = [
-        "Return exactly ONE JSON tool call per message and nothing else.",
+        "Return JSON only: either one tool call object, or a {\"tool_calls\": [...]} batch for parallel-safe tools.",
         "Only use tools listed below. If a tool is not listed, it is not available in this session.",
         "Use concise, efficient steps and finish with the done tool when the task is complete.",
     ]
@@ -481,6 +500,7 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
                 "Do not invent repository paths or branch names. Use returned tool results.",
             ]
         )
+    rules.append(f"Active system mode: {agent_mode}. {MODE_SYSTEM_HINTS.get(agent_mode, '')}")
     rules.extend(
         [
             "Identity: You are Aegis, an AI agent built by Chronos AI.",
@@ -1336,6 +1356,43 @@ def _parse_tool_call(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse model output into one or more tool calls.
+
+    Supported formats:
+    - {"tool": "...", ...}
+    - {"tool_calls": [{"tool": "..."}, ...]}
+    - [{"tool": "..."}, ...]
+    """
+    single = _parse_tool_call(text)
+    if not single:
+        return []
+
+    if isinstance(single.get("tool"), str):
+        return [single]
+
+    raw_calls = single.get("tool_calls")
+    if isinstance(raw_calls, list):
+        parsed_calls: list[dict[str, Any]] = []
+        for candidate in raw_calls:
+            if isinstance(candidate, dict) and isinstance(candidate.get("tool"), str):
+                parsed_calls.append(candidate)
+        return parsed_calls
+
+    return []
+
+
+def _can_run_tool_calls_in_parallel(tool_calls: list[dict[str, Any]]) -> bool:
+    """Return whether a batch of tool calls can be executed concurrently."""
+    if len(tool_calls) < 2:
+        return False
+    for call in tool_calls:
+        tool_name = str(call.get("tool", "")).strip()
+        if tool_name not in PARALLEL_SAFE_TOOLS:
+            return False
+    return True
+
+
 async def run_universal_navigation(
     *,
     provider: BaseProvider,
@@ -1472,67 +1529,96 @@ async def run_universal_navigation(
             }
 
         messages.append(ChatMessage(role="assistant", content=reply))
-        tool_call = _parse_tool_call(reply)
-        if not tool_call:
+        tool_calls = _parse_tool_calls(reply)
+        if not tool_calls:
             await emit_step(f"Model response (no tool call): {reply[:200]}")
-            messages.append(ChatMessage(role="user", content="Please return exactly one JSON tool call to continue."))
+            messages.append(
+                ChatMessage(
+                    role="user",
+                    content="Please return JSON tool call(s): either one tool object or a {\"tool_calls\": [...]} array.",
+                )
+            )
             continue
+        # Fast path: done/error as a single terminal call.
+        if len(tool_calls) == 1:
+            tool_call = tool_calls[0]
+            tool_name = str(tool_call.get("tool", "unknown"))
+            if tool_name == "done":
+                summary = str(tool_call.get("summary", "Task completed."))
+                await emit_step(summary, step_type="result")
+                return {
+                    "status": "completed",
+                    "instruction": instruction,
+                    "steps": steps,
+                    "summary": summary,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                }
+            if tool_name == "error":
+                error_message = str(tool_call.get("message", "Unknown error."))
+                await emit_step(f"Error: {error_message}", step_type="error")
+                return {
+                    "status": "failed",
+                    "instruction": instruction,
+                    "steps": steps,
+                    "error": error_message,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                }
 
-        tool_name = str(tool_call.get("tool", "unknown"))
-        if tool_name == "done":
-            summary = str(tool_call.get("summary", "Task completed."))
-            await emit_step(summary, step_type="result")
-            return {
-                "status": "completed",
-                "instruction": instruction,
-                "steps": steps,
-                "summary": summary,
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
-            }
-        if tool_name == "error":
-            error_message = str(tool_call.get("message", "Unknown error."))
-            await emit_step(f"Error: {error_message}", step_type="error")
-            return {
-                "status": "failed",
-                "instruction": instruction,
-                "steps": steps,
-                "error": error_message,
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
-            }
+        run_in_parallel = _can_run_tool_calls_in_parallel(tool_calls)
+        if len(tool_calls) > 1:
+            mode_text = "parallel" if run_in_parallel else "sequential"
+            await emit_step(f"Processing {len(tool_calls)} tool calls ({mode_text})", step_type="step")
 
-        if tool_name == "ask_user_input":
-            question = str(tool_call.get("question", ""))
-            options = [str(item) for item in list(tool_call.get("options", []))]
-            request_id = str(uuid4())
-            special_step: dict[str, Any] = {
-                "type": "user_input_request",
-                "content": f"[ask_user_input] {question}",
-                "question": question,
-                "options": options,
-                "request_id": request_id,
-                "steering": [],
-            }
-            steps.append(special_step)
-            if on_step:
-                await on_step(special_step)
+        async def _execute_single_tool_call(tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
+            tool_name = str(tool_call.get("tool", "unknown"))
+            if tool_name == "ask_user_input":
+                question = str(tool_call.get("question", ""))
+                options = [str(item) for item in list(tool_call.get("options", []))]
+                request_id = str(uuid4())
+                special_step: dict[str, Any] = {
+                    "type": "user_input_request",
+                    "content": f"[ask_user_input] {question}",
+                    "question": question,
+                    "options": options,
+                    "request_id": request_id,
+                    "steering": [],
+                }
+                steps.append(special_step)
+                if on_step:
+                    await on_step(special_step)
+            else:
+                await emit_step(f"[{tool_name}] {json.dumps({key: value for key, value in tool_call.items() if key != 'tool'})[:220]}")
+            return await tool_executor.run(tool_call)
+
+        if run_in_parallel:
+            execution_results = await asyncio.gather(*(_execute_single_tool_call(tool_call) for tool_call in tool_calls))
         else:
-            await emit_step(f"[{tool_name}] {json.dumps({key: value for key, value in tool_call.items() if key != 'tool'})[:220]}")
+            execution_results: list[tuple[str, bytes | None]] = []
+            for tool_call in tool_calls:
+                execution_results.append(await _execute_single_tool_call(tool_call))
 
-        result_text, screenshot_bytes = await tool_executor.run(tool_call)
-        if screenshot_bytes and on_frame:
-            await on_frame(base64.b64encode(screenshot_bytes).decode())
+        result_fragments: list[str] = []
+        screenshot_frames: list[bytes] = []
+        for index, (result_text, screenshot_bytes) in enumerate(execution_results, start=1):
+            result_fragments.append(f"Tool #{index} result: {result_text}")
+            if screenshot_bytes:
+                screenshot_frames.append(screenshot_bytes)
+                if on_frame:
+                    await on_frame(base64.b64encode(screenshot_bytes).decode())
 
-        if screenshot_bytes:
-            follow_up = ChatMessage(
-                role="user",
-                content=f"Tool result: {result_text}\nHere is the current screenshot. Decide your next action.",
-                images=[screenshot_bytes],
+        follow_up_content = "\n\n".join(result_fragments)
+        if screenshot_frames:
+            messages.append(
+                ChatMessage(
+                    role="user",
+                    content=f"{follow_up_content}\n\nCurrent screenshot attached. Decide your next action.",
+                    images=[screenshot_frames[-1]],
+                )
             )
         else:
-            follow_up = ChatMessage(role="user", content=f"Tool result: {result_text}\nDecide your next action.")
-        messages.append(follow_up)
+            messages.append(ChatMessage(role="user", content=f"{follow_up_content}\n\nDecide your next action."))
 
     await emit_step("Reached maximum step limit without completing task.", step_type="error")
     return {

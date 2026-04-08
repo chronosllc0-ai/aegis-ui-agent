@@ -28,6 +28,42 @@ SUPPORTED_GEMINI_MODELS = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro",
 # Providers that use the Gemini ADK path
 GEMINI_PROVIDERS = {"google", "gemini", ""}
 
+PROVIDER_ALIASES: dict[str, str] = {
+    "google": "google",
+    "gemini": "google",
+    "google gemini": "google",
+    "google (gemini)": "google",
+    "chronos": "chronos",
+    "chronos gateway": "chronos",
+    "chronos ai": "chronos",
+    "gateway": "chronos",
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "xai": "xai",
+    "x.ai": "xai",
+    "openrouter": "openrouter",
+    "fireworks": "fireworks",
+    "fireworks ai": "fireworks",
+}
+
+
+def _normalize_provider_name(provider_name: str, model_id: str = "") -> str:
+    """Normalize provider labels/aliases from UI payloads into canonical IDs."""
+    candidate = provider_name.strip().lower().replace("-", " ")
+    if candidate in PROVIDER_ALIASES:
+        return PROVIDER_ALIASES[candidate]
+
+    compact = candidate.replace(" ", "")
+    if compact in {"fireworksai", "chronosgateway"}:
+        return "fireworks" if compact == "fireworksai" else "chronos"
+
+    normalized_model = model_id.strip().lower()
+    if normalized_model.startswith("accounts/fireworks/models/"):
+        return "fireworks"
+    if normalized_model.startswith("gemini"):
+        return "google"
+    return candidate
+
 
 class AgentOrchestrator:
     """Orchestrates the UI navigation pipeline.
@@ -206,12 +242,17 @@ class AgentOrchestrator:
         Automatically routes to the Gemini ADK path or the universal
         vision+tool-calling navigator depending on the requested provider.
         """
-        provider_name = str((settings or {}).get("provider", "")).strip().lower()
+        configured_settings = settings or {}
+        model_id = str(configured_settings.get("model", "")).strip()
+        raw_provider = str(configured_settings.get("provider", "")).strip()
+        provider_name = _normalize_provider_name(raw_provider, model_id)
+        if not provider_name:
+            provider_name = "chronos"
         is_gemini_path = not provider_name or provider_name in GEMINI_PROVIDERS
 
         # ── Non-Gemini path ────────────────────────────────────────────
         if not is_gemini_path:
-            resolved = await self._resolve_provider_for_navigation(settings, user_uid)
+            resolved = await self._resolve_provider_for_navigation({**configured_settings, "provider": provider_name}, user_uid)
             if resolved is None:
                 # No API key available — surface a clear error
                 missing_key_msg = (

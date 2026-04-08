@@ -32,6 +32,7 @@ from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
+from backend.modes import MODE_LABELS, normalize_agent_mode
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
@@ -354,6 +355,18 @@ class SessionRuntime:
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
+
+
+def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Merge websocket config payload with defaults without dropping prior settings."""
+    merged = {**current, **incoming}
+    provider = str(merged.get("provider", "")).strip().lower()
+    if not provider:
+        merged["provider"] = "chronos"
+    model = str(merged.get("model", "")).strip()
+    if not model:
+        merged["model"] = "nvidia/nemotron-3-super-120b-a12b:free"
+    return merged
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -1168,7 +1181,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if not isinstance(candidate_settings, dict):
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
-                runtime.settings = candidate_settings
+                runtime.settings = _merge_runtime_settings(runtime.settings, candidate_settings)
                 await _send_step(
                     websocket,
                     {"type": "config", "content": "Session settings updated"},
@@ -1718,6 +1731,7 @@ TELEGRAM_SLASH_COMMANDS = [
     {"command": "queue", "description": "Queue a task: /queue <instruction>"},
     {"command": "status", "description": "Show agent status and credits"},
     {"command": "model", "description": "Show current model"},
+    {"command": "mode", "description": "Show or switch agent mode"},
     {"command": "models", "description": "List models and switch"},
     {"command": "stream", "description": "Live browser screenshots: /stream start|stop"},
     {"command": "help", "description": "Show all commands"},
@@ -1827,6 +1841,7 @@ async def _handle_slash_command(
             "/queue <instruction> — queue for later\n"
             "/status — agent status + credits\n"
             "/model — current model\n"
+            "/mode [name] — show or switch mode\n"
             "/models — list & switch model\n"
             "/stream start|stop — live screenshots\n"
             "/reason on|off|low|medium|high|stream|status — reasoning mode\n"
@@ -1849,7 +1864,9 @@ async def _handle_slash_command(
                 break
         except Exception:
             pass
-        return f"{state}\n🧠 Model: {model} ({provider})\n📋 Queued: {queued}{credits_info}"
+        mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
+        mode_label = MODE_LABELS.get(mode, mode.title())
+        return f"{state}\n🧠 Model: {model} ({provider})\n🧭 Mode: {mode_label}\n📋 Queued: {queued}{credits_info}"
 
     if cmd == "model":
         if not runtime:
@@ -1857,6 +1874,16 @@ async def _handle_slash_command(
         model = runtime.settings.get("model", "not set")
         provider = runtime.settings.get("provider", "")
         return f"🧠 Current model: *{model}* ({provider})"
+
+    if cmd == "mode":
+        if not runtime:
+            return "⚪ No active session."
+        if not arg:
+            active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
+            return f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+        requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
+        runtime.settings["agent_mode"] = requested_mode
+        return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
 
     if cmd == "models":
         providers = list_providers()
