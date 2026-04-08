@@ -1248,6 +1248,25 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "steer":
+                if not runtime.task_running:
+                    await _log_web_message(
+                        runtime,
+                        session_id,
+                        "user",
+                        instruction,
+                        title=instruction[:200],
+                        title_candidate=title_candidate,
+                        metadata={
+                            "source": "websocket",
+                            "action": "navigate_from_idle_steer",
+                            "task_label": task_label,
+                            "client": client_metadata or {},
+                        },
+                    )
+                    if runtime.conversation_id:
+                        await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
+                    _start_navigation_task(websocket, runtime, session_id, instruction)
+                    continue
                 runtime.steering_context.append(instruction)
                 await _send_step(
                     websocket,
@@ -1263,6 +1282,25 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     metadata={"source": "websocket", "action": "steer", "client": client_metadata or {}},
                 )
             elif action == "interrupt":
+                if not runtime.task_running:
+                    await _log_web_message(
+                        runtime,
+                        session_id,
+                        "user",
+                        instruction,
+                        title=instruction[:200],
+                        title_candidate=title_candidate,
+                        metadata={
+                            "source": "websocket",
+                            "action": "navigate_from_idle_interrupt",
+                            "task_label": task_label,
+                            "client": client_metadata or {},
+                        },
+                    )
+                    if runtime.conversation_id:
+                        await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
+                    _start_navigation_task(websocket, runtime, session_id, instruction)
+                    continue
                 runtime.cancel_event.set()
                 await _send_step(
                     websocket,
@@ -1287,6 +1325,25 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 )
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "queue":
+                if not runtime.task_running:
+                    await _log_web_message(
+                        runtime,
+                        session_id,
+                        "user",
+                        instruction,
+                        title=instruction[:200],
+                        title_candidate=title_candidate,
+                        metadata={
+                            "source": "websocket",
+                            "action": "navigate_from_idle_queue",
+                            "task_label": task_label,
+                            "client": client_metadata or {},
+                        },
+                    )
+                    if runtime.conversation_id:
+                        await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
+                    _start_navigation_task(websocket, runtime, session_id, instruction)
+                    continue
                 runtime.queued_instructions.append(instruction)
                 await _send_step(
                     websocket,

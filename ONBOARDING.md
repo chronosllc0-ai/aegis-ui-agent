@@ -2910,3 +2910,26 @@
 ### Validation
 - `pytest -q tests/test_universal_navigator_parallel_tools.py` passed (15/15).
 - `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_orchestrator_startup.py tests/test_universal_navigator_parallel_tools.py` passed (18/18).
+
+## 2026-04-08 — Idle steering/queue start fix + Gemini key check fix
+
+### What changed
+- Fixed a critical settings shadowing bug in `orchestrator.py` where the `execute_task(..., settings=...)` argument hid the imported config settings object. This caused Gemini key validation to inspect the session dict instead of `config.settings`, producing incorrect “No Gemini API key configured” failures.
+- Updated `orchestrator.py` to reference `settings_module` (import alias) consistently for server keys/secrets and to use `session_settings` as the per-request payload name to avoid future collisions.
+- Hardened `/ws/navigate` action semantics in `main.py`:
+  - `steer`, `queue`, and `interrupt` now **start a normal task** when the runtime is idle (`task_running == False`).
+  - These actions only retain their control semantics while a task is actively running.
+  - This aligns behavior with UX intent: any prompt while idle should start work; only in-flight prompts can steer/interrupt/queue.
+- Added websocket regression tests in `tests/test_main_websocket.py`:
+  - `test_idle_steer_starts_task_instead_of_only_buffering_steering`
+  - `test_idle_queue_starts_task_instead_of_queuing`
+- Added orchestrator regression test in `tests/test_orchestrator_startup.py`:
+  - `test_gemini_path_uses_module_settings_not_session_dict`
+
+### Why
+- Users reported tasks never starting across providers/models. Two root causes were addressed:
+  1. Idle control-action prompts could be swallowed as steering/queue state instead of starting execution.
+  2. Gemini key checks were reading the wrong object due to variable shadowing, leading to misleading provider/model behavior.
+
+### Validation
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing tests/test_orchestrator_startup.py::test_gemini_path_uses_module_settings_not_session_dict` passed.

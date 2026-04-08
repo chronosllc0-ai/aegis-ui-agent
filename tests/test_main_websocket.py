@@ -126,6 +126,50 @@ def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
     assert "Queued instruction: later" in queue_ack["data"]["content"]
 
 
+def test_idle_steer_starts_task_instead_of_only_buffering_steering() -> None:
+    """Steer action should start a new task when no task is currently running."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "steer", "instruction": "open example.com"})
+        step = ws.receive_json()
+        frame = ws.receive_json()
+        workflow_step = ws.receive_json()
+        result = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert step["type"] == "step"
+    assert step["data"]["content"] == "stub:open example.com"
+    assert frame["type"] == "frame"
+    assert workflow_step["type"] == "workflow_step"
+    assert result["type"] == "result"
+    assert result["data"]["status"] == "completed"
+
+
+def test_idle_queue_starts_task_instead_of_queuing() -> None:
+    """Queue action should start immediately when no task is running."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "queue", "instruction": "search for laptops"})
+        step = ws.receive_json()
+        frame = ws.receive_json()
+        workflow_step = ws.receive_json()
+        result = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert step["type"] == "step"
+    assert step["data"]["content"] == "stub:search for laptops"
+    assert frame["type"] == "frame"
+    assert workflow_step["type"] == "workflow_step"
+    assert result["type"] == "result"
+    assert result["data"]["status"] == "completed"
+
+
 def test_health_reports_initializing_database_state() -> None:
     """Health endpoint should stay available while the database is still warming up."""
     previous_db_ready = main.db_ready
