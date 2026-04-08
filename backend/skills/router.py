@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import _verify_session
@@ -100,11 +101,23 @@ async def _set_admin_skills_policy(session: AsyncSession, *, admin_uid: str, pol
     result = await session.execute(select(PlatformSetting).where(PlatformSetting.key == _ADMIN_SKILLS_POLICY_KEY))
     row = result.scalar_one_or_none()
     serialized = json.dumps(policy, ensure_ascii=False)
-    if row is None:
-        session.add(PlatformSetting(key=_ADMIN_SKILLS_POLICY_KEY, value=serialized, updated_by=admin_uid))
-    else:
+    try:
+        if row is None:
+            session.add(PlatformSetting(key=_ADMIN_SKILLS_POLICY_KEY, value=serialized, updated_by=admin_uid))
+            await session.flush()
+        else:
+            row.value = serialized
+            row.updated_by = admin_uid
+            await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        result = await session.execute(select(PlatformSetting).where(PlatformSetting.key == _ADMIN_SKILLS_POLICY_KEY))
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise
         row.value = serialized
         row.updated_by = admin_uid
+        await session.flush()
     await session.commit()
     return await _get_admin_skills_policy(session)
 
@@ -279,7 +292,6 @@ async def set_admin_skills_policy(
         "default_enabled_skill_ids": [skill_id.strip() for skill_id in body.default_enabled_skill_ids if skill_id.strip()],
     }
     saved = await _set_admin_skills_policy(session, admin_uid=admin_user.uid, policy=policy)
-    await session.commit()
     return {"ok": True, "policy": saved}
 
 

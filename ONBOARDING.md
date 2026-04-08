@@ -1,3 +1,33 @@
+## Session 5.83 - April 8, 2026 (PR #192 review follow-up: policy response normalization + race-safe save)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 small backend hardening pass
+
+### What Was Done
+- Addressed PR #192 reviewer suggestions in `backend/skills/router.py` for admin skills policy writes:
+  - `_set_admin_skills_policy(...)` now flushes writes and catches `IntegrityError` on first-create races,
+  - on race, it rolls back/reloads existing row and retries as update,
+  - function now commits internally and returns canonical normalized policy from `_get_admin_skills_policy(...)`.
+- Updated `POST /api/admin/skills/policy` to return the normalized persisted policy object from the helper (no duplicate commit in endpoint).
+
+### What's Working
+- Policy save endpoint now returns the same sanitized/normalized shape that is actually persisted.
+- First-write concurrent admin race is handled gracefully instead of surfacing a uniqueness failure.
+
+### What's NOT Working Yet
+- No new issues found in this pass.
+
+### Next Steps
+1. Optional: add targeted async test for concurrent first-write behavior around `_set_admin_skills_policy(...)`.
+
+### Decisions Made
+- Kept fix localized in router helper to avoid introducing broader migration/schema work.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.82 - April 8, 2026 (PR review fixes: persistent admin skills policy + marketplace version label cleanup)
 
 **Agent:** GPT-5.3-Codex  
