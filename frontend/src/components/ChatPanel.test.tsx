@@ -8,6 +8,9 @@ const baseChatPanelProps = {
   provider: 'google',
   model: 'gemini-2.5-pro',
   agentMode: 'orchestrator' as const,
+  mode: 'steer' as const,
+  queuedMessages: [],
+  onModeChange: vi.fn(),
   onProviderChange: vi.fn(),
   onModelChange: vi.fn(),
   onAgentModeChange: vi.fn(),
@@ -121,6 +124,87 @@ describe('ChatPanel plan intent UX', () => {
       expect(screen.getByText('Build onboarding flow')).toBeInTheDocument()
     })
     expect(screen.queryByText('/plan Build onboarding flow')).not.toBeInTheDocument()
+  })
+})
+
+describe('ChatPanel steering control in composer', () => {
+  it('shows steering control only while a task is running', () => {
+    const { rerender } = render(
+      <ChatPanel
+        logs={[]}
+        isWorking={true}
+        onSend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+        {...baseChatPanelProps}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'steer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'interrupt' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'queue' })).toBeInTheDocument()
+
+    rerender(
+      <ChatPanel
+        logs={[]}
+        isWorking={false}
+        onSend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+        {...baseChatPanelProps}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'steer' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'interrupt' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'queue' })).not.toBeInTheDocument()
+  })
+
+  it('routes selected steering mode through outbound send action', () => {
+    const onSend = vi.fn()
+    const onModeChange = vi.fn()
+
+    render(
+      <ChatPanel
+        {...baseChatPanelProps}
+        logs={[]}
+        isWorking={true}
+        mode='queue'
+        queuedMessages={['Follow-up task']}
+        onModeChange={onModeChange}
+        onSend={onSend}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+      />,
+    )
+
+    const composers = screen.getAllByPlaceholderText('Ask for a task, research, or code…')
+    const composer = composers[composers.length - 1]
+    fireEvent.change(composer, { target: { value: 'Do the next thing' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(onSend).toHaveBeenCalledWith(
+      'Do the next thing',
+      'queue',
+      expect.objectContaining({ task_label: 'Do the next thing' }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'interrupt' }))
+    expect(onModeChange).toHaveBeenCalledWith('interrupt')
   })
 })
 

@@ -1,3 +1,48 @@
+## Session 5.60 - April 8, 2026 (ChatPanel steering controls parity with InputBar)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend wiring + test pass
+
+### What Was Done
+- Ported steering-control support into `ChatPanel` API and composer flow:
+  - added `mode`, `queuedMessages`, and `onModeChange` props on `ChatPanel`.
+  - threaded those props into the custom composer (`InputBarCursor`).
+- Reused shared `SteeringControl` component in `ChatPanel` composer (no forked logic).
+- Rendered steering controls only while a task is running (`isWorking === true`), hidden when idle.
+- Updated composer send behavior to preserve existing UX while routing selected steering mode through `onSend(...)`:
+  - `steer` for steering notes
+  - `interrupt` for stop + redirect
+  - `queue` for follow-up queueing
+- Wired app-level state in `frontend/src/App.tsx`:
+  - switched to mutable `mode` state (`setMode`)
+  - exposed `queuedMessages` state to pass queue count into `ChatPanel`.
+- Added/updated ChatPanel tests to validate:
+  - steering control visible during running tasks
+  - steering control hidden when idle
+  - selected mode affects outbound send action
+  - existing hydration/thinking tests still pass with new required props.
+
+### What's Working
+- While agent runs, users can pick steer/interrupt/queue directly in chat composer.
+- Steering controls disappear automatically when work stops.
+- Composer send path now correctly forwards selected mode without changing attachment/plan behavior.
+- Provider/model/agent-mode selectors remain rendered in their existing rows, and tests are green.
+
+### What's NOT Working Yet
+- No functional blockers identified in this pass.
+
+### Next Steps
+1. Consider resetting steering mode back to `steer` automatically after an `interrupt` send if product UX wants one-shot interrupts.
+2. Optionally add a dedicated layout regression test for narrow/mobile width if we add more composer controls later.
+
+### Decisions Made
+- Reused `SteeringControl` component as-is to avoid diverging mode logic between input surfaces.
+- Kept controls in a dedicated composer row (only during active tasks) to preserve compact selector layout and avoid overlap.
+
+### Blockers
+- None.
+
+---
 ## Session 5.59 - April 8, 2026 (Review follow-up: activity fallback + accessibility)
 
 **Agent:** GPT-5.3-Codex
