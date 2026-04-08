@@ -21,7 +21,7 @@ export type AdminSkillsPolicy = {
 
 const DEFAULT_POLICY: AdminSkillsPolicy = {
   allow_unreviewed_installs: false,
-  block_high_risk_skills: true,
+  block_high_risk_skills: false,
   require_approval_before_install: false,
   default_enabled_skill_ids: [],
 }

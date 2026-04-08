@@ -1,3 +1,57 @@
+## Session 5.82 - April 8, 2026 (SkillsTab Admin Controls + backend RBAC/persistence)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Implemented an admin-only segmented UX in `SkillsTab.tsx` with **My Skills** vs **Admin Controls**.
+- Added new Admin Controls surfaces:
+  - **Policy Defaults** (require-approval toggle + default-enabled skill multi-select),
+  - **Allow/Block List** (search + tabular rows + Allow/Block/Reset actions),
+  - **Org Install Audit** (filters + paginated timeline).
+- Added safety confirmation modal for destructive block/reset actions.
+- Added backend persistence helpers in `backend/skills/policy_store.py` using `PlatformSetting` storage for:
+  - org policy values,
+  - per-skill allow/block override map.
+- Reworked `/api/admin/skills/policy` endpoints to persist/read from DB-backed platform settings (instead of in-memory state).
+- Added new admin RBAC endpoints:
+  - `GET /api/admin/skills/allow-block`
+  - `POST /api/admin/skills/{skill_id}/allow`
+  - `POST /api/admin/skills/{skill_id}/block`
+  - `POST /api/admin/skills/{skill_id}/reset`
+  - `GET /api/admin/skills/install-audit` (filtered, paginated)
+- Enforced install-time blocking in `SkillService.install_skill(...)`:
+  - checks org policy + allow/block overrides,
+  - blocks user install flow for admin-blocked skills,
+  - emits install/install_blocked/uninstall audit events to `skill_audit_events`.
+- Added regression coverage in `tests/test_skills_admin_controls.py` for:
+  - policy persistence after reload,
+  - blocked install prevention,
+  - install audit pagination behavior.
+
+### What's Working
+- Admin-only controls are hidden from non-admin users in the settings UI.
+- Policy values now persist in DB-backed platform settings.
+- Block list policy is enforced server-side in install flow.
+- Install audit endpoint supports pagination and filter params without crashing.
+
+### What's NOT Working Yet
+- Existing `tests/test_skills_api.py::test_admin_review_queue_status_filter_and_badges` may still depend on environment-specific scan behavior (VT disabled defaults can produce `scan_failed` instead of `review`).
+
+### Next Steps
+1. Stabilize scan workflow tests to be deterministic under `VIRUSTOTAL_ENABLED=False` (explicit mocks in API-level tests).
+2. Optionally add dedicated frontend tests for SkillsTab Admin Controls interactions and modal confirmation behavior.
+3. Consider exposing actor display metadata (email/name) in install audit payload for richer admin readability.
+
+### Decisions Made
+- Used existing `PlatformSetting` table for policy + allow/block persistence to avoid schema migration overhead.
+- Kept RBAC enforcement server-side by reusing `get_admin_user` dependencies on all admin endpoints.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.81 - April 8, 2026 (Skill Hub submission/review deterministic state machine)
 
 **Agent:** GPT-5.3-Codex  
