@@ -15,6 +15,18 @@ from backend.skills.service import SkillService
 from backend.skills.router import skills_router
 
 
+async def _mock_clean_scan(*, file_name: str, content: bytes) -> dict[str, object]:
+    _ = (file_name, content)
+    return {
+        "engine": "virustotal",
+        "verdict": "pass",
+        "risk_label": "clean",
+        "raw_json": {"status": "mocked"},
+        "report_url": None,
+        "scanned_at": SkillService._now(),
+    }
+
+
 def _init_db_sync(tmp_path) -> None:
     async def _run() -> None:
         database.init_db(f"sqlite+aiosqlite:///{tmp_path / 'skills_api.db'}")
@@ -49,12 +61,13 @@ def _seed_approved_skill_sync() -> str:
                 skill_markdown="# Safe",
                 submitted_by="admin-1",
             )
-            await SkillService.run_scans_for_submission(
-                session,
-                submission_id=submission.id,
-                actor_id="admin-1",
-                actor_type="admin",
-            )
+            with patch("backend.skills.service.VirusTotalScanner.scan_content", side_effect=_mock_clean_scan):
+                await SkillService.run_scans_for_submission(
+                    session,
+                    submission_id=submission.id,
+                    actor_id="admin-1",
+                    actor_type="admin",
+                )
             await SkillService.apply_review_decision(
                 session,
                 submission_id=submission.id,
@@ -144,8 +157,9 @@ def test_admin_review_queue_status_filter_and_badges(tmp_path) -> None:
         submission_id = submit.json()["submission"]["id"]
 
         client.cookies.set("aegis_session", "admin-1")
-        scan = client.post(f"/api/admin/skills/{submission_id}/scan")
-        assert scan.status_code == 200
+        with patch("backend.skills.service.VirusTotalScanner.scan_content", side_effect=_mock_clean_scan):
+            scan = client.post(f"/api/admin/skills/{submission_id}/scan")
+            assert scan.status_code == 200
 
         queue = client.get("/api/admin/skills/review-queue?status=review")
         assert queue.status_code == 200

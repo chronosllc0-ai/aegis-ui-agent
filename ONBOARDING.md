@@ -4216,3 +4216,48 @@
 ### Decisions / blockers
 - Decision: treat `reasoning_start` as idempotent initialization if stream state already exists.
 - No blocker encountered.
+
+## 2026-04-08 — VirusTotal risk-tag integration for skills pipelines/UI
+
+### What changed
+- Added centralized VirusTotal helper module `backend/security/virustotal.py` with:
+  - `submit_file_for_scan(...)`
+  - `fetch_scan_report(...)`
+  - `map_report_to_risk_tag(...)` returning `clean | low_risk | suspicious | malicious | scan_pending | scan_failed`.
+- Extended config/env plumbing:
+  - `VIRUSTOTAL_ENABLED` added to `config.py` (default `False`).
+  - `VIRUSTOTAL_FALLBACK_POLICY` added (`warn_allow` default; `block` supported for strict policy).
+  - `.env.example` updated with placeholders only (no secrets).
+- Wired Skill Hub submission scan flow:
+  - `backend/skills_hub/service.py` now performs VT scan on submitted artifact text and enforces policy gates.
+  - Malicious blocked, suspicious requires explicit admin override, pending/failed respects fallback policy.
+  - Router/schema updated to pass actor role + `admin_override` flag.
+- Wired install/publish gating in `backend/skills/service.py`:
+  - install blocked for malicious and suspicious (override required path), pending/failed can be blocked via fallback policy.
+  - approval path blocks malicious and requires override notes for suspicious.
+  - existing `VirusTotalScanner` kept as compatibility wrapper but delegates to new security module.
+- Frontend UI risk-tag visibility:
+  - `SkillsTab.tsx` installed list keeps risk tag badges.
+  - Added marketplace section in `SkillsTab.tsx` with risk tags and install button UX.
+  - blocked install error surfaced inline + toast.
+  - `skills-hub/ReviewQueue.tsx` now shows risk tag badge and admin risk filter chips.
+
+### Tests added/updated
+- Added `tests/test_virustotal_risk_mapping.py` for VT report → risk tag mapping.
+- Added `tests/test_skills_install_policy.py` for install gate enforcement.
+- Added frontend tests:
+  - `frontend/src/components/skills-hub/ReviewQueue.test.tsx`
+  - `frontend/src/components/settings/SkillsTab.test.tsx`
+
+### What's working
+- Risk tags now normalized around required vocabulary and propagated to backend policy checks + UI badges.
+- Review queue has quick chip filters for risk values.
+- Install flow surfaces block reasons for malicious/suspicious artifacts.
+
+### What's not done / next
+- Consider adding a persistent DB-level explicit `admin_override` audit marker for install/publish actions.
+- Consider exposing VT report URL + engine stats in marketplace detail modal for deeper analyst review.
+
+### Decisions / blockers
+- Decision: default fallback behavior is warning/allow (`warn_allow`), with strict blocking available via `VIRUSTOTAL_FALLBACK_POLICY=block`.
+- No blocker encountered.
