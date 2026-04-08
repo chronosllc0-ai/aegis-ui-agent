@@ -33,6 +33,7 @@ from backend.modes import (
     is_tool_allowed_for_mode,
     normalize_agent_mode,
 )
+from backend.orchestrator_mode import OrchestratorModeRouter, build_synthesis
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.skills.parser import extract_runtime_guidance_block
 from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
@@ -1735,6 +1736,106 @@ async def run_universal_navigation(
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider."""
     resolved_settings = settings or {}
+    active_mode = normalize_agent_mode(resolved_settings.get("agent_mode", ""))
+    if active_mode == "orchestrator" and not is_subagent:
+        route_decision = OrchestratorModeRouter.classify(
+            instruction,
+            requested_mode=str(resolved_settings.get("agent_mode", "")),
+        )
+        delegate_settings = {**resolved_settings, "agent_mode": route_decision.selected_mode}
+        delegate_timeout = min(max(int(resolved_settings.get("orchestrator_delegate_timeout_seconds", 120)), 15), 600)
+        route_trace = {
+            "type": "route_decision",
+            "router_mode": "orchestrator",
+            "selected_mode": route_decision.selected_mode,
+            "reason": route_decision.reason,
+            "confidence": route_decision.confidence,
+            "bypass_attempt_detected": route_decision.bypass_attempt_detected,
+            "timeout_seconds": delegate_timeout,
+        }
+        if on_step:
+            await on_step({"type": "route_decision", "content": json.dumps(route_trace), "steering": []})
+        if on_workflow_step:
+            await on_workflow_step(route_trace)
+
+        child_results: list[dict[str, Any]] = []
+        fallback_result: dict[str, Any] | None = None
+        primary_result: dict[str, Any] | None = None
+        try:
+            primary_result = await asyncio.wait_for(
+                run_universal_navigation(
+                    provider=provider,
+                    model=model,
+                    executor=executor,
+                    session_id=session_id,
+                    instruction=instruction,
+                    settings=delegate_settings,
+                    on_step=on_step,
+                    on_frame=on_frame,
+                    cancel_event=cancel_event,
+                    steering_context=steering_context,
+                    on_workflow_step=on_workflow_step,
+                    on_user_input=on_user_input,
+                    user_uid=user_uid,
+                    enable_reasoning=enable_reasoning,
+                    reasoning_effort=reasoning_effort,
+                    on_reasoning_delta=on_reasoning_delta,
+                    on_spawn_subagent=on_spawn_subagent,
+                    on_message_subagent=on_message_subagent,
+                    is_subagent=is_subagent,
+                ),
+                timeout=delegate_timeout,
+            )
+            child_results.append(
+                {
+                    "ref": "child:primary",
+                    "mode": route_decision.selected_mode,
+                    "status": primary_result.get("status"),
+                }
+            )
+        except Exception as delegate_exc:  # noqa: BLE001
+            logger.warning("Orchestrator delegate mode failed; using fallback code mode: %s", delegate_exc)
+            fallback_settings = {**resolved_settings, "agent_mode": "code"}
+            fallback_result = await run_universal_navigation(
+                provider=provider,
+                model=model,
+                executor=executor,
+                session_id=session_id,
+                instruction=instruction,
+                settings=fallback_settings,
+                on_step=on_step,
+                on_frame=on_frame,
+                cancel_event=cancel_event,
+                steering_context=steering_context,
+                on_workflow_step=on_workflow_step,
+                on_user_input=on_user_input,
+                user_uid=user_uid,
+                enable_reasoning=enable_reasoning,
+                reasoning_effort=reasoning_effort,
+                on_reasoning_delta=on_reasoning_delta,
+                on_spawn_subagent=on_spawn_subagent,
+                on_message_subagent=on_message_subagent,
+                is_subagent=is_subagent,
+            )
+            primary_result = fallback_result
+            child_results.append({"ref": "child:fallback", "mode": "code", "status": fallback_result.get("status")})
+
+        assert primary_result is not None
+        synthesis = build_synthesis(
+            decision=route_decision,
+            primary_result=primary_result,
+            fallback_result=fallback_result,
+        )
+        child_ref_step = {"type": "child_result_refs", "content": json.dumps({"references": child_results}), "steering": []}
+        if on_step:
+            await on_step(child_ref_step)
+            await on_step({"type": "result", "content": synthesis, "steering": []})
+        result_payload = dict(primary_result)
+        result_payload["summary"] = synthesis
+        result_payload["route_trace"] = route_trace
+        result_payload["child_results"] = child_results
+        return result_payload
+
     tool_executor = UniversalToolExecutor(
         executor,
         session_id=session_id,

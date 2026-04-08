@@ -1,3 +1,47 @@
+## Session 5.90 - April 8, 2026 (orchestrator node-level specialist routing + fallback)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation + targeted test pass
+
+### What Was Done
+- Added a dedicated orchestrator router module `backend/orchestrator_mode.py`:
+  - deterministic intent classification for orchestrator node routing,
+  - enforced specialist selection (`deep_research` for research intent, `code` for build/execution intent),
+  - explicit bypass-attempt detection for prompts that try to override/ignore routing policy,
+  - orchestrator synthesis helper that references delegated child results.
+- Integrated node-level delegation into `run_universal_navigation(...)` in `universal_navigator.py` when `agent_mode=orchestrator`:
+  - classify intent, emit route-decision trace, delegate to specialist mode,
+  - enforce delegated timeout (`orchestrator_delegate_timeout_seconds`, bounded),
+  - add automatic fallback to `code` mode when delegated execution fails or times out,
+  - return final result through orchestrator synthesis with `route_trace` + `child_results` references.
+- Added focused tests in `tests/test_orchestrator_mode_router.py` covering:
+  - research → `deep_research`,
+  - build/execution → `code`,
+  - bypass-attempt detection without policy bypass,
+  - orchestrator synthesis payload with route trace and child refs,
+  - timeout-triggered fallback to `code`.
+
+### What's Working
+- Orchestrator now behaves as a node-level router rather than a direct executor.
+- Route decision and child-result metadata are surfaced in result payloads.
+- Delegation timeout/fallback behavior is covered by automated tests.
+
+### What's NOT Working Yet
+- Current classifier is deterministic keyword-based and can be improved with richer intent scoring over time.
+
+### Next Steps
+1. Add websocket-level integration assertions for `route_decision` and `child_result_refs` event propagation to frontend clients.
+2. Consider adding optional planner/architect specialist routing buckets once explicit acceptance criteria require those routes.
+
+### Decisions Made
+- Kept routing policy deterministic and server-enforced to prevent user prompt attempts from forcing mode bypass.
+- Used `code` as safe fallback specialist for delegated failures to preserve task completion attempts.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.89 - April 8, 2026 (post-merge bugfix PR for mode alternatives + test follow-through)
 
 **Agent:** GPT-5.3-Codex  
