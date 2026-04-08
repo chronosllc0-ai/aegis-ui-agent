@@ -1,7 +1,8 @@
-"""Mode policy helpers for Aegis system-level subagents."""
+"""Mode policy and registry helpers for Aegis system-level subagents."""
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 from typing import Final
 
 AgentMode = str
@@ -63,6 +64,23 @@ READ_ONLY_BLOCKED_TOOLS: Final[set[str]] = {
 }
 
 ORCHESTRATOR_BLOCKED_TOOLS: Final[set[str]] = {"spawn_subagent"}
+ADMIN_EDITABLE_MODE_METADATA_FIELDS: Final[set[str]] = {
+    "title",
+    "description",
+    "badge",
+    "sort_order",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ModeDefinition:
+    """Immutable metadata describing a built-in agent mode."""
+
+    key: AgentMode
+    label: str
+    default_instruction: str
+    read_only: bool
+    blocked_tools: tuple[str, ...]
 
 
 def normalize_agent_mode(value: object) -> AgentMode:
@@ -81,3 +99,29 @@ def blocked_tools_for_mode(mode: AgentMode) -> set[str]:
     if normalized_mode == "orchestrator":
         return set(ORCHESTRATOR_BLOCKED_TOOLS)
     return set()
+
+
+def mode_definitions() -> tuple[ModeDefinition, ...]:
+    """Return built-in immutable mode definitions in UI display order."""
+    ordered_modes: tuple[AgentMode, ...] = ("orchestrator", "planner", "architect", "deep_research", "code")
+    definitions: list[ModeDefinition] = []
+    for mode in ordered_modes:
+        definitions.append(
+            ModeDefinition(
+                key=mode,
+                label=MODE_LABELS[mode],
+                default_instruction=MODE_SYSTEM_HINTS[mode],
+                read_only=mode in READ_ONLY_MODES,
+                blocked_tools=tuple(sorted(blocked_tools_for_mode(mode))),
+            )
+        )
+    return tuple(definitions)
+
+
+def serialize_mode_definition(mode: AgentMode) -> dict[str, object]:
+    """Serialize one mode definition for API responses."""
+    normalized_mode = normalize_agent_mode(mode)
+    definition = next(item for item in mode_definitions() if item.key == normalized_mode)
+    payload = asdict(definition)
+    payload["blocked_tools_count"] = len(definition.blocked_tools)
+    return payload
