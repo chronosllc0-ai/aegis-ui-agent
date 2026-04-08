@@ -271,7 +271,7 @@ export function SkillsTab({ role }: SkillsTabProps) {
                     className={`rounded-xl border p-3 text-left ${selectedSkill?.id === skill.id ? 'border-rose-400/60 bg-[#2a1b1a]' : 'border-[#352a2a] bg-[#1a1414] hover:bg-[#211919]'}`}
                   >
                     <p className='text-base font-semibold'>{skill.name}</p>
-                    <p className='text-xs text-zinc-400'>v{skill.updated_at ? new Date(skill.updated_at).getFullYear() : '1.0.0'}</p>
+                    <p className='text-xs text-zinc-400'>Updated {formatDate(skill.updated_at)}</p>
                     <p className='mt-2 line-clamp-2 text-xs text-zinc-300'>{skill.description || 'No description yet.'}</p>
                   </button>
                 ))}
@@ -293,7 +293,7 @@ export function SkillsTab({ role }: SkillsTabProps) {
                     >
                       <td className='px-4 py-3 align-top'>
                         <p className='text-xl font-semibold'>{skill.slug}</p>
-                        <p className='text-xs text-zinc-400'>v{formatDate(skill.updated_at)}</p>
+                        <p className='text-xs text-zinc-400'>Updated {formatDate(skill.updated_at)}</p>
                       </td>
                       <td className='px-4 py-3 text-zinc-300'>{skill.description || 'No summary provided.'}</td>
                     </tr>

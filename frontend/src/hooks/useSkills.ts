@@ -168,12 +168,17 @@ export function useSkills(isAdmin: boolean) {
   )
 
   const savePolicy = useCallback(async (nextPolicy: AdminSkillsPolicy) => {
-    const data = await apiRequest<{ policy?: Partial<AdminSkillsPolicy> }>('/api/admin/skills/policy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(nextPolicy),
-    })
-    setPolicy({ ...DEFAULT_POLICY, ...nextPolicy, ...(data.policy ?? {}) })
+    try {
+      const data = await apiRequest<{ policy?: Partial<AdminSkillsPolicy> }>('/api/admin/skills/policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextPolicy),
+      })
+      setPolicy({ ...DEFAULT_POLICY, ...nextPolicy, ...(data.policy ?? {}) })
+    } catch (error) {
+      // Keep previous state untouched on failure so UI never drifts from persisted policy.
+      throw error
+    }
   }, [])
 
   const reviewSubmission = useCallback(async (submissionId: string, decision: 'approve_hub' | 'approve_global' | 'reject' | 'needs_changes', notes?: string) => {

@@ -8,14 +8,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import _verify_session
 from backend.admin.dependencies import get_admin_user
-from backend.database import Skill, SkillAuditEvent, User, get_session
-from backend.skills.policy_store import get_blocklist_state, get_skills_policy, set_blocklist_state, set_skills_policy
-from backend.skills.service import APPROVED_STATUSES, REVIEW_SLA_MESSAGE, SkillService
+from backend.database import PlatformSetting, User, get_session
+from backend.skills.service import REVIEW_SLA_MESSAGE, SkillService
 
 skills_router = APIRouter(tags=["skills"])
 
@@ -72,12 +71,42 @@ class AdminSkillPolicyRequest(BaseModel):
     default_enabled_skill_ids: list[str] = Field(default_factory=list)
 
 
-_admin_skill_policy_state: dict[str, Any] = {
+_ADMIN_SKILLS_POLICY_KEY = "aegis_admin_skills_policy_v1"
+_DEFAULT_ADMIN_SKILLS_POLICY: dict[str, Any] = {
     "allow_unreviewed_installs": False,
     "block_high_risk_skills": True,
     "require_approval_before_install": False,
     "default_enabled_skill_ids": [],
 }
+
+
+async def _get_admin_skills_policy(session: AsyncSession) -> dict[str, Any]:
+    result = await session.execute(select(PlatformSetting).where(PlatformSetting.key == _ADMIN_SKILLS_POLICY_KEY))
+    row = result.scalar_one_or_none()
+    if row is None:
+        return dict(_DEFAULT_ADMIN_SKILLS_POLICY)
+    parsed = _safe_json_loads(row.value, default=_DEFAULT_ADMIN_SKILLS_POLICY)
+    if not isinstance(parsed, dict):
+        return dict(_DEFAULT_ADMIN_SKILLS_POLICY)
+    return {
+        "allow_unreviewed_installs": bool(parsed.get("allow_unreviewed_installs", False)),
+        "block_high_risk_skills": bool(parsed.get("block_high_risk_skills", True)),
+        "require_approval_before_install": bool(parsed.get("require_approval_before_install", False)),
+        "default_enabled_skill_ids": [skill_id.strip() for skill_id in parsed.get("default_enabled_skill_ids", []) if isinstance(skill_id, str) and skill_id.strip()],
+    }
+
+
+async def _set_admin_skills_policy(session: AsyncSession, *, admin_uid: str, policy: dict[str, Any]) -> dict[str, Any]:
+    result = await session.execute(select(PlatformSetting).where(PlatformSetting.key == _ADMIN_SKILLS_POLICY_KEY))
+    row = result.scalar_one_or_none()
+    serialized = json.dumps(policy, ensure_ascii=False)
+    if row is None:
+        session.add(PlatformSetting(key=_ADMIN_SKILLS_POLICY_KEY, value=serialized, updated_by=admin_uid))
+    else:
+        row.value = serialized
+        row.updated_by = admin_uid
+    await session.commit()
+    return await _get_admin_skills_policy(session)
 
 
 async def _get_current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
@@ -231,26 +260,27 @@ async def uninstall_skill_delete(
 @skills_router.get("/api/admin/skills/policy")
 async def get_admin_skills_policy(
     admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     _ = admin_user
-    return {"ok": True, "policy": dict(_admin_skill_policy_state)}
+    return {"ok": True, "policy": await _get_admin_skills_policy(session)}
 
 
 @skills_router.post("/api/admin/skills/policy")
 async def set_admin_skills_policy(
     body: AdminSkillPolicyRequest,
     admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    _ = admin_user
-    _admin_skill_policy_state.update(
-        {
-            "allow_unreviewed_installs": body.allow_unreviewed_installs,
-            "block_high_risk_skills": body.block_high_risk_skills,
-            "require_approval_before_install": body.require_approval_before_install,
-            "default_enabled_skill_ids": [skill_id.strip() for skill_id in body.default_enabled_skill_ids if skill_id.strip()],
-        }
-    )
-    return {"ok": True, "policy": dict(_admin_skill_policy_state)}
+    policy = {
+        "allow_unreviewed_installs": body.allow_unreviewed_installs,
+        "block_high_risk_skills": body.block_high_risk_skills,
+        "require_approval_before_install": body.require_approval_before_install,
+        "default_enabled_skill_ids": [skill_id.strip() for skill_id in body.default_enabled_skill_ids if skill_id.strip()],
+    }
+    saved = await _set_admin_skills_policy(session, admin_uid=admin_user.uid, policy=policy)
+    await session.commit()
+    return {"ok": True, "policy": saved}
 
 
 @skills_router.get("/api/admin/skills/review-queue")

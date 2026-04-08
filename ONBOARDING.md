@@ -1,3 +1,41 @@
+## Session 5.82 - April 8, 2026 (PR review fixes: persistent admin skills policy + marketplace version label cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review warning about volatile in-memory admin policy storage in `backend/skills/router.py`:
+  - replaced module-global `_admin_skill_policy_state` usage with persistent reads/writes to `PlatformSetting` (`aegis_admin_skills_policy_v1`),
+  - added helper functions to normalize and sanitize persisted JSON shape,
+  - `GET /api/admin/skills/policy` now reads from DB,
+  - `POST /api/admin/skills/policy` now writes to DB and commits.
+- Addressed marketplace version-display nit in `frontend/src/components/settings/SkillsTab.tsx`:
+  - removed incorrect `updated_at` year-as-version rendering,
+  - now shows `Updated <date>` labels instead of fake semantic versions.
+- Hardened `savePolicy` in `frontend/src/hooks/useSkills.ts`:
+  - explicitly wraps API call in try/catch,
+  - only updates local policy state after successful response,
+  - preserves prior state on failure and propagates error for UI toast handling.
+
+### What's Working
+- Admin policy now persists across pod restarts/deploys (DB-backed) instead of resetting.
+- Marketplace list no longer mislabels years as semantic versions.
+- Policy UI state no longer risks local desync on failed saves.
+
+### What's NOT Working Yet
+- No additional issues identified in this review-fix pass.
+
+### Next Steps
+1. Optional: expose `updated_by` / `updated_at` metadata for policy changes in admin UI.
+
+### Decisions Made
+- Reused existing `PlatformSetting` key-value store instead of introducing a new table to keep migration impact minimal.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.81 - April 8, 2026 (ClawHub-style Skills marketplace/publishing UI refresh)
 
 **Agent:** GPT-5.3-Codex  
