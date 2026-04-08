@@ -107,3 +107,30 @@ def test_orchestrator_timeout_falls_back_to_code_mode() -> None:
         assert result["child_results"][0]["mode"] == "code"
 
     asyncio.run(_run())
+
+
+def test_orchestrator_does_not_swallow_cancellation() -> None:
+    """Cancellation errors from delegated execution should propagate."""
+
+    async def _cancelled(awaitable, timeout):  # type: ignore[no-untyped-def]
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        raise asyncio.CancelledError()
+
+    async def _run() -> None:
+        with patch("universal_navigator.asyncio.wait_for", side_effect=_cancelled):
+            await run_universal_navigation(
+                provider=_DoneProvider(),
+                model="test-model",
+                executor=object(),
+                session_id="orch-route-cancel",
+                instruction="Research audit controls.",
+                settings={"agent_mode": "orchestrator"},
+            )
+
+    try:
+        asyncio.run(_run())
+    except asyncio.CancelledError:
+        return
+    raise AssertionError("Expected asyncio.CancelledError to propagate.")

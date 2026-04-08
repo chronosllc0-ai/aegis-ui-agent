@@ -1,3 +1,40 @@
+## Session 5.91 - April 8, 2026 (review-fix pass for orchestrator routing PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 review remediation + test pass
+
+### What Was Done
+- Addressed code review comments for orchestrator routing:
+  - `backend/orchestrator_mode.py`
+    - removed misleading normalized-but-unused `requested_mode` flow and replaced with explicit comment/intent,
+    - introduced typed mode constants (`DEEP_RESEARCH_MODE`, `CODE_MODE`) and used them in route decisions.
+  - `universal_navigator.py`
+    - added explicit `asyncio.CancelledError` re-raise in delegated execution path so cancellations are never swallowed,
+    - wrapped fallback delegation in its own try/except with cancellation propagation,
+    - added explicit failed response payload if both primary delegation and fallback fail.
+- Expanded test coverage in `tests/test_orchestrator_mode_router.py`:
+  - added cancellation propagation test to ensure orchestrator branch does not suppress cancellation semantics.
+
+### What's Working
+- Orchestrator delegation now preserves cancellation behavior correctly.
+- Double-failure path (primary + fallback) now returns structured failure payload instead of crashing.
+- Orchestrator router code is cleaner and avoids the previous dead normalization pattern.
+
+### What's NOT Working Yet
+- No new blockers identified in this review-fix pass.
+
+### Next Steps
+1. Add an integration-level websocket test for dual-failure payload forwarding (`status=failed`, `route_trace`, `child_results`, `error`).
+
+### Decisions Made
+- Preserved strict cancellation semantics as first-class behavior in routing/fallback control flow.
+- Kept fallback strategy as `code` mode while ensuring hard-failure transparency to callers.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.90 - April 8, 2026 (orchestrator node-level specialist routing + fallback)
 
 **Agent:** GPT-5.3-Codex  

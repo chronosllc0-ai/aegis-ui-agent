@@ -1793,32 +1793,60 @@ async def run_universal_navigation(
                     "status": primary_result.get("status"),
                 }
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as delegate_exc:  # noqa: BLE001
             logger.warning("Orchestrator delegate mode failed; using fallback code mode: %s", delegate_exc)
             fallback_settings = {**resolved_settings, "agent_mode": "code"}
-            fallback_result = await run_universal_navigation(
-                provider=provider,
-                model=model,
-                executor=executor,
-                session_id=session_id,
-                instruction=instruction,
-                settings=fallback_settings,
-                on_step=on_step,
-                on_frame=on_frame,
-                cancel_event=cancel_event,
-                steering_context=steering_context,
-                on_workflow_step=on_workflow_step,
-                on_user_input=on_user_input,
-                user_uid=user_uid,
-                enable_reasoning=enable_reasoning,
-                reasoning_effort=reasoning_effort,
-                on_reasoning_delta=on_reasoning_delta,
-                on_spawn_subagent=on_spawn_subagent,
-                on_message_subagent=on_message_subagent,
-                is_subagent=is_subagent,
-            )
-            primary_result = fallback_result
-            child_results.append({"ref": "child:fallback", "mode": "code", "status": fallback_result.get("status")})
+            try:
+                fallback_result = await run_universal_navigation(
+                    provider=provider,
+                    model=model,
+                    executor=executor,
+                    session_id=session_id,
+                    instruction=instruction,
+                    settings=fallback_settings,
+                    on_step=on_step,
+                    on_frame=on_frame,
+                    cancel_event=cancel_event,
+                    steering_context=steering_context,
+                    on_workflow_step=on_workflow_step,
+                    on_user_input=on_user_input,
+                    user_uid=user_uid,
+                    enable_reasoning=enable_reasoning,
+                    reasoning_effort=reasoning_effort,
+                    on_reasoning_delta=on_reasoning_delta,
+                    on_spawn_subagent=on_spawn_subagent,
+                    on_message_subagent=on_message_subagent,
+                    is_subagent=is_subagent,
+                )
+                primary_result = fallback_result
+                child_results.append({"ref": "child:fallback", "mode": "code", "status": fallback_result.get("status")})
+            except asyncio.CancelledError:
+                raise
+            except Exception as fallback_exc:  # noqa: BLE001
+                logger.exception("Orchestrator fallback mode failed after primary delegation failure.")
+                failure_error = (
+                    f"Delegation failed in mode '{route_decision.selected_mode}' ({delegate_exc}); "
+                    f"fallback 'code' mode also failed ({fallback_exc})."
+                )
+                child_results.append({"ref": "child:fallback", "mode": "code", "status": "failed"})
+                failed_result = {
+                    "status": "failed",
+                    "instruction": instruction,
+                    "error": failure_error,
+                    "route_trace": route_trace,
+                    "child_results": child_results,
+                }
+                if on_step:
+                    await on_step(
+                        {
+                            "type": "error",
+                            "content": failure_error,
+                            "steering": [],
+                        }
+                    )
+                return failed_result
 
         assert primary_result is not None
         synthesis = build_synthesis(

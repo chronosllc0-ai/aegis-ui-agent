@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Any
+from typing import Any, Final
 
 from backend.modes import AgentMode
+
+DEEP_RESEARCH_MODE: Final[AgentMode] = "deep_research"
+CODE_MODE: Final[AgentMode] = "code"
 
 _RESEARCH_HINTS = (
     "research",
@@ -57,29 +60,29 @@ class OrchestratorModeRouter:
     def classify(instruction: str, *, requested_mode: str | None = None) -> RouteDecision:
         """Return deterministic specialist-mode routing for orchestrator node."""
         normalized_instruction = " ".join(str(instruction or "").strip().lower().split())
-        normalized_requested = str(requested_mode or "").strip().lower()
         bypass_attempt = bool(_FORCED_MODE_PATTERN.search(normalized_instruction))
 
-        # Ignore any user attempt to force mode switching from within task text.
-        _ = normalized_requested
+        # Explicitly ignore user-supplied mode coercion attempts inside task text.
+        # The orchestrator router chooses specialist mode from detected intent only.
+        _ = requested_mode
 
         if any(hint in normalized_instruction for hint in _RESEARCH_HINTS):
             return RouteDecision(
-                selected_mode="deep_research",
+                selected_mode=DEEP_RESEARCH_MODE,
                 reason="intent_detected:research",
                 confidence=0.82,
                 bypass_attempt_detected=bypass_attempt,
             )
         if any(hint in normalized_instruction for hint in _EXECUTION_HINTS):
             return RouteDecision(
-                selected_mode="code",
+                selected_mode=CODE_MODE,
                 reason="intent_detected:build_or_execution",
                 confidence=0.86,
                 bypass_attempt_detected=bypass_attempt,
             )
 
         return RouteDecision(
-            selected_mode="code",
+            selected_mode=CODE_MODE,
             reason="fallback:default_code_mode",
             confidence=0.55,
             bypass_attempt_detected=bypass_attempt,
