@@ -81,7 +81,14 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket(handleUsageMessage)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  // Server-side conversation persistence - replaces localStorage for history + messages
+  const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+    onUsageMessage: handleUsageMessage,
+    userId: authUser?.uid ?? null,
+    activeThreadId: selectedTaskId,
+  })
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -99,9 +106,6 @@ function App() {
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  // Server-side conversation persistence - replaces localStorage for history + messages
-  const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
   const { conversations, fetchMessages, deleteConversation, onNewConversationId } = useConversations(authUser?.uid ?? null)
   // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
   const taskToConvRef = useRef<Map<string, string>>(new Map())
@@ -349,6 +353,16 @@ function App() {
       active = false
     }
   }, [])
+
+  const prevUserUidRef = useRef<string | null>(null)
+  useEffect(() => {
+    const nextUid = authUser?.uid ?? null
+    if (prevUserUidRef.current !== null && prevUserUidRef.current !== nextUid) {
+      clearFrameCache()
+      setSelectedTaskId(null)
+    }
+    prevUserUidRef.current = nextUid
+  }, [authUser?.uid, clearFrameCache])
 
   useEffect(() => {
     if (!isAuthenticated || !isImpersonating) return
@@ -786,6 +800,7 @@ function App() {
   }
 
   const onDeleteTask = (id: string) => {
+    removeFrameForThread(id)
     setTaskHistory((prev) => {
       const next = prev.filter((t) => t.id !== id)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* ok */ }
@@ -1079,6 +1094,7 @@ function App() {
               onOpenSettings={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }}
               onSignOut={async () => {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
+                clearFrameCache()
                 setAuthUser(null)
                 setIsAuthenticated(false)
                 setTaskHistory([])
