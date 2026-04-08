@@ -18,5 +18,11 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     const text = await response.text().catch(() => '')
     throw new Error(text || `Request failed (${response.status})`)
   }
-  return (await response.json()) as T
+  try {
+    return (await response.json()) as T
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON response from ${path}: ${error instanceof Error ? error.message : 'Unknown parse error'}`,
+    )
+  }
 }
