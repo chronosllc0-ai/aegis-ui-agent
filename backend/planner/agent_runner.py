@@ -257,8 +257,9 @@ class AgentRunner:
             "google": settings.GEMINI_API_KEY,
             "openai": getattr(settings, "OPENAI_API_KEY", ""),
             "anthropic": getattr(settings, "ANTHROPIC_API_KEY", ""),
-            "mistral": getattr(settings, "MISTRAL_API_KEY", ""),
-            "groq": getattr(settings, "GROQ_API_KEY", ""),
+            "xai": getattr(settings, "XAI_API_KEY", ""),
+            "openrouter": getattr(settings, "OPENROUTER_API_KEY", ""),
+            "fireworks": getattr(settings, "FIREWORKS_API_KEY", ""),
         }
         return fallback.get(provider_name, "")
 

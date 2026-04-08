@@ -37,6 +37,8 @@ import { LuShield } from 'react-icons/lu'
 import { modelInfo } from './lib/models'
 import { normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
+import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
+import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
@@ -64,6 +66,7 @@ const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   workflows: 'Workflows',
   memory: 'Memory',
   observability: 'Observability',
+  skills: 'Skills',
   support: 'Support',
   admin: 'Admin',
 }
@@ -73,32 +76,19 @@ const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().repla
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
-
-const BROWSER_ACTION_LOG_TOOLS = new Set([
-  'screenshot',
-  'go_to_url',
-  'click',
-  'type_text',
-  'scroll',
-  'go_back',
-  'wait',
-  'extract_page',
-])
-
-function isBrowserActionLogEntry(entry: LogEntry): boolean {
-  if (entry.type === 'result' || entry.type === 'error' || entry.type === 'interrupt') return true
-  if (entry.stepKind === 'navigate' && entry.elapsedSeconds === 0) return true
-  const toolMatch = entry.message.match(/^\[([\w_]+)\]/)
-  if (!toolMatch?.[1]) return false
-  return BROWSER_ACTION_LOG_TOOLS.has(toolMatch[1].toLowerCase())
-}
-
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket(handleUsageMessage)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  // Server-side conversation persistence - replaces localStorage for history + messages
+  const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
+  const { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+    onUsageMessage: handleUsageMessage,
+    userId: authUser?.uid ?? null,
+    activeThreadId: selectedTaskId,
+  })
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
@@ -117,14 +107,12 @@ function App() {
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  // Server-side conversation persistence - replaces localStorage for history + messages
-  const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
   const { conversations, fetchMessages, deleteConversation, onNewConversationId } = useConversations(authUser?.uid ?? null)
   // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
   const taskToConvRef = useRef<Map<string, string>>(new Map())
   // Server messages loaded for the selected conversation
   const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
+  const [optimisticMessagesByTask, setOptimisticMessagesByTask] = useState<Record<string, ServerMessage[]>>({})
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const browserGridRef = useRef<HTMLDivElement>(null)
   const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
@@ -276,7 +264,7 @@ function App() {
   ])
 
   // ── Browser tab title: Working… / Steering… / Aegis ──────────────
-  const titleTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const titleTimeoutRef = useRef<number | null>(null)
   const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
   useEffect(() => {
     if (!isWorking) { setTitleMode('idle'); return }
@@ -366,6 +354,16 @@ function App() {
     }
   }, [])
 
+  const prevUserUidRef = useRef<string | null>(null)
+  useEffect(() => {
+    const nextUid = authUser?.uid ?? null
+    if (prevUserUidRef.current !== null && prevUserUidRef.current !== nextUid) {
+      clearFrameCache()
+      setSelectedTaskId(null)
+    }
+    prevUserUidRef.current = nextUid
+  }, [authUser?.uid, clearFrameCache])
+
   useEffect(() => {
     if (!isAuthenticated || !isImpersonating) return
     void checkStatus()
@@ -439,8 +437,9 @@ function App() {
     if (!activeConversationId) return
     const taskId = activeTaskIdRef.current
     taskToConvRef.current.set(taskId, activeConversationId)
-    onNewConversationId(activeConversationId, undefined)
-  }, [activeConversationId, activeTaskIdRef, onNewConversationId])
+    const localTask = taskHistory.find((item) => item.id === taskId)
+    onNewConversationId(activeConversationId, localTask?.title)
+  }, [activeConversationId, activeTaskIdRef, onNewConversationId, taskHistory])
 
   // When the selected task changes, load messages from server for that conversation
   // ── Seed taskHistory from server conversations so history survives refresh ──
@@ -449,26 +448,47 @@ function App() {
   useEffect(() => {
     if (!conversations.length) return
     setTaskHistory((prev) => {
-      const existingIds = new Set(prev.map((t) => t.id))
-      const toAdd: TaskHistoryItem[] = []
+      const byId = new Map(prev.map((item) => [item.id, item]))
+      const next = [...prev]
+
       for (const conv of conversations) {
-        if (!existingIds.has(conv.id)) {
-          const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
-          const today = new Date()
-          const yesterday = new Date(today)
-          yesterday.setDate(today.getDate() - 1)
-          let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
-          if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
-          else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
-          toAdd.push({ id: conv.id, title: conv.title ?? 'Task', dateLabel, instruction: conv.title ?? '', labelSource: 'system' })
+        const existing = byId.get(conv.id)
+        if (existing) {
+          const mergedTitle = mergeTitlePreferMeaningful(
+            existing.title,
+            conv.title,
+            existing.instruction || existing.title,
+          )
+          if (mergedTitle !== existing.title) {
+            const idx = next.findIndex((item) => item.id === conv.id)
+            if (idx >= 0) next[idx] = { ...next[idx], title: mergedTitle }
+          }
+          continue
         }
+
+        const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
+        const today = new Date()
+        const yesterday = new Date(today)
+        yesterday.setDate(today.getDate() - 1)
+        let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
+        else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
+
+        const fallbackInstruction = deriveTitleFromInstruction(conv.title)
+        next.unshift({
+          id: conv.id,
+          title: mergeTitlePreferMeaningful(undefined, conv.title, fallbackInstruction),
+          dateLabel,
+          instruction: isPlaceholderTitle(conv.title) ? fallbackInstruction : (conv.title ?? ''),
+          labelSource: 'system',
+        })
       }
-      if (!toAdd.length) return prev
-      const merged = [...toAdd, ...prev].slice(0, 200) // keep max 200
+
+      const merged = next.slice(0, 200)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(merged)) } catch { /* quota */ }
       return merged
     })
-  }, [conversations])
+  }, [authUser?.uid, conversations])
 
   useEffect(() => {
     if (!selectedTaskId) { setServerMessages([]); return }
@@ -510,6 +530,19 @@ function App() {
     }
     return scoped
   }, [scopedSubAgents, subAgentSteps])
+
+  const mergedChatMessages = useMemo(() => {
+    if (!selectedTaskId) return serverMessages
+    const optimistic = optimisticMessagesByTask[selectedTaskId] ?? []
+    if (!optimistic.length) return serverMessages
+    const dedupedOptimistic = optimistic.filter((optimisticMsg) => (
+      !serverMessages.some((serverMsg) => (
+        serverMsg.role === 'user' &&
+        serverMsg.content.trim() === optimisticMsg.content.trim()
+      ))
+    ))
+    return [...dedupedOptimistic, ...serverMessages]
+  }, [optimisticMessagesByTask, selectedTaskId, serverMessages])
 
   const visibleLogs: LogEntry[] = useMemo(() => {
     if (!selectedTaskId) return logs
@@ -589,9 +622,56 @@ function App() {
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
   const actionLogEntries = useMemo(
-    () => enrichedLogs.filter((entry) => isBrowserActionLogEntry(entry)),
+    () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
     [enrichedLogs],
   )
+  const hasBrowserActivityForActiveTask = useMemo(() => {
+    const activeTaskId = selectedTaskId ?? activeTaskIdRef.current
+    if (!activeTaskId || activeTaskId === 'idle') return false
+    return actionLogEntries.some((entry) => entry.taskId === activeTaskId)
+  }, [actionLogEntries, selectedTaskId, activeTaskIdRef])
+
+  // ── Auto-return to chat when a browser task finishes ────────────────────
+  // When isWorking flips true→false and the task had browser activity,
+  // automatically switch the user back to chat so they see the summary card.
+  const prevBrowsingWorkingRef = useRef(isWorking)
+  const browserActivityDuringRunRef = useRef(false)
+
+  useEffect(() => {
+    const wasWorking = prevBrowsingWorkingRef.current
+
+    if (!wasWorking && isWorking) {
+      browserActivityDuringRunRef.current = false
+    }
+
+    if (isWorking && hasBrowserActivityForActiveTask) {
+      browserActivityDuringRunRef.current = true
+    }
+
+    if (wasWorking && !isWorking) {
+      const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
+      browserActivityDuringRunRef.current = false
+      if (hadBrowserActivityThisRun && appMode === 'browser') {
+        setAppMode('chat')
+      }
+    }
+
+    prevBrowsingWorkingRef.current = isWorking
+  }, [isWorking, hasBrowserActivityForActiveTask, appMode])
+
+  // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
+  // If the agent needs user input mid-task and the user is watching the
+  // browser, jump them to chat so they see (and can answer) the question.
+  useEffect(() => {
+    if (!enrichedLogs.length || appMode !== 'browser') return
+    const last = enrichedLogs[enrichedLogs.length - 1]
+    if (last?.message?.includes('[ask_user_input]') ||
+        last?.message?.includes('[confirm_plan]') ||
+        last?.message?.includes('[plan_steps]')) {
+      setAppMode('chat')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrichedLogs.length, appMode])
 
   const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
@@ -655,6 +735,23 @@ function App() {
         ? metadata.task_label.trim()
         : finalInstruction
       const newEntry: TaskHistoryItem = { id: taskId, title: lockedTitle, dateLabel, instruction: finalInstruction, labelSource }
+      setOptimisticMessagesByTask((prev) => {
+        const existing = prev[taskId] ?? []
+        if (existing.some((msg) => msg.role === 'user' && msg.content.trim() === finalInstruction.trim())) {
+          return prev
+        }
+        const optimisticMessage: ServerMessage = {
+          id: `optimistic-${taskId}-${existing.length + 1}`,
+          role: 'user',
+          content: finalInstruction,
+          metadata: null,
+          created_at: new Date().toISOString(),
+        }
+        return {
+          ...prev,
+          [taskId]: [...existing, optimisticMessage],
+        }
+      })
       setTaskHistory((prev) => {
         if (prev.some((t) => t.id === taskId)) return prev
         const next = [newEntry, ...prev]
@@ -691,7 +788,20 @@ function App() {
     }
   }
 
+  const handleUserInputResponse = (answer: string, requestId: string) => {
+    send({ action: 'user_input_response', request_id: requestId, response: answer })
+  }
+
+  const handlePlanConfirm = (requestId: string) => {
+    send({ action: 'plan_confirm_response', request_id: requestId, response: 'Approve' })
+  }
+
+  const handlePlanReject = (requestId: string) => {
+    send({ action: 'plan_confirm_response', request_id: requestId, response: 'Cancel' })
+  }
+
   const onDeleteTask = (id: string) => {
+    removeFrameForThread(id)
     setTaskHistory((prev) => {
       const next = prev.filter((t) => t.id !== id)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* ok */ }
@@ -701,17 +811,23 @@ function App() {
     const convId = taskToConvRef.current.get(id)
     if (convId) { void deleteConversation(convId); taskToConvRef.current.delete(id) }
     if (selectedTaskId === id) setSelectedTaskId(null)
+    setOptimisticMessagesByTask((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const newSession = () => {
     send({ action: 'stop' })
-    setQueuedMessages([])
     setTaskStartedAt(null)
     setDurationSeconds(0)
     resetClientState()
     resetUsageSession()
     contextMeter.reset()
     setSelectedTaskId(null)
+    setOptimisticMessagesByTask({})
     setShowWorkflow(false)
     void stopVoice()
   }
@@ -979,6 +1095,7 @@ function App() {
               onOpenSettings={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }}
               onSignOut={async () => {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
+                clearFrameCache()
                 setAuthUser(null)
                 setIsAuthenticated(false)
                 setTaskHistory([])
@@ -996,7 +1113,7 @@ function App() {
                 <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
                 </button>
-                <img src='/aegis-owl-logo.svg' alt='Aegis' className='h-4 w-4 sm:h-5 sm:w-5' />
+                <img src='/aegis-shield.png' alt='Aegis' className='h-5 w-5 sm:h-6 sm:w-6 object-contain' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
                 {/* ── Chat ↔ Browser mode switcher ── */}
                 {!showSettings && !showAutomations && (
@@ -1053,6 +1170,7 @@ function App() {
                 onRunWorkflow={(instruction) => handleSend(instruction, 'steer')}
                 initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
                 isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+                authRole={authUser?.role}
                 onTabChange={(tab) => {
                   const base = isAdminPath ? '/admin' : '/settings'
                   navigateTo(`${base}/${settingsSlugForTab(tab)}`)
@@ -1078,14 +1196,21 @@ function App() {
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 activeTaskId={selectedTaskId}
-                serverMessages={serverMessages}
+                serverMessages={mergedChatMessages}
                 onStop={() => send({ action: 'stop' })}
+                onUserInputResponse={handleUserInputResponse}
+                onPlanConfirm={handlePlanConfirm}
+                onPlanReject={handlePlanReject}
                 reasoningMap={reasoningMap}
-                enableReasoning={settings.enableReasoning}
-                onToggleReasoning={(enabled) => patchSettings({ enableReasoning: enabled })}
-                reasoningEffort={settings.reasoningEffort}
-                onChangeReasoningEffort={(effort) => patchSettings({ reasoningEffort: effort })}
-                currentModelSupportsReasoning={currentModelMeta?.reasoning ?? false}
+                provider={settings.provider}
+                model={settings.model}
+                agentMode={settings.agentMode}
+                onProviderChange={(nextProvider) => {
+                  const providerMeta = PROVIDERS.find((item) => item.id === nextProvider) ?? PROVIDERS[0]
+                  patchSettings({ provider: nextProvider, model: providerMeta.models[0].id })
+                }}
+                onModelChange={(nextModel) => patchSettings({ model: nextModel })}
+                onAgentModeChange={(nextMode) => patchSettings({ agentMode: nextMode })}
                 contextSnapshot={{
                   tokensUsed: contextMeter.current.tokensUsed,
                   contextLimit: contextMeter.current.contextLimit,

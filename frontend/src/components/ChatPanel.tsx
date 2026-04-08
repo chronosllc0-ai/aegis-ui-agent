@@ -47,15 +47,16 @@ export interface ChatPanelProps {
   activeTaskId?: string | null
   serverMessages?: ServerMessage[]
   onStop?: () => void
-  onUserInputResponse?: (answer: string, requestId: string) => void
+  onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
   reasoningMap?: Record<string, string>
-  enableReasoning?: boolean
-  onToggleReasoning?: (enabled: boolean) => void
-  reasoningEffort?: 'medium' | 'high' | 'extended' | 'adaptive'
-  onChangeReasoningEffort?: (effort: 'medium' | 'high' | 'extended' | 'adaptive') => void
-  currentModelSupportsReasoning?: boolean
+  provider: string
+  model: string
+  agentMode: AgentModeId
+  onProviderChange: (provider: string) => void
+  onModelChange: (model: string) => void
+  onAgentModeChange: (mode: AgentModeId) => void
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
     tokensUsed: number
@@ -72,13 +73,14 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'thinking'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'thinking'
 
 interface ChatMessage {
   id: string
   role: ChatRole
   text: string
   timestamp?: string
+  metadata?: Record<string, unknown>
   toolName?: string
   toolArgs?: string
   toolResult?: string
@@ -90,6 +92,13 @@ interface ChatMessage {
   options?: string[]
   requestId?: string
   stepId?: string
+  planSteps?: string[]
+}
+
+type ThreadUiState = {
+  collapsedToolIds: string[]
+  answeredUserInputIds: string[]
+  openThinkingIds: string[]
 }
 
 interface AttachedFile {
@@ -97,6 +106,21 @@ interface AttachedFile {
   type: string
   dataUrl: string
 }
+
+type ComposerSubmissionMode = 'normal' | 'plan'
+
+export function resolveComposerSubmission(input: string, planIntent: boolean): { mode: ComposerSubmissionMode; text: string } {
+  const trimmed = input.trim()
+  if (!trimmed) return { mode: 'normal', text: '' }
+  if (trimmed.startsWith('/plan')) {
+    return { mode: 'plan', text: trimmed.slice('/plan'.length).trim() }
+  }
+  if (planIntent) return { mode: 'plan', text: trimmed }
+  return { mode: 'normal', text: trimmed }
+}
+
+const OPEN_THINKING_KEY = (taskId: string) => `aegis.chat.ui.${taskId}.openThinkingIds`
+type ThinkingState = 'streaming' | 'completed'
 
 // ─── Live connector type ───────────────────────────────────────────────────────
 interface ConnectorMeta {
@@ -111,6 +135,12 @@ interface ConnectorMeta {
 const RE_MODEL_RESPONSE  = /^Model response/i
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
+const CHAT_HARD_DENY_PREFIXES = [
+  '(no tool call):',
+  'Model response (no tool call):',
+  'Session settings updated',
+  'Workflow step update',
+]
 
 /**
  * Browser-execution tool names that belong exclusively in the ActionLog.
@@ -175,24 +205,31 @@ function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
     if (toolName && (BROWSER_TOOL_NAMES.has(toolName) || SILENT_TOOL_NAMES.has(toolName))) return true
   }
 
-  return false
+function isDeniedChatText(text: string): boolean {
+  const normalized = text.trim().toLowerCase()
+  return CHAT_HARD_DENY_PREFIXES.some((prefix) => normalized.startsWith(prefix.toLowerCase()))
 }
 
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
-    const msg = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+    const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
+    const msg = normalizeTextPreservingMarkdown(rawMessage)
+    if (isDeniedChatText(msg)) continue
+
+    if (msg.trim() === '[thinking]') {
+      msgs.push({
+        id: entry.id,
+        role: 'thinking',
+        text: '',
+        stepId: entry.stepId,
+        metadata: { placeholder: true },
+      })
+      continue
+    }
 
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
-
-    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
-      const stepId = entry.stepId
-      if (stepId && !msgs.find((m) => m.role === 'thinking' && m.stepId === stepId)) {
-        msgs.push({ id: `thinking-${stepId}`, role: 'thinking', text: msg, stepId })
-      }
-      continue
-    }
 
     if (msg.includes('[ask_user_input]')) {
       try {
@@ -207,7 +244,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
           requestId: parsed.request_id,
         })
       } catch {
-        msgs.push({ id: entry.id, role: 'user_input', text: msg.replace('[ask_user_input]', '').trim(), options: [] })
+        msgs.push({ id: entry.id, role: 'user_input', text: normalizeTextPreservingMarkdown(msg.replace('[ask_user_input]', '').trim()), options: [] })
       }
       continue
     }
@@ -224,6 +261,17 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
         msgs.push({ id: entry.id, role: 'plan_confirm', text: parsed.plan ?? jsonStr, requestId: parsed.request_id })
       } catch {
         msgs.push({ id: entry.id, role: 'plan_confirm', text: msg.replace('[confirm_plan]', '').trim() })
+      }
+      continue
+    }
+
+    if (msg.includes('[plan_steps]')) {
+      try {
+        const jsonStr = msg.replace('[plan_steps]', '').trim()
+        const steps: string[] = JSON.parse(jsonStr)
+        msgs.push({ id: entry.id, role: 'live_plan', text: '', planSteps: steps })
+      } catch {
+        msgs.push({ id: entry.id, role: 'live_plan', text: msg.replace('[plan_steps]', '').trim(), planSteps: [] })
       }
       continue
     }
@@ -255,7 +303,13 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       const toolMatch = msg.match(/^\[([\w_]+)\]/)
       const toolName  = toolMatch?.[1] ?? entry.stepKind
       if (toolName.toLowerCase() === 'thinking') {
-        msgs.push({ id: entry.id, role: 'thinking', text: msg.replace(/^\[[\w_]+\]\s*/, '').trim() || 'Thinking', stepId: entry.stepId })
+        msgs.push({
+          id: entry.id,
+          role: 'thinking',
+          text: '',
+          stepId: entry.stepId,
+          metadata: { placeholder: true },
+        })
         continue
       }
       const argsRaw   = msg.replace(/^\[[\w_]+\]\s*/, '').trim()
@@ -360,16 +414,24 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
   )
 }
 
-// ─── GeneratingCanvas ─────────────────────────────────────────────────────────
+// ─── GeneratingCanvas — spinning Aegis shield + label ─────────────────────────
 function GeneratingCanvas({ label }: { label: string }) {
   return (
-    <div className='my-2 flex items-center gap-3 rounded-xl border border-[#2a2a2a] bg-[#141414] p-4'>
-      <div className='flex gap-0.5'>
-        {[0, 1, 2, 3].map((i) => (
-          <span key={i} className='h-5 w-1 rounded-full bg-violet-400 animate-pulse' style={{ animationDelay: `${i * 120}ms` }} />
-        ))}
+    <div className='my-2 flex items-center gap-3 rounded-xl border border-blue-500/10 bg-[#0d1117] p-4'>
+      {/* Spinning shield logo */}
+      <div className='relative flex h-9 w-9 flex-shrink-0 items-center justify-center'>
+        <span className='absolute inset-0 rounded-full border border-blue-500/40 animate-spin' style={{ animationDuration: '2.5s' }} />
+        <span className='absolute inset-[3px] rounded-full border border-cyan-400/25 animate-spin' style={{ animationDuration: '1.8s', animationDirection: 'reverse' }} />
+        <img src='/aegis-shield.png' alt='Aegis' className='h-6 w-6 object-contain' />
       </div>
-      <span className='text-sm text-zinc-400'>{label}</span>
+      <div className='flex flex-col gap-0.5'>
+        <span className='text-sm font-medium text-zinc-300'>{label}</span>
+        <div className='flex gap-0.5 mt-0.5'>
+          {[0, 1, 2].map((i) => (
+            <span key={i} className='h-1 w-1 rounded-full bg-blue-400/70 animate-bounce' style={{ animationDelay: `${i * 150}ms`, animationDuration: '1s' }} />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -377,7 +439,7 @@ function GeneratingCanvas({ label }: { label: string }) {
 // ─── UserBubble — dark style (no blue) ────────────────────────────────────────
 function UserBubble({ msg }: { msg: ChatMessage }) {
   return (
-    <div className='flex justify-end px-1 py-1'>
+    <div className='flex justify-end px-1 py-1' data-testid='user-bubble'>
       <div className='max-w-[82%] space-y-1.5'>
         {msg.attachments?.map((att, i) =>
           att.type.startsWith('image/') ? (
@@ -424,10 +486,11 @@ function AssistantCard({ msg }: { msg: ChatMessage }) {
 interface ShellCardProps {
   msg: ChatMessage
   isRunning?: boolean
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
 }
 
-function ShellCard({ msg, isRunning }: ShellCardProps) {
-  const [expanded, setExpanded] = useState(isRunning ?? false)
+function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProps) {
   const outputRef = useRef<HTMLPreElement>(null)
 
   const toolLabel = (msg.toolName ?? 'shell').replace(/_/g, ' ')
@@ -439,10 +502,10 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
   const prevRunning = useRef(isRunning)
   useEffect(() => {
     if (prevRunning.current === isRunning) return
-    if (isRunning) setExpanded(true)
-    if (!isRunning && prevRunning.current) setExpanded(false)
+    if (isRunning) onExpandedChange(true)
+    if (!isRunning && prevRunning.current) onExpandedChange(false)
     prevRunning.current = isRunning
-  }, [isRunning])
+  }, [isRunning, onExpandedChange])
 
   // Auto-scroll output while running
   useEffect(() => {
@@ -468,7 +531,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
     return (
       <button
         type='button'
-        onClick={() => setExpanded(true)}
+        onClick={() => onExpandedChange(true)}
         className='flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-[#1a1a1a] group'
       >
         {statusDot}
@@ -492,7 +555,7 @@ function ShellCard({ msg, isRunning }: ShellCardProps) {
       {/* Terminal header bar */}
       <button
         type='button'
-        onClick={() => setExpanded(false)}
+        onClick={() => onExpandedChange(false)}
         className='flex w-full items-center gap-2.5 border-b border-[#1e1e1e] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
       >
         {/* Traffic-light dots */}
@@ -536,10 +599,11 @@ interface ThinkingRowProps {
   stepId: string
   reasoningText: string
   isStreaming: boolean
+  open: boolean
+  onToggle: () => void
 }
 
-function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRowProps) {
-  const [open, setOpen] = useState(false)
+function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onToggle }: ThinkingRowProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -549,11 +613,12 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
   })
 
   return (
-    <div className='my-0.5'>
+    <div className='my-0.5' data-testid='thinking-row'>
       <button
         type='button'
-        onClick={() => setOpen((v) => !v)}
-        className='flex items-center gap-2 rounded-xl px-3 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
+        onClick={onToggle}
+        className='flex items-center gap-2 rounded-xl px-0 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
+        data-testid='thinking-row-trigger'
       >
         {isStreaming ? (
           /* Shimmer "Thinking" tag */
@@ -576,7 +641,8 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming }: ThinkingRo
       {open && (
         <div
           ref={contentRef}
-          className='mx-3 mt-0.5 max-h-48 overflow-y-auto rounded-xl border border-violet-500/15 bg-[#0e0e18] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap'
+          className='mx-0 mt-0.5 max-h-48 overflow-y-auto rounded-xl border border-violet-500/15 bg-[#0e0e18] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap'
+          data-testid='thinking-row-content'
         >
           {reasoningText || <span className='text-zinc-600 animate-pulse'>…</span>}
         </div>
@@ -667,31 +733,34 @@ function SubagentCard({ msg }: { msg: ChatMessage }) {
 
 // ─── UserInputCard — inline quick-reply + custom reply slot ───────────────────
 function UserInputCard({
-  question, options, requestId, onRespond,
-}: { question: string; options: string[]; requestId: string; onRespond: (answer: string, requestId: string) => void }) {
+  question, options, requestId, answered, onRespond,
+}: {
+  question: string
+  options: string[]
+  requestId: string
+  answered: boolean
+  onRespond: (answer: string, requestId: string) => void
+}) {
   const [customMode, setCustomMode] = useState(false)
   const [customText, setCustomText] = useState('')
-  const [answered, setAnswered] = useState<string | null>(null)
 
   const promptOptions = options.length > 0 ? options : ['Continue']
   const customSlotLabel = 'Type your own answer'
 
   const handleQuickReply = (opt: string) => {
-    setAnswered(opt)
     onRespond(opt, requestId)
   }
 
   const handleCustomSend = () => {
     const answer = customText.trim()
     if (!answer) return
-    setAnswered(answer)
     onRespond(answer, requestId)
   }
 
   if (answered) {
     return (
       <div className='my-1.5 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2'>
-        <p className='text-xs text-zinc-500'>You answered: <span className='text-zinc-300'>{answered}</span></p>
+        <p className='text-xs text-zinc-500'>You answered this question.</p>
       </div>
     )
   }
@@ -887,6 +956,42 @@ function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
   )
 }
 
+// ─── LivePlanCard — animated step checklist for announce_plan ────────────────
+function LivePlanCard({ steps, completedTools }: { steps: string[]; completedTools: Set<string> }) {
+  if (!steps.length) return null
+  const doneCount = steps.filter((_, i) => completedTools.has(String(i))).length
+  const pct = Math.round((doneCount / steps.length) * 100)
+  return (
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#141414] overflow-hidden'>
+      <div className='flex items-center gap-2 border-b border-[#222] px-4 py-3'>
+        <IcoPlan className='h-4 w-4 flex-shrink-0 text-violet-400' />
+        <p className='flex-1 text-xs font-semibold text-zinc-200'>Plan</p>
+        <span className='text-[10px] text-zinc-500'>{doneCount}/{steps.length} steps</span>
+      </div>
+      <div className='px-4 py-3 space-y-2'>
+        {steps.map((step, i) => {
+          const done = completedTools.has(String(i))
+          return (
+            <div key={i} className='flex items-start gap-2'>
+              <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[9px] font-bold transition-colors ${done ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-[#333] text-zinc-600'}`}>
+                {done ? <IcoCheck className='h-2.5 w-2.5' /> : i + 1}
+              </span>
+              <span className={`text-xs leading-relaxed transition-colors ${done ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>{step}</span>
+            </div>
+          )
+        })}
+      </div>
+      {doneCount > 0 && (
+        <div className='px-4 pb-3'>
+          <div className='h-0.5 rounded-full bg-[#222]'>
+            <div className='h-0.5 rounded-full bg-emerald-500/50 transition-all duration-500' style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── PlusMenu ─────────────────────────────────────────────────────────────────
 interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
@@ -977,7 +1082,14 @@ interface InputBarCursorProps {
   onStop: () => void
   onMicClick: () => void
   onPlusClick: () => void
-  onPlanClick: () => void
+  onOpenGallery: () => void
+  onSelectSuggestion: (templateId: string) => void
+  provider: string
+  model: string
+  agentMode: AgentModeId
+  onProviderChange: (provider: string) => void
+  onModelChange: (model: string) => void
+  onAgentModeChange: (mode: AgentModeId) => void
   isWorking: boolean
   isDisabled: boolean
   micIsActive: boolean
@@ -988,16 +1100,15 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
-  modelChipLabel?: string
   isLocalOnly?: boolean
   hasFullAccess?: boolean
 }
 
 function InputBarCursor({
-  input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onPlanClick,
+  input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
+  provider, model, agentMode, onProviderChange, onModelChange, onAgentModeChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments,
-  modelChipLabel = 'GPT-5.4',
   isLocalOnly = true,
   hasFullAccess = true,
 }: InputBarCursorProps) {
@@ -1051,22 +1162,67 @@ function InputBarCursor({
         )}
       </div>
 
-      <div className='flex items-center gap-1.5 border-t border-[#242424] px-2.5 py-2'>
+      <div className='space-y-2 border-t border-[#242424] px-2.5 py-2'>
+        <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+          <span className='hidden text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:inline'>Mode</span>
+          <select
+            value={agentMode}
+            onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
+            className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+            aria-label='Agent mode'
+          >
+            {AGENT_MODES.map((option) => (
+              <option key={option.id} value={option.id} className='bg-[#0f0f0f] text-zinc-100'>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className='grid grid-cols-2 gap-2'>
+          <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+            <span className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-xs'>
+              {renderProviderIcon(providerById(provider) ?? PROVIDERS[0])}
+            </span>
+            <select
+              value={provider}
+              onChange={(event) => onProviderChange(event.target.value)}
+              className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+              aria-label='Provider'
+            >
+              {PROVIDERS.map((item) => (
+                <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
+                  {item.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+            <select
+              value={model}
+              onChange={(event) => onModelChange(event.target.value)}
+              className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
+              aria-label='Model'
+            >
+              {(providerById(provider) ?? PROVIDERS[0]).models.map((item) => (
+                <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <SuggestionChips onSelectSuggestion={onSelectSuggestion} onOpenGallery={onOpenGallery} />
+
+        <div className='flex items-center gap-1.5'>
         {/* + button */}
         <button type='button' onClick={onPlusClick} disabled={isDisabled}
           className='flex items-center justify-center h-7 w-7 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0'
           aria-label='Add files or connectors'>
           <Icons.plus className='h-4 w-4' />
         </button>
-
-        {/* Plan button */}
-        <button type='button' onClick={onPlanClick} disabled={isDisabled}
-          className='flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0 text-xs font-medium'>
-          <IcoPlan className='h-3.5 w-3.5' />
-          Plan
-        </button>
-
-        <span className='rounded-lg px-2 py-1 text-xs text-zinc-500'>⚡ {modelChipLabel}</span>
 
         <div className='flex-1' />
 
@@ -1079,6 +1235,7 @@ function InputBarCursor({
           <IcoMic className='h-3.5 w-3.5' />
         </button>
 
+      </div>
       </div>
 
       <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
@@ -1109,6 +1266,12 @@ export function ChatPanel({
   onPlanConfirm,
   onPlanReject,
   reasoningMap,
+  provider,
+  model,
+  agentMode,
+  onProviderChange,
+  onModelChange,
+  onAgentModeChange,
   contextSnapshot,
   userName,
   subAgentNames = [],
@@ -1120,51 +1283,87 @@ export function ChatPanel({
 
   // ── Conversation persistence ──────────────────────────────────────────────
   const CHAT_KEY = (id: string) => `aegis.chat.${id}`
+  const uiKey = (taskId: string | null | undefined) => `aegis.chat.ui.${taskId ?? 'none'}`
+  const emptyThreadUiState = (): ThreadUiState => ({
+    collapsedToolIds: [],
+    answeredUserInputIds: [],
+    openThinkingIds: [],
+  })
   const saveMsgs = (id: string | null | undefined, msgs: ChatMessage[]) => {
     if (!id) return
     try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(msgs.slice(-200))) } catch { /* quota */ }
   }
 
   const [sentMessages, setSentMessages] = useState<ChatMessage[]>([])
-  const prevTaskIdRef    = useRef(activeTaskId)
-  const prevServerLenRef = useRef(0)
+  const [threadUi, setThreadUi] = useState<ThreadUiState>(emptyThreadUiState)
+  const [threadReady, setThreadReady] = useState(false)
+
+  const serverThreadSignature = useMemo(() => {
+    const id = activeTaskId ?? 'no-task'
+    const msgSig = serverMessages
+      .map((m) => `${m.id}:${m.role}:${m.created_at ?? ''}:${m.content}`)
+      .join('|')
+    return `${id}::${msgSig}`
+  }, [activeTaskId, serverMessages])
 
   useEffect(() => {
-    const taskChanged   = prevTaskIdRef.current !== activeTaskId
-    const serverArrived = prevServerLenRef.current === 0 && serverMessages.length > 0
-    prevTaskIdRef.current    = activeTaskId
-    prevServerLenRef.current = serverMessages.length
-    if (!taskChanged && !serverArrived) return
+    try {
+      const raw = localStorage.getItem(uiKey(activeTaskId))
+      if (raw) setThreadUi(JSON.parse(raw) as ThreadUiState)
+      else setThreadUi(emptyThreadUiState())
+    } catch {
+      setThreadUi(emptyThreadUiState())
+    }
+  }, [activeTaskId])
+
+  useEffect(() => {
+    if (!activeTaskId) return
+    try {
+      localStorage.setItem(uiKey(activeTaskId), JSON.stringify(threadUi))
+    } catch {
+      // ignore localStorage quota/read-only errors
+    }
+  }, [activeTaskId, threadUi])
+
+  useEffect(() => {
     if (serverMessages.length > 0) {
-      const serverMapped = serverMessages.map((m) => ({
-        id: m.id,
-        role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
-        text: m.content,
-        timestamp:
-          m.role === 'assistant'
-            ? undefined
-            : m.created_at
-              ? new Date(m.created_at).toLocaleTimeString()
-              : new Date().toLocaleTimeString(),
-        attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
-          ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
-          : undefined,
-      }))
-      const serverUserTexts = new Set(serverMapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+      const mapped = serverMessages
+        .filter((m) => !isDeniedChatText(m.content))
+        .filter((m) => !isBrowserOnlyEvent({ message: m.content }))
+        .map((m) => ({
+          id: m.id,
+          role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
+          text: m.content,
+          timestamp:
+            m.role === 'assistant'
+              ? undefined
+              : m.created_at
+                ? new Date(m.created_at).toLocaleTimeString()
+                : new Date().toLocaleTimeString(),
+          attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
+            ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
+            : undefined,
+        }))
+      const serverUserTexts = new Set(mapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
       setSentMessages((prev) => {
-        const optimisticLocalUsers = prev.filter(
+        const optimistic = prev.filter(
           (m) => m.role === 'user' && String(m.id).startsWith('local-') && !serverUserTexts.has((m.text ?? '').trim()),
         )
-        return [...optimisticLocalUsers, ...serverMapped]
+        return [...optimistic, ...mapped]
       })
-    } else if (taskChanged) {
+    } else {
       setSentMessages([])
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId, serverMessages.length])
+  }, [serverThreadSignature, serverMessages])
+
+  useEffect(() => {
+    setThreadReady(false)
+    queueMicrotask(() => setThreadReady(true))
+  }, [serverThreadSignature])
 
   const [activeConnector, setActiveConnector] = useState<ConnectorMeta | null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
   const [approvedIds, setApprovedIds]   = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds]   = useState<Set<string>>(new Set())
 
@@ -1285,10 +1484,12 @@ export function ChatPanel({
     window.setTimeout(() => textareaRef.current?.focus(), 0)
   }
 
-  const handleSend = () => {
+  const handleSend = (forcePlan = false) => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
-    const withContext = activeConnector ? `[${activeConnector.name}] ${trimmed}` : trimmed
+    const parsed = resolveComposerSubmission(trimmed, forcePlan)
+    const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
+    const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const localMsg: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
@@ -1302,8 +1503,8 @@ export function ChatPanel({
       saveMsgs(activeTaskId, next)
       return next
     })
-    if (withContext.startsWith('/plan ')) {
-      onDecomposePlan(withContext.slice(6))
+    if (parsed.mode === 'plan' && withContext) {
+      onDecomposePlan(withContext)
     } else {
       onSend(withContext || '(attachment)', 'steer', {
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -1325,11 +1526,19 @@ export function ChatPanel({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const handlePlanClick = () => {
-    const prompt = input.trim()
-    if (prompt) { onDecomposePlan(prompt); setInput('') }
-    else setInput('/plan ')
-    textareaRef.current?.focus()
+  const handleSuggestionSelect = async (templateId: string) => {
+    try {
+      const response = await fetch(apiUrl(`/api/gallery/${templateId}`), { credentials: 'include' })
+      const data = await response.json()
+      if (data?.ok && typeof data?.template?.prompt === 'string') setInput(data.template.prompt)
+    } catch {
+      // non-fatal
+    }
+  }
+
+  const handleTemplateSelect = (prompt: string) => {
+    setInput(prompt)
+    setGalleryOpen(false)
   }
 
   const handleConnectorSelect = (connector: ConnectorMeta) => {
@@ -1360,19 +1569,57 @@ export function ChatPanel({
 
   const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onSend('approved', 'steer') }
   const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onSend('rejected', 'steer') }
+  const setToolCollapsed = useCallback((toolId: string, collapsed: boolean) => {
+    setThreadUi((prev) => {
+      const next = new Set(prev.collapsedToolIds)
+      if (collapsed) next.add(toolId)
+      else next.delete(toolId)
+      return { ...prev, collapsedToolIds: Array.from(next) }
+    })
+  }, [])
+  const setUserInputAnswered = useCallback((requestId: string) => {
+    setThreadUi((prev) => {
+      if (prev.answeredUserInputIds.includes(requestId)) return prev
+      return { ...prev, answeredUserInputIds: [...prev.answeredUserInputIds, requestId] }
+    })
+  }, [])
 
   const handleUserInputReply = (answer: string, requestId: string) => {
     const trimmed = answer.trim()
     if (!trimmed) return
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     setSentMessages((prev) => {
-      const next: ChatMessage[] = [...prev, { id: `local-${crypto.randomUUID()}`, role: 'user', text: trimmed, timestamp: now }]
+      const next: ChatMessage[] = [
+        ...prev,
+        {
+          id: `local-${crypto.randomUUID()}`,
+          role: 'user',
+          text: trimmed,
+          timestamp: now,
+          metadata: { source: 'ask_user_input', request_id: requestId },
+        },
+      ]
       saveMsgs(activeTaskId, next)
       return next
     })
-    onUserInputResponse?.(trimmed, requestId)
-    onSend(trimmed, 'steer', { task_label_source: 'chat', task_label: trimmed })
+    setUserInputAnswered(requestId)
+    onUserInputResponse(trimmed, requestId)
   }
+
+  const handleToggleThinkingOpen = useCallback((stepId: string) => {
+    if (!activeTaskId || !stepId) return
+    setThreadUi((prev) => {
+      const next = new Set(prev.openThinkingIds)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      try {
+        localStorage.setItem(OPEN_THINKING_KEY(activeTaskId), JSON.stringify(Array.from(next)))
+      } catch {
+        // ignore localStorage write failures
+      }
+      return { ...prev, openThinkingIds: Array.from(next) }
+    })
+  }, [activeTaskId])
 
   const isDisabled = connectionStatus !== 'connected'
 
@@ -1380,7 +1627,6 @@ export function ChatPanel({
   const firstName = userName ? userName.split(' ')[0] : null
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
-  const modelChipLabel = 'GPT-5.4'
   const isLocalOnly = true
   const hasFullAccess = true
 
@@ -1414,8 +1660,11 @@ export function ChatPanel({
 
       {/* Messages */}
       <div className='flex-1 overflow-y-auto px-3 py-3 space-y-0.5'>
+        {!threadReady && (
+          <div className='flex-1 px-3 py-3 text-xs text-zinc-500'>Loading thread…</div>
+        )}
 
-        {allMessages.length === 0 && (
+        {threadReady && allMessages.length === 0 && (
           <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-4'>
             <div className='flex h-12 w-12 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
               <IcoMessage className='h-5 w-5 text-zinc-500' />
@@ -1435,14 +1684,23 @@ export function ChatPanel({
           </div>
         )}
 
-        {allMessages.map((msg) => {
+        {threadReady && allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
 
           // Tool calls → ShellCard (collapsed accordion by default when done, open while running)
           if (msg.role === 'tool') {
             const isLive = isWorking && msg.toolStatus === 'in_progress'
-            return <ShellCard key={msg.id} msg={msg} isRunning={isLive} />
+            const collapsed = threadUi.collapsedToolIds.includes(msg.id)
+            return (
+              <ShellCard
+                key={msg.id}
+                msg={msg}
+                isRunning={isLive}
+                expanded={isLive || !collapsed}
+                onExpandedChange={(expanded) => setToolCollapsed(msg.id, !expanded)}
+              />
+            )
           }
 
           if (msg.role === 'approval') {
@@ -1460,12 +1718,16 @@ export function ChatPanel({
           if (msg.role === 'subagent') return <SubagentCard key={msg.id} msg={msg} />
 
           if (msg.role === 'user_input') {
+            const requestId = msg.requestId ?? msg.id
             return (
               <UserInputCard key={msg.id}
                 question={msg.question ?? msg.text}
                 options={msg.options ?? []}
-                requestId={msg.requestId ?? msg.id}
-                onRespond={(answer, reqId) => { handleUserInputReply(answer, reqId) }}
+                requestId={requestId}
+                answered={threadUi.answeredUserInputIds.includes(requestId)}
+                onRespond={(answer, reqId) => {
+                  handleUserInputReply(answer, reqId)
+                }}
               />
             )
           }
@@ -1475,19 +1737,40 @@ export function ChatPanel({
           if (msg.role === 'plan_confirm') {
             return (
               <PlanConfirmCard key={msg.id} plan={msg.text} requestId={msg.requestId ?? msg.id}
-                onConfirm={(reqId) => { onPlanConfirm?.(reqId); onSend('confirmed', 'steer') }}
-                onReject={(reqId) => { onPlanReject?.(reqId); onSend('rejected', 'steer') }}
+                onConfirm={(reqId) => { onPlanConfirm?.(reqId) }}
+                onReject={(reqId) => { onPlanReject?.(reqId) }}
               />
             )
           }
 
+          if (msg.role === 'live_plan') {
+            const msgIdx = allMessages.indexOf(msg)
+            const subsequentTools = new Set(
+              allMessages.slice(msgIdx + 1)
+                .filter((m) => m.role === 'tool')
+                .map((_, i) => String(i))
+            )
+            return <LivePlanCard key={msg.id} steps={msg.planSteps ?? []} completedTools={subsequentTools} />
+          }
+
           if (msg.role === 'thinking') {
             const stepId = msg.stepId ?? ''
-            const reasoningText = reasoningMap?.[stepId] ?? msg.text ?? ''
-            const isStreaming = isWorking && msg.id === latestThinkingId
+            const hasStructuredState = Boolean(stepId && reasoningMap?.[stepId])
+            const reasoningText = hasStructuredState
+              ? (reasoningMap?.[stepId] ?? msg.text ?? '')
+              : ''
+            const status = (msg.metadata as { status?: ThinkingState; placeholder?: boolean } | undefined)?.status
+            const placeholder = Boolean((msg.metadata as { placeholder?: boolean } | undefined)?.placeholder)
+            const isStreaming = placeholder || status !== 'completed'
             return (
-              <div key={msg.id} className='px-1'>
-                <ThinkingRow stepId={stepId} reasoningText={reasoningText} isStreaming={isStreaming} />
+              <div key={msg.id}>
+                <ThinkingRow
+                  stepId={stepId}
+                  reasoningText={reasoningText}
+                  isStreaming={isStreaming}
+                  open={threadUi.openThinkingIds.includes(stepId)}
+                  onToggle={() => handleToggleThinkingOpen(stepId)}
+                />
               </div>
             )
           }
@@ -1495,14 +1778,17 @@ export function ChatPanel({
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 
-        {/* Agent working indicator — shows when no explicit thinking card yet */}
+        {/* Agent working indicator — spinning Aegis shield logo like Gemini */}
         {isWorking && !allMessages.some((m) => m.role === 'thinking' || m.role === 'tool') && (
-          <div className='flex items-center gap-2 px-3 py-2'>
-            <span
-              className='thinking-shimmer rounded-md bg-[#1e1e2e] px-2.5 py-0.5 text-xs font-semibold text-violet-300 border border-violet-500/20'
-            >
-              Thinking
-            </span>
+          <div className='flex items-center gap-3 px-3 py-2'>
+            <div className='relative flex h-7 w-7 flex-shrink-0 items-center justify-center'>
+              {/* Outer glow ring — spins */}
+              <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
+              <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+              {/* Logo itself — gentle pulse */}
+              <img src='/aegis-shield.png' alt='Aegis thinking' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
+            </div>
+            <span className='thinking-shimmer text-xs font-medium text-zinc-400'>Aegis is thinking…</span>
           </div>
         )}
 
@@ -1565,7 +1851,14 @@ export function ChatPanel({
           onStop={() => onStop?.()}
           onMicClick={handleMicClick}
           onPlusClick={() => setShowPlusMenu((v) => !v)}
-          onPlanClick={handlePlanClick}
+          onOpenGallery={() => setGalleryOpen(true)}
+          onSelectSuggestion={handleSuggestionSelect}
+          provider={provider}
+          model={model}
+          agentMode={agentMode}
+          onProviderChange={onProviderChange}
+          onModelChange={onModelChange}
+          onAgentModeChange={onAgentModeChange}
           isWorking={isWorking}
           isDisabled={isDisabled}
           micIsActive={micIsActive}
@@ -1582,7 +1875,6 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
-          modelChipLabel={modelChipLabel}
           isLocalOnly={isLocalOnly}
           hasFullAccess={hasFullAccess}
         />
@@ -1596,6 +1888,13 @@ export function ChatPanel({
           </p>
         )}
       </div>
+      {galleryOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
+          <div className='h-[85vh] w-full max-w-6xl'>
+            <PromptGallery onSelectTemplate={handleTemplateSelect} onClose={() => setGalleryOpen(false)} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

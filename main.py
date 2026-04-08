@@ -30,6 +30,7 @@ from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
 from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
+from backend.integrations.text_normalization import normalize_for_channel
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
 from backend.modes import MODE_LABELS, normalize_agent_mode
@@ -37,9 +38,12 @@ from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
 from backend.research.router import research_router
+from backend.skills.router import skills_router
+from backend.skills_hub.router import skills_hub_router
+from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
-from backend.conversation_service import append_message, get_or_create_conversation, update_conversation_title
+from backend.conversation_service import append_message, get_or_create_conversation
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
@@ -93,6 +97,8 @@ app.include_router(planner_router)
 app.include_router(executor_router)
 app.include_router(research_router)
 app.include_router(tasks_router)
+app.include_router(skills_router)
+app.include_router(skills_hub_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
@@ -330,6 +336,70 @@ _stream_subscribers: dict[str, dict[str, Any]] = {}
 _bot_configs: dict[str, dict[str, Any]] = {}
 
 
+def _apply_runtime_mode_update(
+    runtime: SessionRuntime,
+    requested_mode_raw: object,
+    *,
+    apply: bool = True,
+) -> tuple[str, bool, str | None]:
+    """Validate/apply requested mode for a runtime and return outcome details."""
+    requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+    if mode_valid and apply:
+        runtime.settings["agent_mode"] = requested_mode
+        return requested_mode, True, None
+    allowed = ", ".join(MODE_LABELS.keys())
+    return (
+        requested_mode,
+        False,
+        f"Invalid mode `{requested_mode_raw}`. Allowed modes: {allowed}.",
+    )
+
+
+def validate_requested_mode(requested_mode_raw: object) -> tuple[str, bool]:
+    """Normalize a raw mode payload and return whether it is an allowed explicit mode."""
+    candidate = str(requested_mode_raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if candidate in MODE_LABELS:
+        return candidate, True
+    return normalize_agent_mode(candidate), False
+
+
+def _normalize_runtime_mode(runtime_settings: dict[str, Any]) -> str:
+    """Normalize the active runtime mode and persist canonical value in settings."""
+    normalized = normalize_agent_mode(runtime_settings.get("agent_mode", ""))
+    runtime_settings["agent_mode"] = normalized
+    return normalized
+
+
+def allowed_tool_alternatives(mode: str, *, limit: int = 8) -> list[str]:
+    """Return representative tools that remain available in the requested mode."""
+    blocked = blocked_tools_for_mode(mode)
+    candidates = (
+        "screenshot",
+        "analyze_screen",
+        "ask_user_input",
+        "memory_search",
+        "memory_read",
+        "web_search",
+        "extract_page",
+        "list_files",
+        "read_file",
+        "done",
+        "error",
+    )
+    return [tool for tool in candidates if tool not in blocked][: max(1, limit)]
+
+
+def _mode_refusal_payload(*, requested_mode: object, effective_mode: str, reason: str) -> dict[str, Any]:
+    """Create a consistent websocket payload for mode-policy refusals."""
+    return {
+        "type": "mode_policy_refusal",
+        "requested_mode": str(requested_mode or ""),
+        "effective_mode": effective_mode,
+        "reason": reason,
+        "allowed_alternatives": allowed_tool_alternatives(effective_mode),
+    }
+
+
 def _get_orchestrator() -> AgentOrchestrator:
     """Return a lazily initialized orchestrator instance."""
     global orchestrator
@@ -376,6 +446,42 @@ def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -
 async def get_providers() -> dict[str, Any]:
     """List all supported LLM providers and their models."""
     return {"ok": True, "providers": list_providers()}
+
+
+@app.get("/api/modes")
+async def get_modes(request: Request) -> dict[str, Any]:
+    """Return the canonical immutable mode registry."""
+    _get_current_user(request)
+    return {"ok": True, "modes": [serialize_mode_definition(mode.key) for mode in mode_definitions()]}
+
+
+@app.post("/api/modes")
+async def create_mode(_: dict[str, Any], request: Request) -> None:
+    """Reject mode creation; modes are immutable system-owned nodes."""
+    _get_current_user(request)
+    raise HTTPException(
+        status_code=403,
+        detail="Modes are immutable system-level nodes and cannot be created, modified, or deleted via this API.",
+    )
+
+
+@app.patch("/api/modes/{mode_key}")
+async def patch_mode(mode_key: str, _: dict[str, Any], request: Request) -> None:
+    """Reject mode mutation; protected mode policy fields are immutable."""
+    _get_current_user(request)
+    _ = mode_key
+    raise HTTPException(status_code=403, detail="Protected mode policy fields are immutable")
+
+
+@app.delete("/api/modes/{mode_key}")
+async def delete_mode(mode_key: str, request: Request) -> None:
+    """Reject mode deletion; canonical mode registry is fixed."""
+    _get_current_user(request)
+    _ = mode_key
+    raise HTTPException(
+        status_code=403,
+        detail="Modes are immutable system-level nodes and cannot be created, modified, or deleted via this API.",
+    )
 
 
 @app.get("/api/keys")
@@ -718,14 +824,18 @@ async def _send_step(
     session_id: str | None = None,
 ) -> None:
     """Send step payload to frontend."""
-    await websocket.send_json({"type": "step", "data": step})
+    normalized_step = dict(step)
+    if "content" in normalized_step:
+        normalized_content, _ = normalize_for_channel(str(normalized_step["content"] or ""), channel="web")
+        normalized_step["content"] = normalized_content
+    await websocket.send_json({"type": "step", "data": normalized_step})
     if runtime and session_id:
         await _log_web_message(
             runtime,
             session_id,
             "assistant",
-            str(step.get("content") or step.get("type") or "Step update"),
-            metadata={"source": "websocket", "action": "step", "step": step},
+            str(normalized_step.get("content") or normalized_step.get("type") or "Step update"),
+            metadata={"source": "websocket", "action": "step", "step": normalized_step},
         )
 
 
@@ -815,6 +925,7 @@ async def _log_web_message(
     *,
     title: str | None = None,
     metadata: dict[str, Any] | None = None,
+    title_candidate: str | None = None,
 ) -> None:
     """Persist a websocket message to the conversations DB and emit conversation_id to client."""
     if not runtime.user_uid:
@@ -829,7 +940,14 @@ async def _log_web_message(
                 title=title,
             )
             runtime.conversation_id = conv.id
-            await append_message(db, conv.id, role, content, metadata=metadata)
+            await append_message(
+                db,
+                conv.id,
+                role,
+                content,
+                metadata=metadata,
+                title_candidate=title_candidate,
+            )
             break
     except Exception:  # noqa: BLE001
         logger.warning("Failed to persist web message to DB for session %s", session_id)
@@ -911,6 +1029,7 @@ async def _run_navigation_task(
     )
     runtime.task_running = True
     runtime.cancel_event.clear()
+    _normalize_runtime_mode(runtime.settings)
 
     async def _on_user_input(question: str, options: list[str]) -> str:
         """Send a user_input_request WS message and await the user's response."""
@@ -936,11 +1055,12 @@ async def _run_navigation_task(
             runtime.pending_user_inputs.pop(request_id, None)
 
     async def _on_reasoning_delta(step_id: str, delta_text: str) -> None:
+        normalized_delta, _ = normalize_for_channel(delta_text, channel="web")
         await websocket.send_json({
             "type": "reasoning_delta",
             "data": {
                 "step_id": step_id,
-                "delta": delta_text,
+                "delta": normalized_delta,
             },
         })
 
@@ -1085,8 +1205,26 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             data = await websocket.receive_json()
             action = data.get("action")
             instruction = str(data.get("instruction", "")).strip()
+            requested_mode_raw = data.get("mode")
+            if requested_mode_raw is not None:
+                requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw)
+                if not mode_valid:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": _mode_refusal_payload(
+                                requested_mode=requested_mode_raw,
+                                effective_mode=requested_mode,
+                                reason="invalid_mode",
+                            ),
+                        }
+                    )
+                    continue
+            active_mode = _normalize_runtime_mode(runtime.settings)
             raw_metadata = data.get("metadata")
             client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
+            task_label = str(client_metadata.get("task_label", "")).strip() if client_metadata else ""
+            title_candidate = task_label or instruction
 
             if action == "navigate":
                 if runtime.task_running:
@@ -1098,7 +1236,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "navigate", "client": client_metadata or {}},
+                    title_candidate=title_candidate,
+                    metadata={
+                        "source": "websocket",
+                        "action": "navigate",
+                        "task_label": task_label,
+                        "client": client_metadata or {},
+                    },
                 )
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
@@ -1245,6 +1389,21 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 pass
             elif action == "spawn_subagent":
                 # ── Spawn a sub-agent ──────────────────────────────────
+                active_mode = _normalize_runtime_mode(runtime.settings)
+                if "spawn_subagent" in blocked_tools_for_mode(active_mode):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": {
+                                "type": "mode_policy_refusal",
+                                "requested_tool": "spawn_subagent",
+                                "effective_mode": active_mode,
+                                "reason": "tool_disallowed_for_mode",
+                                "allowed_alternatives": allowed_tool_alternatives(active_mode),
+                            },
+                        }
+                    )
+                    continue
                 sub_instruction = str(data.get("instruction", "")).strip()
                 sub_model = str(data.get("model", runtime.settings.get("model", ""))).strip()
                 if not sub_instruction:
@@ -1336,6 +1495,42 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await live_manager.close_session(session_id)
 
 
+async def _log_platform_message(
+    user_id: str | None,
+    *,
+    platform: str,
+    platform_chat_id: str,
+    role: str,
+    content: str,
+    title: str,
+    metadata: dict[str, Any] | None = None,
+    platform_message_id: str | None = None,
+) -> None:
+    """Persist a platform message to conversation storage when an owner is available."""
+    if not user_id:
+        return
+    session_iter = get_session()
+    db = await anext(session_iter)
+    try:
+        conversation = await get_or_create_conversation(
+            db,
+            user_id=user_id,
+            platform=platform,
+            platform_chat_id=str(platform_chat_id),
+            title=title,
+        )
+        await append_message(
+            db,
+            conversation_id=conversation.id,
+            role=role,
+            content=content,
+            metadata=metadata or {},
+            platform_message_id=platform_message_id,
+        )
+    finally:
+        await session_iter.aclose()
+
+
 # ── Integration webhook / registration endpoints ─────────────────────
 
 
@@ -1346,12 +1541,57 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
         raise HTTPException(status_code=404, detail="Integration not found")
     config = telegram_registry.get_config(integration_id)
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    expected_secret = str(config.get("webhook_secret", ""))
-    if expected_secret and secret != expected_secret:
-        raise HTTPException(status_code=403, detail="Invalid secret token")
+    if hasattr(integration, "validate_webhook_secret"):
+        if not integration.validate_webhook_secret(secret):
+            raise HTTPException(status_code=403, detail="Invalid secret token")
+    else:
+        expected_secret = str(config.get("webhook_secret", ""))
+        if expected_secret and secret != expected_secret:
+            raise HTTPException(status_code=403, detail="Invalid secret token")
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
+    callback_mode, callback_mode_valid = _parse_telegram_mode_callback(update)
+    if callback_mode is not None:
+        callback_message = update.get("callback_query", {}).get("message", {})
+        callback_chat_id = (callback_message.get("chat") or {}).get("id")
+        if not owner_user_id:
+            if callback_chat_id is not None:
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": str(callback_chat_id),
+                        "text": "⚠️ Mode switching is only available for the owner session.",
+                    },
+                )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if callback_chat_id is not None:
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {"chat_id": str(callback_chat_id), "text": "⚠️ No active session. Start a session first."},
+                )
+            return {"ok": True}
+        if not callback_mode_valid:
+            if callback_chat_id is not None:
+                allowed = ", ".join(MODE_LABELS.keys())
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": str(callback_chat_id),
+                        "text": f"❌ Invalid mode selection. Allowed modes: {allowed}",
+                    },
+                )
+            return {"ok": True}
+        runtime.settings["agent_mode"] = callback_mode
+        mode_label = MODE_LABELS.get(callback_mode, callback_mode.title())
+        if callback_chat_id is not None:
+            await integration.execute_tool(
+                "telegram_send_message",
+                {"chat_id": str(callback_chat_id), "text": f"✅ Mode switched to *{mode_label}*"},
+            )
+        return {"ok": True}
     chat_id, text_content, platform_message_id = _extract_telegram_message(update)
 
     # Slash command handling
@@ -1373,7 +1613,17 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             ack_reaction=ack_reaction,
         )
         if cmd_response:
-            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
+            if isinstance(cmd_response, dict):
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": chat_id,
+                        "text": str(cmd_response.get("text", "")),
+                        "reply_markup": cmd_response.get("reply_markup"),
+                    },
+                )
+            else:
+                await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
         return {"ok": True}
 
     if chat_id and text_content:
@@ -1392,12 +1642,22 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
 async def register_telegram_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    session_owner_user_id = _extract_session_user_uid(request.cookies.get("aegis_session"))
+    payload_owner_user_id = str(payload.get("owner_user_id", "")).strip() or None
+    if session_owner_user_id and payload_owner_user_id and payload_owner_user_id != session_owner_user_id:
+        raise HTTPException(status_code=403, detail="owner_user_id does not match authenticated session")
+    owner_user_id = session_owner_user_id or payload_owner_user_id
+    if not owner_user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="owner_user_id is required (authenticate via aegis_session or provide owner_user_id in payload)",
+        )
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "delivery_mode": str(payload.get("delivery_mode", "polling")).strip(),
         "webhook_url": str(payload.get("webhook_url", "")).strip(),
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
-        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
+        "owner_user_id": owner_user_id,
     }
     integration = TelegramIntegration()
     connection = await integration.connect(config)
@@ -1427,9 +1687,14 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid chat_id")
     text = str(payload.get("text", "")).strip()
+    parse_mode = str(payload.get("parse_mode", "")).strip() or None
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text})
+    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
+    tool_payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text}
+    if normalized_parse_mode:
+        tool_payload["parse_mode"] = normalized_parse_mode
+    result = await integration.execute_tool("telegram_send_message", tool_payload)
     config = telegram_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1437,7 +1702,7 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
             platform="telegram",
             platform_chat_id=str(chat_id),
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Telegram {chat_id}",
             metadata={"integration_id": integration_id, "source": "send_message", "draft": False},
         )
@@ -1454,9 +1719,14 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid chat_id")
     text = str(payload.get("text", "")).strip()
+    parse_mode = str(payload.get("parse_mode", "")).strip() or None
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": text, "draft": True})
+    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
+    tool_payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text, "draft": True}
+    if normalized_parse_mode:
+        tool_payload["parse_mode"] = normalized_parse_mode
+    result = await integration.execute_tool("telegram_send_message", tool_payload)
     config = telegram_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1464,7 +1734,7 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
             platform="telegram",
             platform_chat_id=str(chat_id),
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Telegram {chat_id}",
             metadata={"integration_id": integration_id, "source": "send_message", "draft": True},
         )
@@ -1483,6 +1753,75 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
     connection = await integration.connect(config)
     slack_registry.upsert(integration_id, integration, config)
     return {"ok": True, "connection": connection}
+
+
+@app.post("/api/integrations/slack/webhook/{integration_id}")
+async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]:
+    """Handle Slack events/interactions and route shared slash commands."""
+    integration = slack_registry.get_slack(integration_id)
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    payload = await request.json()
+    result = await integration.execute_tool("slack_handle_event", {"payload": payload, "headers": dict(request.headers)})
+    owner_user_id = str(slack_registry.get_config(integration_id).get("owner_user_id", "")).strip() or None
+
+    selected_mode_raw = SlackIntegration.extract_mode_selection(payload if isinstance(payload, dict) else {})
+    if selected_mode_raw:
+        channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
+        if not owner_user_id:
+            if channel:
+                await integration.execute_tool(
+                    "slack_send_message",
+                    {"channel": channel, "text": "⚠️ Mode switching is only available for the owner session."},
+                )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if channel:
+                await integration.execute_tool("slack_send_message", {"channel": channel, "text": "⚠️ No active session. Start a session first."})
+            return {"ok": True}
+        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
+        if not mode_valid:
+            if channel:
+                await integration.execute_tool("slack_send_message", {"channel": channel, "text": f"❌ {mode_error}"})
+            return {"ok": True}
+        if channel:
+            await integration.execute_tool(
+                "slack_send_message",
+                {"channel": channel, "text": f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*"},
+            )
+        return {"ok": True}
+
+    channel, text_content, platform_message_id = _extract_slack_message(payload if isinstance(payload, dict) else {})
+    if channel and text_content and text_content.startswith("/"):
+        cmd_response = await _handle_slash_command(
+            text=text_content,
+            owner_uid=owner_user_id,
+            platform="slack",
+            integration_id=integration_id,
+            chat_id=channel,
+        )
+        if isinstance(cmd_response, dict):
+            await integration.execute_tool(
+                "slack_send_message",
+                {"channel": channel, "text": str(cmd_response.get("text", "")), "blocks": cmd_response.get("blocks")},
+            )
+        elif cmd_response:
+            await integration.execute_tool("slack_send_message", {"channel": channel, "text": cmd_response})
+        return {"ok": True}
+
+    if channel and text_content:
+        await _log_platform_message(
+            owner_user_id,
+            platform="slack",
+            platform_chat_id=channel,
+            role="user",
+            content=text_content,
+            title=text_content[:200],
+            metadata={"integration_id": integration_id, "source": "webhook"},
+            platform_message_id=platform_message_id,
+        )
+    return {"ok": True, "result": result}
 
 
 @app.post("/api/integrations/slack/{integration_id}/test")
@@ -1505,7 +1844,8 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
         raise HTTPException(status_code=400, detail="Channel is required")
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("slack_send_message", {"channel": channel, "text": text})
+    normalized_text, _ = normalize_for_channel(text, channel="slack")
+    result = await integration.execute_tool("slack_send_message", {"channel": channel, "text": normalized_text})
     config = slack_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1513,7 +1853,7 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
             platform="slack",
             platform_chat_id=channel,
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Slack {channel}",
             metadata={"integration_id": integration_id, "source": "send_message"},
         )
@@ -1531,6 +1871,75 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
     connection = await integration.connect(config)
     discord_registry.upsert(integration_id, integration, config)
     return {"ok": True, "connection": connection}
+
+
+@app.post("/api/integrations/discord/webhook/{integration_id}")
+async def discord_webhook(integration_id: str, request: Request) -> dict[str, Any]:
+    """Handle Discord interactions/events and route shared slash commands."""
+    integration = discord_registry.get_discord(integration_id)
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    payload = await request.json()
+    result = await integration.execute_tool("discord_handle_event", {"payload": payload, "headers": dict(request.headers)})
+    owner_user_id = str(discord_registry.get_config(integration_id).get("owner_user_id", "")).strip() or None
+
+    selected_mode_raw = DiscordIntegration.extract_mode_selection(payload if isinstance(payload, dict) else {})
+    if selected_mode_raw:
+        channel = str(payload.get("channel_id") or "").strip()
+        if not owner_user_id:
+            if channel:
+                await integration.execute_tool(
+                    "discord_send_message",
+                    {"channel": channel, "text": "⚠️ Mode switching is only available for the owner session."},
+                )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if channel:
+                await integration.execute_tool("discord_send_message", {"channel": channel, "text": "⚠️ No active session. Start a session first."})
+            return {"ok": True}
+        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
+        if not mode_valid:
+            if channel:
+                await integration.execute_tool("discord_send_message", {"channel": channel, "text": f"❌ {mode_error}"})
+            return {"ok": True}
+        if channel:
+            await integration.execute_tool(
+                "discord_send_message",
+                {"channel": channel, "text": f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*"},
+            )
+        return {"ok": True}
+
+    channel, text_content, platform_message_id = _extract_discord_message(payload if isinstance(payload, dict) else {})
+    if channel and text_content and text_content.startswith("/"):
+        cmd_response = await _handle_slash_command(
+            text=text_content,
+            owner_uid=owner_user_id,
+            platform="discord",
+            integration_id=integration_id,
+            chat_id=channel,
+        )
+        if isinstance(cmd_response, dict):
+            await integration.execute_tool(
+                "discord_send_message",
+                {"channel": channel, "text": str(cmd_response.get("text", "")), "components": cmd_response.get("components")},
+            )
+        elif cmd_response:
+            await integration.execute_tool("discord_send_message", {"channel": channel, "text": cmd_response})
+        return {"ok": True}
+
+    if channel and text_content:
+        await _log_platform_message(
+            owner_user_id,
+            platform="discord",
+            platform_chat_id=channel,
+            role="user",
+            content=text_content,
+            title=text_content[:200],
+            metadata={"integration_id": integration_id, "source": "webhook"},
+            platform_message_id=platform_message_id,
+        )
+    return {"ok": True, "result": result}
 
 
 @app.post("/api/integrations/discord/{integration_id}/test")
@@ -1553,7 +1962,8 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
         raise HTTPException(status_code=400, detail="Channel is required")
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": text})
+    normalized_text, _ = normalize_for_channel(text, channel="discord")
+    result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": normalized_text})
     config = discord_registry.get_config(integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -1561,7 +1971,7 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
             platform="discord",
             platform_chat_id=channel,
             role="assistant",
-            content=text,
+            content=normalized_text,
             title=f"Discord {channel}",
             metadata={"integration_id": integration_id, "source": "send_message"},
         )
@@ -1826,16 +2236,79 @@ async def _run_navigation_task_from_bot(
     if platform == "telegram":
         integration = telegram_registry.get_telegram(integration_id)
         if integration:
-            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": reply})
+            normalized_reply, _ = normalize_for_channel(reply, channel="telegram")
+            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": normalized_reply})
     elif platform == "discord":
         integration = discord_registry.get_discord(integration_id)
         if integration:
-            await integration.execute_tool("discord_send_message", {"channel": str(chat_id), "text": reply})
+            normalized_reply, _ = normalize_for_channel(reply, channel="discord")
+            await integration.execute_tool("discord_send_message", {"channel": str(chat_id), "text": normalized_reply})
 
 
 def _get_telegram_sender_id(update: dict[str, Any]) -> str:
+    callback_query = update.get("callback_query") or {}
+    callback_from = callback_query.get("from") or {}
+    if callback_from.get("id") is not None:
+        return str(callback_from.get("id"))
     msg = update.get("message") or update.get("edited_message") or {}
     return str((msg.get("from") or {}).get("id", ""))
+
+
+def _extract_telegram_message(update: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract chat/text/message-id from message or callback payloads."""
+    callback_query = update.get("callback_query") or {}
+    if callback_query:
+        message = callback_query.get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        text = str(callback_query.get("data", "")).strip() or None
+        message_id = message.get("message_id")
+        return (
+            str(chat_id) if chat_id is not None else None,
+            text,
+            str(message_id) if message_id is not None else None,
+        )
+
+    message = update.get("message") or update.get("edited_message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    text = str(message.get("text", "")).strip() or None
+    message_id = message.get("message_id")
+    return (
+        str(chat_id) if chat_id is not None else None,
+        text,
+        str(message_id) if message_id is not None else None,
+    )
+
+
+def _extract_slack_message(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract channel/text/message-id from a Slack event payload."""
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    channel = event.get("channel") or payload.get("channel_id")
+    text = event.get("text") or payload.get("text")
+    message_id = event.get("ts") or payload.get("message_ts")
+    return (
+        str(channel) if channel is not None and str(channel).strip() else None,
+        str(text).strip() if text is not None and str(text).strip() else None,
+        str(message_id) if message_id is not None and str(message_id).strip() else None,
+    )
+
+
+def _extract_discord_message(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract channel/text/message-id from Discord interaction/event payload."""
+    channel = payload.get("channel_id")
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    options = data.get("options") if isinstance(data.get("options"), list) else []
+    option_value = ""
+    if options and isinstance(options[0], dict):
+        option_value = str(options[0].get("value") or "").strip()
+    text = option_value or str(data.get("text") or "").strip() or str(payload.get("content") or "").strip()
+    message_id = message.get("id") or payload.get("id")
+    return (
+        str(channel) if channel is not None and str(channel).strip() else None,
+        text or None,
+        str(message_id) if message_id is not None and str(message_id).strip() else None,
+    )
 
 
 async def _handle_slash_command(
@@ -1845,7 +2318,7 @@ async def _handle_slash_command(
     integration_id: str,
     chat_id: Any,
     ack_reaction: str = "",
-) -> str | None:
+) -> str | dict[str, Any] | None:
     """Parse a slash command and execute the appropriate action. Returns a reply string or None."""
     parts = text.strip().split(None, 1)
     cmd = parts[0].lstrip("/").lower().split("@")[0]  # strip bot username suffix
@@ -2012,6 +2485,21 @@ async def _handle_slash_command(
             )
 
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
+
+
+def _telegram_mode_reply_markup() -> dict[str, Any]:
+    """Build Telegram inline keyboard for all available modes."""
+    return TelegramIntegration.mode_selector_reply_markup(MODE_LABELS)
+
+
+def _parse_telegram_mode_callback(update: dict[str, Any]) -> tuple[str | None, bool]:
+    """Parse Telegram callback payload for mode selection actions."""
+    callback = update.get("callback_query") or {}
+    mode_data = TelegramIntegration.extract_mode_selection(callback_data=callback.get("data"))
+    if mode_data is None:
+        return None, False
+    resolved_mode, is_valid = validate_requested_mode(mode_data)
+    return resolved_mode, is_valid
 
 
 # ── Bot config endpoints ─────────────────────────────────────────────

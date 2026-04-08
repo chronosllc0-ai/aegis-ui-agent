@@ -153,6 +153,7 @@ export function useSettings() {
       integrations: settings.integrations.filter((integration) => integration.enabled),
       tool_permissions: settings.toolPermissions,
       disabled_tools: settings.disabledTools,
+      enabled_skill_ids: settings.enabledSkillIds,
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
       agent_mode: settings.agentMode,

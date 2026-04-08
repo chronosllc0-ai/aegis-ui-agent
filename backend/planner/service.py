@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import TaskPlan, TaskStep
-from backend.providers import get_provider
+from backend.providers import PROVIDER_CATALOGUE, get_provider
 from backend.providers.base import ChatMessage
 
 logger = logging.getLogger(__name__)
@@ -50,15 +50,6 @@ Respond with ONLY valid JSON in this exact format:
     }
   ]
 }"""
-
-TASK_TYPE_TO_PROVIDER: dict[str, tuple[str, str]] = {
-    "reasoning": ("anthropic", "claude-sonnet-4-20250514"),
-    "coding": ("anthropic", "claude-sonnet-4-20250514"),
-    "fast": ("google", "gemini-2.5-flash"),
-    "research": ("google", "gemini-3.1-pro (Preview)"),
-    "creative": ("openai", "gpt-5.2"),
-}
-
 
 class PlannerService:
     """Manages task plan lifecycle."""
@@ -101,6 +92,8 @@ class PlannerService:
     ) -> TaskPlan:
         """Persist a decomposed plan and its steps to the database."""
         plan_id = str(uuid4())
+        default_model = str(PROVIDER_CATALOGUE.get(provider, {}).get("default_model", "")).strip()
+        assigned_model = model.strip() if model and model.strip() else default_model
 
         plan = TaskPlan(
             id=plan_id,
@@ -118,8 +111,6 @@ class PlannerService:
         step_index = 0
         tasks = plan_data.get("tasks", [])
         for task in tasks:
-            task_type = task.get("task_type", "reasoning")
-            rec_provider, rec_model = TASK_TYPE_TO_PROVIDER.get(task_type, ("google", "gemini-2.5-pro"))
             task_id = task.get("id", str(uuid4()))
 
             step = TaskStep(
@@ -128,17 +119,14 @@ class PlannerService:
                 step_index=step_index,
                 title=task.get("title", f"Step {step_index + 1}"),
                 description=task.get("description", ""),
-                assigned_provider=rec_provider,
-                assigned_model=rec_model,
+                assigned_provider=provider,
+                assigned_model=assigned_model,
                 depends_on=json.dumps(task.get("depends_on", [])),
             )
             session.add(step)
             step_index += 1
 
             for subtask in task.get("subtasks", []):
-                sub_type = subtask.get("task_type", "fast")
-                sub_provider, sub_model = TASK_TYPE_TO_PROVIDER.get(sub_type, ("google", "gemini-2.5-flash"))
-
                 sub_step = TaskStep(
                     id=subtask.get("id", str(uuid4())),
                     plan_id=plan_id,
@@ -146,8 +134,8 @@ class PlannerService:
                     step_index=step_index,
                     title=subtask.get("title", f"Step {step_index + 1}"),
                     description=subtask.get("description", ""),
-                    assigned_provider=sub_provider,
-                    assigned_model=sub_model,
+                    assigned_provider=provider,
+                    assigned_model=assigned_model,
                     depends_on=json.dumps(subtask.get("depends_on", [task_id])),
                 )
                 session.add(sub_step)

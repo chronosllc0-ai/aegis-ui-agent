@@ -1,4 +1,13 @@
 {
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "frontend:build": "npm --workspace frontend run build",
+    "frontend:test": "npm --workspace frontend run test",
+    "frontend:lint": "npm --workspace frontend run lint"
+  },
   "devDependencies": {
     "@types/react-icons": "^2.2.7"
   }
