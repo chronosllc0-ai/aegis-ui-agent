@@ -5,7 +5,7 @@
 # ──────────────────────────────────────────────────────────────────────
 
 [build]
-  base = "/"
+  base = "."
   command = "npm ci && npm run -w frontend build"
   publish = "frontend/dist"
 
@@ -18,21 +18,14 @@
 # ── Environment variables (set in Netlify dashboard) ─────────────────
 #
 # Recommended production values:
-#   VITE_API_URL      = https://api.mohex.org
-#   VITE_WS_URL       = wss://api.mohex.org/ws/navigate
 #   VITE_DOCS_SITE_URL = https://docs.mohex.org
 #
 # If you keep the backend on the Railway default domain instead:
-#   VITE_API_URL      = https://your-backend.up.railway.app
-#   VITE_WS_URL       = wss://your-backend.up.railway.app/ws/navigate
 #
 # These are baked into the build at deploy time via Vite's env handling.
 
 [build.environment]
   NODE_VERSION = "22"
-  VITE_APP_VERSION = "1.2.0"
-  VITE_API_URL = "https://web-production-89bf4.up.railway.app"
-  VITE_WS_URL = "wss://web-production-89bf4.up.railway.app/ws/navigate"
 
 # ── Security headers ─────────────────────────────────────────────────
 

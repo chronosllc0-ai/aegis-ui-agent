@@ -1,3 +1,33 @@
+## Session 5.53 - April 8, 2026 (Netlify config hardening from PR review)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Updated `netlify.toml` build `base` from an environment-coupled path to `.` for portable builds.
+- Kept `publish = "frontend/dist"` as a relative output path to avoid Netlify-internal absolute paths.
+- Removed hardcoded frontend runtime build variables (`VITE_APP_VERSION`, `VITE_API_URL`, `VITE_WS_URL`) from `[build.environment]` so deploy-specific values can be managed in Netlify dashboard/environment configuration.
+- Ensured the file ends with a newline for formatting hygiene.
+
+### What's Working
+- Netlify config is now deployment-environment agnostic and no longer tied to `/opt/build/repo`-style absolute paths.
+
+### What's NOT Working Yet
+- Deploy-time frontend variables must be configured in Netlify environment settings before production deploys.
+
+### Next Steps
+1. Set `VITE_API_URL` and `VITE_WS_URL` in Netlify site environment variables per target environment.
+2. Optionally set `VITE_APP_VERSION` at CI/build time if release stamping is required.
+3. Run a Netlify preview deploy to verify expected API/WebSocket endpoints are injected.
+
+### Decisions Made
+- Left `NODE_VERSION` in `netlify.toml` since it is build-tooling configuration (not environment-secret/service-endpoint coupling).
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.52 - April 8, 2026 (Thread/browser UX regression prompt pack)
 
 **Agent:** GPT-5.3-Codex
