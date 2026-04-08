@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from backend.modes import blocked_tools_for_mode, normalize_agent_mode
+from backend.modes import (
+    allowed_tool_alternatives,
+    blocked_tools_for_mode,
+    is_tool_allowed_for_mode,
+    normalize_agent_mode,
+)
 from universal_navigator import UniversalToolExecutor, _available_tools
 
 
@@ -93,3 +98,17 @@ def test_no_skill_policy_keeps_default_manifest_behavior() -> None:
     baseline = {tool["name"] for tool in _available_tools({"agent_mode": "code"}, is_subagent=False)}
     no_skill = {tool["name"] for tool in _available_tools({"agent_mode": "code", "enabled_skill_ids": []}, is_subagent=False)}
     assert no_skill == baseline
+
+
+def test_mode_tool_policy_is_case_insensitive() -> None:
+    """Mode gate checks should deny mixed-case variants of blocked tool names."""
+    assert is_tool_allowed_for_mode("planner", "EXEC_SHELL") is False
+    assert is_tool_allowed_for_mode("planner", "Spawn_SubAgent") is False
+
+
+def test_code_mode_has_non_empty_allowed_alternatives() -> None:
+    """Code mode should return deterministic allowed alternatives for refusals."""
+    alternatives = allowed_tool_alternatives("code", limit=200)
+    assert alternatives
+    assert "exec_shell" in alternatives
+    assert "spawn_subagent" in alternatives

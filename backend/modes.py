@@ -81,12 +81,6 @@ READ_ONLY_ALLOWED_TOOLS: Final[frozenset[str]] = frozenset(
 ALL_MODE_POLICY_TOOLS: Final[frozenset[str]] = frozenset(
     set(READ_ONLY_ALLOWED_TOOLS)
     | set(EXECUTION_BLOCKED_TOOLS)
-    | {
-        "github_list_repos",
-        "github_get_issues",
-        "github_get_pull_requests",
-        "github_get_file",
-    }
 )
 
 CANONICAL_MODE_ORDER: Final[tuple[AgentMode, ...]] = (
@@ -195,7 +189,8 @@ def is_tool_allowed_for_mode(mode: AgentMode, tool_name: str) -> bool:
 def allowed_tool_alternatives(mode: AgentMode, *, limit: int = 8) -> list[str]:
     """Return deterministic allowed tool suggestions for refusal payloads."""
     normalized_mode = normalize_agent_mode(mode)
-    allowed = sorted(set(ALL_MODE_POLICY_TOOLS) - blocked_tools_for_mode(normalized_mode))
+    known_tools = {str(tool).strip().lower() for tool in ALL_MODE_POLICY_TOOLS}
+    allowed = sorted(known_tools - blocked_tools_for_mode(normalized_mode))
     return allowed[: max(1, limit)]
 
 

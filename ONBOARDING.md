@@ -1,3 +1,34 @@
+## Session 5.89 - April 8, 2026 (post-merge bugfix PR for mode alternatives + test follow-through)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused bugfix + test pass
+
+### What Was Done
+- Fixed the post-merge review bugs in `backend/modes.py`:
+  - removed redundant duplicate GitHub tool entries from `ALL_MODE_POLICY_TOOLS`,
+  - hardened `allowed_tool_alternatives(...)` to lowercase the policy tool universe before subtracting lowercase blocked tools, avoiding future case-mismatch leakage in alternatives.
+- Completed previously documented next steps by adding tests in `tests/test_modes.py`:
+  - case-insensitive policy denial checks for mixed-case blocked tool names,
+  - assertion that `allowed_tool_alternatives("code")` is non-empty and includes execution/subagent tools.
+
+### What's Working
+- Allowed-alternative computation now has consistent casing on both operands.
+- Added regression coverage for the two noted risk areas from prior session notes.
+
+### What's NOT Working Yet
+- No additional gaps identified in this pass for mode policy behavior.
+
+### Next Steps
+1. Optional: add websocket-level API tests that assert structured refusal payload shape for invalid mode + blocked tool requests end-to-end.
+
+### Decisions Made
+- Kept tool universe derivation local to `backend/modes.py` and normalized at usage point to preserve decoupling and avoid cross-module imports.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.88 - April 8, 2026 (PR #198 review follow-up: mode-policy hardening)
 
 **Agent:** GPT-5.3-Codex  
