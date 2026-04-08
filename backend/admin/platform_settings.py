@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,6 @@ from backend.database import PlatformSetting, User, get_session
 from backend.modes import (
     ADMIN_EDITABLE_MODE_METADATA_FIELDS,
     MODE_LABELS,
-    PROTECTED_MODE_POLICY_FIELDS,
     mode_definitions,
     normalize_agent_mode,
     serialize_mode_definition,
@@ -153,14 +152,6 @@ async def patch_platform_settings(
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Update platform-wide settings (admin only)."""
-    if body.mode_policy:
-        protected = sorted({field for payload in body.mode_policy.values() for field in payload} & PROTECTED_MODE_POLICY_FIELDS)
-        if protected:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Protected mode policy fields are immutable: {', '.join(protected)}",
-            )
-
     await _set_value(db, GLOBAL_INSTRUCTION_KEY, body.global_system_instruction, admin.uid)
     if body.mode_system_instructions is not None:
         for mode, instruction in body.mode_system_instructions.items():

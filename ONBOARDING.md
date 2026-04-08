@@ -1,3 +1,35 @@
+## Session 5.86 - April 8, 2026 (PR #190 review follow-up: dead-code removal + message accuracy)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review feedback in mode immutability/admin settings changes:
+  1. **Removed redundant dead-code branch** in `backend/admin/platform_settings.py`:
+     - deleted the endpoint-level `if body.mode_policy:` guard in `patch_platform_settings(...)` because `PatchPlatformSettingsBody._reject_mode_policy_mutation(...)` already rejects truthy `mode_policy` payloads during validation.
+     - removed now-unused `HTTPException` and `PROTECTED_MODE_POLICY_FIELDS` imports accordingly.
+  2. **Corrected API rejection copy** in `main.py`:
+     - updated `POST /api/modes` and `DELETE /api/modes/{mode_key}` error details to accurately state that mode create/modify/delete is not allowed via this API for any caller.
+
+### What's Working
+- `mode_policy` mutation rejection now has a single authoritative validation path (no dead branch in handler).
+- Rejection messages for mode create/delete now match real behavior.
+
+### What's NOT Working Yet
+- No new issues identified in this pass.
+
+### Next Steps
+1. Optional: add an explicit API test asserting `mode_policy` payloads fail validation before route handler logic to prevent future reintroduction of redundant checks.
+
+### Decisions Made
+- Preferred single-layer validation (Pydantic model) over duplicate handler guard when behavior is identical.
+- Kept strict mode immutability semantics unchanged; this pass only removes redundancy and improves error-message accuracy.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.85 - April 8, 2026 (Immutable system mode registry + admin-audited mode edits)
 
 **Agent:** GPT-5.3-Codex  

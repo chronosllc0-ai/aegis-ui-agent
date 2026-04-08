@@ -383,7 +383,10 @@ async def get_modes(request: Request) -> dict[str, Any]:
 async def create_mode(_: dict[str, Any], request: Request) -> None:
     """Reject mode creation; modes are immutable system-owned nodes."""
     _get_current_user(request)
-    raise HTTPException(status_code=403, detail="Modes are immutable system-level nodes controlled only by admins")
+    raise HTTPException(
+        status_code=403,
+        detail="Modes are immutable system-level nodes and cannot be created, modified, or deleted via this API.",
+    )
 
 
 @app.patch("/api/modes/{mode_key}")
@@ -399,7 +402,10 @@ async def delete_mode(mode_key: str, request: Request) -> None:
     """Reject mode deletion; canonical mode registry is fixed."""
     _get_current_user(request)
     _ = mode_key
-    raise HTTPException(status_code=403, detail="Modes are immutable system-level nodes controlled only by admins")
+    raise HTTPException(
+        status_code=403,
+        detail="Modes are immutable system-level nodes and cannot be created, modified, or deleted via this API.",
+    )
 
 
 @app.get("/api/keys")
