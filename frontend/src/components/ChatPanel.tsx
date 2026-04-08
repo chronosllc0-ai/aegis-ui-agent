@@ -4,6 +4,7 @@ import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
+import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -40,8 +41,6 @@ export interface ChatPanelProps {
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
-  /** True when the agent is actively executing browser steps right now */
-  isBrowsing?: boolean
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -120,6 +119,7 @@ const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generat
  */
 const BROWSER_TOOL_NAMES = new Set([
   'navigate_browser', 'navigate', 'go_to_url', 'open_url', 'load_url',
+  'extract_page', 'go_back', 'wait',
   'click_element', 'click', 'left_click', 'right_click', 'double_click',
   'type_text', 'type', 'input_text', 'fill_input', 'clear_and_type',
   'scroll_page', 'scroll', 'scroll_down', 'scroll_up', 'scroll_to_element',
@@ -143,6 +143,13 @@ const SILENT_TOOL_NAMES = new Set([
   'set_next_step', 'plan_step', 'record_thought',
 ])
 
+const BROWSER_STATUS_PATTERNS: RegExp[] = [
+  /^session settings updated/i,
+  /^workflow step update/i,
+  /^starting task:/i,
+  /^task (completed|interrupted|failed)/i,
+]
+
 /**
  * Returns true if this log entry should be hidden from the chat conversation.
  *
@@ -156,6 +163,9 @@ const SILENT_TOOL_NAMES = new Set([
  * pass through and render as ShellCards in chat.
  */
 function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
+  const normalized = msg.trim()
+
+  if (BROWSER_STATUS_PATTERNS.some((pattern) => pattern.test(normalized))) return true
   if (entry.stepKind === 'click' || entry.stepKind === 'type' || entry.stepKind === 'scroll') return true
   if (entry.stepKind === 'navigate' && entry.elapsedSeconds > 0) return true
 
@@ -188,7 +198,14 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       try {
         const jsonStr = msg.replace('[ask_user_input]', '').trim()
         const parsed = JSON.parse(jsonStr)
-        msgs.push({ id: entry.id, role: 'user_input', text: parsed.question ?? jsonStr, question: parsed.question, options: parsed.options ?? [], requestId: parsed.request_id })
+        msgs.push({
+          id: entry.id,
+          role: 'user_input',
+          text: parsed.question ?? jsonStr,
+          question: parsed.question,
+          options: normalizeAskUserInputOptions(parsed.options),
+          requestId: parsed.request_id,
+        })
       } catch {
         msgs.push({ id: entry.id, role: 'user_input', text: msg.replace('[ask_user_input]', '').trim(), options: [] })
       }
@@ -231,7 +248,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
     if (isModelResponse) {
-      msgs.push({ id: entry.id, role: 'assistant', text: displayText, timestamp: entry.timestamp })
+      msgs.push({ id: entry.id, role: 'assistant', text: displayText })
       continue
     }
     if (isToolCall) {
@@ -262,7 +279,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     }
     if (isStepText || entry.type === 'result' || entry.type === 'error') {
       const role: ChatRole = isUser ? 'user' : 'assistant'
-      msgs.push({ id: entry.id, role, text: displayText, timestamp: entry.timestamp })
+      msgs.push({ id: entry.id, role, text: displayText, timestamp: role === 'user' ? entry.timestamp : undefined })
       continue
     }
   }
@@ -657,7 +674,7 @@ function UserInputCard({
   const [answered, setAnswered] = useState<string | null>(null)
 
   const promptOptions = options.length > 0 ? options : ['Continue']
-  const customSlotLabel = 'Type custom reply'
+  const customSlotLabel = 'Type your own answer'
 
   const handleQuickReply = (opt: string) => {
     setAnswered(opt)
@@ -1081,7 +1098,6 @@ export function ChatPanel({
   connectionStatus,
   onSwitchToBrowser,
   latestFrame,
-  isBrowsing = false,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
@@ -1203,13 +1219,24 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
-  const baseMessages = useMemo(() => logsToMessages(logs).filter((m) => m.role !== 'user'), [logs])
+  const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
     if (sentMessages.length > 500) setSentMessages((prev) => prev.slice(-500))
   }, [sentMessages.length])
 
-  const allMessages = useMemo(() => [...sentMessages, ...baseMessages], [sentMessages, baseMessages])
+  const allMessages = useMemo(() => {
+    const seenUserTexts = new Set(sentMessages.filter((m) => m.role === 'user').map((m) => m.text.trim()))
+    const dedupedBase = baseMessages.filter((m) => {
+      if (m.role !== 'user') return true
+      const key = m.text.trim()
+      if (!key) return true
+      if (seenUserTexts.has(key)) return false
+      seenUserTexts.add(key)
+      return true
+    })
+    return [...sentMessages, ...dedupedBase]
+  }, [sentMessages, baseMessages])
   const latestThinkingId = useMemo(() => {
     for (let i = allMessages.length - 1; i >= 0; i -= 1) {
       if (allMessages[i].role === 'thinking') return allMessages[i].id

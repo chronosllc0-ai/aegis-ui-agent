@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SteeringMode, TranscriptEntry } from '../hooks/useWebSocket'
 import { apiUrl } from '../lib/api'
+import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
 import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
@@ -19,6 +20,8 @@ type InputBarProps = {
   sending: boolean
   onModeChange: (mode: SteeringMode) => void
   onSend: (instruction: string, mode: SteeringMode) => void
+  agentMode: AgentModeId
+  onAgentModeChange: (mode: AgentModeId) => void
   onDecomposePlan?: (prompt: string) => void
   provider: string
   model: string
@@ -85,6 +88,27 @@ function ModelPicker({
   )
 }
 
+
+function AgentModePicker({ mode, onChange }: { mode: AgentModeId; onChange: (mode: AgentModeId) => void }) {
+  return (
+    <label className='flex min-w-0 shrink items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
+      <span className='hidden text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:inline'>Mode</span>
+      <select
+        value={mode}
+        onChange={(event) => onChange(normalizeAgentMode(event.target.value))}
+        className='w-full min-w-0 max-w-[112px] truncate rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none sm:max-w-[150px]'
+        aria-label='Agent mode'
+      >
+        {AGENT_MODES.map((option) => (
+          <option key={option.id} value={option.id} className='bg-[#0f0f0f] text-zinc-100'>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 export function InputBar({
   mode,
   voiceActive,
@@ -96,6 +120,8 @@ export function InputBar({
   sending,
   onModeChange,
   onSend,
+  agentMode,
+  onAgentModeChange,
   onDecomposePlan,
   provider,
   model,
@@ -186,7 +212,8 @@ export function InputBar({
           {isWorking && (
             <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
           )}
-          <div className='hidden sm:block'>
+          <div className='hidden sm:flex sm:items-center sm:gap-1.5'>
+            <AgentModePicker mode={agentMode} onChange={onAgentModeChange} />
             <ModelPicker provider={provider} model={model} onProviderChange={onProviderChange} onModelChange={onModelChange} />
           </div>
         </div>
@@ -204,6 +231,9 @@ export function InputBar({
 
       {/* Model picker on mobile */}
       <div className='w-full overflow-hidden sm:hidden'>
+        <div className='mb-2'>
+          <AgentModePicker mode={agentMode} onChange={onAgentModeChange} />
+        </div>
         <ModelPicker provider={provider} model={model} onProviderChange={onProviderChange} onModelChange={onModelChange} />
       </div>
 
