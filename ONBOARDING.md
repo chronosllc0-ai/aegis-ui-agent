@@ -1,3 +1,115 @@
+## Session 5.92 - April 8, 2026 (critical regression-proofing for orchestrator fallback variable scope)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Applied a defensive clarity fix in `universal_navigator.py` for orchestrator delegation synthesis wiring:
+  - renamed fallback accumulator from `fallback_result` to `delegated_fallback_result`,
+  - kept it explicitly initialized before primary delegation so synthesis always receives a defined variable on success and fallback paths,
+  - preserved existing cancellation and dual-failure behavior.
+- Added an assertion in `tests/test_orchestrator_mode_router.py` to lock in expected primary-success behavior:
+  - successful primary routing must not emit a fallback child reference.
+
+### What's Working
+- Primary delegated success path now has an explicit, unambiguous fallback variable lifecycle.
+- Regression test now guarantees no accidental fallback reference leakage on primary success.
+
+### What's NOT Working Yet
+- No blockers identified in this pass.
+
+### Next Steps
+1. Optional: add a targeted static type check job for orchestrator routing paths to catch future scope/name regressions earlier.
+
+### Decisions Made
+- Chose explicit variable naming and initialization to avoid ambiguity in future review cycles and prevent reintroduction of scope confusion bugs.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.91 - April 8, 2026 (review-fix pass for orchestrator routing PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 review remediation + test pass
+
+### What Was Done
+- Addressed code review comments for orchestrator routing:
+  - `backend/orchestrator_mode.py`
+    - removed misleading normalized-but-unused `requested_mode` flow and replaced with explicit comment/intent,
+    - introduced typed mode constants (`DEEP_RESEARCH_MODE`, `CODE_MODE`) and used them in route decisions.
+  - `universal_navigator.py`
+    - added explicit `asyncio.CancelledError` re-raise in delegated execution path so cancellations are never swallowed,
+    - wrapped fallback delegation in its own try/except with cancellation propagation,
+    - added explicit failed response payload if both primary delegation and fallback fail.
+- Expanded test coverage in `tests/test_orchestrator_mode_router.py`:
+  - added cancellation propagation test to ensure orchestrator branch does not suppress cancellation semantics.
+
+### What's Working
+- Orchestrator delegation now preserves cancellation behavior correctly.
+- Double-failure path (primary + fallback) now returns structured failure payload instead of crashing.
+- Orchestrator router code is cleaner and avoids the previous dead normalization pattern.
+
+### What's NOT Working Yet
+- No new blockers identified in this review-fix pass.
+
+### Next Steps
+1. Add an integration-level websocket test for dual-failure payload forwarding (`status=failed`, `route_trace`, `child_results`, `error`).
+
+### Decisions Made
+- Preserved strict cancellation semantics as first-class behavior in routing/fallback control flow.
+- Kept fallback strategy as `code` mode while ensuring hard-failure transparency to callers.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.90 - April 8, 2026 (orchestrator node-level specialist routing + fallback)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation + targeted test pass
+
+### What Was Done
+- Added a dedicated orchestrator router module `backend/orchestrator_mode.py`:
+  - deterministic intent classification for orchestrator node routing,
+  - enforced specialist selection (`deep_research` for research intent, `code` for build/execution intent),
+  - explicit bypass-attempt detection for prompts that try to override/ignore routing policy,
+  - orchestrator synthesis helper that references delegated child results.
+- Integrated node-level delegation into `run_universal_navigation(...)` in `universal_navigator.py` when `agent_mode=orchestrator`:
+  - classify intent, emit route-decision trace, delegate to specialist mode,
+  - enforce delegated timeout (`orchestrator_delegate_timeout_seconds`, bounded),
+  - add automatic fallback to `code` mode when delegated execution fails or times out,
+  - return final result through orchestrator synthesis with `route_trace` + `child_results` references.
+- Added focused tests in `tests/test_orchestrator_mode_router.py` covering:
+  - research → `deep_research`,
+  - build/execution → `code`,
+  - bypass-attempt detection without policy bypass,
+  - orchestrator synthesis payload with route trace and child refs,
+  - timeout-triggered fallback to `code`.
+
+### What's Working
+- Orchestrator now behaves as a node-level router rather than a direct executor.
+- Route decision and child-result metadata are surfaced in result payloads.
+- Delegation timeout/fallback behavior is covered by automated tests.
+
+### What's NOT Working Yet
+- Current classifier is deterministic keyword-based and can be improved with richer intent scoring over time.
+
+### Next Steps
+1. Add websocket-level integration assertions for `route_decision` and `child_result_refs` event propagation to frontend clients.
+2. Consider adding optional planner/architect specialist routing buckets once explicit acceptance criteria require those routes.
+
+### Decisions Made
+- Kept routing policy deterministic and server-enforced to prevent user prompt attempts from forcing mode bypass.
+- Used `code` as safe fallback specialist for delegated failures to preserve task completion attempts.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.89 - April 8, 2026 (post-merge bugfix PR for mode alternatives + test follow-through)
 
 **Agent:** GPT-5.3-Codex  
