@@ -2933,3 +2933,20 @@
 
 ### Validation
 - `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing tests/test_orchestrator_startup.py::test_gemini_path_uses_module_settings_not_session_dict` passed.
+
+## 2026-04-08 — Follow-up refactor from PR review (DRY idle-control path)
+
+### What changed
+- Refactored duplicated idle-control task-start logic in `main.py` into a single helper:
+  - `_start_idle_navigation_from_control_action(...)`
+- Replaced three copy-pasted blocks under websocket actions `steer`, `interrupt`, and `queue` with calls to the helper.
+- Preserved behavior exactly:
+  - While idle: those actions start a normal navigation task.
+  - While active: they retain steering/interrupt/queue semantics.
+
+### Why
+- Addressed PR review feedback about 3 duplicated 18-line blocks.
+- Reduces maintenance risk and keeps idle-control semantics consistent across all three actions.
+
+### Validation
+- `pytest -q tests/test_main_websocket.py::test_idle_steer_starts_task_instead_of_only_buffering_steering tests/test_main_websocket.py::test_idle_queue_starts_task_instead_of_queuing tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_orchestrator_startup.py::test_gemini_path_uses_module_settings_not_session_dict` passed.
