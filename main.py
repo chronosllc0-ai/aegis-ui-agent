@@ -32,7 +32,15 @@ from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
-from backend.modes import MODE_LABELS, mode_definitions, normalize_agent_mode, serialize_mode_definition
+from backend.modes import (
+    MODE_LABELS,
+    allowed_tool_alternatives,
+    blocked_tools_for_mode,
+    mode_definitions,
+    normalize_agent_mode,
+    serialize_mode_definition,
+    validate_requested_mode,
+)
 from backend.integrations.text_normalization import normalize_for_channel
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
@@ -361,6 +369,24 @@ class SessionRuntime:
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
+
+
+def _normalize_runtime_mode(settings: dict[str, Any]) -> str:
+    """Normalize and persist the active mode in runtime settings."""
+    normalized = normalize_agent_mode(settings.get("agent_mode", ""))
+    settings["agent_mode"] = normalized
+    return normalized
+
+
+def _mode_refusal_payload(*, requested_mode: object, effective_mode: str, reason: str) -> dict[str, Any]:
+    """Create a structured mode refusal payload for websocket clients."""
+    return {
+        "type": "mode_policy_refusal",
+        "requested_mode": str(requested_mode),
+        "effective_mode": effective_mode,
+        "reason": reason,
+        "allowed_modes": list(MODE_LABELS.keys()),
+    }
 
 
 # ── Provider & BYOK API routes ────────────────────────────────────────
@@ -953,6 +979,7 @@ async def _run_navigation_task(
     )
     runtime.task_running = True
     runtime.cancel_event.clear()
+    _normalize_runtime_mode(runtime.settings)
 
     async def _on_user_input(question: str, options: list[str]) -> str:
         """Send a user_input_request WS message and await the user's response."""
@@ -1128,6 +1155,23 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             data = await websocket.receive_json()
             action = data.get("action")
             instruction = str(data.get("instruction", "")).strip()
+            requested_mode_raw = data.get("mode")
+            if requested_mode_raw is not None:
+                requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+                runtime.settings["agent_mode"] = requested_mode
+                if not mode_valid:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": _mode_refusal_payload(
+                                requested_mode=requested_mode_raw,
+                                effective_mode=requested_mode,
+                                reason="invalid_mode",
+                            ),
+                        }
+                    )
+                    continue
+            active_mode = _normalize_runtime_mode(runtime.settings)
             raw_metadata = data.get("metadata")
             client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
             task_label = str(client_metadata.get("task_label", "")).strip() if client_metadata else ""
@@ -1232,6 +1276,20 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if not isinstance(candidate_settings, dict):
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
+                requested_mode_raw = candidate_settings.get("agent_mode", runtime.settings.get("agent_mode", active_mode))
+                requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+                if not mode_valid:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": _mode_refusal_payload(
+                                requested_mode=requested_mode_raw,
+                                effective_mode=requested_mode,
+                                reason="invalid_mode",
+                            ),
+                        }
+                    )
+                    continue
                 requested_skill_ids_raw = candidate_settings.get("enabled_skill_ids", [])
                 if requested_skill_ids_raw is None:
                     requested_skill_ids_raw = []
@@ -1243,6 +1301,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 requested_skill_ids = [item.strip() for item in requested_skill_ids_raw if item.strip()]
                 runtime_skill_context = await resolve_runtime_skills(runtime.user_uid, requested_skill_ids)
                 candidate_settings["enabled_skill_ids"] = requested_skill_ids
+                candidate_settings["agent_mode"] = requested_mode
                 candidate_settings.update(runtime_skill_context.as_settings_fragment())
                 runtime.settings = candidate_settings
                 await _send_step(
@@ -1287,6 +1346,21 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 pass
             elif action == "spawn_subagent":
                 # ── Spawn a sub-agent ──────────────────────────────────
+                active_mode = _normalize_runtime_mode(runtime.settings)
+                if "spawn_subagent" in blocked_tools_for_mode(active_mode):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": {
+                                "type": "mode_policy_refusal",
+                                "requested_tool": "spawn_subagent",
+                                "effective_mode": active_mode,
+                                "reason": "tool_disallowed_for_mode",
+                                "allowed_alternatives": allowed_tool_alternatives(active_mode),
+                            },
+                        }
+                    )
+                    continue
                 sub_instruction = str(data.get("instruction", "")).strip()
                 sub_model = str(data.get("model", runtime.settings.get("model", ""))).strip()
                 if not sub_instruction:
@@ -2081,7 +2155,13 @@ async def _handle_slash_command(
             if platform == "telegram":
                 return {"text": message, "reply_markup": _telegram_mode_reply_markup()}
             return message
-        requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
+        requested_mode_raw = arg.replace("-", "_").replace(" ", "_")
+        requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+        if not mode_valid:
+            return (
+                f"❌ Invalid mode: *{requested_mode_raw}*.\n"
+                f"Allowed modes: {', '.join(MODE_LABELS.keys())}"
+            )
         runtime.settings["agent_mode"] = requested_mode
         return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
 
