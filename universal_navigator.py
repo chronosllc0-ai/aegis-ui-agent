@@ -468,6 +468,12 @@ def _resolve_skill_tool_policy(settings: dict[str, Any]) -> tuple[set[str] | Non
     return (allow_set if allow_set else None), deny_set
 
 
+def is_tool_allowed_for_mode(mode: str, tool_name: str) -> bool:
+    """Return whether a tool is allowed for the normalized agent mode."""
+    blocked = blocked_tools_for_mode(normalize_agent_mode(mode))
+    return tool_name not in blocked
+
+
 def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dict[str, Any]]:
     """Resolve the current tool manifest after permissions and integration gating."""
     disabled_tools = {str(item) for item in settings.get("disabled_tools", []) or []}
