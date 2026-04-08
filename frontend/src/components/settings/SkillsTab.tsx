@@ -1,27 +1,43 @@
-import { useEffect, useMemo, useState } from 'react'
-import { apiRequest } from '../../lib/api'
-import { ReviewQueue } from '../skills-hub/ReviewQueue'
-import { SubmissionForm } from '../skills-hub/SubmissionForm'
-import { SubmissionStatusTimeline } from '../skills-hub/SubmissionStatusTimeline'
-import type { HubSubmission } from '../skills-hub/types'
+import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent } from 'react'
 import { useSettingsContext } from '../../context/useSettingsContext'
-import { useSkills, type AdminSkillsPolicy, type InstalledSkill } from '../../hooks/useSkills'
+import {
+  useSkills,
+  type AdminSkillsPolicy,
+  type AdminSkillQueueItem,
+  type HubSkill,
+  type InstalledSkill,
+} from '../../hooks/useSkills'
 import { useToast } from '../../hooks/useToast'
 
 type SkillsTabProps = {
   role?: string
 }
 
+type MarketplaceView = 'table' | 'cards'
+
+type PublishForm = {
+  slug: string
+  name: string
+  description: string
+  owner: string
+  version: string
+  tags: string
+  changelog: string
+  acceptedLicense: boolean
+  publishTarget: 'hub' | 'global'
+}
+
+const AEGIS_GRADIENT = 'bg-[radial-gradient(circle_at_top,_rgba(251,113,133,0.18),_rgba(17,17,17,0.9)_55%,_#0b0b0b)]'
+
 function formatDate(value?: string): string {
   if (!value) return 'Unknown'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Unknown'
-  return date.toLocaleString()
+  return date.toLocaleDateString()
 }
 
 export function SkillsTab({ role }: SkillsTabProps) {
   const isAdmin = role === 'admin' || role === 'superadmin'
-  const [activeSegment, setActiveSegment] = useState<'my_skills' | 'admin_controls'>('my_skills')
   const toast = useToast()
   const { patchSettings } = useSettingsContext()
   const {
@@ -31,24 +47,40 @@ export function SkillsTab({ role }: SkillsTabProps) {
     toggleSkill,
     uninstallSkill,
     refreshInstalled,
+    installSkill,
+    hubSkills,
+    loadingHub,
+    refreshHub,
+    submitSkill,
     policy,
     loadingPolicy,
     savePolicy,
+    reviewQueue,
+    loadingQueue,
+    refreshReviewQueue,
+    reviewSubmission,
+    scanSubmission,
   } = useSkills(isAdmin)
 
   const [savingPolicy, setSavingPolicy] = useState(false)
-  const [expandedSkillId, setExpandedSkillId] = useState<string | null>(null)
-  const [activeSubmission, setActiveSubmission] = useState<HubSubmission | null>(null)
-  const [allowedTransitions, setAllowedTransitions] = useState<string[]>([])
-  const [marketplaceSkills, setMarketplaceSkills] = useState<Array<{ id: string; name: string; slug: string; description: string; risk_label?: string }>>([])
-  const [marketplaceError, setMarketplaceError] = useState<string>('')
-  const [allowBlockQuery, setAllowBlockQuery] = useState('')
-  const [allowBlockRows, setAllowBlockRows] = useState<Array<{ skill_id: string; skill: string; version: string; risk: string; allowed: boolean; blocked: boolean; updated: string }>>([])
-  const [auditRows, setAuditRows] = useState<Array<{ id: string; user: string; skill_id: string; action: string; reason: string; timestamp: string }>>([])
-  const [auditPage, setAuditPage] = useState(1)
-  const [auditTotal, setAuditTotal] = useState(0)
-  const [auditFilters, setAuditFilters] = useState({ user: '', skill: '', action: '', date_from: '', date_to: '' })
-  const [pendingConfirm, setPendingConfirm] = useState<{ action: 'block' | 'reset'; skillId: string; skillName: string } | null>(null)
+  const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [riskFilter, setRiskFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all')
+  const [marketView, setMarketView] = useState<MarketplaceView>('table')
+  const [publishForm, setPublishForm] = useState<PublishForm>({
+    slug: '',
+    name: '',
+    description: '',
+    owner: '@aegis-user',
+    version: '1.0.0',
+    tags: 'latest',
+    changelog: '',
+    acceptedLicense: false,
+    publishTarget: 'hub',
+  })
+  const [skillMarkdown, setSkillMarkdown] = useState('')
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([])
+  const [submitting, setSubmitting] = useState(false)
 
   const enabledSkillIds = useMemo(() => installed.filter((skill) => skill.enabled).map((skill) => skill.skill_id), [installed])
 
@@ -56,41 +88,20 @@ export function SkillsTab({ role }: SkillsTabProps) {
     patchSettings({ enabledSkillIds })
   }, [enabledSkillIds, patchSettings])
 
-  useEffect(() => {
-    void apiRequest<{ skills?: Array<{ id: string; name: string; slug: string; description: string; risk_label?: string }> }>('/api/skills/hub')
-      .then((data) => setMarketplaceSkills(data.skills ?? []))
-  }, [])
+  const hubFiltered = useMemo(() => {
+    return hubSkills.filter((skill) => {
+      const riskMatch = riskFilter === 'all' || (skill.risk_label ?? 'medium') === riskFilter
+      const token = `${skill.name} ${skill.slug} ${skill.description}`.toLowerCase()
+      return riskMatch && token.includes(search.toLowerCase().trim())
+    })
+  }, [hubSkills, riskFilter, search])
 
-  const refreshAllowBlock = async (query: string = allowBlockQuery) => {
-    if (!isAdmin) return
-    const params = new URLSearchParams()
-    if (query.trim()) params.set('q', query.trim())
-    const data = await apiRequest<{ items?: Array<{ skill_id: string; skill: string; version: string; risk: string; allowed: boolean; blocked: boolean; updated: string }> }>(
-      `/api/admin/skills/allow-block${params.toString() ? `?${params.toString()}` : ''}`,
-    )
-    setAllowBlockRows(data.items ?? [])
-  }
+  const selectedSkill = useMemo(() => {
+    if (!activeSkillId) return hubFiltered[0] ?? null
+    return hubSkills.find((skill) => skill.id === activeSkillId) ?? hubFiltered[0] ?? null
+  }, [activeSkillId, hubFiltered, hubSkills])
 
-  const refreshAudit = async (page: number = auditPage) => {
-    if (!isAdmin) return
-    const params = new URLSearchParams({ page: String(page), page_size: '10' })
-    if (auditFilters.user.trim()) params.set('user', auditFilters.user.trim())
-    if (auditFilters.skill.trim()) params.set('skill', auditFilters.skill.trim())
-    if (auditFilters.action.trim()) params.set('action', auditFilters.action.trim())
-    if (auditFilters.date_from) params.set('date_from', auditFilters.date_from)
-    if (auditFilters.date_to) params.set('date_to', auditFilters.date_to)
-    const data = await apiRequest<{ items?: Array<{ id: string; user: string; skill_id: string; action: string; reason: string; timestamp: string }>; total?: number }>(
-      `/api/admin/skills/install-audit?${params.toString()}`,
-    )
-    setAuditRows(data.items ?? [])
-    setAuditTotal(data.total ?? 0)
-  }
-
-  useEffect(() => {
-    if (!isAdmin) return
-    void refreshAllowBlock()
-    void refreshAudit(1)
-  }, [isAdmin])
+  const installedById = useMemo(() => new Set(installed.map((skill) => skill.skill_id)), [installed])
 
   const onToggleSkill = async (skill: InstalledSkill) => {
     const nextEnabled = !skill.enabled
@@ -115,15 +126,13 @@ export function SkillsTab({ role }: SkillsTabProps) {
     }
   }
 
-  const onInstallMarketplaceSkill = async (skillId: string) => {
+  const onInstallSkill = async (skill: HubSkill) => {
     try {
-      await apiRequest(`/api/skills/${encodeURIComponent(skillId)}/install`, { method: 'POST' })
-      setMarketplaceError('')
+      await installSkill(skill.id)
       await refreshInstalled()
-      toast.success('Skill installed')
+      toast.success('Skill installed', `${skill.name} is now available in your runtime tools.`)
     } catch (error) {
-      setMarketplaceError(error instanceof Error ? error.message : 'Install blocked by policy')
-      toast.error('Skill install blocked', error instanceof Error ? error.message : 'Install blocked by policy')
+      toast.error('Failed to install skill', error instanceof Error ? error.message : 'Please retry.')
     }
   }
 
@@ -140,276 +149,413 @@ export function SkillsTab({ role }: SkillsTabProps) {
     }
   }
 
-  const onAllowBlockAction = async (skillId: string, action: 'allow' | 'block' | 'reset') => {
-    await apiRequest(`/api/admin/skills/${encodeURIComponent(skillId)}/${action}`, { method: 'POST' })
-    await refreshAllowBlock()
-    toast.success(`Skill ${action}ed`)
+  const onDropFiles = async (files: FileList | null) => {
+    if (!files) return
+    const list = Array.from(files)
+    setDroppedFiles(list)
+    const markdownFile = list.find((file) => /skill\.md$/i.test(file.name))
+    if (!markdownFile) return
+    const text = await markdownFile.text()
+    setSkillMarkdown(text)
   }
 
+  const onDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    await onDropFiles(event.dataTransfer.files)
+  }
 
-  const transitionSubmission = async (nextState: string) => {
-    if (!activeSubmission) return
-    const data = await apiRequest<{ submission: HubSubmission; allowed_transitions: string[] }>(`/api/skills/hub/submissions/${encodeURIComponent(activeSubmission.id)}/transition`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ next_state: nextState }),
-    })
-    setActiveSubmission(data.submission)
-    setAllowedTransitions(data.allowed_transitions ?? [])
+  const onFileInput = async (event: ChangeEvent<HTMLInputElement>) => {
+    await onDropFiles(event.target.files)
+  }
+
+  const onPublish = async () => {
+    if (!publishForm.slug.trim() || !publishForm.name.trim()) {
+      toast.error('Validation error', 'Slug and display name are required.')
+      return
+    }
+    if (!publishForm.acceptedLicense) {
+      toast.error('Validation error', 'Please accept the Aegis MIT-0 license terms.')
+      return
+    }
+    if (!skillMarkdown.trim()) {
+      toast.error('Validation error', 'SKILL.md content is required.')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      await submitSkill({
+        slug: publishForm.slug.trim(),
+        name: publishForm.name.trim(),
+        description: publishForm.description.trim(),
+        publish_target: publishForm.publishTarget,
+        metadata_json: {
+          owner: publishForm.owner,
+          version: publishForm.version,
+          tags: publishForm.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+          changelog: publishForm.changelog,
+        },
+        skill_md: skillMarkdown,
+        workflow_action: 'submit_review',
+      })
+      toast.success('Skill submitted', 'Your skill was submitted to the Aegis publishing queue.')
+      await refreshHub()
+      if (isAdmin) await refreshReviewQueue()
+    } catch (error) {
+      toast.error('Failed to submit skill', error instanceof Error ? error.message : 'Please retry.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleReviewAction = async (item: AdminSkillQueueItem, action: 'scan' | 'approve_hub' | 'approve_global' | 'reject') => {
+    try {
+      if (action === 'scan') await scanSubmission(item.submission.id)
+      else await reviewSubmission(item.submission.id, action)
+      toast.success('Admin action completed')
+      await refreshReviewQueue()
+      await refreshHub()
+    } catch (error) {
+      toast.error('Admin action failed', error instanceof Error ? error.message : 'Please retry.')
+    }
   }
 
   return (
-    <div className='grid gap-4 lg:grid-cols-2'>
-      <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-2 lg:col-span-2'>
-        <div className='inline-flex rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
-          <button
-            type='button'
-            className={`rounded-md px-3 py-1.5 text-xs ${activeSegment === 'my_skills' ? 'bg-cyan-500/20 text-cyan-200' : 'text-zinc-400'}`}
-            onClick={() => setActiveSegment('my_skills')}
-          >
-            My Skills
-          </button>
-          {isAdmin ? (
-            <button
-              type='button'
-              className={`rounded-md px-3 py-1.5 text-xs ${activeSegment === 'admin_controls' ? 'bg-cyan-500/20 text-cyan-200' : 'text-zinc-400'}`}
-              onClick={() => setActiveSegment('admin_controls')}
-            >
-              Admin Controls
-            </button>
-          ) : null}
+    <div className={`space-y-5 rounded-2xl border border-[#352626] p-4 text-zinc-100 ${AEGIS_GRADIENT}`}>
+      <section className='rounded-2xl border border-[#3d2c2b] bg-[#1b1312]/90 p-4'>
+        <div className='mb-4'>
+          <h3 className='text-3xl font-semibold tracking-tight'>Skills Marketplace</h3>
+          <p className='mt-1 text-sm text-zinc-400'>Browse the Aegis skill library (security reviewed by default).</p>
         </div>
-      </section>
 
-      {activeSegment === 'my_skills' ? (
-        <>
-      <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
-        <div className='mb-3 flex items-center justify-between'>
-          <h3 className='text-sm font-semibold'>Installed skills</h3>
-          <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800' onClick={() => void refreshInstalled()}>
-            Refresh
-          </button>
-        </div>
-        {loadingInstalled ? (
-          <p className='text-xs text-zinc-400'>Loading installed skills…</p>
-        ) : installed.length === 0 ? (
-          <p className='text-xs text-zinc-400'>No skills installed yet.</p>
-        ) : (
-          <div className='space-y-2'>
-            {installed.map((skill) => (
-              <article key={skill.skill_id} className='rounded-lg border border-[#2a2a2a] bg-[#171717] p-3'>
-                <div className='flex items-start justify-between gap-2'>
-                  <div>
-                    <h4 className='text-sm font-medium text-zinc-100'>{skill.name}</h4>
-                    <p className='text-[11px] text-zinc-500'>{skill.slug}</p>
-                  </div>
-                  <button
-                    type='button'
-                    onClick={() => void onToggleSkill(skill)}
-                    className={`rounded-full border px-2.5 py-1 text-[11px] ${skill.enabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-[#2a2a2a] bg-[#1d1d1d] text-zinc-500'}`}
-                  >
-                    {skill.enabled ? 'Enabled' : 'Disabled'}
-                  </button>
-                </div>
-
-                <div className='mt-2 flex flex-wrap gap-1.5 text-[10px]'>
-                  <span className='rounded-full border border-[#333] px-2 py-0.5 text-zinc-300'>version: {skill.version_id.slice(0, 8)}</span>
-                  <span className='rounded-full border border-[#333] px-2 py-0.5 text-zinc-300'>source: {skill.publish_target ?? 'hub'}</span>
-                  <span className='rounded-full border border-[#333] px-2 py-0.5 text-zinc-300'>updated: {formatDate(skill.updated_at)}</span>
-                  <span className='rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-300'>risk: {skill.risk_label ?? 'unknown'}</span>
-                </div>
-
-                <div className='mt-3 flex flex-wrap gap-2'>
-                  <button type='button' onClick={() => setExpandedSkillId((prev) => (prev === skill.skill_id ? null : skill.skill_id))} className='rounded border border-cyan-500/40 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/10'>
-                    Submit to Hub
-                  </button>
-
-                  <button type='button' onClick={() => void onDeleteSkill(skill.skill_id)} className='rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10'>
-                    Uninstall
-                  </button>
-                </div>
-
-                {expandedSkillId === skill.skill_id ? (
-                  <div className='mt-2 space-y-2'>
-                    <SubmissionForm
-                      skillId={skill.skill_id}
-                      slug={skill.slug}
-                      title={skill.name}
-                      onCreated={(submission) => {
-                        setActiveSubmission(submission)
-                        setAllowedTransitions(submission.current_state === 'draft' ? ['submitted'] : [])
-                      }}
-                    />
-                    {activeSubmission && activeSubmission.skill_id === skill.skill_id ? (
-                      <SubmissionStatusTimeline submission={activeSubmission} allowedTransitions={allowedTransitions} onTransition={(state) => void transitionSubmission(state)} />
-                    ) : null}
-                  </div>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <ReviewQueue isAdmin={isAdmin} />
-      <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4 lg:col-span-2'>
-        <h3 className='mb-3 text-sm font-semibold'>Marketplace</h3>
-        {marketplaceError ? <p className='mb-2 text-xs text-red-300'>{marketplaceError}</p> : null}
         <div className='grid gap-2 md:grid-cols-2'>
-          {marketplaceSkills.map((skill) => (
-            <article key={skill.id} className='rounded-lg border border-[#2a2a2a] bg-[#171717] p-3'>
-              <div className='flex items-center justify-between gap-2'>
-                <div>
-                  <h4 className='text-sm font-medium text-zinc-100'>{skill.name}</h4>
-                  <p className='text-[11px] text-zinc-500'>{skill.slug}</p>
-                </div>
-                <span className='rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300'>{skill.risk_label ?? 'scan_pending'}</span>
-              </div>
-              <p className='mt-2 line-clamp-2 text-xs text-zinc-400'>{skill.description || 'No description provided.'}</p>
-              <button type='button' onClick={() => void onInstallMarketplaceSkill(skill.id)} className='mt-2 rounded border border-cyan-500/40 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/10'>
-                Install
-              </button>
-            </article>
-          ))}
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder='Search skills by name, slug, or summary'
+            className='rounded-xl border border-[#1f3a52] bg-[#061a2d] px-4 py-3 text-sm'
+          />
+          <div className='flex gap-2'>
+            <select
+              value={riskFilter}
+              onChange={(event) => setRiskFilter(event.target.value as 'all' | 'low' | 'medium' | 'high')}
+              className='w-full rounded-xl border border-[#1f3a52] bg-[#061a2d] px-3 py-3 text-sm'
+            >
+              <option value='all'>All risk levels</option>
+              <option value='low'>Low</option>
+              <option value='medium'>Medium</option>
+              <option value='high'>High</option>
+            </select>
+            <button type='button' className={`rounded-xl border px-3 py-2 text-xs ${marketView === 'table' ? 'border-rose-400/60 bg-rose-500/20' : 'border-[#2a2a2a]'}`} onClick={() => setMarketView('table')}>
+              List
+            </button>
+            <button type='button' className={`rounded-xl border px-3 py-2 text-xs ${marketView === 'cards' ? 'border-rose-400/60 bg-rose-500/20' : 'border-[#2a2a2a]'}`} onClick={() => setMarketView('cards')}>
+              Cards
+            </button>
+          </div>
         </div>
-      </section>
-        </>
-      ) : null}
 
-      {isAdmin && activeSegment === 'admin_controls' ? (
-        <>
-          <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
-            <h3 className='mb-3 text-sm font-semibold'>Policy Defaults</h3>
-            {loadingPolicy ? (
-              <p className='text-xs text-zinc-400'>Loading policy…</p>
-            ) : (
-              <div className='space-y-3'>
-                <ToggleRow
-                  label='Require approval before install'
-                  value={policy.require_approval_before_install}
-                  onToggle={(value) => void updatePolicy({ require_approval_before_install: value })}
-                  disabled={savingPolicy}
-                />
-                <div className='space-y-1'>
-                  <p className='text-xs font-medium text-zinc-300'>Default enabled skills for new users</p>
-                  <div className='max-h-44 space-y-1 overflow-y-auto rounded border border-[#2a2a2a] bg-[#101010] p-2'>
-                    {marketplaceSkills.map((skill) => {
-                      const checked = policy.default_enabled_skill_ids.includes(skill.id)
-                      return (
-                        <label key={skill.id} className='flex items-center gap-2 text-xs text-zinc-300'>
-                          <input
-                            type='checkbox'
-                            checked={checked}
-                            onChange={(event) => {
-                              const next = event.target.checked
-                                ? [...policy.default_enabled_skill_ids, skill.id]
-                                : policy.default_enabled_skill_ids.filter((entry) => entry !== skill.id)
-                              void updatePolicy({ default_enabled_skill_ids: Array.from(new Set(next)) })
-                            }}
-                          />
-                          <span>{skill.name}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
+        <p className='mt-3 text-xs text-zinc-400'>{hubFiltered.length} of {hubSkills.length} skills (filtered)</p>
+
+        <div className='mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]'>
+          <div className='overflow-hidden rounded-2xl border border-[#3a2f2f]'>
+            {loadingHub ? (
+              <p className='p-4 text-sm text-zinc-400'>Loading marketplace…</p>
+            ) : marketView === 'cards' ? (
+              <div className='grid gap-2 p-2'>
+                {hubFiltered.map((skill) => (
+                  <button
+                    key={skill.id}
+                    type='button'
+                    onClick={() => setActiveSkillId(skill.id)}
+                    className={`rounded-xl border p-3 text-left ${selectedSkill?.id === skill.id ? 'border-rose-400/60 bg-[#2a1b1a]' : 'border-[#352a2a] bg-[#1a1414] hover:bg-[#211919]'}`}
+                  >
+                    <p className='text-base font-semibold'>{skill.name}</p>
+                    <p className='text-xs text-zinc-400'>Updated {formatDate(skill.updated_at)}</p>
+                    <p className='mt-2 line-clamp-2 text-xs text-zinc-300'>{skill.description || 'No description yet.'}</p>
+                  </button>
+                ))}
               </div>
-            )}
-          </section>
-
-          <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
-            <div className='mb-3 flex items-center justify-between gap-2'>
-              <h3 className='text-sm font-semibold'>Allow / Block List</h3>
-              <input
-                value={allowBlockQuery}
-                onChange={(event) => setAllowBlockQuery(event.target.value)}
-                placeholder='Search skills'
-                className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs'
-              />
-              <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs' onClick={() => void refreshAllowBlock()}>
-                Search
-              </button>
-            </div>
-            <div className='overflow-x-auto'>
-              <table className='w-full text-left text-xs'>
-                <thead className='text-zinc-400'>
+            ) : (
+              <table className='w-full text-left text-sm'>
+                <thead className='bg-[#2b2020] text-xs uppercase tracking-[0.08em] text-zinc-300'>
                   <tr>
-                    <th className='pb-2'>Skill</th><th className='pb-2'>Version</th><th className='pb-2'>Risk</th><th className='pb-2'>Allowed</th><th className='pb-2'>Blocked</th><th className='pb-2'>Updated</th><th className='pb-2'>Actions</th>
+                    <th className='px-4 py-3'>Skill</th>
+                    <th className='px-4 py-3'>Summary</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allowBlockRows.map((row) => (
-                    <tr key={row.skill_id} className='border-t border-[#232323]'>
-                      <td className='py-2'>{row.skill}</td>
-                      <td>{row.version}</td>
-                      <td>{row.risk}</td>
-                      <td>{row.allowed ? 'Yes' : 'No'}</td>
-                      <td>{row.blocked ? 'Yes' : 'No'}</td>
-                      <td>{formatDate(row.updated)}</td>
-                      <td className='space-x-1'>
-                        <button type='button' className='rounded border border-emerald-500/40 px-1.5 py-0.5 text-emerald-300' onClick={() => void onAllowBlockAction(row.skill_id, 'allow')}>Allow</button>
-                        <button type='button' className='rounded border border-red-500/40 px-1.5 py-0.5 text-red-300' onClick={() => setPendingConfirm({ action: 'block', skillId: row.skill_id, skillName: row.skill })}>Block</button>
-                        <button type='button' className='rounded border border-zinc-500/40 px-1.5 py-0.5 text-zinc-300' onClick={() => setPendingConfirm({ action: 'reset', skillId: row.skill_id, skillName: row.skill })}>Reset</button>
+                  {hubFiltered.map((skill) => (
+                    <tr
+                      key={skill.id}
+                      onClick={() => setActiveSkillId(skill.id)}
+                      className={`cursor-pointer border-t border-[#332525] ${selectedSkill?.id === skill.id ? 'bg-[#2c1f1e]' : 'hover:bg-[#221817]'}`}
+                    >
+                      <td className='px-4 py-3 align-top'>
+                        <p className='text-xl font-semibold'>{skill.slug}</p>
+                        <p className='text-xs text-zinc-400'>Updated {formatDate(skill.updated_at)}</p>
                       </td>
+                      <td className='px-4 py-3 text-zinc-300'>{skill.description || 'No summary provided.'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          </section>
+            )}
+          </div>
 
-          <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4 lg:col-span-2'>
-            <h3 className='mb-3 text-sm font-semibold'>Org Install Audit</h3>
-            <div className='mb-3 grid gap-2 md:grid-cols-5'>
-              <input placeholder='user' value={auditFilters.user} onChange={(event) => setAuditFilters((prev) => ({ ...prev, user: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
-              <input placeholder='skill id' value={auditFilters.skill} onChange={(event) => setAuditFilters((prev) => ({ ...prev, skill: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
-              <input placeholder='action' value={auditFilters.action} onChange={(event) => setAuditFilters((prev) => ({ ...prev, action: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
-              <input type='datetime-local' value={auditFilters.date_from} onChange={(event) => setAuditFilters((prev) => ({ ...prev, date_from: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
-              <input type='datetime-local' value={auditFilters.date_to} onChange={(event) => setAuditFilters((prev) => ({ ...prev, date_to: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
-            </div>
-            <button type='button' className='mb-3 rounded border border-[#2a2a2a] px-2 py-1 text-xs' onClick={() => { setAuditPage(1); void refreshAudit(1) }}>Apply filters</button>
+          {selectedSkill && (
+            <article className='rounded-2xl border border-[#3a2c2b] bg-[#231817]/95 p-4'>
+              <div className='flex items-center justify-between gap-3'>
+                <h4 className='text-2xl font-semibold'>{selectedSkill.slug}</h4>
+                <span className='rounded-full bg-[#6d3c2e] px-3 py-1 text-xs'>latest</span>
+              </div>
+              <p className='mt-2 text-zinc-300'>{selectedSkill.description || 'No description supplied for this skill yet.'}</p>
+              <p className='mt-3 text-sm text-zinc-400'>by {selectedSkill.owner?.username || selectedSkill.owner?.name || '@aegis-author'}</p>
+              <div className='mt-4 flex flex-wrap gap-2 text-xs'>
+                <span className='rounded-full bg-[#163421] px-2 py-1 text-emerald-300'>VirusTotal: Benign</span>
+                <span className='rounded-full bg-[#163421] px-2 py-1 text-emerald-300'>Aegis Scan: Benign</span>
+              </div>
+              <div className='mt-4 rounded-xl border border-[#3f3130] p-3 text-sm text-zinc-300'>
+                <p className='font-medium text-zinc-100'>License</p>
+                <p className='mt-1'>MIT-0 · Free to use, modify, and redistribute. No attribution required.</p>
+              </div>
+              <div className='mt-4 flex gap-2'>
+                <button
+                  type='button'
+                  onClick={() => void onInstallSkill(selectedSkill)}
+                  disabled={installedById.has(selectedSkill.id)}
+                  className='rounded-xl bg-[#f97360] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60'
+                >
+                  {installedById.has(selectedSkill.id) ? 'Installed' : 'Install skill'}
+                </button>
+                <button type='button' className='rounded-xl border border-[#61322b] px-4 py-2 text-sm'>View files</button>
+              </div>
+            </article>
+          )}
+        </div>
+      </section>
+
+      <section className='rounded-2xl border border-[#3d2c2b] bg-[#1b1312]/90 p-4'>
+        <h3 className='text-3xl font-semibold tracking-tight'>Publish a skill</h3>
+        <p className='mt-1 text-sm text-zinc-400'>Create card metadata, then drop a folder with SKILL.md and supporting files.</p>
+
+        <div className='mt-4 rounded-2xl border border-[#3a2c2b] bg-[#231817]/80 p-4'>
+          <div className='grid gap-3 md:grid-cols-2'>
+            <InputField label='Slug' value={publishForm.slug} onChange={(value) => setPublishForm((prev) => ({ ...prev, slug: value }))} placeholder='skill-name' />
+            <InputField label='Display name' value={publishForm.name} onChange={(value) => setPublishForm((prev) => ({ ...prev, name: value }))} placeholder='My skill' />
+            <InputField label='Owner' value={publishForm.owner} onChange={(value) => setPublishForm((prev) => ({ ...prev, owner: value }))} placeholder='@aegis-user' />
+            <InputField label='Version' value={publishForm.version} onChange={(value) => setPublishForm((prev) => ({ ...prev, version: value }))} placeholder='1.0.0' />
+            <InputField label='Tags' value={publishForm.tags} onChange={(value) => setPublishForm((prev) => ({ ...prev, tags: value }))} placeholder='latest, productivity' />
+            <label className='space-y-1 text-xs uppercase tracking-[0.15em] text-zinc-400'>
+              Publish target
+              <select
+                className='w-full rounded-xl border border-[#1f3a52] bg-[#061a2d] px-3 py-3 text-sm uppercase tracking-normal text-zinc-100'
+                value={publishForm.publishTarget}
+                onChange={(event) => setPublishForm((prev) => ({ ...prev, publishTarget: event.target.value as 'hub' | 'global' }))}
+              >
+                <option value='hub'>Hub</option>
+                {isAdmin && <option value='global'>Global</option>}
+              </select>
+            </label>
+          </div>
+
+          <label className='mt-3 block space-y-1 text-xs uppercase tracking-[0.15em] text-zinc-400'>
+            Summary
+            <textarea
+              value={publishForm.description}
+              onChange={(event) => setPublishForm((prev) => ({ ...prev, description: event.target.value }))}
+              className='h-24 w-full rounded-xl border border-[#1f3a52] bg-[#061a2d] p-3 text-sm'
+              placeholder='Describe this skill for marketplace cards.'
+            />
+          </label>
+        </div>
+
+        <div className='mt-4 rounded-2xl border border-[#3a2c2b] bg-[#231817]/80 p-4'>
+          <div
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => void onDrop(event)}
+            className='rounded-xl border border-dashed border-[#7b5f53] bg-[#2a1e1d] p-6 text-center'
+          >
+            <p className='text-3xl font-semibold'>Drop a folder</p>
+            <p className='mt-1 text-sm text-zinc-400'>We keep folder paths and flatten outer wrappers automatically.</p>
+            <label className='mx-auto mt-4 inline-flex cursor-pointer rounded-full border border-[#8b5148] px-4 py-2 text-sm'>
+              Choose folder
+              <input type='file' multiple className='hidden' onChange={(event) => void onFileInput(event)} />
+            </label>
+          </div>
+          <p className='mt-2 text-sm text-zinc-300'>
+            {droppedFiles.length ? `${droppedFiles.length} files selected` : 'No files selected.'}
+          </p>
+
+          <label className='mt-3 block space-y-1 text-xs uppercase tracking-[0.15em] text-zinc-400'>
+            SKILL.md preview
+            <textarea
+              value={skillMarkdown}
+              onChange={(event) => setSkillMarkdown(event.target.value)}
+              className='h-56 w-full rounded-xl border border-[#1f3a52] bg-[#061a2d] p-3 font-mono text-xs'
+              placeholder='Paste or drop SKILL.md content here.'
+            />
+          </label>
+
+          <div className='mt-4 rounded-xl border border-[#3f3130] p-3'>
+            <p className='text-2xl font-semibold'>License</p>
+            <p className='mt-1 text-zinc-300'>MIT-0 · MIT No Attribution (Aegis default skill license).</p>
+            <label className='mt-3 flex items-start gap-2 text-sm text-zinc-200'>
+              <input
+                type='checkbox'
+                checked={publishForm.acceptedLicense}
+                onChange={(event) => setPublishForm((prev) => ({ ...prev, acceptedLicense: event.target.checked }))}
+              />
+              <span>I have the rights to this skill and agree to publish it under MIT-0.</span>
+            </label>
+
+            <label className='mt-3 block space-y-1 text-xs uppercase tracking-[0.15em] text-zinc-400'>
+              Changelog
+              <textarea
+                value={publishForm.changelog}
+                onChange={(event) => setPublishForm((prev) => ({ ...prev, changelog: event.target.value }))}
+                className='h-28 w-full rounded-xl border border-[#1f3a52] bg-[#061a2d] p-3 text-sm'
+                placeholder='Describe what changed in this skill…'
+              />
+            </label>
+          </div>
+
+          <div className='mt-4 flex justify-end'>
+            <button
+              type='button'
+              onClick={() => void onPublish()}
+              disabled={submitting}
+              className='rounded-2xl bg-[#c75742] px-8 py-3 text-lg font-semibold disabled:cursor-not-allowed disabled:opacity-60'
+            >
+              {submitting ? 'Publishing…' : 'Publish skill'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className='grid gap-4 xl:grid-cols-2'>
+        <div className='rounded-2xl border border-[#3d2c2b] bg-[#1b1312]/90 p-4'>
+          <div className='mb-3 flex items-center justify-between'>
+            <h3 className='text-xl font-semibold'>Installed skills</h3>
+            <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800' onClick={() => void refreshInstalled()}>
+              Refresh
+            </button>
+          </div>
+          {loadingInstalled ? (
+            <p className='text-xs text-zinc-400'>Loading installed skills…</p>
+          ) : installed.length === 0 ? (
+            <p className='text-xs text-zinc-400'>No skills installed yet.</p>
+          ) : (
             <div className='space-y-2'>
-              {auditRows.map((row) => (
-                <article key={row.id} className='rounded border border-[#2a2a2a] bg-[#171717] p-2 text-xs'>
-                  <p className='text-zinc-200'>{row.action} • {row.skill_id}</p>
-                  <p className='text-zinc-400'>{row.user} • {formatDate(row.timestamp)} • {row.reason || 'n/a'}</p>
+              {installed.map((skill) => (
+                <article key={skill.skill_id} className='rounded-lg border border-[#2a2a2a] bg-[#171717] p-3'>
+                  <div className='flex items-start justify-between gap-2'>
+                    <div>
+                      <h4 className='text-sm font-medium text-zinc-100'>{skill.name}</h4>
+                      <p className='text-[11px] text-zinc-500'>{skill.slug}</p>
+                    </div>
+                    <button
+                      type='button'
+                      onClick={() => void onToggleSkill(skill)}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] ${skill.enabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-[#2a2a2a] bg-[#1d1d1d] text-zinc-500'}`}
+                    >
+                      {skill.enabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                  </div>
+
+                  <div className='mt-2 flex flex-wrap gap-1.5 text-[10px]'>
+                    <span className='rounded-full border border-[#333] px-2 py-0.5 text-zinc-300'>version: {skill.version_id.slice(0, 8)}</span>
+                    <span className='rounded-full border border-[#333] px-2 py-0.5 text-zinc-300'>source: {skill.publish_target ?? 'hub'}</span>
+                    <span className='rounded-full border border-[#333] px-2 py-0.5 text-zinc-300'>updated: {formatDate(skill.updated_at)}</span>
+                    <span className='rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-300'>risk: {skill.risk_label ?? 'unknown'}</span>
+                  </div>
+
+                  <div className='mt-3'>
+                    <button type='button' onClick={() => void onDeleteSkill(skill.skill_id)} className='rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10'>
+                      Uninstall
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
-            <div className='mt-3 flex items-center justify-between text-xs'>
-              <span>Page {auditPage} • {auditTotal} total</span>
-              <div className='space-x-2'>
-                <button type='button' disabled={auditPage <= 1} className='rounded border border-[#2a2a2a] px-2 py-1 disabled:opacity-40' onClick={() => { const next = Math.max(auditPage - 1, 1); setAuditPage(next); void refreshAudit(next) }}>Prev</button>
-                <button type='button' disabled={auditPage * 10 >= auditTotal} className='rounded border border-[#2a2a2a] px-2 py-1 disabled:opacity-40' onClick={() => { const next = auditPage + 1; setAuditPage(next); void refreshAudit(next) }}>Next</button>
-              </div>
-            </div>
-          </section>
-        </>
-      ) : null}
-
-      {pendingConfirm ? (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4'>
-          <div className='w-full max-w-md rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
-            <h4 className='text-sm font-semibold'>Confirm {pendingConfirm.action}</h4>
-            <p className='mt-2 text-xs text-zinc-400'>Are you sure you want to {pendingConfirm.action} <span className='text-zinc-200'>{pendingConfirm.skillName}</span>?</p>
-            <div className='mt-3 flex justify-end gap-2'>
-              <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs' onClick={() => setPendingConfirm(null)}>Cancel</button>
-              <button
-                type='button'
-                className='rounded border border-red-500/40 px-2 py-1 text-xs text-red-300'
-                onClick={() => {
-                  const pending = pendingConfirm
-                  setPendingConfirm(null)
-                  void onAllowBlockAction(pending.skillId, pending.action)
-                }}
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
+          )}
         </div>
-      ) : null}
+
+        {isAdmin && (
+          <div className='space-y-4'>
+            <section className='rounded-2xl border border-[#3d2c2b] bg-[#1b1312]/90 p-4'>
+              <h3 className='mb-3 text-xl font-semibold'>Admin publishing policy</h3>
+              {loadingPolicy ? (
+                <p className='text-xs text-zinc-400'>Loading policy…</p>
+              ) : (
+                <div className='space-y-3'>
+                  <ToggleRow label='Allow unreviewed installs' value={policy.allow_unreviewed_installs} onToggle={(value) => void updatePolicy({ allow_unreviewed_installs: value })} disabled={savingPolicy} />
+                  <ToggleRow label='Block high-risk skills' value={policy.block_high_risk_skills} onToggle={(value) => void updatePolicy({ block_high_risk_skills: value })} disabled={savingPolicy} />
+                  <ToggleRow label='Require approval before install' value={policy.require_approval_before_install} onToggle={(value) => void updatePolicy({ require_approval_before_install: value })} disabled={savingPolicy} />
+                  <label className='block text-xs font-medium text-zinc-300'>
+                    Org default-enabled skill IDs
+                    <textarea
+                      className='mt-1 h-20 w-full rounded border border-[#2a2a2a] bg-[#111] p-2 text-xs'
+                      value={policy.default_enabled_skill_ids.join('\n')}
+                      onChange={(event) =>
+                        void updatePolicy({
+                          default_enabled_skill_ids: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+            </section>
+
+            <section className='rounded-2xl border border-[#3d2c2b] bg-[#1b1312]/90 p-4'>
+              <div className='mb-3 flex items-center justify-between'>
+                <h3 className='text-xl font-semibold'>Admin publishing controls</h3>
+                <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800' onClick={() => void refreshReviewQueue()}>
+                  Refresh queue
+                </button>
+              </div>
+              {loadingQueue ? (
+                <p className='text-xs text-zinc-400'>Loading review queue…</p>
+              ) : reviewQueue.length === 0 ? (
+                <p className='text-xs text-zinc-400'>No pending submissions.</p>
+              ) : (
+                <div className='space-y-2'>
+                  {reviewQueue.map((item) => (
+                    <article key={item.submission.id} className='rounded-xl border border-[#2d2222] bg-[#181212] p-3'>
+                      <p className='text-sm font-semibold'>{item.skill.name}</p>
+                      <p className='text-xs text-zinc-400'>
+                        {item.skill.slug} · {item.submission.review_state} · {formatDate(item.submission.created_at)}
+                      </p>
+                      <div className='mt-2 flex flex-wrap gap-2'>
+                        <button type='button' className='rounded border border-amber-500/40 px-2 py-1 text-xs text-amber-200' onClick={() => void handleReviewAction(item, 'scan')}>Scan</button>
+                        <button type='button' className='rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-200' onClick={() => void handleReviewAction(item, 'approve_hub')}>Approve hub</button>
+                        <button type='button' className='rounded border border-blue-500/40 px-2 py-1 text-xs text-blue-200' onClick={() => void handleReviewAction(item, 'approve_global')}>Approve global</button>
+                        <button type='button' className='rounded border border-red-500/40 px-2 py-1 text-xs text-red-200' onClick={() => void handleReviewAction(item, 'reject')}>Reject</button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </section>
     </div>
+  )
+}
+
+function InputField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <label className='space-y-1 text-xs uppercase tracking-[0.15em] text-zinc-400'>
+      {label}
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className='w-full rounded-xl border border-[#1f3a52] bg-[#061a2d] px-3 py-3 text-sm normal-case tracking-normal text-zinc-100'
+      />
+    </label>
   )
 }
 

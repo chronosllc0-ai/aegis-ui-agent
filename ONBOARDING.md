@@ -47,249 +47,148 @@
 ## Session 5.86 - April 8, 2026 (PR #190 review follow-up: dead-code removal + message accuracy)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused review-fix pass
+**Duration:** ~1 focused stabilization + test pass
 
 ### What Was Done
-- Addressed review feedback in mode immutability/admin settings changes:
-  1. **Removed redundant dead-code branch** in `backend/admin/platform_settings.py`:
-     - deleted the endpoint-level `if body.mode_policy:` guard in `patch_platform_settings(...)` because `PatchPlatformSettingsBody._reject_mode_policy_mutation(...)` already rejects truthy `mode_policy` payloads during validation.
-     - removed now-unused `HTTPException` and `PROTECTED_MODE_POLICY_FIELDS` imports accordingly.
-  2. **Corrected API rejection copy** in `main.py`:
-     - updated `POST /api/modes` and `DELETE /api/modes/{mode_key}` error details to accurately state that mode create/modify/delete is not allowed via this API for any caller.
+- Fixed all three reviewer findings from merged PR #192:
+  1. `frontend/src/hooks/useSkills.ts` policy merge bug:
+     - `savePolicy(...)` now trusts server canonical normalization and applies `setPolicy({ ...DEFAULT_POLICY, ...(data.policy ?? {}) })` only.
+  2. `backend/skills/router.py` commit placement:
+     - moved commit handling into successful write paths (initial write path + retry path after `IntegrityError`) to avoid committing an error-state session.
+  3. `frontend/src/lib/api.ts` JSON parse hardening:
+     - wrapped successful-response `json()` parsing in try/catch and throw a meaningful error if parse fails.
+- Worked through the prior ONBOARDING “next steps / not yet working” direction by adding targeted backend API tests:
+  - new `tests/test_admin_skills_policy.py` validating normalization + persistence + admin authorization behavior for skills policy endpoints.
 
 ### What's Working
-- `mode_policy` mutation rejection now has a single authoritative validation path (no dead branch in handler).
-- Rejection messages for mode create/delete now match real behavior.
+- Skills policy UI now reflects server-normalized policy values exactly (no client-side overwrite drift).
+- Admin policy persistence path is safer around transaction error states.
+- API helper now fails with clear error text for malformed JSON responses.
+- New admin skills policy tests pass (`2 passed`).
+- Frontend build still succeeds after fixes.
 
 ### What's NOT Working Yet
-- No new issues identified in this pass.
+- Full folder/file payload persistence for skill publishing (beyond SKILL.md extraction) remains a future enhancement.
+- Full ClawHub-style file/compare/version detail sub-tabs are still partial in the current UI.
 
 ### Next Steps
-1. Optional: add an explicit API test asserting `mode_policy` payloads fail validation before route handler logic to prevent future reintroduction of redundant checks.
+1. Implement backend upload storage + manifest persistence for full dropped folder payloads.
+2. Extend skill detail view with Files/Compare/Versions real data tabs.
+3. Add API tests for concurrent first-write policy race path (forced IntegrityError simulation).
 
 ### Decisions Made
-- Preferred single-layer validation (Pydantic model) over duplicate handler guard when behavior is identical.
-- Kept strict mode immutability semantics unchanged; this pass only removes redundancy and improves error-message accuracy.
+- Kept fixes minimal and post-merge safe: no endpoint shape changes, only correctness/robustness adjustments.
 
 ### Blockers
 - None.
 
 ---
 
-## Session 5.85 - April 8, 2026 (Immutable system mode registry + admin-audited mode edits)
+## Session 5.83 - April 8, 2026 (PR #192 review follow-up: policy response normalization + race-safe save)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 implementation pass
+**Duration:** ~1 small backend hardening pass
 
 ### What Was Done
-- Implemented a **canonical immutable mode registry** in `backend/modes.py` with ordered system modes:
-  - `orchestrator`, `planner`, `architect`, `deep_research`, `code`.
-- Added a frozen `ModeDefinition` model and derived policy views (`MODE_LABELS`, `MODE_SYSTEM_HINTS`, read-only/tool-block behavior) from the single registry source of truth.
-- Marked modes as **system-owned immutable nodes** (`immutable=True`, `owner="system"` in serialized mode definitions).
-- Added server-side mode mutation enforcement in `main.py`:
-  - new `GET /api/modes` to expose canonical registry,
-  - explicit rejection endpoints for `POST /api/modes`, `PATCH /api/modes/{mode_key}`, and `DELETE /api/modes/{mode_key}` with `403`.
-- Extended admin platform settings in `backend/admin/platform_settings.py`:
-  - supports persisting only admin-editable per-mode instruction text + safe metadata (`description`, `emoji`, `sort_order`),
-  - rejects attempted edits to immutable mode policy payloads (`mode_policy`),
-  - returns canonical registry data alongside persisted admin instruction/metadata.
-- Added admin audit logging for mode edits via `log_admin_action(..., action="mode_registry.admin_edit")`.
+- Addressed PR #192 reviewer suggestions in `backend/skills/router.py` for admin skills policy writes:
+  - `_set_admin_skills_policy(...)` now flushes writes and catches `IntegrityError` on first-create races,
+  - on race, it rolls back/reloads existing row and retries as update,
+  - function now commits internally and returns canonical normalized policy from `_get_admin_skills_policy(...)`.
+- Updated `POST /api/admin/skills/policy` to return the normalized persisted policy object from the helper (no duplicate commit in endpoint).
 
 ### What's Working
-- Canonical mode registry is code-defined and stable across restarts.
-- Non-admin attempts to create/delete/mutate mode policy fields through mode mutation routes are rejected.
-- Admin mode instruction/metadata edits are persisted and now produce audit events.
+- Policy save endpoint now returns the same sanitized/normalized shape that is actually persisted.
+- First-write concurrent admin race is handled gracefully instead of surfacing a uniqueness failure.
 
 ### What's NOT Working Yet
-- No dedicated migration/backfill currently normalizes pre-existing malformed mode metadata rows; invalid JSON is safely ignored at read time.
+- No new issues found in this pass.
 
 ### Next Steps
-1. Add explicit API tests for `/api/modes` mutation rejection semantics and admin audit event assertions for mode edit patches.
-2. Optionally split `PATCH /api/admin/platform-settings` into narrower endpoints (`/modes/instructions`, `/modes/metadata`) for cleaner RBAC and audit granularity.
+1. Optional: add targeted async test for concurrent first-write behavior around `_set_admin_skills_policy(...)`.
 
 ### Decisions Made
-- Kept mode policy fields fully immutable and code-owned to satisfy registry stability requirements.
-- Limited persisted per-mode metadata to a strict safe allowlist.
+- Kept fix localized in router helper to avoid introducing broader migration/schema work.
 
 ### Blockers
 - None.
 
 ---
 
-## Session 5.84 - April 8, 2026 (PR #189 review fixes: policy semantics + exception transaction safety)
+## Session 5.82 - April 8, 2026 (PR review fixes: persistent admin skills policy + marketplace version label cleanup)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 focused review-fix pass
 
 ### What Was Done
-- Addressed PR review feedback in install policy enforcement:
-  1. **Default mismatch fix in runtime check**
-     - `SkillService.install_skill(...)` now uses `DEFAULT_SKILLS_POLICY["block_high_risk_skills"]` as the fallback instead of hardcoded `True`.
-  2. **Removed placebo behavior for suspicious skills**
-     - eliminated unconditional `suspicious_requires_override` hard-block branch so `block_high_risk_skills` now actually controls suspicious-risk blocking behavior.
-     - retained unconditional malicious blocking for safety.
-- Addressed review feedback about transaction safety on install failures:
-  - removed `commit()`-on-exception in router install endpoint and replaced with `rollback()`.
-  - moved `install_blocked` audit writes into an isolated DB transaction via a dedicated helper in `SkillService` using the shared async session factory (`backend.database._session_factory`) to avoid committing unrelated request state.
-- Updated tests to align with corrected policy semantics:
-  - `tests/test_skills_install_policy.py` now explicitly enables `block_high_risk_skills=True` before asserting suspicious-risk blocks.
-  - existing deterministic VT scan mocks in `tests/test_skills_api.py` continue to keep review-queue assertions stable.
+- Addressed review warning about volatile in-memory admin policy storage in `backend/skills/router.py`:
+  - replaced module-global `_admin_skill_policy_state` usage with persistent reads/writes to `PlatformSetting` (`aegis_admin_skills_policy_v1`),
+  - added helper functions to normalize and sanitize persisted JSON shape,
+  - `GET /api/admin/skills/policy` now reads from DB,
+  - `POST /api/admin/skills/policy` now writes to DB and commits.
+- Addressed marketplace version-display nit in `frontend/src/components/settings/SkillsTab.tsx`:
+  - removed incorrect `updated_at` year-as-version rendering,
+  - now shows `Updated <date>` labels instead of fake semantic versions.
+- Hardened `savePolicy` in `frontend/src/hooks/useSkills.ts`:
+  - explicitly wraps API call in try/catch,
+  - only updates local policy state after successful response,
+  - preserves prior state on failure and propagates error for UI toast handling.
 
 ### What's Working
-- Review comments about default mismatch, placebo flag behavior, and exception transaction safety are now addressed in code.
-- Targeted skills/admin test set is green (`8 passed`).
+- Admin policy now persists across pod restarts/deploys (DB-backed) instead of resetting.
+- Marketplace list no longer mislabels years as semantic versions.
+- Policy UI state no longer risks local desync on failed saves.
 
 ### What's NOT Working Yet
-- No new blockers identified in this pass.
+- No additional issues identified in this review-fix pass.
 
 ### Next Steps
-1. Optional: add a dedicated test that verifies suspicious installs are allowed when `block_high_risk_skills=False` and no explicit block override exists.
+1. Optional: expose `updated_by` / `updated_at` metadata for policy changes in admin UI.
 
 ### Decisions Made
-- Kept malicious-risk installs always blocked as a hard safety gate while making suspicious-risk behavior policy-driven.
-- Chose isolated audit transaction writes over request-transaction commit-on-error to preserve failure semantics and reduce accidental partial commits.
+- Reused existing `PlatformSetting` key-value store instead of introducing a new table to keep migration impact minimal.
 
 ### Blockers
 - None.
 
 ---
 
-## Session 5.83 - April 8, 2026 (fix test mismatch + deterministic scan mocks)
+## Session 5.81 - April 8, 2026 (ClawHub-style Skills marketplace/publishing UI refresh)
 
 **Agent:** GPT-5.3-Codex  
-**Duration:** ~1 focused fix pass
+**Duration:** ~1 UI redesign pass
 
 ### What Was Done
-- Fixed a policy default mismatch in `backend/skills/policy_store.py`:
-  - `set_skills_policy(...)` now defaults `block_high_risk_skills` to `False` to match the declared default policy shape used elsewhere.
-- Completed the prior “next step” to stabilize scan-related API tests under environments where VirusTotal is disabled:
-  - added async mock scanner helper in `tests/test_skills_api.py`,
-  - patched `VirusTotalScanner.scan_content` in:
-    - `_seed_approved_skill_sync()` path,
-    - `test_admin_review_queue_status_filter_and_badges`,
-  - this makes review-queue status assertions deterministic (`review` no longer depends on external VT availability/config).
-- Re-ran the affected test slices and a broader skills test set.
+- Reworked `frontend/src/components/settings/SkillsTab.tsx` into a ClawHub-inspired Skills experience (Aegis color/branding):
+  - user marketplace header + search/filter/view controls,
+  - table/card listing mode,
+  - click-to-open skill detail panel with install CTA and scan/license summary styling,
+  - richer publish form section (metadata card + drag/drop folder zone + SKILL.md area + license + changelog + publish CTA),
+  - retained installed-skills management with optimistic toggle + rollback and uninstall rollback behavior,
+  - added admin publishing controls panel with review queue actions (scan / approve hub / approve global / reject) plus existing policy controls.
+- Extended `frontend/src/hooks/useSkills.ts` to support marketplace and publishing flows:
+  - load hub catalog (`/api/skills/hub`),
+  - install skill (`/api/skills/{id}/install`),
+  - submit skill (`/api/skills/submit`),
+  - admin review queue (`/api/admin/skills/review-queue`) and moderation actions (`scan`, `review`).
 
 ### What's Working
-- Previously failing review-queue status test now passes reliably.
-- Skills API + admin controls + install policy test set is green (`8 passed`).
+- Skills page now includes user-facing marketplace + detail + publishing UX and admin publishing controls in one cohesive screen.
+- Installed/enable/uninstall behavior remains wired and optimistic.
+- Skill submission can now be triggered directly from Settings > Skills UI.
+- Admin moderation actions are callable directly from the Skills tab.
 
 ### What's NOT Working Yet
-- No new blockers discovered in this pass.
+- Marketplace/detail/publish styling is a close Aegis-themed clone but not pixel-perfect to every mobile screenshot dimension.
+- Folder drag-drop currently reads files client-side and only extracts SKILL.md text for submission payload.
 
 ### Next Steps
-1. Optional: apply the same deterministic scan-mocking pattern to any remaining VT-sensitive tests outside `tests/test_skills_api.py` to reduce CI flake risk further.
+1. Add backend upload support for full folder/file payload storage (beyond SKILL.md text).
+2. Add compare/versions/file-tabs view in detail panel if strict parity is needed.
+3. Add integration tests around submit/install/review flows.
 
 ### Decisions Made
-- Preferred deterministic unit/integration mocking in tests instead of changing runtime scan behavior.
-- Kept production scan workflow untouched; only test-time behavior is stabilized.
-
-### Blockers
-- None.
-
----
-
-## Session 5.82 - April 8, 2026 (SkillsTab Admin Controls + backend RBAC/persistence)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 implementation pass
-
-### What Was Done
-- Implemented an admin-only segmented UX in `SkillsTab.tsx` with **My Skills** vs **Admin Controls**.
-- Added new Admin Controls surfaces:
-  - **Policy Defaults** (require-approval toggle + default-enabled skill multi-select),
-  - **Allow/Block List** (search + tabular rows + Allow/Block/Reset actions),
-  - **Org Install Audit** (filters + paginated timeline).
-- Added safety confirmation modal for destructive block/reset actions.
-- Added backend persistence helpers in `backend/skills/policy_store.py` using `PlatformSetting` storage for:
-  - org policy values,
-  - per-skill allow/block override map.
-- Reworked `/api/admin/skills/policy` endpoints to persist/read from DB-backed platform settings (instead of in-memory state).
-- Added new admin RBAC endpoints:
-  - `GET /api/admin/skills/allow-block`
-  - `POST /api/admin/skills/{skill_id}/allow`
-  - `POST /api/admin/skills/{skill_id}/block`
-  - `POST /api/admin/skills/{skill_id}/reset`
-  - `GET /api/admin/skills/install-audit` (filtered, paginated)
-- Enforced install-time blocking in `SkillService.install_skill(...)`:
-  - checks org policy + allow/block overrides,
-  - blocks user install flow for admin-blocked skills,
-  - emits install/install_blocked/uninstall audit events to `skill_audit_events`.
-- Added regression coverage in `tests/test_skills_admin_controls.py` for:
-  - policy persistence after reload,
-  - blocked install prevention,
-  - install audit pagination behavior.
-
-### What's Working
-- Admin-only controls are hidden from non-admin users in the settings UI.
-- Policy values now persist in DB-backed platform settings.
-- Block list policy is enforced server-side in install flow.
-- Install audit endpoint supports pagination and filter params without crashing.
-
-### What's NOT Working Yet
-- Existing `tests/test_skills_api.py::test_admin_review_queue_status_filter_and_badges` may still depend on environment-specific scan behavior (VT disabled defaults can produce `scan_failed` instead of `review`).
-
-### Next Steps
-1. Stabilize scan workflow tests to be deterministic under `VIRUSTOTAL_ENABLED=False` (explicit mocks in API-level tests).
-2. Optionally add dedicated frontend tests for SkillsTab Admin Controls interactions and modal confirmation behavior.
-3. Consider exposing actor display metadata (email/name) in install audit payload for richer admin readability.
-
-### Decisions Made
-- Used existing `PlatformSetting` table for policy + allow/block persistence to avoid schema migration overhead.
-- Kept RBAC enforcement server-side by reusing `get_admin_user` dependencies on all admin endpoints.
-
-### Blockers
-- None.
-
----
-
-## Session 5.81 - April 8, 2026 (Skill Hub submission/review deterministic state machine)
-
-**Agent:** GPT-5.3-Codex  
-**Duration:** ~1 implementation pass
-
-### What Was Done
-- Added a new backend Skill Hub workflow package (`backend/skills_hub/`) with explicit submission schemas, deterministic transition rules, service logic, and API routes.
-- Implemented deterministic transition matrix with server-side enforcement (`allowed_transitions(current_state)`), including terminal behavior for `rejected` and revision-based resubmission support.
-- Added persistent audit trail + reviewer notes storage via new DB models:
-  - `SkillHubSubmission`
-  - `SkillHubTransition`
-- Added Skill Hub API endpoints:
-  - `POST /api/skills/hub/submissions`
-  - `GET /api/skills/hub/submissions/{id}`
-  - `POST /api/skills/hub/submissions/{id}/transition`
-  - `GET /api/skills/hub/review-queue` (admin)
-- Wired the new Skill Hub router into `main.py`.
-- Added frontend Skill Hub components under `frontend/src/components/skills-hub/`:
-  - `SubmissionForm.tsx`
-  - `SubmissionStatusTimeline.tsx`
-  - `ReviewQueue.tsx`
-- Integrated Skills tab UX updates:
-  - Added **Submit to Hub** action per skill row.
-  - Added timeline rendering with exact state badges and reviewer note history.
-  - Added client-side disabling for impossible transition actions using `allowed_transitions` from backend.
-- Added tests:
-  - `tests/test_skills_hub_states.py` (legal/illegal transitions, rejected terminal + new revision)
-  - `tests/test_skills_hub_permissions.py` (admin queue access and transition permissions)
-
-### What's Working
-- Transition matrix is enforced server-side with deterministic next-state validation.
-- Reviewer notes and immutable transition history are persisted and returned in submission detail payloads.
-- Admin review queue endpoint supports state/risk/date filtering.
-- Client UI disables impossible actions while still relying on server validation.
-- Targeted backend tests pass and frontend production build passes.
-
-### What's NOT Working Yet
-- Existing marketplace listing endpoints still rely on legacy skill status semantics; the new Skill Hub `published`/visibility coupling is in place for transitioned linked skills, but legacy list surfaces may need harmonization if both workflows are used simultaneously.
-
-### Next Steps
-1. Unify legacy skill publication states with new Skill Hub states across all listing/install endpoints.
-2. Add dedicated UI navigation to inspect existing submission IDs outside the inline per-row workflow.
-3. Add API docs/examples for the new review queue filters and revision resubmission flow.
-
-### Decisions Made
-- Implemented Skill Hub as a dedicated package (`backend/skills_hub`) to keep workflow logic isolated from legacy skill-pipeline behavior.
-- Kept transition permissions strict: only admins can perform moderation/publishing states; users can only move their own records through submit/resubmit transitions.
+- Kept existing API contracts and wsConfig compatibility while expanding front-end capability.
+- Prioritized mobile-friendly dark marketplace/publishing structure matching reference hierarchy.
 
 ### Blockers
 - None.
