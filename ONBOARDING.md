@@ -1,3 +1,34 @@
+## Session 5.99 - April 8, 2026 (Netlify npm ci workspace/lockfile fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 build-config + lockfile sync pass
+
+### What Was Done
+- Fixed Netlify build configuration in `netlify.toml` to run from the repo root workspace context instead of inside `frontend/`:
+  - `base` changed from `frontend` to `/`
+  - `command` changed to `npm ci && npm run -w frontend build`
+  - `publish` changed to `frontend/dist`
+- Regenerated/synced the root `package-lock.json` by running `npm install` at repository root so workspace metadata and dependencies are in lockfile sync for `npm ci`.
+
+### What's Working
+- Root workspace now has a lockfile that includes frontend workspace dependency graph, enabling strict `npm ci` usage in CI.
+- Netlify build command now aligns with monorepo/workspace layout and should avoid the previous workspace filter mismatch.
+
+### What's NOT Working Yet
+- Environment still emits the existing npm warning: `Unknown env config "http-proxy"` (non-blocking).
+
+### Next Steps
+1. Trigger a fresh Netlify deploy to confirm the build passes with the updated base/command.
+2. Optional cleanup: remove or normalize the `http-proxy` npm env setting in CI/shell profile to silence warning noise.
+
+### Decisions Made
+- Chose the monorepo/workspace-safe approach (root install/build orchestration) to preserve deterministic installs via `npm ci` rather than downgrading to `npm install` in CI.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.98 - April 8, 2026 (chat noise deny-list + thinking row alignment regression guard)
 
 **Agent:** GPT-5.3-Codex  
