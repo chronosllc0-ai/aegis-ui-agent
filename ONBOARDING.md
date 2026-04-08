@@ -1,3 +1,347 @@
+## Session 5.52 - April 8, 2026 (Thread/browser UX regression prompt pack)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused planning pass
+
+### What Was Done
+- Added `docs/thread-ux-fix-prompts.md` with targeted prompts for the reported regressions:
+  1. browser frame leakage across users/threads,
+  2. generic thread titles instead of first trigger prompt,
+  3. chat noise artifacts (`(no tool call):`, workflow/session spam) and thinking-row alignment,
+  4. browser-action leakage into chat (`go_back` and others),
+  5. post-refresh/thread-switch state scattering,
+  6. shell-card downgrade to plain text after hydration.
+- Included a strict T1→T6 master execution prompt with acceptance gates and pass/fail reporting.
+- Added an explicit \"How this solves it\" section under each prompt for operator clarity.
+
+### What's Working
+- There is now a one-to-one prompt mapping for each listed UX defect with implementation and validation scope.
+
+### What's NOT Working Yet
+- This pass is planning-only; the regressions are not fixed in code yet.
+
+### Next Steps
+1. Execute T1/T2 first (state isolation + title correctness).
+2. Execute T3/T4 (noise suppression + strict browser-action exclusion in all paths).
+3. Execute T5/T6 (hydration stability + shell-card persistence), then run regression tests.
+
+### Decisions Made
+- Kept this prompt pack separate from modes/skills docs because these bugs are cross-cutting hydration/render regressions.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.51 - April 8, 2026 (Copy-paste system instructions for all modes)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused documentation pass
+
+### What Was Done
+- Added `docs/mode-instruction-pack.md` containing copy-paste system-instruction templates for all five modes:
+  - Orchestrator,
+  - Planner (read-only),
+  - Architect (read-only),
+  - Deep Research (read-only),
+  - Code (execution-enabled).
+- Each mode template now includes:
+  - mission,
+  - capabilities,
+  - allowed behavior,
+  - blocked/restricted behavior,
+  - operating rules,
+  - output format.
+- Added optional shared global preamble for policy precedence and least-privilege enforcement.
+
+### What's Working
+- Admin can directly copy mode instructions into the new Mode config UI when implemented.
+- Instruction structure is standardized across modes for consistency.
+
+### What's NOT Working Yet
+- This pass is docs-only; no runtime/admin UI implementation change was applied.
+
+### Next Steps
+1. Paste these templates into admin mode instruction fields.
+2. Validate backend enforcement aligns with each mode’s blocked/allowed behaviors.
+3. Add regression tests for rejected disallowed actions by mode.
+
+### Decisions Made
+- Kept templates explicit and implementation-oriented (instead of narrative-only) to reduce ambiguity in admin configuration.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.50 - April 7, 2026 (Modes missing-parts prompt pack)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused planning pass
+
+### What Was Done
+- Added `docs/modes-system-node-prompts.md` to address remaining gaps in the Modes feature.
+- Prompt pack covers six missing areas:
+  1. canonical immutable system-node mode model (admin-controlled only),
+  2. admin settings subtab for per-mode system instructions,
+  3. server-side runtime enforcement for mode capability policy,
+  4. orchestrator-only routing/delegation workflow,
+  5. integration parity for `/mode` + inline selectors,
+  6. standards-aligned feasibility/guardrail checklist.
+- Included strict M1→M6 execution prompt with phase gates.
+
+### What's Working
+- Missing-mode implementation areas are now mapped into an executable prompt sequence.
+
+### What's NOT Working Yet
+- This pass is planning-only; missing backend/admin UI pieces are still pending implementation.
+
+### Next Steps
+1. Execute M1 and M2 first (policy model + admin UI subtab).
+2. Execute M3 and M4 (enforcement + routing behavior).
+3. Execute M5 and M6 (integration parity + guardrail validation tests).
+
+### Decisions Made
+- Separated mode-gap prompts from prior skills prompts to keep implementation tracks clear.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.49 - April 7, 2026 (Admin subtab clarification for Skills UI)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused clarification pass
+
+### What Was Done
+- Expanded `docs/skills-prompts-def-implementation.md` with an explicit **Admin UI subtab spec** under Prompt D.1.
+- Added concrete admin subtab layout requirements:
+  - segmented `My Skills` / `Admin Controls`,
+  - policy defaults section,
+  - allow/block list grid,
+  - org install audit timeline.
+- Added explicit permission and done-criteria requirements for the admin subtab so implementation and QA can validate exact behavior.
+
+### What's Working
+- Admin-subtab expectations are now concrete enough to implement without ambiguity.
+
+### What's NOT Working Yet
+- This pass is documentation-only; admin subtab code is not yet implemented.
+
+### Next Steps
+1. Implement `SkillsTab.tsx` segmented tabs and admin-only pane rendering.
+2. Add admin policy endpoints + RBAC checks.
+3. Add frontend tests for role visibility and policy persistence.
+
+### Decisions Made
+- Kept this as an additive clarification in D.1 so previous prompt references remain valid.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.48 - April 7, 2026 (Delivered D.1/E.1/F.1 prompts inline for copy/paste)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 response-format pass
+
+### What Was Done
+- Delivered the repo-tailored Skills prompts directly in chat (copy-paste format) per user request:
+  - Prompt D.1 (Skills tab UI + admin subtab),
+  - Prompt E.1 (hub submission/review state machine),
+  - Prompt F.1 (VirusTotal integration + risk tags/policy gates).
+- Kept the previously-authored prompt docs as canonical references while ensuring inline usability for immediate execution.
+
+### What's Working
+- User can copy prompts directly from chat without opening docs files.
+
+### What's NOT Working Yet
+- This pass does not implement D/E/F functionality; it only changes delivery format.
+
+### Next Steps
+1. Execute Prompt D.1 and validate settings UX + permissions.
+2. Execute Prompt E.1 and validate transition matrix tests.
+3. Execute Prompt F.1 and validate risk-policy enforcement + scan mapping tests.
+
+### Decisions Made
+- Prioritized direct inline prompt delivery for operator convenience.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.47 - April 7, 2026 (Repo-tailored D/E/F.1 implementation prompts)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused planning pass
+
+### What Was Done
+- Added `docs/skills-prompts-def-implementation.md` with copy-paste **D.1 / E.1 / F.1** prompts tailored to this repo’s real file layout.
+- D.1 prompt now references concrete frontend settings files (`SettingsPage.tsx`, `AgentTab.tsx`, `ToolsTab.tsx`, `useSettings.ts`, `useSettingsContext.tsx`) and introduces `SkillsTab.tsx` + `useSkills.ts` with admin-pane requirements.
+- E.1 prompt defines repo-specific hub workflow placement and routes, with concrete frontend component suggestions under `frontend/src/components/skills-hub/` and backend test targets.
+- F.1 prompt wires VirusTotal integration into `config.py`, `main.py`, and `backend/security/virustotal.py`, with explicit risk-tag mapping and policy gates.
+- Included a master D.1→E.1→F.1 execution prompt with strict stop-gates.
+
+### What's Working
+- There is now a directly executable, repo-specific prompt set for the D/E/F workstream instead of generic placeholders.
+
+### What's NOT Working Yet
+- This pass is planning-only; no D/E/F implementation code has been applied yet.
+
+### Next Steps
+1. Execute D.1 (Skills tab + admin subtab) and validate frontend build.
+2. Execute E.1 (hub state machine + review queue) and validate transition tests.
+3. Execute F.1 (VT scan + risk policy) and validate policy-gate tests.
+
+### Decisions Made
+- Kept D/E/F.1 prompts in a separate implementation-focused file to preserve the earlier higher-level prompt docs.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.46 - April 6, 2026 (Prompt D/E/F for Skills roadmap)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused planning pass
+
+### What Was Done
+- Added `docs/skills-prompts-def.md` with explicit Prompt D/E/F content requested:
+  - **Prompt D:** Skills tab UI + admin subtab (role-based controls, policy tooling, user toggles/delete).
+  - **Prompt E:** Hub submission/review workflow states (draft→published/suspended/archived, reviewer actions, audit log).
+  - **Prompt F:** VirusTotal integration + normalized risk tags + policy gates + UI badging/filtering.
+- Included a combined execution prompt that enforces strict D→E→F sequence with acceptance checks per stage.
+
+### What's Working
+- Prompt set now directly covers the three requested tracks with implementation-grade requirements and acceptance criteria.
+
+### What's NOT Working Yet
+- This session is planning-only; D/E/F implementation code has not been applied yet.
+
+### Next Steps
+1. Execute Prompt D and ship Skills tab/admin subtab first.
+2. Implement Prompt E state machine + reviewer queue UI.
+3. Integrate Prompt F scanning/risk policy and verify install/submit gating behavior.
+
+### Decisions Made
+- Kept D/E/F as a separate focused prompt file for easier assignment and milestone tracking.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.45 - April 6, 2026 (Skills UI prompt pack: admin + user + marketplace)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 planning/documentation pass
+
+### What Was Done
+- Added `docs/skills-ui-prompts.md` to explicitly cover Skills feature work that was missing from the earlier sequential fix pack.
+- Included prompt flow for all requested Skills surfaces:
+  1. backend skills lifecycle API contract,
+  2. admin settings UI (Agent Configuration subtab or dedicated Skills tab),
+  3. user-side installed skill toggle on/off and delete,
+  4. marketplace browse/install/update UX,
+  5. runtime wiring so enabled skills affect tool availability,
+  6. regression testing and rollout checklist.
+- Added a one-shot execution prompt for strict ordered implementation with stop gates.
+
+### What's Working
+- There is now a dedicated copy-paste prompt pack that covers both admin and user Skills UI plus marketplace end-to-end.
+
+### What's NOT Working Yet
+- This pass is prompt-planning only; code implementation is still pending execution of the new prompt pack.
+
+### Next Steps
+1. Execute Prompts 1–6 from `docs/skills-ui-prompts.md`.
+2. Decide final UI placement for admin controls (Agent Config subtab vs dedicated Skills tab) before implementation.
+3. Add screenshots for admin/user/marketplace Skills flows during implementation.
+
+### Decisions Made
+- Split Skills prompts into a separate focused document so it can run independently from the broader bug-fix sequence.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.44 - April 6, 2026 (Comprehensive no-skip fix prompt pack)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 planning/documentation pass
+
+### What Was Done
+- Added a new execution-ready prompt pack at `docs/fix-prompts-sequential.md` that breaks the unresolved UI/runtime issues into strict sequential phases with acceptance gates.
+- Included phase-by-phase prompts covering all requested unresolved areas without skipping:
+  1. baseline telemetry guardrails,
+  2. browser-panel composer removal validation,
+  3. chat vs ActionLog routing hardening,
+  4. plan-card dedupe and structured rendering,
+  5. streaming normalization across web + outbound channels,
+  6. UI state continuity/idempotent reducer stabilization,
+  7. shield/logo transparency + active ring visual polish,
+  8. regression suite + release checklist.
+- Added a final master prompt that instructs strict in-order execution with per-phase stop gates and remediation flow.
+
+### What's Working
+- There is now a single, copy-pasteable, no-skip implementation plan that can be run by an agent or developer one phase at a time.
+- Each phase has explicit acceptance criteria to prevent partial fixes from being marked complete.
+
+### What's NOT Working Yet
+- This pass is planning-only; code fixes listed in the new prompt pack are not implemented in this specific session.
+
+### Next Steps
+1. Execute Phase 0→7 sequentially and do not advance when a gate fails.
+2. Commit after each phase or cohesive pair of phases.
+3. Capture before/after screenshots for the visual phase and attach to PR.
+
+### Decisions Made
+- Chose strict gate-based sequencing to eliminate “partial fix drift” and make review objective.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.43 - April 6, 2026 (Browser/chat separation hardening + browser composer removal)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused UI behavior pass
+
+### What Was Done
+- Removed the browser-surface `InputBar` mount from `App.tsx` so prompt composition remains in chat surface and the browser panel now focuses on `ScreenView` + `ActionLog`.
+- Cleaned related `App.tsx` state/import wiring that was only used by the removed browser composer block.
+- Hardened chat filtering rules in `ChatPanel.tsx` so browser workflow chatter is kept out of conversation rendering:
+  - added explicit status filters for `Session settings updated`, `Workflow step update`, `Starting task:`, and terminal task status messages.
+  - expanded browser-only tool-name suppression to include `extract_page`, `go_back`, and `wait`.
+
+### What's Working
+- Browser mode no longer shows a duplicate/secondary input composer under the action log.
+- Browser execution noise and workflow status chatter are now routed away from chat panel rendering, reducing duplicate/confusing narrative output.
+
+### What's NOT Working Yet
+- Plan-card duplicate/content-formatting issues are still pending a dedicated parser/dedup pass.
+- Animated shield activity ring/logo transparency cleanup is still pending asset/UI pass.
+
+### Next Steps
+1. Implement plan event canonicalization + dedupe keying in chat message mapping.
+2. Add stream-text normalization (newline/control-tag cleanup) for consistent rendering.
+3. Add targeted frontend tests for chat/action-log routing and browser-noise suppression.
+
+### Decisions Made
+- Prioritized state-safe incremental fixes (routing/filtering + layout cleanup) over broader architecture changes.
+- Deferred any Redis/state-store migration discussion until event normalization and UI reducer consistency are validated.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.42 - April 2, 2026 (Follow-up: @mentions + explicit sub-agent message routing)
 
 **Agent:** GPT-5.3-Codex  
@@ -1833,6 +2177,37 @@
 ### Blockers
 - None in this pass.
 
+## Session 5.27 - April 3, 2026 (Railway build failure triage for `isBrowsing` TypeScript errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Triaged Railway production build failure screenshot and confirmed the failing errors were:
+  - `src/App.tsx(...): Cannot find name 'isBrowsing'`
+  - `src/components/ChatPanel.tsx(...): 'isBrowsing' is declared but its value is never read`
+- Verified repository source no longer contains any `isBrowsing` references in frontend code.
+- Re-ran local frontend production build to validate the exact Docker-stage command used by Railway (`npm run build`) now succeeds.
+- Confirmed no merge-conflict markers remain in repo after prior cleanup.
+
+### What's Working
+- Frontend TypeScript + Vite production build completes successfully with current branch code.
+- The `isBrowsing` compile blockers from the screenshot are resolved in source.
+
+### What's NOT Working Yet
+- Full container-image parity check with Railway could not be executed in this environment because Docker CLI is unavailable.
+
+### Next Steps
+1. Redeploy Railway from latest commit containing the `isBrowsing` removal patch.
+2. If Railway still fails, clear build cache and force rebuild from scratch.
+3. Add a CI gate that runs `cd frontend && npm run build` on every PR to prevent regression.
+
+### Decisions Made
+- Treat this as a stale-deploy artifact (older commit) unless a fresh rebuild on the latest SHA reproduces.
+
+### Blockers
+- Local runtime lacks Docker binary, so direct `docker build` verification was not possible.
+
 ---
 ## Session 3.6 — March 16, 2026 (Final Pass: Live Wiring + Demo Data Removal)
 
@@ -2180,44 +2555,199 @@
 
 ### Blockers
 - None in this pass.
-<<<<<<< codex/redesign-chat-panel-input-bar-n1ro4s
 
-## Session 5.26 - April 2, 2026 (Mobile bubble regression, ask_user_input inline UX, billing+telegram import fixes)
+## Session 5.26 - April 2, 2026 (Mobile chat bubble fallback + ask_user_input inline reply polish + export fixes)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Fixed chat rendering regression where optimistic local user bubbles could disappear after server history hydration:
-  - server sync now preserves unsynced local user messages instead of hard-replacing message state.
-- Removed assistant timestamps from chat reply cards while keeping user-side timestamp behavior.
-- Reworked `ask_user_input` UI from popup-like card behavior into inline quick-reply tool UX:
-  - clickable numbered option chips that immediately send,
-  - always-available custom reply slot (`Type custom reply`) that opens inline input,
-  - custom text is sent via Continue button or Enter key.
-- Added explicit local user bubble insertion when responding to `ask_user_input`, so selected/custom replies appear in chat as user messages.
-- Fixed backend import/test blockers:
-  - added `_get_cycle_bounds(...)` helper export in `backend/admin/billing.py` and reused it in plan updates,
-  - restored validation constraints for billing payload models,
-  - restored Telegram compatibility surface in `integrations/telegram.py` (`TelegramAPIError`, `TelegramClient`, `TelegramConfig`) and implemented missing helper methods expected by tests (`validate_webhook_secret`, `handle_webhook_update`, `stream_draft_then_send`).
+- Fixed a mobile/alternate-entry chat visibility gap by allowing user-role log messages to render in chat as fallback when there is no matching optimistic/server user bubble.
+- Updated `ask_user_input` parsing to support structured option payloads (`[{ label, ... }]`) in addition to raw string lists so quick replies always render as clickable chips.
+- Kept ask-user-input interaction inline (chat-native):
+  - option click sends immediately,
+  - the final chip is always a custom-answer slot,
+  - custom answer sends on Enter or Continue.
+- Removed assistant timestamp assignment in chat message mapping so agent replies are timestamp-free while user bubbles keep timestamps.
+- Fixed package-level import surfaces used by downstream modules:
+  - exported `_get_cycle_bounds` from `backend.admin`,
+  - exported `TelegramAPIError` from `integrations`.
 
 ### What's Working
-- Frontend build passes with the updated chat + ask-user-input behavior.
-- Admin billing tests pass including `_get_cycle_bounds` import and payload validation.
-- Telegram integration tests pass including API error handling and draft-stream flow.
+- Targeted frontend behavior now supports structured quick-reply options for ask-user-input flows.
+- User prompts sent from non-chat composer paths can still appear in chat via user-log fallback.
+- Admin billing and Telegram targeted tests are passing.
 
 ### What's NOT Working Yet
-- Full test suite still appears to stall on websocket conversation persistence tests in this environment (timed out on the targeted websocket test), requiring separate investigation.
+- Full mobile visual verification was not captured in this environment (no browser screenshot tool available in this runtime).
 
 ### Next Steps
-1. Debug websocket test hang in `tests/test_conversation_persistence.py::test_websocket_navigation_persists_user_and_assistant_messages`.
-2. Add frontend interaction tests for ask_user_input quick-reply/custom flow.
-3. Validate mobile UX manually on-device for the optimistic user bubble path.
+1. Add frontend tests for structured ask-user-input option payloads and user-log fallback dedupe.
+2. Validate mobile portrait behavior on-device for composer + quick-reply spacing around the input bar.
+3. Consider adding richer per-option metadata support (e.g., description text) in quick-reply rendering.
 
 ### Decisions Made
-- Kept ask_user_input as an inline chat card (tool-like flow) rather than modal/popup to avoid input-bar obstruction and match chat-native response patterns.
+- Chose a fallback merge strategy (not hard replacement) so chat remains robust when messages originate from multiple composer surfaces.
 
 ### Blockers
-- Websocket persistence test timeout/hang (not an import error; likely async event sequencing issue).
-=======
->>>>>>> main
+- None in this pass.
+
+## 2026-04-05 — Modes foundation pass (system subagent framing)
+
+### What changed
+- Added a frontend **Agent Mode picker** in `InputBar` with the requested options: Orchestrator, Planner, Architect, Deep Research, Code.
+- Added persistent `agentMode` session setting in frontend app settings and websocket config payloads.
+- Added backend mode policy module (`backend/modes.py`) with:
+  - mode normalization
+  - canonical labels
+  - mode-level blocked tool policies
+- Enforced mode tool gating in `universal_navigator._available_tools(...)` so non-code modes cannot use high-risk execution tools; only Code mode retains `spawn_subagent`.
+- Extended system prompt assembly to state the **active mode policy hint**.
+- Added Telegram slash command support for `/mode` (show + switch), and surfaced mode in `/status` + `/help`.
+- Added tests for mode policy + slash command behavior.
+- Added `docs/modes-industry-feasibility.md` with research-backed architecture/feasibility notes and recommended next steps for admin-managed per-mode system instructions.
+
+### Working
+- Mode state now round-trips from UI to backend runtime settings.
+- Tool manifest respects mode policy in universal navigator path.
+- Telegram users can switch mode via `/mode code` etc.
+
+### Not yet done / next
+- Admin UI for editing per-mode system instructions is not implemented yet.
+- Telegram inline keyboard mode selector (instead of text-only `/mode`) is not implemented yet.
+- Need end-to-end UI snapshot once browser screenshot tooling is available in this environment.
+
+### Decisions / notes
+- Current implementation treats modes as authoritative runtime policy gates, with defaults falling back to `orchestrator`.
+- Orchestrator mode intentionally blocks direct `spawn_subagent` to preserve router semantics requested in product direction.
+
+## 2026-04-05 — Post-review hotfix (ChatPanel option normalizer)
+
+### What changed
+- Hardened `normalizeAskUserInputOptions` in `frontend/src/components/ChatPanel.tsx` as the single canonical parser for ask-user-input options.
+- Added inline docs and converted logic to explicit loop-based normalization.
+- Added de-duplication of rendered quick-reply chips to prevent repeated options from mixed payloads.
+
+### Why
+- Addressed code review concern about duplicate/fragile normalization behavior and made this function clearly authoritative and maintainable.
+
+## 2026-04-05 — Review follow-up for PR #161 (duplicate normalizer guard)
+
+### What changed
+- Moved `normalizeAskUserInputOptions` into `frontend/src/lib/askUserInput.ts`.
+- Removed local declaration from `ChatPanel.tsx` and imported the shared helper instead.
+
+### Why
+- Eliminates any chance of duplicate in-file declarations for `normalizeAskUserInputOptions` and makes the parser truly single-source.
+- Addresses review-critical duplicate identifier concern directly.
+
+## 2026-04-05 — PR #161 post-merge trace fix (ChatPanel review cleanup)
+
+### What changed
+- Re-traced `ChatPanel.tsx` and confirmed `normalizeAskUserInputOptions` is only imported from `frontend/src/lib/askUserInput.ts` with no local redeclarations.
+- Removed extra blank-line spacing around the `AttachedFile` boundary to satisfy review nitpick and keep TypeScript style clean.
+- Rebuilt frontend to verify no duplicate-identifier or TS compile issues remain.
+
+### Why
+- Ensures the critical review concern (duplicate local declarations conflicting with import) is fully resolved on the post-merge branch.
+
+## 2026-04-05 — Review follow-up (test import side-effect suggestion)
+
+### What changed
+- Updated `tests/test_mode_commands.py` to avoid module-level `import main`.
+- Switched to lazy import (`import_module("main")`) inside the test function to defer app/module initialization until test execution.
+
+### Why
+- Reduces pytest collection-time side effects and keeps this unit test lighter as `main.py` grows.
+
+## 2026-04-05 — Railway build resilience fix (frontend test-file exclusion)
+
+### What changed
+- Updated `frontend/tsconfig.app.json` to explicitly exclude frontend test/spec files and `__tests__` directories from production TypeScript builds.
+
+### Why
+- Railway build logs showed a TS parse failure from a stray `src/components/__tests__/__ChatPanel.thinking-persistence.test.tsx` file.
+- Excluding test artifacts from `tsc -b` prevents production builds from failing due to accidental or environment-specific test files.
+
+## 2026-04-05 — Netlify/Railway production build hardening follow-up
+
+### What changed
+- Updated `frontend/package.json` build script from `tsc -b && vite build` to `tsc -b tsconfig.app.json tsconfig.node.json && vite build`.
+
+### Why
+- Netlify/Railway logs show build failures triggered when `tsc -b` picks up unexpected test artifacts in production contexts.
+- Explicitly targeting app + node tsconfig projects makes production compilation deterministic and aligned with the test-file exclusions in `tsconfig.app.json`.
+
+### Validation
+- Ran `cd frontend && npm ci && npm run build` to mirror Netlify command; build succeeded.
+
+## 2026-04-05 — Parallel tool-call foundation (phase kickoff)
+
+### What changed
+- Added first-pass support for batched tool-call parsing in `universal_navigator`:
+  - supports single `{ "tool": ... }`
+  - supports batched `{ "tool_calls": [ ... ] }`
+- Added conservative parallel execution gating (`PARALLEL_SAFE_TOOLS`) and execution path:
+  - runs batched calls in parallel only when all tools are explicitly allowlisted as parallel-safe
+  - otherwise falls back to sequential execution
+- Updated prompting/fallback language so model can return either a single tool call or a batched `tool_calls` object.
+- Added tests in `tests/test_parallel_tool_calls.py` covering parsing and safety gating.
+
+### Why
+- Begins implementing the requested parallel tool-call capability without risking destructive/racy tools.
+- Keeps safety-first behavior by requiring explicit allowlisting for concurrent execution.
+
+### Next steps
+1. Add dependency-aware batching (read-after-write graph constraints) instead of pure allowlist.
+2. Add per-tool idempotency metadata in `TOOL_DEFINITIONS`.
+3. Add telemetry around batch size, parallel speedup, and failure rates.
+
+## 2026-04-08 — Provider routing + mobile mode banner hotfix
+
+### What changed
+- Fixed provider-routing robustness in `orchestrator.py` by adding provider alias normalization (e.g., `fireworks ai` → `fireworks`, `chronos gateway` → `chronos`) and model-based fallback inference for Fireworks/Gemini slugs.
+- Added a safe fallback default to Chronos when provider is unexpectedly empty in session settings, preventing accidental fallback to Gemini-only ADK path.
+- Hardened websocket config handling in `main.py` to merge incoming settings with existing runtime settings instead of replacing wholesale, preserving provider/model across partial config updates.
+- Added server-side defaults during config merge:
+  - `provider=chronos` when missing
+  - `model=nvidia/nemotron-3-super-120b-a12b:free` when missing
+- Improved mobile header layout constraints in `frontend/src/App.tsx` to prevent mode/banner area from overflowing into the chat/browser switcher region.
+- Reduced mobile width budget for the mode selector in `frontend/src/components/InputBar.tsx` so the mode chip stays within its own lane on narrow screens.
+
+### Why
+- Production reports showed “No Gemini API key configured” even when Fireworks/Chronos was selected, indicating provider config could be blank/overwritten or sent in alias form.
+- Mobile UI reports showed mode banner intrusion into adjacent controls; tighter width + overflow constraints prevent layout collision.
+
+### Validation
+- `pytest -q tests/test_mode_commands.py tests/test_modes.py tests/test_parallel_tool_calls.py` passed (8/8).
+- `cd frontend && npm run build` passed.
+
+## 2026-04-08 — Netlify compile hardening follow-up
+
+### What changed
+- Removed stale browser example-prompt state plumbing in `frontend/src/App.tsx` (`setExamplePrompt`) that no longer fed any active composer path.
+- Switched `ScreenView` example clicks to call the shared `handleSend(...)` path directly with task-label metadata.
+- Updated sub-agent modal “Try now” action to use `handleSend(...)` directly instead of writing to removed placeholder state.
+
+### Why
+- Netlify logs showed TypeScript compile failures around stale/dead symbols from previous refactors.
+- This cleanup removes dead state and keeps browser examples/sub-agent quickstart on the same send pipeline as normal chat execution, reducing mismatch risk between local/dev and CI builds.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+## 2026-04-08 — Task start recovery when frontend sends `steer` without active task
+
+### What changed
+- Updated websocket action handling in `main.py` for `action == "steer"`:
+  - If a task is currently running, behavior is unchanged (append steering note).
+  - If no task is running, the server now recovers automatically by treating the steer payload as a new navigation task (`steer_fallback_navigate`) and starts execution.
+- Added a user-visible step message for the fallback path so the client gets immediate feedback instead of appearing stuck.
+
+### Why
+- Reported production behavior showed repeated user prompts with no agent progress or error.
+- One likely root cause was frontend/client `isWorking` drift causing sends to be labeled `steer` even when server had no active task; previously this path only appended context and never started execution.
+
+### Validation
+- `pytest -q tests/test_mode_commands.py tests/test_modes.py tests/test_parallel_tool_calls.py` passed.
+- `cd frontend && npm run build` passed.

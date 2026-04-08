@@ -7,7 +7,6 @@ import { TermsPage } from './components/TermsPage'
 import { useNotifications } from './context/NotificationContext'
 import { AuthPage } from './components/AuthPage'
 // CostEstimator removed from main UI - credit details live in Settings > Usage
-import { InputBar } from './components/InputBar'
 import { LandingPage } from './components/LandingPage'
 import { OnboardingWizard, isOnboardingComplete } from './components/OnboardingWizard'
 import { ProductTour, isTourComplete } from './components/ProductTour'
@@ -35,7 +34,8 @@ import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSo
 import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
-import { PROVIDERS, providerById, modelInfo } from './lib/models'
+import { modelInfo } from './lib/models'
+import { normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
@@ -105,16 +105,14 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [mode, setMode] = useState<SteeringMode>('steer')
-  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
+  const [mode] = useState<SteeringMode>('steer')
+  const [, setQueuedMessages] = useState<string[]>([])
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [showWorkflow, setShowWorkflow] = useState(false)
   const [urlInput, setUrlInput] = useState('about:blank')
-  const [sending, setSending] = useState(false)
-  const [examplePrompt, setExamplePrompt] = useState<string | null>(null)
   const [showSubAgentModal, setShowSubAgentModal] = useState(false)
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
@@ -165,7 +163,7 @@ function App() {
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
-  const { isActive: voiceActive, error: voiceError, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
+  const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
 
   useEffect(() => {
@@ -603,17 +601,16 @@ function App() {
     const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
     const finalInstruction = cleanedInstruction || trimmed
 
-    setSending(true)
-    window.setTimeout(() => setSending(false), 280)
+    const selectedAgentMode = normalizeAgentMode(settings.agentMode)
     send({ action: 'config', settings: wsConfig })
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
@@ -626,7 +623,7 @@ function App() {
       return
     }
 
-    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // ── Update browser tab title for steering state ────────────────
@@ -995,7 +992,7 @@ function App() {
         <section className='flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-x-hidden sm:gap-2 lg:gap-3'>
           <header className='space-y-1.5 sm:space-y-2'>
             <div className='flex items-center justify-between gap-2 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:rounded-2xl sm:px-4 sm:py-2'>
-              <div className='flex items-center gap-1.5 sm:gap-2'>
+              <div className='flex min-w-0 items-center gap-1.5 sm:gap-2'>
                 <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
                 </button>
@@ -1003,7 +1000,7 @@ function App() {
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
                 {/* ── Chat ↔ Browser mode switcher ── */}
                 {!showSettings && !showAutomations && (
-                  <div className='ml-1 flex items-center gap-0.5 rounded-full border border-[#2a2a2a] bg-[#111] p-0.5'>
+                  <div className='ml-1 flex max-w-[42vw] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[#2a2a2a] bg-[#111] p-0.5 sm:max-w-none'>
                     <button
                       type='button'
                       onClick={() => setAppMode('browser')}
@@ -1023,7 +1020,7 @@ function App() {
                   </div>
                 )}
               </div>
-              <div className='flex items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
+              <div className='flex shrink-0 items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
                 <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-1.5 py-0.5 sm:px-2 sm:py-1'>
                   <span className={`h-2 w-2 rounded-full sm:h-2.5 sm:w-2.5 ${connectionLabel.cls}`} /> <span className='hidden xs:inline'>{connectionLabel.label}</span>
                 </span>
@@ -1077,7 +1074,6 @@ function App() {
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setAppMode('browser') }}
                 latestFrame={latestFrame}
-                isBrowsing={isBrowsing}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
@@ -1111,7 +1107,14 @@ function App() {
                   {showWorkflow ? (
                     <WorkflowView steps={workflowSteps} />
                   ) : (
-                    <ScreenView frameSrc={latestFrame} isWorking={isWorking} steeringFlashKey={steeringFlashKey} onExampleClick={(prompt) => setExamplePrompt(prompt)} dataTour='screen-view' lastClickCoords={lastClickCoords} />
+                    <ScreenView
+                      frameSrc={latestFrame}
+                      isWorking={isWorking}
+                      steeringFlashKey={steeringFlashKey}
+                      onExampleClick={(prompt) => handleSend(prompt, isWorking ? 'steer' : mode, { task_label_source: 'chat', task_label: prompt })}
+                      dataTour='screen-view'
+                      lastClickCoords={lastClickCoords}
+                    />
                   )}
                 </div>
 
@@ -1154,38 +1157,6 @@ function App() {
             </div>
           )}
 
-          {!showSettings && !showAutomations && appMode === 'browser' && (
-            <div data-tour='input-bar'>
-              <InputBar
-                mode={mode}
-                voiceActive={voiceActive}
-                voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
-                voiceError={voiceError}
-                isConnected={connectionStatus === 'connected'}
-                isWorking={isWorking}
-                onToggleVoice={toggleVoice}
-                sending={sending}
-                onModeChange={setMode}
-                onSend={handleSend}
-                onDecomposePlan={handleDecomposePlan}
-                provider={settings.provider}
-                model={settings.model}
-                onProviderChange={(nextProvider) => {
-                  const p = providerById(nextProvider) ?? PROVIDERS[0]
-                  patchSettings({ provider: nextProvider, model: p.models[0].id })
-                }}
-                onModelChange={(nextModel) => patchSettings({ model: nextModel })}
-                queuedMessages={queuedMessages}
-                onDeleteQueueItem={(index) => {
-                  setQueuedMessages((prev) => prev.filter((_, i) => i !== index))
-                  send({ action: 'dequeue', index })
-                }}
-                examplePrompt={examplePrompt}
-                onExampleHandled={() => setExamplePrompt(null)}
-                transcripts={transcripts}
-              />
-            </div>
-          )}
           <SpendingAlert balance={balance} />
         </section>
       </div>
@@ -1208,7 +1179,7 @@ function App() {
           onTryNow={() => {
             localStorage.setItem('aegis_seen_subagent_modal', '1')
             setShowSubAgentModal(false)
-            setExamplePrompt('spawn sub-agents: ')
+            handleSend('spawn sub-agents: ', 'steer', { task_label_source: 'chat', task_label: 'spawn sub-agents' })
           }}
         />
       )}
