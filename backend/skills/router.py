@@ -53,6 +53,30 @@ class SkillEnableRequest(BaseModel):
     enabled: bool
 
 
+class SkillToggleRequest(BaseModel):
+    """Toggle payload for compatibility endpoint."""
+
+    skill_id: str = Field(min_length=1, max_length=255)
+    enabled: bool
+
+
+class AdminSkillPolicyRequest(BaseModel):
+    """Organization-level skill policy payload."""
+
+    allow_unreviewed_installs: bool = False
+    block_high_risk_skills: bool = True
+    require_approval_before_install: bool = False
+    default_enabled_skill_ids: list[str] = Field(default_factory=list)
+
+
+_admin_skill_policy_state: dict[str, Any] = {
+    "allow_unreviewed_installs": False,
+    "block_high_risk_skills": True,
+    "require_approval_before_install": False,
+    "default_enabled_skill_ids": [],
+}
+
+
 async def _get_current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
     token = request.cookies.get("aegis_session")
     payload = _verify_session(token)
@@ -168,6 +192,61 @@ async def list_installed_skills(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     return {"ok": True, "skills": await SkillService.list_installed_skills(session, user_id=current_user.uid)}
+
+
+@skills_router.post("/api/skills/toggle")
+async def toggle_installed_skill(
+    body: SkillToggleRequest,
+    current_user: User = Depends(_get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        install = await SkillService.set_skill_enabled(
+            session,
+            user_id=current_user.uid,
+            skill_id=body.skill_id,
+            enabled=body.enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {"ok": True, "skill_id": install.skill_id, "enabled": install.enabled}
+
+
+@skills_router.delete("/api/skills/{skill_id}")
+async def uninstall_skill_delete(
+    skill_id: str,
+    current_user: User = Depends(_get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    removed = await SkillService.uninstall_skill(session, user_id=current_user.uid, skill_id=skill_id)
+    await session.commit()
+    return {"ok": True, "removed": removed}
+
+
+@skills_router.get("/api/admin/skills/policy")
+async def get_admin_skills_policy(
+    admin_user: User = Depends(get_admin_user),
+) -> dict[str, Any]:
+    _ = admin_user
+    return {"ok": True, "policy": dict(_admin_skill_policy_state)}
+
+
+@skills_router.post("/api/admin/skills/policy")
+async def set_admin_skills_policy(
+    body: AdminSkillPolicyRequest,
+    admin_user: User = Depends(get_admin_user),
+) -> dict[str, Any]:
+    _ = admin_user
+    _admin_skill_policy_state.update(
+        {
+            "allow_unreviewed_installs": body.allow_unreviewed_installs,
+            "block_high_risk_skills": body.block_high_risk_skills,
+            "require_approval_before_install": body.require_approval_before_install,
+            "default_enabled_skill_ids": [skill_id.strip() for skill_id in body.default_enabled_skill_ids if skill_id.strip()],
+        }
+    )
+    return {"ok": True, "policy": dict(_admin_skill_policy_state)}
 
 
 @skills_router.get("/api/admin/skills/review-queue")

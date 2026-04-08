@@ -1,3 +1,44 @@
+## Session 5.80 - April 7, 2026 (Settings Skills management UI + API compatibility routes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added a new **Skills** tab to settings navigation and route mapping so `/settings/skills` resolves correctly in-app.
+- Implemented `frontend/src/components/settings/SkillsTab.tsx` with:
+  - user pane (installed skills list, enable/disable toggle, uninstall action, metadata chips for version/source/updated/risk),
+  - admin-only pane (org policy toggles + require-approval switch + default-enabled skill IDs editor).
+- Added `frontend/src/hooks/useSkills.ts` to centralize installed-skill fetch/mutations and admin policy fetch/save flows.
+- Extended `frontend/src/lib/api.ts` with a reusable authenticated `apiRequest(...)` helper and used it from `useSkills`.
+- Wired role-awareness into settings by passing `authRole` from `App.tsx` to `SettingsPage`, then gating admin controls in `SkillsTab` for `admin|superadmin` only.
+- Added backend compatibility endpoints in `backend/skills/router.py`:
+  - `POST /api/skills/toggle`
+  - `DELETE /api/skills/{skill_id}`
+  - `GET/POST /api/admin/skills/policy`
+
+### What's Working
+- Skills tab now appears in Settings and is route-addressable.
+- Installed skill toggling is optimistic in UI with rollback + toast error on failure.
+- Uninstall action updates UI and persists via backend uninstall endpoint.
+- Admin policy controls are hidden from non-admin roles and available to admin/superadmin users.
+- Frontend production build succeeds after these changes.
+
+### What's NOT Working Yet
+- Admin skills policy currently uses in-process router state (compatible API shape), not durable DB persistence yet.
+
+### Next Steps
+1. Persist admin policy in DB (or platform settings store) so policy survives backend restarts/multi-instance deployments.
+2. Optionally add policy audit logging for admin compliance tracking.
+
+### Decisions Made
+- Kept `wsConfig` shape backward-compatible and only synced `enabledSkillIds` through existing settings state.
+- Added API compatibility routes rather than replacing existing install/enable endpoints to avoid breaking existing clients.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.79 - April 7, 2026 (PR #183 follow-up: typing fix in async test helper)
 
 **Agent:** GPT-5.3-Codex  
