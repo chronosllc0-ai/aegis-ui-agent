@@ -26,7 +26,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUCTION_KEY_PREFIX
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
-from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
+from backend.modes import (
+    MODE_SYSTEM_HINTS,
+    allowed_tool_alternatives,
+    blocked_tools_for_mode,
+    is_tool_allowed_for_mode,
+    normalize_agent_mode,
+)
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.skills.parser import extract_runtime_guidance_block
 from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
@@ -483,6 +489,8 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
         if required_integration and required_integration not in connected_integrations:
             continue
         if subagent_allowlist is not None and name not in subagent_allowlist:
+            continue
+        if not is_tool_allowed_for_mode(agent_mode, name):
             continue
         available.append(tool)
     return available
@@ -1058,9 +1066,21 @@ class UniversalToolExecutor:
             if tool not in SUBAGENT_ALLOWED_TOOLS:
                 return f"Tool '{tool}' is not available to sub-agents.", {"policy_source": "subagent"}
         if tool in self._mode_blocked_tools:
+            alternatives = allowed_tool_alternatives(self._agent_mode, limit=10)
             return (
                 f"Tool '{tool}' is unavailable in '{self._agent_mode}' mode.",
-                {"policy_source": "mode", "agent_mode": self._agent_mode},
+                {
+                    "policy_source": "mode",
+                    "agent_mode": self._agent_mode,
+                    "allowed_alternatives": alternatives,
+                    "refusal": {
+                        "type": "mode_policy_refusal",
+                        "requested_tool": tool,
+                        "effective_mode": self._agent_mode,
+                        "reason": "tool_disallowed_for_mode",
+                        "allowed_alternatives": alternatives,
+                    },
+                },
             )
         if tool in self._skill_deny_tools:
             return (
@@ -1934,6 +1954,12 @@ async def run_universal_navigation(
                 denial_meta: dict[str, Any] = {}
                 if isinstance(unavailable_meta, dict):
                     denial_meta = dict(unavailable_meta)
+                refusal_payload = denial_meta.get("refusal")
+                if isinstance(refusal_payload, dict):
+                    alternatives = refusal_payload.get("allowed_alternatives", [])
+                    alternatives_text = ", ".join(str(item) for item in alternatives[:6]) if isinstance(alternatives, list) else ""
+                    if alternatives_text:
+                        unavailable_reason = f"{unavailable_reason} Allowed alternatives: {alternatives_text}."
                 immediate_results.append(
                     {
                         "index": index,
@@ -2053,6 +2079,15 @@ async def run_universal_navigation(
                     "policy_source": "skill_policy",
                     "policy_rule": str(debug.get("policy_rule", "")),
                 }
+            elif isinstance(debug, dict) and debug.get("policy_source") == "mode":
+                batch_result_event["denial_debug"] = {
+                    "policy_source": "mode",
+                    "agent_mode": str(debug.get("agent_mode", "")),
+                    "allowed_alternatives": list(debug.get("allowed_alternatives", []) or []),
+                }
+                refusal_payload = debug.get("refusal")
+                if isinstance(refusal_payload, dict):
+                    batch_result_event["refusal"] = refusal_payload
             logger.info("batch_tool_result %s", json.dumps(batch_result_event, ensure_ascii=False))
             if on_workflow_step:
                 await on_workflow_step(batch_result_event)
