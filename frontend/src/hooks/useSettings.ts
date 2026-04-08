@@ -48,6 +48,8 @@ export type AppSettings = {
   promptToSwitchOnBrowse: boolean
   /** Automatically return from browser surface to chat when a task completes. */
   autoReturnToChat: boolean
+  /** Enabled skills selected in settings; mirrored from Skills tab state. */
+  enabledSkillIds: string[]
   agentMode: AgentModeId
 }
 
@@ -77,6 +79,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   separateExecutionSurfaces: true,
   promptToSwitchOnBrowse: true,
   autoReturnToChat: true,
+  enabledSkillIds: [],
   agentMode: DEFAULT_AGENT_MODE,
 }
 
@@ -103,6 +106,7 @@ function loadInitialSettings(): AppSettings {
     return {
       ...merged,
       agentMode: normalizeAgentMode(merged.agentMode),
+      enabledSkillIds: Array.isArray(merged.enabledSkillIds) ? merged.enabledSkillIds.filter((id): id is string => typeof id === 'string') : [],
       integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
     }
   } catch {
@@ -153,6 +157,7 @@ export function useSettings() {
       integrations: settings.integrations.filter((integration) => integration.enabled),
       tool_permissions: settings.toolPermissions,
       disabled_tools: settings.disabledTools,
+      enabled_skill_ids: settings.enabledSkillIds,
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
       agent_mode: settings.agentMode,

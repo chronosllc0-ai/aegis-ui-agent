@@ -34,7 +34,7 @@ import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSo
 import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
-import { modelInfo } from './lib/models'
+import { modelInfo, PROVIDERS } from './lib/models'
 import { normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
@@ -144,7 +144,6 @@ function App() {
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
-  const currentAgentModeLabel = AGENT_MODES.find((modeOption) => modeOption.id === normalizeAgentMode(settings.agentMode))?.label ?? 'Orchestrator'
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
