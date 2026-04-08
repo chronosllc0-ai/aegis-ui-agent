@@ -123,3 +123,126 @@ describe('ChatPanel plan intent UX', () => {
     expect(screen.queryByText('/plan Build onboarding flow')).not.toBeInTheDocument()
   })
 })
+
+describe('ChatPanel noise filtering + thinking row spacing', () => {
+  it('hard-deny filters noisy status artifacts from logs and server messages', async () => {
+    const noisyLogs: LogEntry[] = [
+      {
+        id: 'noise-log-1',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'in_progress',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: '(no tool call): intermediary trace',
+        elapsedSeconds: 1,
+      },
+      {
+        id: 'noise-log-2',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'in_progress',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Session settings updated',
+        elapsedSeconds: 1,
+      },
+      {
+        id: 'noise-log-3',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'in_progress',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Workflow step update',
+        elapsedSeconds: 1,
+      },
+      {
+        id: 'clean-log-1',
+        taskId: 'task-noise',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Model response: Visible assistant text',
+        elapsedSeconds: 2,
+      },
+    ]
+
+    render(
+      <ChatPanel
+        logs={noisyLogs}
+        isWorking={false}
+        onSend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        activeTaskId='task-noise'
+        serverMessages={[
+          { id: 'srv-noise-1', role: 'assistant', content: 'Model response (no tool call): hidden' },
+          { id: 'srv-noise-2', role: 'assistant', content: 'Workflow step update' },
+          { id: 'srv-clean-1', role: 'assistant', content: 'Visible from server' },
+        ]}
+        {...baseChatPanelProps}
+      />,
+    )
+
+    await screen.findByText('Visible from server')
+    await screen.findByText('Visible assistant text')
+    expect(screen.queryByText(/\(no tool call\):/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/model response \(no tool call\):/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/session settings updated/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/workflow step update/i)).not.toBeInTheDocument()
+  })
+
+  it('matches visual regression snapshot for thinking row alignment classes', async () => {
+    const logs: LogEntry[] = [
+      {
+        id: 'thinking-log-snapshot',
+        taskId: 'task-snapshot',
+        type: 'reasoning_start',
+        status: 'in_progress',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        stepId: 'step-align',
+        message: '[thinking]',
+        elapsedSeconds: 1,
+      },
+      {
+        id: 'assistant-log-snapshot',
+        taskId: 'task-snapshot',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Model response: baseline message',
+        elapsedSeconds: 1,
+      },
+    ]
+
+    const { findByTestId } = render(
+      <ChatPanel
+        logs={logs}
+        isWorking={false}
+        onSend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        activeTaskId='task-snapshot'
+        reasoningMap={{ 'step-align': 'Alignment regression guard text' }}
+        serverMessages={[]}
+        {...baseChatPanelProps}
+      />,
+    )
+
+    await screen.findByText('baseline message')
+    expect(await findByTestId('thinking-row')).toMatchSnapshot()
+    expect(await findByTestId('thinking-row-trigger')).toMatchSnapshot()
+  })
+})
