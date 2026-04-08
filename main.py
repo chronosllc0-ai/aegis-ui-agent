@@ -344,6 +344,25 @@ _stream_subscribers: dict[str, dict[str, Any]] = {}
 _bot_configs: dict[str, dict[str, Any]] = {}
 
 
+def _apply_runtime_mode_update(
+    runtime: SessionRuntime,
+    requested_mode_raw: object,
+    *,
+    apply: bool = True,
+) -> tuple[str, bool, str | None]:
+    """Validate/apply requested mode for a runtime and return outcome details."""
+    requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+    if mode_valid and apply:
+        runtime.settings["agent_mode"] = requested_mode
+        return requested_mode, True, None
+    allowed = ", ".join(MODE_LABELS.keys())
+    return (
+        requested_mode,
+        False,
+        f"Invalid mode `{requested_mode_raw}`. Allowed modes: {allowed}.",
+    )
+
+
 def _get_orchestrator() -> AgentOrchestrator:
     """Return a lazily initialized orchestrator instance."""
     global orchestrator
@@ -1157,8 +1176,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             instruction = str(data.get("instruction", "")).strip()
             requested_mode_raw = data.get("mode")
             if requested_mode_raw is not None:
-                requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
-                runtime.settings["agent_mode"] = requested_mode
+                requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw)
                 if not mode_valid:
                     await websocket.send_json(
                         {
@@ -1277,7 +1295,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
                 requested_mode_raw = candidate_settings.get("agent_mode", runtime.settings.get("agent_mode", active_mode))
-                requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+                requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw, apply=False)
                 if not mode_valid:
                     await websocket.send_json(
                         {
@@ -1508,8 +1526,8 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     update = await request.json()
     result = await integration.execute_tool("telegram_webhook_update", {"update": update})
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
-    callback_mode = _parse_telegram_mode_callback(update)
-    if callback_mode:
+    callback_mode, callback_mode_valid = _parse_telegram_mode_callback(update)
+    if callback_mode is not None:
         callback_message = update.get("callback_query", {}).get("message", {})
         callback_chat_id = (callback_message.get("chat") or {}).get("id")
         if not owner_user_id:
@@ -1528,6 +1546,17 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
                 await integration.execute_tool(
                     "telegram_send_message",
                     {"chat_id": str(callback_chat_id), "text": "⚠️ No active session. Start a session first."},
+                )
+            return {"ok": True}
+        if not callback_mode_valid:
+            if callback_chat_id is not None:
+                allowed = ", ".join(MODE_LABELS.keys())
+                await integration.execute_tool(
+                    "telegram_send_message",
+                    {
+                        "chat_id": str(callback_chat_id),
+                        "text": f"❌ Invalid mode selection. Allowed modes: {allowed}",
+                    },
                 )
             return {"ok": True}
         runtime.settings["agent_mode"] = callback_mode
@@ -1701,6 +1730,75 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
     return {"ok": True, "connection": connection}
 
 
+@app.post("/api/integrations/slack/webhook/{integration_id}")
+async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]:
+    """Handle Slack events/interactions and route shared slash commands."""
+    integration = slack_registry.get_slack(integration_id)
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    payload = await request.json()
+    result = await integration.execute_tool("slack_handle_event", {"payload": payload, "headers": dict(request.headers)})
+    owner_user_id = str(slack_registry.get_config(integration_id).get("owner_user_id", "")).strip() or None
+
+    selected_mode_raw = SlackIntegration.extract_mode_selection(payload if isinstance(payload, dict) else {})
+    if selected_mode_raw:
+        channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
+        if not owner_user_id:
+            if channel:
+                await integration.execute_tool(
+                    "slack_send_message",
+                    {"channel": channel, "text": "⚠️ Mode switching is only available for the owner session."},
+                )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if channel:
+                await integration.execute_tool("slack_send_message", {"channel": channel, "text": "⚠️ No active session. Start a session first."})
+            return {"ok": True}
+        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
+        if not mode_valid:
+            if channel:
+                await integration.execute_tool("slack_send_message", {"channel": channel, "text": f"❌ {mode_error}"})
+            return {"ok": True}
+        if channel:
+            await integration.execute_tool(
+                "slack_send_message",
+                {"channel": channel, "text": f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*"},
+            )
+        return {"ok": True}
+
+    channel, text_content, platform_message_id = _extract_slack_message(payload if isinstance(payload, dict) else {})
+    if channel and text_content and text_content.startswith("/"):
+        cmd_response = await _handle_slash_command(
+            text=text_content,
+            owner_uid=owner_user_id,
+            platform="slack",
+            integration_id=integration_id,
+            chat_id=channel,
+        )
+        if isinstance(cmd_response, dict):
+            await integration.execute_tool(
+                "slack_send_message",
+                {"channel": channel, "text": str(cmd_response.get("text", "")), "blocks": cmd_response.get("blocks")},
+            )
+        elif cmd_response:
+            await integration.execute_tool("slack_send_message", {"channel": channel, "text": cmd_response})
+        return {"ok": True}
+
+    if channel and text_content:
+        await _log_platform_message(
+            owner_user_id,
+            platform="slack",
+            platform_chat_id=channel,
+            role="user",
+            content=text_content,
+            title=text_content[:200],
+            metadata={"integration_id": integration_id, "source": "webhook"},
+            platform_message_id=platform_message_id,
+        )
+    return {"ok": True, "result": result}
+
+
 @app.post("/api/integrations/slack/{integration_id}/test")
 async def test_slack_integration(integration_id: str) -> dict[str, Any]:
     integration = slack_registry.get_slack(integration_id)
@@ -1748,6 +1846,75 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
     connection = await integration.connect(config)
     discord_registry.upsert(integration_id, integration, config)
     return {"ok": True, "connection": connection}
+
+
+@app.post("/api/integrations/discord/webhook/{integration_id}")
+async def discord_webhook(integration_id: str, request: Request) -> dict[str, Any]:
+    """Handle Discord interactions/events and route shared slash commands."""
+    integration = discord_registry.get_discord(integration_id)
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    payload = await request.json()
+    result = await integration.execute_tool("discord_handle_event", {"payload": payload, "headers": dict(request.headers)})
+    owner_user_id = str(discord_registry.get_config(integration_id).get("owner_user_id", "")).strip() or None
+
+    selected_mode_raw = DiscordIntegration.extract_mode_selection(payload if isinstance(payload, dict) else {})
+    if selected_mode_raw:
+        channel = str(payload.get("channel_id") or "").strip()
+        if not owner_user_id:
+            if channel:
+                await integration.execute_tool(
+                    "discord_send_message",
+                    {"channel": channel, "text": "⚠️ Mode switching is only available for the owner session."},
+                )
+            return {"ok": True}
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if channel:
+                await integration.execute_tool("discord_send_message", {"channel": channel, "text": "⚠️ No active session. Start a session first."})
+            return {"ok": True}
+        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
+        if not mode_valid:
+            if channel:
+                await integration.execute_tool("discord_send_message", {"channel": channel, "text": f"❌ {mode_error}"})
+            return {"ok": True}
+        if channel:
+            await integration.execute_tool(
+                "discord_send_message",
+                {"channel": channel, "text": f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*"},
+            )
+        return {"ok": True}
+
+    channel, text_content, platform_message_id = _extract_discord_message(payload if isinstance(payload, dict) else {})
+    if channel and text_content and text_content.startswith("/"):
+        cmd_response = await _handle_slash_command(
+            text=text_content,
+            owner_uid=owner_user_id,
+            platform="discord",
+            integration_id=integration_id,
+            chat_id=channel,
+        )
+        if isinstance(cmd_response, dict):
+            await integration.execute_tool(
+                "discord_send_message",
+                {"channel": channel, "text": str(cmd_response.get("text", "")), "components": cmd_response.get("components")},
+            )
+        elif cmd_response:
+            await integration.execute_tool("discord_send_message", {"channel": channel, "text": cmd_response})
+        return {"ok": True}
+
+    if channel and text_content:
+        await _log_platform_message(
+            owner_user_id,
+            platform="discord",
+            platform_chat_id=channel,
+            role="user",
+            content=text_content,
+            title=text_content[:200],
+            metadata={"integration_id": integration_id, "source": "webhook"},
+            platform_message_id=platform_message_id,
+        )
+    return {"ok": True, "result": result}
 
 
 @app.post("/api/integrations/discord/{integration_id}/test")
@@ -2088,6 +2255,37 @@ def _extract_telegram_message(update: dict[str, Any]) -> tuple[str | None, str |
     )
 
 
+def _extract_slack_message(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract channel/text/message-id from a Slack event payload."""
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    channel = event.get("channel") or payload.get("channel_id")
+    text = event.get("text") or payload.get("text")
+    message_id = event.get("ts") or payload.get("message_ts")
+    return (
+        str(channel) if channel is not None and str(channel).strip() else None,
+        str(text).strip() if text is not None and str(text).strip() else None,
+        str(message_id) if message_id is not None and str(message_id).strip() else None,
+    )
+
+
+def _extract_discord_message(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Extract channel/text/message-id from Discord interaction/event payload."""
+    channel = payload.get("channel_id")
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    options = data.get("options") if isinstance(data.get("options"), list) else []
+    option_value = ""
+    if options and isinstance(options[0], dict):
+        option_value = str(options[0].get("value") or "").strip()
+    text = option_value or str(data.get("text") or "").strip() or str(payload.get("content") or "").strip()
+    message_id = message.get("id") or payload.get("id")
+    return (
+        str(channel) if channel is not None and str(channel).strip() else None,
+        text or None,
+        str(message_id) if message_id is not None and str(message_id).strip() else None,
+    )
+
+
 async def _handle_slash_command(
     text: str,
     owner_uid: str | None,
@@ -2151,18 +2349,19 @@ async def _handle_slash_command(
             return "⚪ No active session."
         if not arg:
             active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-            message = f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
+            mode_label = MODE_LABELS.get(active_mode, active_mode.title())
+            message = f"🧭 Current mode: *{mode_label}*"
             if platform == "telegram":
                 return {"text": message, "reply_markup": _telegram_mode_reply_markup()}
+            if platform == "slack":
+                return {"text": message, "blocks": SlackIntegration.mode_selector_blocks(current_mode_label=mode_label, mode_labels=MODE_LABELS)}
+            if platform == "discord":
+                return {"text": message, "components": DiscordIntegration.mode_selector_components(MODE_LABELS)}
             return message
         requested_mode_raw = arg.replace("-", "_").replace(" ", "_")
-        requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
+        requested_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, requested_mode_raw)
         if not mode_valid:
-            return (
-                f"❌ Invalid mode: *{requested_mode_raw}*.\n"
-                f"Allowed modes: {', '.join(MODE_LABELS.keys())}"
-            )
-        runtime.settings["agent_mode"] = requested_mode
+            return f"❌ {mode_error}"
         return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
 
     if cmd == "models":
@@ -2275,21 +2474,17 @@ async def _handle_slash_command(
 
 def _telegram_mode_reply_markup() -> dict[str, Any]:
     """Build Telegram inline keyboard for all available modes."""
-    return {
-        "inline_keyboard": [
-            [{"text": label, "callback_data": f"mode:{mode_name}"}]
-            for mode_name, label in MODE_LABELS.items()
-        ]
-    }
+    return TelegramIntegration.mode_selector_reply_markup(MODE_LABELS)
 
 
-def _parse_telegram_mode_callback(update: dict[str, Any]) -> str | None:
+def _parse_telegram_mode_callback(update: dict[str, Any]) -> tuple[str | None, bool]:
     """Parse Telegram callback payload for mode selection actions."""
     callback = update.get("callback_query") or {}
-    data = str(callback.get("data", "")).strip()
-    if not data.startswith("mode:"):
-        return None
-    return normalize_agent_mode(data[5:])
+    mode_data = TelegramIntegration.extract_mode_selection(callback_data=callback.get("data"))
+    if mode_data is None:
+        return None, False
+    resolved_mode, is_valid = validate_requested_mode(mode_data)
+    return resolved_mode, is_valid
 
 
 # ── Bot config endpoints ─────────────────────────────────────────────

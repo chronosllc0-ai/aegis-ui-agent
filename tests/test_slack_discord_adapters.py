@@ -175,3 +175,20 @@ def test_delivery_deduper_is_bounded() -> None:
     # oldest id should be evicted once capacity is exceeded
     assert deduper.seen_or_add("a") is False
     assert deduper.seen_or_add("d") is True
+
+
+def test_mode_selector_helpers_extract_expected_values() -> None:
+    slack_blocks = SlackIntegration.mode_selector_blocks(
+        current_mode_label="Planner",
+        mode_labels={"planner": "Planner", "code": "Code"},
+    )
+    assert isinstance(slack_blocks, list)
+    slack_selection = SlackIntegration.extract_mode_selection(
+        {"actions": [{"action_id": "mode_select", "value": "mode:code"}]}
+    )
+    assert slack_selection == "code"
+
+    discord_components = DiscordIntegration.mode_selector_components({"planner": "Planner", "code": "Code"})
+    assert isinstance(discord_components, list)
+    discord_selection = DiscordIntegration.extract_mode_selection({"data": {"custom_id": "mode:planner"}})
+    assert discord_selection == "planner"

@@ -1,3 +1,59 @@
+## Session 5.93 - April 8, 2026 (mode selection parity across web + messaging integrations)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation + test pass
+
+### What Was Done
+- Unified runtime mode validation/application in `main.py` via `_apply_runtime_mode_update(...)` and reused that shared path for:
+  - websocket `mode` payload handling,
+  - websocket `config.settings.agent_mode` validation,
+  - `/mode` slash command handling,
+  - Telegram callback mode selections.
+- Upgraded Telegram mode UX and validation behavior:
+  - moved Telegram mode selector/parsing helpers into `integrations/telegram.py`,
+  - `/mode` already returns current mode + inline selector, now invalid callback mode values return explicit allowed-mode guidance instead of silently coercing.
+- Added Slack + Discord parity in backend handling:
+  - added webhook endpoints:
+    - `POST /api/integrations/slack/webhook/{integration_id}`
+    - `POST /api/integrations/discord/webhook/{integration_id}`
+  - both now:
+    - process inbound payload envelopes through integration event handlers,
+    - support `/mode` command routing through the same `_handle_slash_command(...)` path,
+    - support interactive mode selection callbacks/buttons where available,
+    - persist mode changes to owner runtime session (`_user_runtimes[owner_user_id].settings["agent_mode"]`).
+- Added channel-native mode selector helpers:
+  - Slack Block Kit selector helpers in `integrations/slack_connector.py`,
+  - Discord button component helpers in `integrations/discord.py`,
+  - plus metadata support for `blocks` (Slack `send_text`) and `components` (Discord `send_text`) for selector rendering.
+- Frontend parity improvement:
+  - retained existing mode picker in chat composer,
+  - added a current mode badge in the app header (`frontend/src/App.tsx`) so users can always see active runtime mode at a glance.
+- Added/updated tests for mode parity and invalid-mode errors:
+  - expanded `tests/test_mode_commands.py` with cross-channel selector payload checks and invalid callback handling,
+  - expanded `tests/test_slack_discord_adapters.py` with selector helper extraction coverage.
+
+### What's Working
+- Mode switching now uses one backend validation path across websocket + slash/callback flows.
+- Telegram `/mode` shows current mode + inline selector and returns actionable invalid-mode errors.
+- Slack/Discord now expose parity for current mode selector payloads and mode callback parsing where supported.
+- Frontend visibly reflects active mode in header badge + existing picker.
+
+### What's NOT Working Yet
+- End-to-end production verification for Slack/Discord webhook signature validation and platform-specific interaction payload variants still needs real workspace/guild testing.
+
+### Next Steps
+1. Add integration tests for `/api/integrations/slack/webhook/{id}` and `/api/integrations/discord/webhook/{id}` covering command + interaction payload variants.
+2. Optionally expose explicit `/mode` slash command registration metadata for Slack/Discord setup docs.
+
+### Decisions Made
+- Chosen to centralize all mode validation through one runtime helper to guarantee consistent allowed-mode enforcement and error messages.
+- Kept mode persistence scoped to owner runtime session mapping so channel events can immediately affect active policy without separate storage migrations.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.92 - April 8, 2026 (critical regression-proofing for orchestrator fallback variable scope)
 
 **Agent:** GPT-5.3-Codex  
