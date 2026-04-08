@@ -1,3 +1,46 @@
+## Session 5.98 - April 8, 2026 (chat noise deny-list + thinking row alignment regression guard)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 frontend cleanup + test/snapshot pass
+
+### What Was Done
+- Updated `frontend/src/components/ChatPanel.tsx` chat mapping with a hard deny-list for noisy status artifacts so these are never rendered in chat:
+  - `(no tool call):`
+  - `Model response (no tool call):`
+  - `Session settings updated`
+  - `Workflow step update`
+- Applied the same deny-list filter to server-restored chat messages so persisted/server chatter is also excluded from chat.
+- Added explicit `[thinking]` placeholder mapping to `thinking` chat rows (using `stepId`) before browser/tool filtering, so reasoning placeholders reliably render as thinking rows.
+- Adjusted thinking row spacing to align with assistant message column:
+  - removed extra wrapper horizontal padding around `ThinkingRow`,
+  - changed thinking trigger/button horizontal padding from `px-3` to `px-0`,
+  - changed expanded reasoning panel margin from `mx-3` to `mx-0`.
+- Added test IDs for thinking row elements and added/updated frontend tests:
+  - deny-list behavior validation (logs + serverMessages),
+  - visual regression snapshots for thinking row container + trigger class/layout.
+- Generated new snapshot file: `frontend/src/components/__snapshots__/ChatPanel.test.tsx.snap`.
+
+### What's Working
+- Chat panel now suppresses the specified noisy artifacts from both live logs and server message hydration.
+- Thinking row aligns closer to neighboring assistant content column (no extra right shift from nested horizontal padding).
+- Regression snapshots now guard thinking row spacing classes against future drift.
+
+### What's NOT Working Yet
+- npm still prints existing environment warning: `Unknown env config "http-proxy"` during test runs.
+
+### Next Steps
+1. Optional: add a narrow Action Log test to explicitly assert that filtered chat-noise still appears in Action Log when appropriate.
+2. Optional: add Storybook/Playwright visual capture for chat row alignment if broader UI regression coverage is desired.
+
+### Decisions Made
+- Chosen to enforce deny-list filtering at the ChatPanel mapping layer (including server message hydration) to ensure noise never reaches chat UI.
+- Kept status/workflow chatter routing behavior Action-Log-first by suppressing only in chat, not mutating upstream log ingestion.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.97 - April 8, 2026 (PR review follow-up: frame cache cleanup on thread delete)
 
 **Agent:** GPT-5.3-Codex  

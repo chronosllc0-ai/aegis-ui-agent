@@ -140,6 +140,12 @@ interface ConnectorMeta {
 const RE_MODEL_RESPONSE  = /^Model response/i
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
+const CHAT_HARD_DENY_PREFIXES = [
+  '(no tool call):',
+  'Model response (no tool call):',
+  'Session settings updated',
+  'Workflow step update',
+]
 
 /**
  * Browser-execution tool names that belong exclusively in the ActionLog.
@@ -196,11 +202,28 @@ function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
   return false
 }
 
+function isDeniedChatText(text: string): boolean {
+  const normalized = text.trim().toLowerCase()
+  return CHAT_HARD_DENY_PREFIXES.some((prefix) => normalized.startsWith(prefix.toLowerCase()))
+}
+
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
     const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
     const msg = normalizeTextPreservingMarkdown(rawMessage)
+    if (isDeniedChatText(msg)) continue
+
+    if (msg.trim() === '[thinking]') {
+      msgs.push({
+        id: entry.id,
+        role: 'thinking',
+        text: '',
+        stepId: entry.stepId,
+        metadata: { placeholder: true },
+      })
+      continue
+    }
 
     // ── Browser-execution steps: ActionLog only, never in chat ──────────────
     if (isBrowserOnlyEntry(entry, msg)) continue
@@ -588,11 +611,12 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onTogg
   })
 
   return (
-    <div className='my-0.5'>
+    <div className='my-0.5' data-testid='thinking-row'>
       <button
         type='button'
         onClick={onToggle}
-        className='flex items-center gap-2 rounded-xl px-3 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
+        className='flex items-center gap-2 rounded-xl px-0 py-1.5 hover:bg-[#1a1a1a] transition-colors text-left'
+        data-testid='thinking-row-trigger'
       >
         {isStreaming ? (
           /* Shimmer "Thinking" tag */
@@ -615,7 +639,8 @@ function ThinkingRow({ stepId: _stepId, reasoningText, isStreaming, open, onTogg
       {open && (
         <div
           ref={contentRef}
-          className='mx-3 mt-0.5 max-h-48 overflow-y-auto rounded-xl border border-violet-500/15 bg-[#0e0e18] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap'
+          className='mx-0 mt-0.5 max-h-48 overflow-y-auto rounded-xl border border-violet-500/15 bg-[#0e0e18] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap'
+          data-testid='thinking-row-content'
         >
           {reasoningText || <span className='text-zinc-600 animate-pulse'>…</span>}
         </div>
@@ -1300,20 +1325,22 @@ export function ChatPanel({
 
   useEffect(() => {
     if (serverMessages.length > 0) {
-      const mapped = serverMessages.map((m) => ({
-        id: m.id,
-        role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
-        text: m.content,
-        timestamp:
-          m.role === 'assistant'
-            ? undefined
-            : m.created_at
-              ? new Date(m.created_at).toLocaleTimeString()
-              : new Date().toLocaleTimeString(),
-        attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
-          ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
-          : undefined,
-      }))
+      const mapped = serverMessages
+        .filter((m) => !isDeniedChatText(m.content))
+        .map((m) => ({
+          id: m.id,
+          role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
+          text: m.content,
+          timestamp:
+            m.role === 'assistant'
+              ? undefined
+              : m.created_at
+                ? new Date(m.created_at).toLocaleTimeString()
+                : new Date().toLocaleTimeString(),
+          attachments: Array.isArray((m.metadata as Record<string, unknown> | null)?.attachments)
+            ? ((m.metadata as Record<string, unknown>).attachments as AttachedFile[])
+            : undefined,
+        }))
       const serverUserTexts = new Set(mapped.filter((m) => m.role === 'user').map((m) => m.text.trim()))
       setSentMessages((prev) => {
         const optimistic = prev.filter(
@@ -1727,7 +1754,7 @@ export function ChatPanel({
             const placeholder = Boolean((msg.metadata as { placeholder?: boolean } | undefined)?.placeholder)
             const isStreaming = placeholder || status !== 'completed'
             return (
-              <div key={msg.id} className='px-1'>
+              <div key={msg.id}>
                 <ThinkingRow
                   stepId={stepId}
                   reasoningText={reasoningText}
