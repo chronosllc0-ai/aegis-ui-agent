@@ -21,6 +21,7 @@ function formatDate(value?: string): string {
 
 export function SkillsTab({ role }: SkillsTabProps) {
   const isAdmin = role === 'admin' || role === 'superadmin'
+  const [activeSegment, setActiveSegment] = useState<'my_skills' | 'admin_controls'>('my_skills')
   const toast = useToast()
   const { patchSettings } = useSettingsContext()
   const {
@@ -41,6 +42,13 @@ export function SkillsTab({ role }: SkillsTabProps) {
   const [allowedTransitions, setAllowedTransitions] = useState<string[]>([])
   const [marketplaceSkills, setMarketplaceSkills] = useState<Array<{ id: string; name: string; slug: string; description: string; risk_label?: string }>>([])
   const [marketplaceError, setMarketplaceError] = useState<string>('')
+  const [allowBlockQuery, setAllowBlockQuery] = useState('')
+  const [allowBlockRows, setAllowBlockRows] = useState<Array<{ skill_id: string; skill: string; version: string; risk: string; allowed: boolean; blocked: boolean; updated: string }>>([])
+  const [auditRows, setAuditRows] = useState<Array<{ id: string; user: string; skill_id: string; action: string; reason: string; timestamp: string }>>([])
+  const [auditPage, setAuditPage] = useState(1)
+  const [auditTotal, setAuditTotal] = useState(0)
+  const [auditFilters, setAuditFilters] = useState({ user: '', skill: '', action: '', date_from: '', date_to: '' })
+  const [pendingConfirm, setPendingConfirm] = useState<{ action: 'block' | 'reset'; skillId: string; skillName: string } | null>(null)
 
   const enabledSkillIds = useMemo(() => installed.filter((skill) => skill.enabled).map((skill) => skill.skill_id), [installed])
 
@@ -52,6 +60,37 @@ export function SkillsTab({ role }: SkillsTabProps) {
     void apiRequest<{ skills?: Array<{ id: string; name: string; slug: string; description: string; risk_label?: string }> }>('/api/skills/hub')
       .then((data) => setMarketplaceSkills(data.skills ?? []))
   }, [])
+
+  const refreshAllowBlock = async (query: string = allowBlockQuery) => {
+    if (!isAdmin) return
+    const params = new URLSearchParams()
+    if (query.trim()) params.set('q', query.trim())
+    const data = await apiRequest<{ items?: Array<{ skill_id: string; skill: string; version: string; risk: string; allowed: boolean; blocked: boolean; updated: string }> }>(
+      `/api/admin/skills/allow-block${params.toString() ? `?${params.toString()}` : ''}`,
+    )
+    setAllowBlockRows(data.items ?? [])
+  }
+
+  const refreshAudit = async (page: number = auditPage) => {
+    if (!isAdmin) return
+    const params = new URLSearchParams({ page: String(page), page_size: '10' })
+    if (auditFilters.user.trim()) params.set('user', auditFilters.user.trim())
+    if (auditFilters.skill.trim()) params.set('skill', auditFilters.skill.trim())
+    if (auditFilters.action.trim()) params.set('action', auditFilters.action.trim())
+    if (auditFilters.date_from) params.set('date_from', auditFilters.date_from)
+    if (auditFilters.date_to) params.set('date_to', auditFilters.date_to)
+    const data = await apiRequest<{ items?: Array<{ id: string; user: string; skill_id: string; action: string; reason: string; timestamp: string }>; total?: number }>(
+      `/api/admin/skills/install-audit?${params.toString()}`,
+    )
+    setAuditRows(data.items ?? [])
+    setAuditTotal(data.total ?? 0)
+  }
+
+  useEffect(() => {
+    if (!isAdmin) return
+    void refreshAllowBlock()
+    void refreshAudit(1)
+  }, [isAdmin])
 
   const onToggleSkill = async (skill: InstalledSkill) => {
     const nextEnabled = !skill.enabled
@@ -101,6 +140,12 @@ export function SkillsTab({ role }: SkillsTabProps) {
     }
   }
 
+  const onAllowBlockAction = async (skillId: string, action: 'allow' | 'block' | 'reset') => {
+    await apiRequest(`/api/admin/skills/${encodeURIComponent(skillId)}/${action}`, { method: 'POST' })
+    await refreshAllowBlock()
+    toast.success(`Skill ${action}ed`)
+  }
+
 
   const transitionSubmission = async (nextState: string) => {
     if (!activeSubmission) return
@@ -115,6 +160,29 @@ export function SkillsTab({ role }: SkillsTabProps) {
 
   return (
     <div className='grid gap-4 lg:grid-cols-2'>
+      <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-2 lg:col-span-2'>
+        <div className='inline-flex rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
+          <button
+            type='button'
+            className={`rounded-md px-3 py-1.5 text-xs ${activeSegment === 'my_skills' ? 'bg-cyan-500/20 text-cyan-200' : 'text-zinc-400'}`}
+            onClick={() => setActiveSegment('my_skills')}
+          >
+            My Skills
+          </button>
+          {isAdmin ? (
+            <button
+              type='button'
+              className={`rounded-md px-3 py-1.5 text-xs ${activeSegment === 'admin_controls' ? 'bg-cyan-500/20 text-cyan-200' : 'text-zinc-400'}`}
+              onClick={() => setActiveSegment('admin_controls')}
+            >
+              Admin Controls
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      {activeSegment === 'my_skills' ? (
+        <>
       <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
         <div className='mb-3 flex items-center justify-between'>
           <h3 className='text-sm font-semibold'>Installed skills</h3>
@@ -183,48 +251,6 @@ export function SkillsTab({ role }: SkillsTabProps) {
         )}
       </section>
 
-      {isAdmin && (
-        <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
-          <h3 className='mb-3 text-sm font-semibold'>Organization policy</h3>
-          {loadingPolicy ? (
-            <p className='text-xs text-zinc-400'>Loading policy…</p>
-          ) : (
-            <div className='space-y-3'>
-              <ToggleRow
-                label='Allow unreviewed installs'
-                value={policy.allow_unreviewed_installs}
-                onToggle={(value) => void updatePolicy({ allow_unreviewed_installs: value })}
-                disabled={savingPolicy}
-              />
-              <ToggleRow
-                label='Block high-risk skills'
-                value={policy.block_high_risk_skills}
-                onToggle={(value) => void updatePolicy({ block_high_risk_skills: value })}
-                disabled={savingPolicy}
-              />
-              <ToggleRow
-                label='Require approval before install'
-                value={policy.require_approval_before_install}
-                onToggle={(value) => void updatePolicy({ require_approval_before_install: value })}
-                disabled={savingPolicy}
-              />
-
-              <div className='space-y-1'>
-                <label htmlFor='org-default-enabled-skill-ids' className='text-xs font-medium text-zinc-300'>
-                  Org default-enabled skill IDs
-                </label>
-                <textarea
-                  id='org-default-enabled-skill-ids'
-                  className='h-24 w-full rounded border border-[#2a2a2a] bg-[#111] p-2 text-xs'
-                  value={policy.default_enabled_skill_ids.join('\n')}
-                  onChange={(event) => void updatePolicy({ default_enabled_skill_ids: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
-                />
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
       <ReviewQueue isAdmin={isAdmin} />
       <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4 lg:col-span-2'>
         <h3 className='mb-3 text-sm font-semibold'>Marketplace</h3>
@@ -247,6 +273,142 @@ export function SkillsTab({ role }: SkillsTabProps) {
           ))}
         </div>
       </section>
+        </>
+      ) : null}
+
+      {isAdmin && activeSegment === 'admin_controls' ? (
+        <>
+          <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
+            <h3 className='mb-3 text-sm font-semibold'>Policy Defaults</h3>
+            {loadingPolicy ? (
+              <p className='text-xs text-zinc-400'>Loading policy…</p>
+            ) : (
+              <div className='space-y-3'>
+                <ToggleRow
+                  label='Require approval before install'
+                  value={policy.require_approval_before_install}
+                  onToggle={(value) => void updatePolicy({ require_approval_before_install: value })}
+                  disabled={savingPolicy}
+                />
+                <div className='space-y-1'>
+                  <p className='text-xs font-medium text-zinc-300'>Default enabled skills for new users</p>
+                  <div className='max-h-44 space-y-1 overflow-y-auto rounded border border-[#2a2a2a] bg-[#101010] p-2'>
+                    {marketplaceSkills.map((skill) => {
+                      const checked = policy.default_enabled_skill_ids.includes(skill.id)
+                      return (
+                        <label key={skill.id} className='flex items-center gap-2 text-xs text-zinc-300'>
+                          <input
+                            type='checkbox'
+                            checked={checked}
+                            onChange={(event) => {
+                              const next = event.target.checked
+                                ? [...policy.default_enabled_skill_ids, skill.id]
+                                : policy.default_enabled_skill_ids.filter((entry) => entry !== skill.id)
+                              void updatePolicy({ default_enabled_skill_ids: Array.from(new Set(next)) })
+                            }}
+                          />
+                          <span>{skill.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4'>
+            <div className='mb-3 flex items-center justify-between gap-2'>
+              <h3 className='text-sm font-semibold'>Allow / Block List</h3>
+              <input
+                value={allowBlockQuery}
+                onChange={(event) => setAllowBlockQuery(event.target.value)}
+                placeholder='Search skills'
+                className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs'
+              />
+              <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs' onClick={() => void refreshAllowBlock()}>
+                Search
+              </button>
+            </div>
+            <div className='overflow-x-auto'>
+              <table className='w-full text-left text-xs'>
+                <thead className='text-zinc-400'>
+                  <tr>
+                    <th className='pb-2'>Skill</th><th className='pb-2'>Version</th><th className='pb-2'>Risk</th><th className='pb-2'>Allowed</th><th className='pb-2'>Blocked</th><th className='pb-2'>Updated</th><th className='pb-2'>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allowBlockRows.map((row) => (
+                    <tr key={row.skill_id} className='border-t border-[#232323]'>
+                      <td className='py-2'>{row.skill}</td>
+                      <td>{row.version}</td>
+                      <td>{row.risk}</td>
+                      <td>{row.allowed ? 'Yes' : 'No'}</td>
+                      <td>{row.blocked ? 'Yes' : 'No'}</td>
+                      <td>{formatDate(row.updated)}</td>
+                      <td className='space-x-1'>
+                        <button type='button' className='rounded border border-emerald-500/40 px-1.5 py-0.5 text-emerald-300' onClick={() => void onAllowBlockAction(row.skill_id, 'allow')}>Allow</button>
+                        <button type='button' className='rounded border border-red-500/40 px-1.5 py-0.5 text-red-300' onClick={() => setPendingConfirm({ action: 'block', skillId: row.skill_id, skillName: row.skill })}>Block</button>
+                        <button type='button' className='rounded border border-zinc-500/40 px-1.5 py-0.5 text-zinc-300' onClick={() => setPendingConfirm({ action: 'reset', skillId: row.skill_id, skillName: row.skill })}>Reset</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-4 lg:col-span-2'>
+            <h3 className='mb-3 text-sm font-semibold'>Org Install Audit</h3>
+            <div className='mb-3 grid gap-2 md:grid-cols-5'>
+              <input placeholder='user' value={auditFilters.user} onChange={(event) => setAuditFilters((prev) => ({ ...prev, user: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
+              <input placeholder='skill id' value={auditFilters.skill} onChange={(event) => setAuditFilters((prev) => ({ ...prev, skill: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
+              <input placeholder='action' value={auditFilters.action} onChange={(event) => setAuditFilters((prev) => ({ ...prev, action: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
+              <input type='datetime-local' value={auditFilters.date_from} onChange={(event) => setAuditFilters((prev) => ({ ...prev, date_from: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
+              <input type='datetime-local' value={auditFilters.date_to} onChange={(event) => setAuditFilters((prev) => ({ ...prev, date_to: event.target.value }))} className='rounded border border-[#2a2a2a] bg-[#101010] px-2 py-1 text-xs' />
+            </div>
+            <button type='button' className='mb-3 rounded border border-[#2a2a2a] px-2 py-1 text-xs' onClick={() => { setAuditPage(1); void refreshAudit(1) }}>Apply filters</button>
+            <div className='space-y-2'>
+              {auditRows.map((row) => (
+                <article key={row.id} className='rounded border border-[#2a2a2a] bg-[#171717] p-2 text-xs'>
+                  <p className='text-zinc-200'>{row.action} • {row.skill_id}</p>
+                  <p className='text-zinc-400'>{row.user} • {formatDate(row.timestamp)} • {row.reason || 'n/a'}</p>
+                </article>
+              ))}
+            </div>
+            <div className='mt-3 flex items-center justify-between text-xs'>
+              <span>Page {auditPage} • {auditTotal} total</span>
+              <div className='space-x-2'>
+                <button type='button' disabled={auditPage <= 1} className='rounded border border-[#2a2a2a] px-2 py-1 disabled:opacity-40' onClick={() => { const next = Math.max(auditPage - 1, 1); setAuditPage(next); void refreshAudit(next) }}>Prev</button>
+                <button type='button' disabled={auditPage * 10 >= auditTotal} className='rounded border border-[#2a2a2a] px-2 py-1 disabled:opacity-40' onClick={() => { const next = auditPage + 1; setAuditPage(next); void refreshAudit(next) }}>Next</button>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {pendingConfirm ? (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4'>
+          <div className='w-full max-w-md rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
+            <h4 className='text-sm font-semibold'>Confirm {pendingConfirm.action}</h4>
+            <p className='mt-2 text-xs text-zinc-400'>Are you sure you want to {pendingConfirm.action} <span className='text-zinc-200'>{pendingConfirm.skillName}</span>?</p>
+            <div className='mt-3 flex justify-end gap-2'>
+              <button type='button' className='rounded border border-[#2a2a2a] px-2 py-1 text-xs' onClick={() => setPendingConfirm(null)}>Cancel</button>
+              <button
+                type='button'
+                className='rounded border border-red-500/40 px-2 py-1 text-xs text-red-300'
+                onClick={() => {
+                  const pending = pendingConfirm
+                  setPendingConfirm(null)
+                  void onAllowBlockAction(pending.skillId, pending.action)
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

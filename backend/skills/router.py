@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import _verify_session
 from backend.admin.dependencies import get_admin_user
-from backend.database import User, get_session
-from backend.skills.service import REVIEW_SLA_MESSAGE, SkillService
+from backend.database import Skill, SkillAuditEvent, User, get_session
+from backend.skills.policy_store import get_blocklist_state, get_skills_policy, set_blocklist_state, set_skills_policy
+from backend.skills.service import APPROVED_STATUSES, REVIEW_SLA_MESSAGE, SkillService
 
 skills_router = APIRouter(tags=["skills"])
 
@@ -64,17 +67,9 @@ class AdminSkillPolicyRequest(BaseModel):
     """Organization-level skill policy payload."""
 
     allow_unreviewed_installs: bool = False
-    block_high_risk_skills: bool = True
+    block_high_risk_skills: bool = False
     require_approval_before_install: bool = False
     default_enabled_skill_ids: list[str] = Field(default_factory=list)
-
-
-_admin_skill_policy_state: dict[str, Any] = {
-    "allow_unreviewed_installs": False,
-    "block_high_risk_skills": True,
-    "require_approval_before_install": False,
-    "default_enabled_skill_ids": [],
-}
 
 
 async def _get_current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
@@ -155,6 +150,7 @@ async def install_skill(
     try:
         install = await SkillService.install_skill(session, user_id=current_user.uid, skill_id=skill_id)
     except ValueError as exc:
+        await session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return {"ok": True, "skill_id": install.skill_id, "version_id": install.skill_version_id, "enabled": install.enabled}
@@ -227,26 +223,162 @@ async def uninstall_skill_delete(
 @skills_router.get("/api/admin/skills/policy")
 async def get_admin_skills_policy(
     admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     _ = admin_user
-    return {"ok": True, "policy": dict(_admin_skill_policy_state)}
+    return {"ok": True, "policy": await get_skills_policy(session)}
 
 
 @skills_router.post("/api/admin/skills/policy")
 async def set_admin_skills_policy(
     body: AdminSkillPolicyRequest,
     admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    _ = admin_user
-    _admin_skill_policy_state.update(
-        {
+    policy = await set_skills_policy(
+        session,
+        policy={
             "allow_unreviewed_installs": body.allow_unreviewed_installs,
             "block_high_risk_skills": body.block_high_risk_skills,
             "require_approval_before_install": body.require_approval_before_install,
-            "default_enabled_skill_ids": [skill_id.strip() for skill_id in body.default_enabled_skill_ids if skill_id.strip()],
-        }
+            "default_enabled_skill_ids": body.default_enabled_skill_ids,
+        },
+        admin_uid=admin_user.uid,
     )
-    return {"ok": True, "policy": dict(_admin_skill_policy_state)}
+    await session.commit()
+    return {"ok": True, "policy": policy}
+
+
+@skills_router.get("/api/admin/skills/allow-block")
+async def list_allow_block(
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+    q: str | None = None,
+) -> dict[str, Any]:
+    _ = admin_user
+    filters = [Skill.status.in_(APPROVED_STATUSES)]
+    if q:
+        search_value = f"%{q.strip()}%"
+        filters.append((Skill.name.ilike(search_value)) | (Skill.slug.ilike(search_value)))
+
+    rows = await session.execute(select(Skill).where(and_(*filters)).order_by(desc(Skill.updated_at)).limit(200))
+    state_map = await get_blocklist_state(session)
+    items: list[dict[str, Any]] = []
+    for skill in rows.scalars().all():
+        entry = state_map.get(skill.id, {})
+        state = entry.get("state")
+        items.append(
+            {
+                "skill_id": skill.id,
+                "skill": skill.name,
+                "slug": skill.slug,
+                "version": skill.status,
+                "risk": skill.risk_label or "unknown",
+                "allowed": state == "allow",
+                "blocked": state == "block",
+                "updated": entry.get("updated_at") or skill.updated_at,
+            }
+        )
+    return {"ok": True, "items": items}
+
+
+async def _set_skill_override(*, session: AsyncSession, skill_id: str, state: str | None, admin_uid: str) -> None:
+    state_map = await get_blocklist_state(session)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if state is None:
+        state_map.pop(skill_id, None)
+    else:
+        state_map[skill_id] = {"state": state, "updated_at": now_iso, "updated_by": admin_uid}
+    await set_blocklist_state(session, state=state_map, admin_uid=admin_uid)
+
+
+@skills_router.post("/api/admin/skills/{skill_id}/allow")
+async def allow_skill(
+    skill_id: str,
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await _set_skill_override(session=session, skill_id=skill_id, state="allow", admin_uid=admin_user.uid)
+    await session.commit()
+    return {"ok": True}
+
+
+@skills_router.post("/api/admin/skills/{skill_id}/block")
+async def block_skill(
+    skill_id: str,
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await _set_skill_override(session=session, skill_id=skill_id, state="block", admin_uid=admin_user.uid)
+    await session.commit()
+    return {"ok": True}
+
+
+@skills_router.post("/api/admin/skills/{skill_id}/reset")
+async def reset_skill_override(
+    skill_id: str,
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await _set_skill_override(session=session, skill_id=skill_id, state=None, admin_uid=admin_user.uid)
+    await session.commit()
+    return {"ok": True}
+
+
+@skills_router.get("/api/admin/skills/install-audit")
+async def list_install_audit(
+    admin_user: User = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+    user: str | None = None,
+    skill: str | None = None,
+    action: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    _ = admin_user
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
+    filters = [SkillAuditEvent.event_type.in_(["install", "install_blocked", "uninstall"])]
+    if user:
+        filters.append(SkillAuditEvent.actor_id == user)
+    if skill:
+        filters.append(SkillAuditEvent.skill_id == skill)
+    if action:
+        filters.append(SkillAuditEvent.event_type == action)
+    if date_from:
+        filters.append(SkillAuditEvent.created_at >= date_from)
+    if date_to:
+        filters.append(SkillAuditEvent.created_at <= date_to)
+
+    total_result = await session.execute(select(func.count()).select_from(SkillAuditEvent).where(and_(*filters)))
+    total = int(total_result.scalar() or 0)
+    rows = await session.execute(
+        select(SkillAuditEvent)
+        .where(and_(*filters))
+        .order_by(desc(SkillAuditEvent.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    entries = rows.scalars().all()
+    return {
+        "ok": True,
+        "items": [
+            {
+                "id": entry.id,
+                "user": entry.actor_id,
+                "skill_id": entry.skill_id,
+                "action": entry.event_type,
+                "reason": entry.reason,
+                "timestamp": entry.created_at,
+            }
+            for entry in entries
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
 
 
 @skills_router.get("/api/admin/skills/review-queue")

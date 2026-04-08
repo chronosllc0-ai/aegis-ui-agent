@@ -26,6 +26,8 @@ from backend.database import (
     SkillVersion,
     User,
 )
+from backend import database as database_module
+from backend.skills.policy_store import DEFAULT_SKILLS_POLICY, get_blocklist_state, get_skills_policy
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -739,16 +741,40 @@ class SkillService:
             raise ValueError("Skill not found")
         if skill.status not in APPROVED_STATUSES:
             raise ValueError("Skill is not approved for installation")
-        if skill.risk_label == "malicious":
-            raise ValueError("Install blocked: malicious scan result")
-        if skill.risk_label == "suspicious":
-            raise ValueError("Install blocked: suspicious skill requires admin override")
-        if skill.risk_label in {"scan_pending", "scan_failed"} and settings.VIRUSTOTAL_FALLBACK_POLICY == "block":
-            raise ValueError(f"Install blocked: scan status {skill.risk_label}")
-
         version = await SkillService.latest_version(session, skill_id)
         if version is None:
             raise ValueError("Approved skill is missing version")
+
+        async def _block(reason: str) -> None:
+            await SkillService._log_install_blocked_event(
+                user_id=user_id,
+                skill=skill,
+                version_id=version.id,
+                reason=reason,
+            )
+
+        policy = await get_skills_policy(session)
+        allow_block_map = await get_blocklist_state(session)
+        skill_override = allow_block_map.get(skill_id, {})
+        if skill_override.get("state") == "block":
+            await _block("admin_block_list_policy")
+            raise ValueError("Install blocked: admin block list policy")
+        if policy.get("require_approval_before_install") and skill_override.get("state") != "allow":
+            await _block("requires_admin_approval")
+            raise ValueError("Install blocked: requires admin approval before install")
+        if (
+            policy.get("block_high_risk_skills", DEFAULT_SKILLS_POLICY["block_high_risk_skills"])
+            and skill.risk_label in {"malicious", "suspicious"}
+            and skill_override.get("state") != "allow"
+        ):
+            await _block(f"org_policy_risk_{skill.risk_label}")
+            raise ValueError(f"Install blocked: org policy for risk level {skill.risk_label}")
+        if skill.risk_label == "malicious":
+            await _block("malicious_scan_result")
+            raise ValueError("Install blocked: malicious scan result")
+        if skill.risk_label in {"scan_pending", "scan_failed"} and settings.VIRUSTOTAL_FALLBACK_POLICY == "block":
+            await _block(f"scan_status_{skill.risk_label}")
+            raise ValueError(f"Install blocked: scan status {skill.risk_label}")
 
         rows = await session.execute(select(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
         install = rows.scalar_one_or_none()
@@ -782,11 +808,66 @@ class SkillService:
             install.enabled = True
             install.updated_at = now
             await session.flush()
+        session.add(
+            SkillAuditEvent(
+                skill_id=skill.id,
+                submission_id=None,
+                skill_version_id=version.id,
+                from_status=skill.status,
+                to_status=skill.status,
+                actor_id=user_id,
+                actor_type="user",
+                event_type="install",
+                reason="installed_or_updated",
+                created_at=now,
+            )
+        )
+        await session.flush()
         return install
 
     @staticmethod
+    async def _log_install_blocked_event(*, user_id: str, skill: Skill, version_id: str, reason: str) -> None:
+        """Write blocked-install audit in an isolated transaction."""
+        if database_module._session_factory is None:
+            logger.warning("Skipping blocked install audit; database session factory unavailable")
+            return
+        async with database_module._session_factory() as audit_session:
+            audit_session.add(
+                SkillAuditEvent(
+                    skill_id=skill.id,
+                    submission_id=None,
+                    skill_version_id=version_id,
+                    from_status=skill.status,
+                    to_status=skill.status,
+                    actor_id=user_id,
+                    actor_type="user",
+                    event_type="install_blocked",
+                    reason=reason,
+                    created_at=SkillService._now(),
+                )
+            )
+            await audit_session.commit()
+
+    @staticmethod
     async def uninstall_skill(session: AsyncSession, *, user_id: str, skill_id: str) -> int:
+        version = await SkillService.latest_version(session, skill_id)
+        skill = await session.get(Skill, skill_id)
         result = await session.execute(delete(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
+        if (result.rowcount or 0) > 0 and version is not None and skill is not None:
+            session.add(
+                SkillAuditEvent(
+                    skill_id=skill.id,
+                    submission_id=None,
+                    skill_version_id=version.id,
+                    from_status=skill.status,
+                    to_status=skill.status,
+                    actor_id=user_id,
+                    actor_type="user",
+                    event_type="uninstall",
+                    reason="user_uninstall",
+                    created_at=SkillService._now(),
+                )
+            )
         return int(result.rowcount or 0)
 
     @staticmethod

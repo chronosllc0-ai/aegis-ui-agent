@@ -1,3 +1,130 @@
+## Session 5.84 - April 8, 2026 (PR #189 review fixes: policy semantics + exception transaction safety)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed PR review feedback in install policy enforcement:
+  1. **Default mismatch fix in runtime check**
+     - `SkillService.install_skill(...)` now uses `DEFAULT_SKILLS_POLICY["block_high_risk_skills"]` as the fallback instead of hardcoded `True`.
+  2. **Removed placebo behavior for suspicious skills**
+     - eliminated unconditional `suspicious_requires_override` hard-block branch so `block_high_risk_skills` now actually controls suspicious-risk blocking behavior.
+     - retained unconditional malicious blocking for safety.
+- Addressed review feedback about transaction safety on install failures:
+  - removed `commit()`-on-exception in router install endpoint and replaced with `rollback()`.
+  - moved `install_blocked` audit writes into an isolated DB transaction via a dedicated helper in `SkillService` using the shared async session factory (`backend.database._session_factory`) to avoid committing unrelated request state.
+- Updated tests to align with corrected policy semantics:
+  - `tests/test_skills_install_policy.py` now explicitly enables `block_high_risk_skills=True` before asserting suspicious-risk blocks.
+  - existing deterministic VT scan mocks in `tests/test_skills_api.py` continue to keep review-queue assertions stable.
+
+### What's Working
+- Review comments about default mismatch, placebo flag behavior, and exception transaction safety are now addressed in code.
+- Targeted skills/admin test set is green (`8 passed`).
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Optional: add a dedicated test that verifies suspicious installs are allowed when `block_high_risk_skills=False` and no explicit block override exists.
+
+### Decisions Made
+- Kept malicious-risk installs always blocked as a hard safety gate while making suspicious-risk behavior policy-driven.
+- Chose isolated audit transaction writes over request-transaction commit-on-error to preserve failure semantics and reduce accidental partial commits.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.83 - April 8, 2026 (fix test mismatch + deterministic scan mocks)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Fixed a policy default mismatch in `backend/skills/policy_store.py`:
+  - `set_skills_policy(...)` now defaults `block_high_risk_skills` to `False` to match the declared default policy shape used elsewhere.
+- Completed the prior “next step” to stabilize scan-related API tests under environments where VirusTotal is disabled:
+  - added async mock scanner helper in `tests/test_skills_api.py`,
+  - patched `VirusTotalScanner.scan_content` in:
+    - `_seed_approved_skill_sync()` path,
+    - `test_admin_review_queue_status_filter_and_badges`,
+  - this makes review-queue status assertions deterministic (`review` no longer depends on external VT availability/config).
+- Re-ran the affected test slices and a broader skills test set.
+
+### What's Working
+- Previously failing review-queue status test now passes reliably.
+- Skills API + admin controls + install policy test set is green (`8 passed`).
+
+### What's NOT Working Yet
+- No new blockers discovered in this pass.
+
+### Next Steps
+1. Optional: apply the same deterministic scan-mocking pattern to any remaining VT-sensitive tests outside `tests/test_skills_api.py` to reduce CI flake risk further.
+
+### Decisions Made
+- Preferred deterministic unit/integration mocking in tests instead of changing runtime scan behavior.
+- Kept production scan workflow untouched; only test-time behavior is stabilized.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.82 - April 8, 2026 (SkillsTab Admin Controls + backend RBAC/persistence)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Implemented an admin-only segmented UX in `SkillsTab.tsx` with **My Skills** vs **Admin Controls**.
+- Added new Admin Controls surfaces:
+  - **Policy Defaults** (require-approval toggle + default-enabled skill multi-select),
+  - **Allow/Block List** (search + tabular rows + Allow/Block/Reset actions),
+  - **Org Install Audit** (filters + paginated timeline).
+- Added safety confirmation modal for destructive block/reset actions.
+- Added backend persistence helpers in `backend/skills/policy_store.py` using `PlatformSetting` storage for:
+  - org policy values,
+  - per-skill allow/block override map.
+- Reworked `/api/admin/skills/policy` endpoints to persist/read from DB-backed platform settings (instead of in-memory state).
+- Added new admin RBAC endpoints:
+  - `GET /api/admin/skills/allow-block`
+  - `POST /api/admin/skills/{skill_id}/allow`
+  - `POST /api/admin/skills/{skill_id}/block`
+  - `POST /api/admin/skills/{skill_id}/reset`
+  - `GET /api/admin/skills/install-audit` (filtered, paginated)
+- Enforced install-time blocking in `SkillService.install_skill(...)`:
+  - checks org policy + allow/block overrides,
+  - blocks user install flow for admin-blocked skills,
+  - emits install/install_blocked/uninstall audit events to `skill_audit_events`.
+- Added regression coverage in `tests/test_skills_admin_controls.py` for:
+  - policy persistence after reload,
+  - blocked install prevention,
+  - install audit pagination behavior.
+
+### What's Working
+- Admin-only controls are hidden from non-admin users in the settings UI.
+- Policy values now persist in DB-backed platform settings.
+- Block list policy is enforced server-side in install flow.
+- Install audit endpoint supports pagination and filter params without crashing.
+
+### What's NOT Working Yet
+- Existing `tests/test_skills_api.py::test_admin_review_queue_status_filter_and_badges` may still depend on environment-specific scan behavior (VT disabled defaults can produce `scan_failed` instead of `review`).
+
+### Next Steps
+1. Stabilize scan workflow tests to be deterministic under `VIRUSTOTAL_ENABLED=False` (explicit mocks in API-level tests).
+2. Optionally add dedicated frontend tests for SkillsTab Admin Controls interactions and modal confirmation behavior.
+3. Consider exposing actor display metadata (email/name) in install audit payload for richer admin readability.
+
+### Decisions Made
+- Used existing `PlatformSetting` table for policy + allow/block persistence to avoid schema migration overhead.
+- Kept RBAC enforcement server-side by reusing `get_admin_user` dependencies on all admin endpoints.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.81 - April 8, 2026 (Skill Hub submission/review deterministic state machine)
 
 **Agent:** GPT-5.3-Codex  

@@ -4,6 +4,7 @@ import asyncio
 
 from backend import database
 from backend.database import Skill, SkillVersion, User, get_session
+from backend.skills.policy_store import set_skills_policy
 from backend.skills.service import SkillService
 from config import settings
 
@@ -58,6 +59,17 @@ def test_install_policy_blocks_malicious_and_suspicious(tmp_path) -> None:
         suspicious_id = await _create_skill(risk_label="suspicious")
 
         async for session in get_session():
+            await set_skills_policy(
+                session,
+                policy={
+                    "allow_unreviewed_installs": False,
+                    "block_high_risk_skills": True,
+                    "require_approval_before_install": False,
+                    "default_enabled_skill_ids": [],
+                },
+                admin_uid="user-1",
+            )
+            await session.commit()
             try:
                 await SkillService.install_skill(session, user_id="user-1", skill_id=malicious_id)
             except ValueError as exc:
@@ -68,7 +80,7 @@ def test_install_policy_blocks_malicious_and_suspicious(tmp_path) -> None:
             try:
                 await SkillService.install_skill(session, user_id="user-1", skill_id=suspicious_id)
             except ValueError as exc:
-                assert "override" in str(exc)
+                assert "org policy" in str(exc)
             else:
                 raise AssertionError("suspicious install should be blocked")
             break
