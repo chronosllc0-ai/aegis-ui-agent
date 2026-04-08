@@ -2721,3 +2721,17 @@
 ### Validation
 - `pytest -q tests/test_mode_commands.py tests/test_modes.py tests/test_parallel_tool_calls.py` passed (8/8).
 - `cd frontend && npm run build` passed.
+
+## 2026-04-08 — Netlify compile hardening follow-up
+
+### What changed
+- Removed stale browser example-prompt state plumbing in `frontend/src/App.tsx` (`setExamplePrompt`) that no longer fed any active composer path.
+- Switched `ScreenView` example clicks to call the shared `handleSend(...)` path directly with task-label metadata.
+- Updated sub-agent modal “Try now” action to use `handleSend(...)` directly instead of writing to removed placeholder state.
+
+### Why
+- Netlify logs showed TypeScript compile failures around stale/dead symbols from previous refactors.
+- This cleanup removes dead state and keeps browser examples/sub-agent quickstart on the same send pipeline as normal chat execution, reducing mismatch risk between local/dev and CI builds.
+
+### Validation
+- `cd frontend && npm run build` passed.

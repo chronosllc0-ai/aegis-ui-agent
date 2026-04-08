@@ -103,7 +103,6 @@ function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [showWorkflow, setShowWorkflow] = useState(false)
   const [urlInput, setUrlInput] = useState('about:blank')
-  const [, setExamplePrompt] = useState<string | null>(null)
   const [showSubAgentModal, setShowSubAgentModal] = useState(false)
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
@@ -1238,7 +1237,7 @@ function App() {
                       frameSrc={latestFrame}
                       isWorking={isWorking}
                       steeringFlashKey={steeringFlashKey}
-                      onExampleClick={(prompt) => handleSend(prompt, 'steer', { task_label_source: 'chat', task_label: prompt })}
+                      onExampleClick={(prompt) => handleSend(prompt, isWorking ? 'steer' : mode, { task_label_source: 'chat', task_label: prompt })}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}
                     />
@@ -1306,7 +1305,7 @@ function App() {
           onTryNow={() => {
             localStorage.setItem('aegis_seen_subagent_modal', '1')
             setShowSubAgentModal(false)
-            setAppMode('chat')
+            handleSend('spawn sub-agents: ', 'steer', { task_label_source: 'chat', task_label: 'spawn sub-agents' })
           }}
         />
       )}
