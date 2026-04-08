@@ -38,11 +38,13 @@ async def create_submission(
         submission = await SkillHubService.create_submission(
             session,
             submitter_id=current_user.uid,
+            actor_role=current_user.role,
             skill_id=body.skill_id,
             skill_slug=body.skill_slug,
             title=body.title,
             description=body.description,
             risk_label=body.risk_label,
+            admin_override=body.admin_override,
             previous_submission_id=body.previous_submission_id,
             submit_now=body.submit_now,
         )

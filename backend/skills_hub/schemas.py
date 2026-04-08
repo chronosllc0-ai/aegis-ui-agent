@@ -29,6 +29,7 @@ class SkillHubSubmissionCreateRequest(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     description: str = Field(default="", max_length=4000)
     risk_label: str = Field(default="unknown", max_length=30)
+    admin_override: bool = False
     previous_submission_id: str | None = Field(default=None, max_length=255)
     submit_now: bool = False
 
