@@ -15,6 +15,7 @@ from sqlalchemy import and_, delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
+from backend.security.virustotal import fetch_scan_report, submit_file_for_scan
 from backend.database import (
     Skill,
     SkillAuditEvent,
@@ -25,6 +26,8 @@ from backend.database import (
     SkillVersion,
     User,
 )
+from backend import database as database_module
+from backend.skills.policy_store import DEFAULT_SKILLS_POLICY, get_blocklist_state, get_skills_policy
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -34,7 +37,7 @@ REVIEW_SLA_MESSAGE = "Review SLA: up to 5 working days."
 
 
 class VirusTotalScanner:
-    """Thin VT client with timeout/retry and a simple circuit breaker."""
+    """Backward-compatible VT wrapper backed by backend.security.virustotal."""
 
     _consecutive_failures = 0
     _opened_until: datetime | None = None
@@ -87,124 +90,45 @@ class VirusTotalScanner:
 
     @classmethod
     async def scan_content(cls, *, file_name: str, content: bytes) -> dict[str, Any]:
-        """Run VirusTotal hash lookup/upload flow and return normalized payload."""
-        if not settings.VIRUSTOTAL_API_KEY:
-            return {
-                "engine": "virustotal",
-                "verdict": "skipped",
-                "risk_label": "unknown",
-                "raw_json": {"reason": "missing_api_key"},
-                "report_url": None,
-                "scanned_at": datetime.now(timezone.utc),
-            }
-
+        """Run VT submit/report flow and normalize to legacy verdict payload."""
         if len(content) > settings.VIRUSTOTAL_MAX_FILE_BYTES:
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "risk_label": "unknown",
+                "risk_label": "scan_failed",
                 "raw_json": {"reason": "file_too_large", "max_bytes": settings.VIRUSTOTAL_MAX_FILE_BYTES},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
             }
-
-        if await cls._is_open():
-            return {
-                "engine": "virustotal",
-                "verdict": "error",
-                "risk_label": "unknown",
-                "raw_json": {"reason": "circuit_open"},
-                "report_url": None,
-                "scanned_at": datetime.now(timezone.utc),
-            }
-
-        sha256 = hashlib.sha256(content).hexdigest()
-        headers = {"x-apikey": settings.VIRUSTOTAL_API_KEY}
-        timeout = httpx.Timeout(settings.VIRUSTOTAL_TIMEOUT_SECONDS)
-
         try:
-            async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-                file_report = await cls._request_with_backoff(
-                    request_fn=lambda: client.get(f"https://www.virustotal.com/api/v3/files/{sha256}")
-                )
-                analysis_id: str | None = None
-                if file_report.status_code == 404:
-                    upload_response = await cls._request_with_backoff(
-                        request_fn=lambda: client.post(
-                            "https://www.virustotal.com/api/v3/files",
-                            files={"file": (file_name, content, "text/markdown")},
-                        )
-                    )
-                    upload_response.raise_for_status()
-                    analysis_id = upload_response.json().get("data", {}).get("id")
-                    final_status = "queued"
-                    raw: dict[str, Any] = {}
-                    if analysis_id:
-                        for _ in range(settings.VIRUSTOTAL_MAX_POLLS):
-                            poll_response = await cls._request_with_backoff(
-                                request_fn=lambda: client.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}")
-                            )
-                            poll_response.raise_for_status()
-                            raw = poll_response.json()
-                            final_status = raw.get("data", {}).get("attributes", {}).get("status", "queued")
-                            if final_status == "completed":
-                                break
-                            await asyncio.sleep(settings.VIRUSTOTAL_POLL_INTERVAL_SECONDS)
-                    if final_status != "completed":
-                        return {
-                            "engine": "virustotal",
-                            "verdict": "error",
-                            "risk_label": "unknown",
-                            "raw_json": {"reason": "analysis_timeout", "last_status": final_status, "analysis_id": analysis_id},
-                            "report_url": None,
-                            "scanned_at": datetime.now(timezone.utc),
-                        }
-                else:
-                    file_report.raise_for_status()
-                    raw = file_report.json()
+            submit_result = await submit_file_for_scan(file_name=file_name, content=content)
+            report_result = await fetch_scan_report(
+                analysis_id=submit_result.get("analysis_id"),
+                sha256=submit_result.get("sha256"),
+            )
         except (httpx.RequestError, httpx.HTTPStatusError, OSError) as exc:
             await cls._register_failure()
             logger.warning("VirusTotal scan failed: %s", exc)
             return {
                 "engine": "virustotal",
                 "verdict": "error",
-                "risk_label": "unknown",
-                "raw_json": {"reason": "exception", "error": str(exc)},
+                "risk_label": "scan_failed",
+                "raw_json": {"reason": "exception"},
                 "report_url": None,
                 "scanned_at": datetime.now(timezone.utc),
             }
-
         await cls._register_success()
-
-        attributes = raw.get("data", {}).get("attributes", {})
-        stats = attributes.get("last_analysis_stats") or attributes.get("stats", {})
-        malicious = int(stats.get("malicious", 0))
-        suspicious = int(stats.get("suspicious", 0))
-        vt_identifier = raw.get("data", {}).get("id")
-
-        if malicious > 0:
-            verdict = "fail"
-            risk = "high-risk"
-        elif suspicious > 0:
-            verdict = "warn"
-            risk = "suspicious"
-        else:
-            verdict = "pass"
-            risk = "clean"
-
+        risk = str(report_result.get("risk_tag") or submit_result.get("risk_tag") or "scan_failed")
+        verdict = "pass" if risk in {"clean", "low_risk"} else "warn" if risk in {"suspicious", "scan_pending"} else "fail"
+        if risk == "scan_failed":
+            verdict = "error"
         return {
             "engine": "virustotal",
             "verdict": verdict,
             "risk_label": risk,
-            "raw_json": {
-                "sha256": sha256,
-                "stats": stats,
-                "positives": malicious,
-                "suspicious": suspicious,
-                "id": vt_identifier,
-            },
-            "report_url": f"https://www.virustotal.com/gui/file/{sha256}",
-            "scanned_at": datetime.now(timezone.utc),
+            "raw_json": report_result.get("raw_json") or submit_result.get("raw_json") or {},
+            "report_url": report_result.get("report_url") or submit_result.get("report_url"),
+            "scanned_at": report_result.get("scanned_at", datetime.now(timezone.utc)),
         }
 
 
@@ -233,7 +157,7 @@ class PolicyScanner:
 
         if max_score >= 0.9:
             verdict = "fail"
-            risk = "high-risk"
+            risk = "malicious"
         elif max_score >= 0.5:
             verdict = "warn"
             risk = "suspicious"
@@ -433,7 +357,7 @@ class SkillService:
                 owner_type=owner_type,
                 publish_target=publish_target,
                 status="submitted",
-                risk_label="unknown",
+                risk_label="scan_pending",
                 is_new=False,
                 new_until=None,
                 created_at=now,
@@ -486,7 +410,7 @@ class SkillService:
                 skill_version_id=version.id,
                 engine="virustotal",
                 verdict="queued",
-                risk_label="unknown",
+                risk_label="scan_pending",
                 raw_json=json.dumps({"status": "queued", "sha256": content_sha256}),
                 report_url=None,
                 scanned_at=now,
@@ -563,10 +487,10 @@ class SkillService:
             )
         )
 
-        if vt_result["verdict"] == "error":
+        if vt_result["risk_label"] in {"scan_failed"}:
             skill.status = "scan_failed"
             submission.review_state = "scan_failed"
-            skill.risk_label = "unknown"
+            skill.risk_label = "scan_failed"
             await SkillService._record_event(
                 session,
                 skill_id=skill.id,
@@ -599,12 +523,16 @@ class SkillService:
         )
 
         combined_risks = {vt_result["risk_label"], policy_result["risk_label"]}
-        if "high-risk" in combined_risks:
-            skill.risk_label = "high-risk"
+        if "malicious" in combined_risks:
+            skill.risk_label = "malicious"
         elif "suspicious" in combined_risks:
             skill.risk_label = "suspicious"
-        elif "unknown" in combined_risks:
-            skill.risk_label = "unknown"
+        elif "scan_pending" in combined_risks:
+            skill.risk_label = "scan_pending"
+        elif "scan_failed" in combined_risks:
+            skill.risk_label = "scan_failed"
+        elif "low_risk" in combined_risks:
+            skill.risk_label = "low_risk"
         else:
             skill.risk_label = "clean"
         skill.status = "review"
@@ -693,8 +621,10 @@ class SkillService:
         now = SkillService._now()
         from_status = skill.status
 
-        if decision in {"approve_global", "approve_hub"} and skill.risk_label in {"suspicious", "high-risk"} and not (notes or "").strip():
-            raise ValueError("Suspicious/high-risk skills require explicit override reason")
+        if decision in {"approve_global", "approve_hub"} and skill.risk_label in {"suspicious"} and not (notes or "").strip():
+            raise ValueError("Suspicious skills require explicit override reason")
+        if decision in {"approve_global", "approve_hub"} and skill.risk_label == "malicious":
+            raise ValueError("Malicious skills cannot be approved")
 
         if decision == "approve_global":
             skill.status = "published_global"
@@ -811,10 +741,40 @@ class SkillService:
             raise ValueError("Skill not found")
         if skill.status not in APPROVED_STATUSES:
             raise ValueError("Skill is not approved for installation")
-
         version = await SkillService.latest_version(session, skill_id)
         if version is None:
             raise ValueError("Approved skill is missing version")
+
+        async def _block(reason: str) -> None:
+            await SkillService._log_install_blocked_event(
+                user_id=user_id,
+                skill=skill,
+                version_id=version.id,
+                reason=reason,
+            )
+
+        policy = await get_skills_policy(session)
+        allow_block_map = await get_blocklist_state(session)
+        skill_override = allow_block_map.get(skill_id, {})
+        if skill_override.get("state") == "block":
+            await _block("admin_block_list_policy")
+            raise ValueError("Install blocked: admin block list policy")
+        if policy.get("require_approval_before_install") and skill_override.get("state") != "allow":
+            await _block("requires_admin_approval")
+            raise ValueError("Install blocked: requires admin approval before install")
+        if (
+            policy.get("block_high_risk_skills", DEFAULT_SKILLS_POLICY["block_high_risk_skills"])
+            and skill.risk_label in {"malicious", "suspicious"}
+            and skill_override.get("state") != "allow"
+        ):
+            await _block(f"org_policy_risk_{skill.risk_label}")
+            raise ValueError(f"Install blocked: org policy for risk level {skill.risk_label}")
+        if skill.risk_label == "malicious":
+            await _block("malicious_scan_result")
+            raise ValueError("Install blocked: malicious scan result")
+        if skill.risk_label in {"scan_pending", "scan_failed"} and settings.VIRUSTOTAL_FALLBACK_POLICY == "block":
+            await _block(f"scan_status_{skill.risk_label}")
+            raise ValueError(f"Install blocked: scan status {skill.risk_label}")
 
         rows = await session.execute(select(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
         install = rows.scalar_one_or_none()
@@ -848,11 +808,66 @@ class SkillService:
             install.enabled = True
             install.updated_at = now
             await session.flush()
+        session.add(
+            SkillAuditEvent(
+                skill_id=skill.id,
+                submission_id=None,
+                skill_version_id=version.id,
+                from_status=skill.status,
+                to_status=skill.status,
+                actor_id=user_id,
+                actor_type="user",
+                event_type="install",
+                reason="installed_or_updated",
+                created_at=now,
+            )
+        )
+        await session.flush()
         return install
 
     @staticmethod
+    async def _log_install_blocked_event(*, user_id: str, skill: Skill, version_id: str, reason: str) -> None:
+        """Write blocked-install audit in an isolated transaction."""
+        if database_module._session_factory is None:
+            logger.warning("Skipping blocked install audit; database session factory unavailable")
+            return
+        async with database_module._session_factory() as audit_session:
+            audit_session.add(
+                SkillAuditEvent(
+                    skill_id=skill.id,
+                    submission_id=None,
+                    skill_version_id=version_id,
+                    from_status=skill.status,
+                    to_status=skill.status,
+                    actor_id=user_id,
+                    actor_type="user",
+                    event_type="install_blocked",
+                    reason=reason,
+                    created_at=SkillService._now(),
+                )
+            )
+            await audit_session.commit()
+
+    @staticmethod
     async def uninstall_skill(session: AsyncSession, *, user_id: str, skill_id: str) -> int:
+        version = await SkillService.latest_version(session, skill_id)
+        skill = await session.get(Skill, skill_id)
         result = await session.execute(delete(SkillInstall).where(and_(SkillInstall.user_id == user_id, SkillInstall.skill_id == skill_id)))
+        if (result.rowcount or 0) > 0 and version is not None and skill is not None:
+            session.add(
+                SkillAuditEvent(
+                    skill_id=skill.id,
+                    submission_id=None,
+                    skill_version_id=version.id,
+                    from_status=skill.status,
+                    to_status=skill.status,
+                    actor_id=user_id,
+                    actor_type="user",
+                    event_type="uninstall",
+                    reason="user_uninstall",
+                    created_at=SkillService._now(),
+                )
+            )
         return int(result.rowcount or 0)
 
     @staticmethod

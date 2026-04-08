@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import _verify_session
 from backend.admin.dependencies import get_admin_user
-from backend.database import User, get_session
-from backend.skills.service import REVIEW_SLA_MESSAGE, SkillService
+from backend.database import Skill, SkillAuditEvent, User, get_session
+from backend.skills.policy_store import get_blocklist_state, get_skills_policy, set_blocklist_state, set_skills_policy
+from backend.skills.service import APPROVED_STATUSES, REVIEW_SLA_MESSAGE, SkillService
 
 skills_router = APIRouter(tags=["skills"])
 
@@ -155,6 +158,7 @@ async def install_skill(
     try:
         install = await SkillService.install_skill(session, user_id=current_user.uid, skill_id=skill_id)
     except ValueError as exc:
+        await session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return {"ok": True, "skill_id": install.skill_id, "version_id": install.skill_version_id, "enabled": install.enabled}
