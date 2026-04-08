@@ -1621,6 +1621,8 @@ export function ChatPanel({
           <div className='my-1'>
             <button
               type='button'
+              aria-expanded={activityExpanded}
+              aria-label={resolveActivityLabel(taskActivity)}
               onClick={() => setActivityExpanded((prev) => !prev)}
               className='w-full rounded-xl border border-blue-500/25 bg-[#121826] px-3 py-2 text-left hover:bg-[#141c2e] transition-colors'
             >

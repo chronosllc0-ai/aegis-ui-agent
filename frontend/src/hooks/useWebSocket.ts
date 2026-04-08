@@ -204,7 +204,7 @@ function inferActivityFromStep(content: string): Omit<TaskActivity, 'updatedAt'>
   if (/(thinking|reasoning|analyzing|planning)/i.test(normalized)) {
     return { phase: 'thinking', detail: content }
   }
-  return { phase: 'generating', detail: ACTIVITY_FALLBACK_LABEL }
+  return { phase: 'calling_tool', detail: ACTIVITY_FALLBACK_LABEL }
 }
 
 type UseWebSocketOptions = {

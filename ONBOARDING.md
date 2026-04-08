@@ -1,3 +1,36 @@
+## Session 5.59 - April 8, 2026 (Review follow-up: activity fallback + accessibility)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed two PR review findings from kilo-code-bot:
+  1. **Activity fallback correctness** in `frontend/src/hooks/useWebSocket.ts`:
+     - changed unknown/default inferred activity from `generating` to `calling_tool` to avoid misleading status text.
+  2. **Accessibility for live activity accordion** in `frontend/src/components/ChatPanel.tsx`:
+     - added `aria-expanded={activityExpanded}`
+     - added `aria-label={resolveActivityLabel(taskActivity)}`
+- Re-ran full frontend test suite and production build to verify no regressions.
+
+### What's Working
+- Unknown activity inference no longer mislabels unrecognized events as response generation.
+- Live activity accordion now has explicit accessibility metadata for assistive tech.
+- Frontend tests and build both pass after review-driven fixes.
+
+### What's NOT Working Yet
+- No blockers identified.
+
+### Next Steps
+1. If future websocket event types expand, add explicit mappings before fallback is used.
+2. Consider adding `aria-controls` with an ID for expanded detail region if we later formalize the accordion panel semantics.
+
+### Decisions Made
+- Followed review suggestion to keep default phase truthful (`calling_tool`) rather than optimistic (`generating`).
+
+### Blockers
+- None.
+
+---
 ## Session 5.58 - April 8, 2026 (Fix failing SkillsTab test and restore frontend green)
 
 **Agent:** GPT-5.3-Codex
