@@ -5,9 +5,9 @@
 # ──────────────────────────────────────────────────────────────────────
 
 [build]
-  base = "frontend"
-  command = "npm ci && npm run build"
-  publish = "dist"
+  base = "/"
+  command = "npm ci && npm run -w frontend build"
+  publish = "frontend/dist"
 
 # SPA fallback — all routes serve index.html
 [[redirects]]
