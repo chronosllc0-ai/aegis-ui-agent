@@ -21,6 +21,34 @@ function makeServerMessages(thread: 'A' | 'B'): ServerMessage[] {
       metadata: null,
       created_at: '2026-04-03T10:00:05.000Z',
     },
+    {
+      id: `${thread}-assistant-browser-1`,
+      role: 'assistant',
+      content: '[extract_page] historical fixture',
+      metadata: null,
+      created_at: '2026-04-03T10:00:06.000Z',
+    },
+    {
+      id: `${thread}-assistant-browser-2`,
+      role: 'assistant',
+      content: '[go_back] historical fixture',
+      metadata: null,
+      created_at: '2026-04-03T10:00:07.000Z',
+    },
+    {
+      id: `${thread}-assistant-browser-3`,
+      role: 'assistant',
+      content: '[click] historical fixture',
+      metadata: null,
+      created_at: '2026-04-03T10:00:08.000Z',
+    },
+    {
+      id: `${thread}-assistant-browser-4`,
+      role: 'assistant',
+      content: '[go_to_url] historical fixture',
+      metadata: null,
+      created_at: '2026-04-03T10:00:09.000Z',
+    },
   ]
 }
 
@@ -33,7 +61,7 @@ function makeLogs(thread: 'A' | 'B'): LogEntry[] {
       status: 'in_progress',
       timestamp: '10:00 AM',
       stepKind: 'other',
-      message: `Reasoning ${thread}`,
+      message: '[thinking]',
       elapsedSeconds: 1,
       stepId: `${thread}-step-1`,
     },
@@ -86,8 +114,12 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
     )
 
     await screen.findByText('Thread A assistant')
+    expect(screen.queryByText(/\[extract_page\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_back\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[click\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_to_url\]/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Thought'))
+    fireEvent.click(screen.getByText('Thinking'))
     expect(screen.getByText('Reasoning A details')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '1. Option A' }))
@@ -117,6 +149,10 @@ describe('ChatPanel thread hydration and per-thread UI restore', () => {
     await screen.findByText('Thread B assistant')
     expect(screen.queryByText('Thread A assistant')).not.toBeInTheDocument()
     expect(screen.queryByText('Reasoning A details')).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[extract_page\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_back\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[click\]/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_to_url\]/i)).not.toBeInTheDocument()
 
     rerender(
       <ChatPanel

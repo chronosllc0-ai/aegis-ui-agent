@@ -8,6 +8,7 @@ import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentM
 import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
+import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
 import { SuggestionChips } from './SuggestionChips'
 import { PromptGallery } from './PromptGallery'
 
@@ -147,70 +148,8 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Workflow step update',
 ]
 
-/**
- * Browser-execution tool names that belong exclusively in the ActionLog.
- * Non-browser tools (search, code, file ops, APIs, etc.) still surface in chat
- * as collapsible ShellCards so the user has visibility into non-browser work.
- */
-const BROWSER_TOOL_NAMES = new Set([
-  'navigate_browser', 'navigate', 'go_to_url', 'open_url', 'load_url',
-  'extract_page', 'go_back', 'wait',
-  'click_element', 'click', 'left_click', 'right_click', 'double_click',
-  'type_text', 'type', 'input_text', 'fill_input', 'clear_and_type',
-  'scroll_page', 'scroll', 'scroll_down', 'scroll_up', 'scroll_to_element',
-  'hover_element', 'hover', 'mouse_move',
-  'press_key', 'key_press', 'keyboard_press',
-  'take_screenshot', 'screenshot',
-  'extract_text', 'get_page_text', 'get_inner_text',
-  'get_element', 'find_element', 'wait_for_element', 'wait_for_selector',
-  'select_option', 'check_checkbox', 'uncheck_checkbox',
-  'get_page_html', 'get_dom', 'evaluate_js', 'execute_script',
-  'drag_and_drop', 'upload_file_to_browser',
-])
-
-/**
- * Internal agent meta-tools that are pure housekeeping — never shown as
- * cards in the chat panel. The isWorking shimmer already signals activity.
- */
-const SILENT_TOOL_NAMES = new Set([
-  'thinking', 'think', 'internal_think',
-  'wait', 'sleep', 'pause', 'noop', 'no_op',
-  'set_next_step', 'plan_step', 'record_thought',
-])
-
-const BROWSER_STATUS_PATTERNS: RegExp[] = [
-  /^session settings updated/i,
-  /^workflow step update/i,
-  /^starting task:/i,
-  /^task (completed|interrupted|failed)/i,
-]
-
-/**
- * Returns true if this log entry should be hidden from the chat conversation.
- *
- * Rules:
- *   1. Raw browser stepKinds (click / type / scroll) → ActionLog only.
- *   2. Navigate entries with elapsedSeconds > 0 → ActionLog only.
- *   3. Tool calls in BROWSER_TOOL_NAMES → ActionLog only.
- *   4. Tool calls in SILENT_TOOL_NAMES → hidden entirely (internal housekeeping).
- *
- * Non-browser, non-silent tool calls (web_search, run_code, read_file…)
- * pass through and render as ShellCards in chat.
- */
 function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
-  const normalized = msg.trim()
-
-  if (BROWSER_STATUS_PATTERNS.some((pattern) => pattern.test(normalized))) return true
-  if (entry.stepKind === 'click' || entry.stepKind === 'type' || entry.stepKind === 'scroll') return true
-  if (entry.stepKind === 'navigate' && entry.elapsedSeconds > 0) return true
-
-  if (RE_TOOL_CALL.test(msg)) {
-    const match = msg.match(/^\[([\w_]+)\]/)
-    const toolName = match?.[1]?.toLowerCase()
-    if (toolName && (BROWSER_TOOL_NAMES.has(toolName) || SILENT_TOOL_NAMES.has(toolName))) return true
-  }
-
-  return false
+  return isBrowserOnlyEvent({ message: msg, entry })
 }
 
 function isDeniedChatText(text: string): boolean {
@@ -1337,6 +1276,7 @@ export function ChatPanel({
     if (serverMessages.length > 0) {
       const mapped = serverMessages
         .filter((m) => !isDeniedChatText(m.content))
+        .filter((m) => !isBrowserOnlyEvent({ message: m.content }))
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,

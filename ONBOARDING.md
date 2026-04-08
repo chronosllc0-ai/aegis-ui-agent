@@ -1,3 +1,37 @@
+## Session 5.56 - April 8, 2026 (Permanent browser-action exclusion in chat live + rehydration)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend filtering + test pass
+
+### What Was Done
+- Added a shared browser-event filter helper at `frontend/src/lib/browserOnlyEvents.ts` with `isBrowserOnlyEvent(...)`.
+- Centralized browser-only + silent tool detection (including `extract_page`, `go_back`, `click`, `go_to_url`, `type_text`, `scroll`, `screenshot`, and related aliases) into that helper.
+- Updated `frontend/src/components/ChatPanel.tsx` live log path to call the shared helper via `isBrowserOnlyEntry(...)`.
+- Updated `ChatPanel.tsx` server-message hydration path (`serverMessages` mapping) to apply the same shared helper before rendering chat messages.
+- Expanded frontend tests with historical browser fixtures in both live and hydration contexts:
+  - `frontend/src/components/ChatPanel.test.tsx`
+  - `frontend/src/components/__tests__/ChatPanel.thread-hydration.test.tsx`
+
+### What's Working
+- Browser-action tool events are filtered from chat in live stream rendering.
+- The same browser-action events are filtered from persisted message rehydration after thread switch/refresh.
+- Non-browser tool cards (e.g., shell/code tools) still render in chat as before.
+- Action Log behavior is unchanged and continues to show full workflow events.
+
+### What's NOT Working Yet
+- No known functional blockers from this pass.
+
+### Next Steps
+1. Run the broader frontend suite to confirm no neighboring regression outside ChatPanel-focused tests.
+2. If backend persists additional browser-only prefixes in future, extend `browserOnlyEvents.ts` once and keep both chat pipelines in sync automatically.
+
+### Decisions Made
+- Chose a single shared helper to eliminate drift between live and rehydration filtering logic.
+
+### Blockers
+- None.
+
+---
 ## Session 5.55 - April 8, 2026 (Fireworks task-runner incorrectly requiring Gemini key fix)
 
 **Agent:** GPT-5.3-Codex
