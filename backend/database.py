@@ -11,7 +11,21 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func, inspect, text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    inspect,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -173,6 +187,190 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
+class Skill(Base):
+    """User/admin-submitted skill definition with moderation lifecycle state."""
+
+    __tablename__ = "skills"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    slug = Column(String(120), nullable=False, unique=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, default="")
+    owner_user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    owner_type = Column(String(20), nullable=False, default="user")  # admin|user
+    publish_target = Column(String(20), nullable=False, default="hub")  # global|hub
+    status = Column(String(40), nullable=False, default="draft")
+    visibility = Column(String(20), nullable=False, default="private")
+    risk_label = Column(String(20), nullable=False, default="medium")
+    created_by = Column(String(255), nullable=True)
+    is_new = Column(Boolean, nullable=False, default=False)
+    new_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillVersion(Base):
+    """Immutable version snapshot of a skill submission."""
+
+    __tablename__ = "skill_versions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    storage_path = Column(Text, nullable=False)
+    markdown_content = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=False)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillSubmission(Base):
+    """Submission queue record for new skills and updates."""
+
+    __tablename__ = "skill_submissions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    submitted_by = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    submission_type = Column(String(20), nullable=False, default="new")  # new|update
+    review_state = Column(String(40), nullable=False, default="pending_scan")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillScanResult(Base):
+    """Security/policy scan output for an immutable skill version."""
+
+    __tablename__ = "skill_scan_results"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    engine = Column(String(40), nullable=False)  # virustotal|policy
+    verdict = Column(String(30), nullable=False)
+    risk_label = Column(String(20), nullable=False, default="low")
+    raw_json = Column(Text)
+    report_url = Column(Text)
+    scanned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillReview(Base):
+    """Human moderation decision on a skill version."""
+
+    __tablename__ = "skill_reviews"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    submission_id = Column(String(255), ForeignKey("skill_submissions.id"), nullable=True, index=True)
+    reviewer_admin_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    decision = Column(String(40), nullable=False)
+    notes = Column(Text)
+    reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SkillInstall(Base):
+    """Per-user installed skill relation with enabled runtime toggle."""
+
+    __tablename__ = "skill_installs"
+    __table_args__ = (UniqueConstraint("user_id", "skill_id", name="uq_skill_install_user_skill"),)
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    installed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillAuditEvent(Base):
+    """Immutable audit trail for skill status transitions and key events."""
+
+    __tablename__ = "skill_audit_events"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    submission_id = Column(String(255), ForeignKey("skill_submissions.id"), nullable=True, index=True)
+    skill_version_id = Column(String(255), ForeignKey("skill_versions.id"), nullable=False, index=True)
+    from_status = Column(String(40), nullable=False)
+    to_status = Column(String(40), nullable=False)
+    actor_id = Column(String(255), nullable=False, index=True)
+    actor_type = Column(String(20), nullable=False)
+    event_type = Column(String(40), nullable=False, default="transition")
+    reason = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class SkillHubSubmission(Base):
+    """Skill Hub submission revision tracked by deterministic workflow state."""
+
+    __tablename__ = "skill_hub_submissions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=True, index=True)
+    skill_slug = Column(String(120), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    risk_label = Column(String(30), nullable=False, default="unknown")
+    revision = Column(Integer, nullable=False, default=1)
+    submitted_by = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    current_state = Column(String(40), nullable=False, default="draft", index=True)
+    reviewer_notes_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SkillHubTransition(Base):
+    """Immutable transition event for Skill Hub submissions."""
+
+    __tablename__ = "skill_hub_transitions"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    submission_id = Column(String(255), ForeignKey("skill_hub_submissions.id"), nullable=False, index=True)
+    from_state = Column(String(40), nullable=False)
+    to_state = Column(String(40), nullable=False)
+    actor_id = Column(String(255), nullable=False, index=True)
+    actor_role = Column(String(20), nullable=False)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class RuntimeSkillInstallation(Base):
+    """Lightweight per-user skill installation record for runtime resolution."""
+
+    __tablename__ = "skill_installations"
+    __table_args__ = (UniqueConstraint("user_id", "skill_id", name="uq_skill_installations_user_skill"),)
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    installed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SkillToggle(Base):
+    """Per-user enable/disable state for an installed skill."""
+
+    __tablename__ = "skill_toggles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "skill_id", name="uq_skill_toggles_user_skill"),
+        ForeignKeyConstraint(
+            ["user_id", "skill_id"],
+            ["skill_installations.user_id", "skill_installations.skill_id"],
+            name="fk_skill_toggles_installation",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    skill_id = Column(String(255), ForeignKey("skills.id"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ImpersonationSession(Base):
     """Track when admins impersonate user accounts."""
 
@@ -269,6 +467,7 @@ async def create_tables() -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_columns_sync)
+        await conn.run_sync(_ensure_skill_columns_sync)
         await conn.run_sync(_ensure_audit_log_created_at_sync)
         await conn.run_sync(_ensure_scheduled_tasks_table)
     _database_ready = True
@@ -296,6 +495,39 @@ def _ensure_user_columns_sync(sync_conn) -> None:
     add_column_if_missing("password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT")
     add_column_if_missing("role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
     add_column_if_missing("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
+
+
+def _ensure_skill_columns_sync(sync_conn) -> None:
+    """Apply lightweight schema fixes for runtime skill scaffolding tables."""
+    inspector = inspect(sync_conn)
+    table_names = set(inspector.get_table_names())
+
+    if "skills" in table_names:
+        skill_columns = {column["name"] for column in inspector.get_columns("skills")}
+
+        def add_skill_column_if_missing(column_name: str, ddl: str) -> None:
+            if column_name in skill_columns:
+                return
+            try:
+                sync_conn.execute(text(ddl))
+                skill_columns.add(column_name)
+            except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+                logger.warning("Skipping skills.%s sync; assuming column already exists or was created concurrently: %s", column_name, exc)
+                skill_columns.add(column_name)
+
+        add_skill_column_if_missing("visibility", "ALTER TABLE skills ADD COLUMN visibility VARCHAR(20) DEFAULT 'private'")
+        add_skill_column_if_missing("created_by", "ALTER TABLE skills ADD COLUMN created_by VARCHAR(255)")
+
+    if "skill_versions" in table_names:
+        version_columns = {column["name"] for column in inspector.get_columns("skill_versions")}
+        if "markdown_content" not in version_columns:
+            try:
+                sync_conn.execute(text("ALTER TABLE skill_versions ADD COLUMN markdown_content TEXT"))
+            except Exception as exc:  # pragma: no cover - defensive local-dev schema sync
+                logger.warning(
+                    "Skipping skill_versions.markdown_content sync; assuming column already exists or was created concurrently: %s",
+                    exc,
+                )
 
 
 def _ensure_audit_log_created_at_sync(sync_conn) -> None:

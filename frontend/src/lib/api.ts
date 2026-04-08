@@ -11,3 +11,18 @@ export function apiUrl(path: string): string {
   }
   return base ? `${base}${path}` : path
 }
+
+export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(apiUrl(path), { credentials: 'include', ...init })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text || `Request failed (${response.status})`)
+  }
+  try {
+    return (await response.json()) as T
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON response from ${path}: ${error instanceof Error ? error.message : 'Unknown parse error'}`,
+    )
+  }
+}
