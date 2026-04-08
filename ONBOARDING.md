@@ -2867,3 +2867,46 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-08 — Agent startup regression fix (provider-agnostic)
+
+### What changed
+- Fixed a websocket startup crash in `main.py` where `/ws/navigate` referenced `_normalize_runtime_mode(...)` without a definition, causing immediate `NameError` on first message regardless of provider.
+- Added missing mode helper utilities in `main.py`:
+  - `validate_requested_mode(...)`
+  - `_normalize_runtime_mode(...)`
+  - `allowed_tool_alternatives(...)`
+  - `_mode_refusal_payload(...)`
+- Restored missing mode imports used by existing routes and policy checks (`blocked_tools_for_mode`, `mode_definitions`, `serialize_mode_definition`).
+- Fixed a second runtime regression in `universal_navigator.py` where batched tool execution referenced undefined `all_results`, causing `NameError` for non-Gemini/provider-agnostic runs.
+- Added deterministic `all_results` construction from `tool_calls + execution_results` before batch telemetry/follow-up prompt generation.
+- Added missing `allowed_tool_alternatives(...)` helper in `universal_navigator.py` for mode-policy refusal metadata.
+
+### Why
+- The websocket `NameError` blocked task startup at the protocol layer, so the agent appeared non-functional “for any provider”.
+- The universal navigator `NameError` broke provider-agnostic runs during batched tool-call processing.
+- Together these regressions explain “agent doesn’t start” symptoms across provider selections.
+
+### Validation
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_websocket_dequeue_invalid_index_payload_does_not_disconnect tests/test_main_websocket.py::test_websocket_user_input_response_resumes_single_pending_prompt_without_extra_task tests/test_orchestrator_startup.py` passed.
+
+## 2026-04-08 — Universal Navigator parallel-tool regression fix
+
+### What changed
+- Fixed the batched tool follow-up message path in `universal_navigator.py` so batch results are consistently summarized in the canonical `Tool results:` format expected by the runtime/tests.
+- Restored and normalized batch workflow telemetry events:
+  - `batch_tool_start`
+  - per-call `batch_tool_result` (including denial debug metadata when tool policy blocks execution)
+  - `batch_tool_complete`
+- Added explicit pre-run policy enforcement in the batch executor path so skill/mode/sub-agent restrictions and confirmation gates still apply even when `UniversalToolExecutor.run(...)` is monkeypatched in tests.
+- Added malformed-batch handling for invalid `tool_calls` arrays (including >3 calls), emitting a deterministic safe error step and reprompting for a valid 1–3 call payload.
+- Corrected parallel eligibility behavior for the current codepath by allowing `wait` in the effective parallel-safe tool set and keeping dependency-bearing batches sequential.
+- Tightened batch result status classification so tool outputs containing explicit `error:` payloads are labeled as `error` in consolidated follow-up text.
+
+### Why
+- The previous pass fixed startup crashes, but batch-tool orchestration regressions remained and were causing the Universal Navigator parallel-tool suite to fail.
+- These fixes restore expected orchestration semantics without changing production feature scope.
+
+### Validation
+- `pytest -q tests/test_universal_navigator_parallel_tools.py` passed (15/15).
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_orchestrator_startup.py tests/test_universal_navigator_parallel_tools.py` passed (18/18).
