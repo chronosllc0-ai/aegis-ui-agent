@@ -75,15 +75,24 @@ class AgentOrchestrator:
     """
 
     def __init__(self) -> None:
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self.analyzer = ScreenshotAnalyzer(self.client)
         self.executor = ActionExecutor()
-        self.navigator = NavigatorAgent(self.analyzer, self.executor)
+        self.client: genai.Client | None = None
+        self.analyzer: ScreenshotAnalyzer | None = None
+        self.navigator: NavigatorAgent | None = None
         self.session_service = InMemorySessionService()
         self.default_model_name = settings.GEMINI_MODEL
         self.model_name = self.default_model_name
         self.agent: Agent | None = None
         self.mcp_client = MCPClient()
+
+    def _ensure_gemini_stack(self) -> None:
+        """Initialize Gemini-dependent components lazily when needed."""
+        if self.client is None:
+            self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        if self.analyzer is None:
+            self.analyzer = ScreenshotAnalyzer(self.client)
+        if self.navigator is None:
+            self.navigator = NavigatorAgent(self.analyzer, self.executor)
 
     def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
         """Build an ADK agent instance for the requested model/instruction."""
@@ -126,7 +135,8 @@ class AgentOrchestrator:
         should_rebuild = self.agent is None
         if requested_model != self.model_name:
             self.model_name = requested_model
-            self.analyzer.model = self.model_name
+            if self.analyzer is not None:
+                self.analyzer.model = self.model_name
             should_rebuild = True
 
         if isinstance(system_instruction, str) and system_instruction.strip():
@@ -145,6 +155,9 @@ class AgentOrchestrator:
 
     async def initialize(self) -> None:
         """Initialize model selection and ADK agent instance."""
+        self._ensure_gemini_stack()
+        assert self.client is not None
+        assert self.analyzer is not None
         key = settings.GEMINI_API_KEY.strip()
         has_real_key = bool(key) and "your-gemini" not in key.lower()
         if has_real_key:

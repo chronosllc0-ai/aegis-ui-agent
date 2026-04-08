@@ -30,9 +30,10 @@ from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
 from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
+from backend.integrations.text_normalization import normalize_for_channel
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
-from backend.modes import MODE_LABELS, normalize_agent_mode
+from backend.modes import MODE_LABELS, blocked_tools_for_mode, mode_definitions, normalize_agent_mode, serialize_mode_definition
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
@@ -352,6 +353,51 @@ def _apply_runtime_mode_update(
         False,
         f"Invalid mode `{requested_mode_raw}`. Allowed modes: {allowed}.",
     )
+
+
+def validate_requested_mode(requested_mode_raw: object) -> tuple[str, bool]:
+    """Normalize a raw mode payload and return whether it is an allowed explicit mode."""
+    candidate = str(requested_mode_raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if candidate in MODE_LABELS:
+        return candidate, True
+    return normalize_agent_mode(candidate), False
+
+
+def _normalize_runtime_mode(runtime_settings: dict[str, Any]) -> str:
+    """Normalize the active runtime mode and persist canonical value in settings."""
+    normalized = normalize_agent_mode(runtime_settings.get("agent_mode", ""))
+    runtime_settings["agent_mode"] = normalized
+    return normalized
+
+
+def allowed_tool_alternatives(mode: str, *, limit: int = 8) -> list[str]:
+    """Return representative tools that remain available in the requested mode."""
+    blocked = blocked_tools_for_mode(mode)
+    candidates = (
+        "screenshot",
+        "analyze_screen",
+        "ask_user_input",
+        "memory_search",
+        "memory_read",
+        "web_search",
+        "extract_page",
+        "list_files",
+        "read_file",
+        "done",
+        "error",
+    )
+    return [tool for tool in candidates if tool not in blocked][: max(1, limit)]
+
+
+def _mode_refusal_payload(*, requested_mode: object, effective_mode: str, reason: str) -> dict[str, Any]:
+    """Create a consistent websocket payload for mode-policy refusals."""
+    return {
+        "type": "mode_policy_refusal",
+        "requested_mode": str(requested_mode or ""),
+        "effective_mode": effective_mode,
+        "reason": reason,
+        "allowed_alternatives": allowed_tool_alternatives(effective_mode),
+    }
 
 
 def _get_orchestrator() -> AgentOrchestrator:

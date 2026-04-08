@@ -2867,3 +2867,25 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-08 — Agent startup regression fix (provider-agnostic)
+
+### What changed
+- Fixed a websocket startup crash in `main.py` where `/ws/navigate` referenced `_normalize_runtime_mode(...)` without a definition, causing immediate `NameError` on first message regardless of provider.
+- Added missing mode helper utilities in `main.py`:
+  - `validate_requested_mode(...)`
+  - `_normalize_runtime_mode(...)`
+  - `allowed_tool_alternatives(...)`
+  - `_mode_refusal_payload(...)`
+- Restored missing mode imports used by existing routes and policy checks (`blocked_tools_for_mode`, `mode_definitions`, `serialize_mode_definition`).
+- Fixed a second runtime regression in `universal_navigator.py` where batched tool execution referenced undefined `all_results`, causing `NameError` for non-Gemini/provider-agnostic runs.
+- Added deterministic `all_results` construction from `tool_calls + execution_results` before batch telemetry/follow-up prompt generation.
+- Added missing `allowed_tool_alternatives(...)` helper in `universal_navigator.py` for mode-policy refusal metadata.
+
+### Why
+- The websocket `NameError` blocked task startup at the protocol layer, so the agent appeared non-functional “for any provider”.
+- The universal navigator `NameError` broke provider-agnostic runs during batched tool-call processing.
+- Together these regressions explain “agent doesn’t start” symptoms across provider selections.
+
+### Validation
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_websocket_dequeue_invalid_index_payload_does_not_disconnect tests/test_main_websocket.py::test_websocket_user_input_response_resumes_single_pending_prompt_without_extra_task tests/test_orchestrator_startup.py` passed.

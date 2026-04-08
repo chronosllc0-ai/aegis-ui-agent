@@ -27,6 +27,7 @@ from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUCTION_KEY_PREFIX
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
+from backend.orchestrator_mode import OrchestratorModeRouter, build_synthesis
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.skills.parser import extract_runtime_guidance_block
 from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
@@ -472,6 +473,17 @@ def is_tool_allowed_for_mode(mode: str, tool_name: str) -> bool:
     """Return whether a tool is allowed for the normalized agent mode."""
     blocked = blocked_tools_for_mode(normalize_agent_mode(mode))
     return tool_name not in blocked
+
+
+def allowed_tool_alternatives(mode: str, *, limit: int = 8) -> list[str]:
+    """List safe tool alternatives available for the given agent mode."""
+    blocked = blocked_tools_for_mode(normalize_agent_mode(mode))
+    alternatives = [
+        name
+        for name in (str(tool["name"]) for tool in TOOL_DEFINITIONS)
+        if name not in blocked and name not in {"done", "error"}
+    ]
+    return alternatives[: max(1, limit)]
 
 
 def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dict[str, Any]]:
@@ -2011,6 +2023,21 @@ async def run_universal_navigation(
             execution_results: list[tuple[str, bytes | None]] = []
             for tool_call in tool_calls:
                 execution_results.append(await _execute_single_tool_call(tool_call))
+
+        all_results: list[dict[str, Any]] = []
+        for index, (tool_call, (result_text, screenshot_bytes)) in enumerate(zip(tool_calls, execution_results, strict=False), start=1):
+            tool_name = str(tool_call.get("tool", "unknown"))
+            ok = not str(result_text).lower().startswith(("tool error", "unknown tool", "denied", "blocked"))
+            all_results.append(
+                {
+                    "index": index,
+                    "tool": tool_name,
+                    "ok": ok,
+                    "result_text": result_text,
+                    "error": None if ok else result_text,
+                    "screenshot_bytes": screenshot_bytes,
+                }
+            )
 
         result_fragments: list[str] = []
         screenshot_frames: list[bytes] = []
