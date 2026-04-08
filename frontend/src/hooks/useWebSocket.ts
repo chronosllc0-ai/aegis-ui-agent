@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 
 export type SteeringMode = 'steer' | 'interrupt' | 'queue'
 
@@ -48,10 +49,107 @@ export type SubAgentStep = {
   parent_task_id?: string
 }
 
+type ThinkingState = 'streaming' | 'completed'
+
+export interface PersistedThinkingMessage {
+  id: string
+  role: 'thinking'
+  taskId: string
+  stepId: string
+  status: ThinkingState
+  text: string
+  updatedAt: string
+}
+
 type WebSocketPayload = {
   type: 'step' | 'result' | 'frame' | 'error' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list'
   data?: Record<string, unknown>
   [key: string]: unknown
+}
+
+const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
+const FRAME_CACHE_PREFIX = 'aegis.frame.'
+const FRAME_CACHE_KEY = (scopeKey: string) => `${FRAME_CACHE_PREFIX}${scopeKey}`
+
+function readPersistedFrame(scopeKey: string): string {
+  if (!scopeKey || typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(FRAME_CACHE_KEY(scopeKey)) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function persistFrame(scopeKey: string, frameDataUrl: string): void {
+  if (!scopeKey || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(FRAME_CACHE_KEY(scopeKey), frameDataUrl)
+  } catch {
+    // Ignore localStorage quota/sandbox issues.
+  }
+}
+
+function removePersistedFrame(scopeKey: string): void {
+  if (!scopeKey || typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(FRAME_CACHE_KEY(scopeKey))
+  } catch {
+    // Ignore localStorage access issues.
+  }
+}
+
+function clearPersistedFrameCache(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const keysToDelete: string[] = []
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (key && key.startsWith(FRAME_CACHE_PREFIX)) {
+        keysToDelete.push(key)
+      }
+    }
+    keysToDelete.forEach((key) => window.localStorage.removeItem(key))
+  } catch {
+    // Ignore localStorage access issues.
+  }
+}
+
+function readPersistedThinking(taskId: string): PersistedThinkingMessage[] {
+  if (!taskId || typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(THINKING_KEY(taskId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is PersistedThinkingMessage => {
+        const candidate = item as Partial<PersistedThinkingMessage>
+        return Boolean(
+          candidate
+          && candidate.role === 'thinking'
+          && typeof candidate.taskId === 'string'
+          && typeof candidate.stepId === 'string'
+          && typeof candidate.id === 'string',
+        )
+      })
+      .map((item) => ({
+        ...item,
+        status: item.status === 'completed' ? 'completed' : 'streaming',
+        text: typeof item.text === 'string' ? item.text : '',
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }))
+  } catch {
+    return []
+  }
+}
+
+function persistThinking(taskId: string, messages: PersistedThinkingMessage[]): void {
+  if (!taskId || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(THINKING_KEY(taskId), JSON.stringify(messages))
+  } catch {
+    // Ignore localStorage quota/sandbox issues.
+  }
 }
 
 function guessStepKind(message: string): LogEntry['stepKind'] {
@@ -64,7 +162,16 @@ function guessStepKind(message: string): LogEntry['stepKind'] {
   return 'other'
 }
 
-export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => void) {
+type UseWebSocketOptions = {
+  onUsageMessage?: (msg: Record<string, unknown>) => void
+  userId?: string | null
+  activeThreadId?: string | null
+}
+
+export function useWebSocket(options?: UseWebSocketOptions) {
+  const onUsageMessage = options?.onUsageMessage
+  const userId = options?.userId ?? null
+  const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [isWorking, setIsWorking] = useState(false)
   const [latestFrame, setLatestFrame] = useState('')
@@ -84,6 +191,8 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
   const pingIntervalRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
+  const activeFrameScopeKeyRef = useRef('')
+  const reasoningNormalizersRef = useRef<Record<string, IncrementalTextNormalizer>>({})
   const lastStepAtRef = useRef(0)
   const lastNotConnectedAtRef = useRef(0)
   const connectRef = useRef<() => void>(() => undefined)
@@ -107,6 +216,14 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     },
     [],
   )
+
+  useEffect(() => {
+    const normalizedUserId = (userId ?? '').trim() || 'anon'
+    const normalizedThreadId = (activeThreadId ?? '').trim()
+    const scopeKey = normalizedThreadId ? `${normalizedUserId}:${normalizedThreadId}` : ''
+    activeFrameScopeKeyRef.current = scopeKey
+    setLatestFrame(scopeKey ? readPersistedFrame(scopeKey) : '')
+  }, [activeThreadId, userId])
 
   const connect = useCallback(function connectSocket() {
     setConnectionStatus('connecting')
@@ -191,6 +308,16 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       }
       if (payload.type === 'result') {
         setIsWorking(false)
+        const persisted = readPersistedThinking(taskId)
+        if (persisted.length > 0) {
+          const nowIso = new Date().toISOString()
+          const next = persisted.map((item) => (
+            item.status === 'streaming'
+              ? { ...item, status: 'completed' as const, updatedAt: nowIso }
+              : item
+          ))
+          persistThinking(taskId, next)
+        }
         const status = String(payload.data?.status ?? 'completed')
         const failed = status !== 'completed' && status !== 'interrupted'
         appendLog({
@@ -203,12 +330,22 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       }
       if (payload.type === 'frame') {
         const image = String(payload.data?.image ?? '')
-        if (image) setLatestFrame(`data:image/png;base64,${image}`)
+        const frameDataUrl = image ? `data:image/png;base64,${image}` : ''
+        const scopeKey = activeFrameScopeKeyRef.current
+        if (frameDataUrl && scopeKey) {
+          persistFrame(scopeKey, frameDataUrl)
+          setLatestFrame(frameDataUrl)
+        }
         return
       }
       if (payload.type === 'screenshot') {
         const image = String(payload.data ?? '')
-        if (image) setLatestFrame(`data:image/png;base64,${image}`)
+        const frameDataUrl = image ? `data:image/png;base64,${image}` : ''
+        const scopeKey = activeFrameScopeKeyRef.current
+        if (frameDataUrl && scopeKey) {
+          persistFrame(scopeKey, frameDataUrl)
+          setLatestFrame(frameDataUrl)
+        }
         return
       }
       if (payload.type === 'workflow_step') {
@@ -244,7 +381,27 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
       if (payload.type === 'reasoning_start') {
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
-          setReasoningMap((prev) => ({ ...prev, [stepId]: '' }))
+          if (!reasoningNormalizersRef.current[stepId]) {
+            reasoningNormalizersRef.current[stepId] = new IncrementalTextNormalizer()
+          }
+          setReasoningMap((prev) => ({ ...prev, [stepId]: prev[stepId] ?? '' }))
+          const nowIso = new Date().toISOString()
+          const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
+          const nextEntry: PersistedThinkingMessage = {
+            id: `thinking-${taskId}-${stepId}`,
+            role: 'thinking',
+            taskId,
+            stepId,
+            status: 'streaming',
+            text: existing?.text ?? '',
+            updatedAt: nowIso,
+          }
+          const next = [
+            ...persisted.filter((item) => item.stepId !== stepId),
+            nextEntry,
+          ]
+          persistThinking(taskId, next)
           appendLog({
             message: '[thinking]',
             taskId,
@@ -259,10 +416,38 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         const stepId = String(payload.data?.step_id ?? '')
         const delta = String(payload.data?.delta ?? '')
         if (stepId && delta) {
+          const normalizer = reasoningNormalizersRef.current[stepId] ?? new IncrementalTextNormalizer()
+          reasoningNormalizersRef.current[stepId] = normalizer
+          const normalizedCumulative = normalizer.push(delta)
+          const normalizedDelta = normalizeTextPreservingMarkdown(delta)
           setReasoningMap((prev) => ({
             ...prev,
-            [stepId]: (prev[stepId] ?? '') + delta,
+            [stepId]: normalizedCumulative,
           }))
+          const nowIso = new Date().toISOString()
+          const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
+          const nextEntry: PersistedThinkingMessage = existing
+            ? {
+                ...existing,
+                status: existing.status === 'completed' ? 'completed' : 'streaming',
+                text: normalizedCumulative,
+                updatedAt: nowIso,
+              }
+            : {
+                id: `thinking-${taskId}-${stepId}`,
+                role: 'thinking',
+                taskId,
+                stepId,
+                status: 'streaming',
+                text: normalizedDelta,
+                updatedAt: nowIso,
+              }
+          const next = [
+            ...persisted.filter((item) => item.stepId !== stepId),
+            nextEntry,
+          ]
+          persistThinking(taskId, next)
         }
         return
       }
@@ -271,13 +456,35 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
         const stepId = String(payload.data?.step_id ?? '')
         const content = String(payload.data?.content ?? '')
         if (stepId) {
+          const normalizer = reasoningNormalizersRef.current[stepId]
+          const finalContent = content ? normalizeTextPreservingMarkdown(content) : (normalizer?.finalize() ?? '')
+          const nowIso = new Date().toISOString()
+          const persisted = readPersistedThinking(taskId)
+          const existing = persisted.find((item) => item.stepId === stepId)
+          const nextEntry: PersistedThinkingMessage = existing
+            ? { ...existing, text: finalContent || existing.text, status: 'completed', updatedAt: nowIso }
+            : {
+                id: `thinking-${taskId}-${stepId}`,
+                role: 'thinking',
+                taskId,
+                stepId,
+                status: 'completed',
+                text: finalContent,
+                updatedAt: nowIso,
+              }
+          const next = [
+            ...persisted.filter((item) => item.stepId !== stepId),
+            nextEntry,
+          ]
+          persistThinking(taskId, next)
           setLogs((prev) =>
             prev.map((e) =>
               e.stepId === stepId
-                ? { ...e, type: 'reasoning', status: 'completed', message: content }
+                ? { ...e, type: 'reasoning', status: 'completed', message: finalContent }
                 : e,
             ),
           )
+          delete reasoningNormalizersRef.current[stepId]
         }
         return
       }
@@ -415,8 +622,25 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     setReasoningMap({})
     setSubAgents([])
     setSubAgentSteps({})
+    reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
   }, [])
+
+  const clearFrameCache = useCallback(() => {
+    clearPersistedFrameCache()
+    setLatestFrame('')
+  }, [])
+
+  const removeFrameForThread = useCallback((threadId: string) => {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return
+    const normalizedUserId = (userId ?? '').trim() || 'anon'
+    const scopeKey = `${normalizedUserId}:${normalizedThreadId}`
+    removePersistedFrame(scopeKey)
+    if (activeFrameScopeKeyRef.current === scopeKey) {
+      setLatestFrame('')
+    }
+  }, [userId])
 
   const spawnSubAgent = useCallback((instruction: string, model: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -442,5 +666,5 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     return false
   }, [])
 
-  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, isWorking, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

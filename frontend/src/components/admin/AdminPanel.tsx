@@ -45,6 +45,8 @@ type AuditEntry = {
 
 const ADMIN_TABS = ['Dashboard', 'Users', 'Agent Config', 'Messaging', 'Emailing', 'Audit Log'] as const
 type AdminTab = (typeof ADMIN_TABS)[number]
+const MODE_IDS = ['orchestrator', 'planner', 'architect', 'deep_research', 'code'] as const
+type ModeId = (typeof MODE_IDS)[number]
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -588,6 +590,14 @@ function UsersTab() {
 
 function AgentConfigTab() {
   const [instruction, setInstruction] = useState('')
+  const [modeInstructions, setModeInstructions] = useState<Record<ModeId, string>>({
+    orchestrator: '',
+    planner: '',
+    architect: '',
+    deep_research: '',
+    code: '',
+  })
+  const [instructionSection, setInstructionSection] = useState<'global' | 'mode'>('global')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -600,6 +610,17 @@ function AgentConfigTab() {
       .then((r) => r.json())
       .then((data) => {
         setInstruction(data.global_system_instruction ?? '')
+        const nextModeInstructions: Record<ModeId, string> = {
+          orchestrator: '',
+          planner: '',
+          architect: '',
+          deep_research: '',
+          code: '',
+        }
+        for (const mode of MODE_IDS) {
+          nextModeInstructions[mode] = data.mode_system_instructions?.[mode] ?? ''
+        }
+        setModeInstructions(nextModeInstructions)
         setLoading(false)
       })
       .catch(() => {
@@ -637,7 +658,10 @@ function AgentConfigTab() {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ global_system_instruction: instruction }),
+        body: JSON.stringify({
+          global_system_instruction: instruction,
+          mode_system_instructions: modeInstructions,
+        }),
       })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setSaved(true)
@@ -659,12 +683,34 @@ function AgentConfigTab() {
 
   return (
     <div className='max-w-2xl space-y-6'>
+      <div className='w-full overflow-x-auto scrollbar-none rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
+        <div className='flex w-max gap-1'>
+          {[
+            { id: 'global', label: 'Global Instruction' },
+            { id: 'mode', label: 'Mode Instructions' },
+          ].map((section) => (
+            <button
+              key={section.id}
+              type='button'
+              onClick={() => setInstructionSection(section.id as 'global' | 'mode')}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition ${
+                instructionSection === section.id ? 'bg-[#1e1e1e] text-zinc-100 shadow' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {section.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div>
-        <h2 className='text-base font-semibold text-white'>Aegis Global System Instructions</h2>
+        <h2 className='text-base font-semibold text-white'>
+          {instructionSection === 'global' ? 'Aegis Global System Instructions' : 'Aegis Mode System Instructions'}
+        </h2>
         <p className='mt-1 text-xs text-zinc-400'>
-          This instruction is injected at the top of every agent system prompt on every session,
-          for every user. It is authoritative - users cannot see or override it. Use it to enforce
-          platform-wide behavior, safety guardrails, brand voice, or restrictions.
+          {instructionSection === 'global'
+            ? 'This instruction is injected at the top of every agent system prompt on every session, for every user. It is authoritative - users cannot see or override it.'
+            : 'Each mode instruction is injected after the global instruction and before user runtime instructions. Admin-defined mode instructions are authoritative within that mode.'}
         </p>
       </div>
 
@@ -676,22 +722,48 @@ function AgentConfigTab() {
         </p>
       </div>
 
-      <div className='space-y-2'>
-        <label htmlFor='global-instruction' className='text-xs font-medium text-zinc-300'>
-          Global instruction
-        </label>
-        <textarea
-          id='global-instruction'
-          value={instruction}
-          onChange={(e) => { setInstruction(e.target.value); setSaved(false) }}
-          rows={10}
-          placeholder='e.g. You are operating as Aegis on the Acme Corp platform. Always respond in formal English. Never discuss competitor products. Route any billing questions to support@acme.com.'
-          className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] p-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none'
-        />
-        <p className='text-xs text-zinc-500'>
-          Leave blank to use only the built-in Aegis identity and the per-user runtime instructions.
-        </p>
-      </div>
+      {instructionSection === 'global' ? (
+        <div className='space-y-2'>
+          <label htmlFor='global-instruction' className='text-xs font-medium text-zinc-300'>
+            Global instruction
+          </label>
+          <textarea
+            id='global-instruction'
+            value={instruction}
+            onChange={(e) => { setInstruction(e.target.value); setSaved(false) }}
+            rows={10}
+            placeholder='e.g. You are operating as Aegis on the Acme Corp platform. Always respond in formal English. Never discuss competitor products. Route any billing questions to support@acme.com.'
+            className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] p-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none'
+          />
+          <p className='text-xs text-zinc-500'>
+            Leave blank to use only built-in defaults plus mode and per-user runtime instructions.
+          </p>
+        </div>
+      ) : (
+        <div className='space-y-4'>
+          {MODE_IDS.map((modeId) => (
+            <div key={modeId} className='space-y-2'>
+              <label htmlFor={`mode-instruction-${modeId}`} className='text-xs font-medium text-zinc-300'>
+                {modeId.replace('_', ' ')} mode instruction
+              </label>
+              <textarea
+                id={`mode-instruction-${modeId}`}
+                value={modeInstructions[modeId]}
+                onChange={(e) => {
+                  setModeInstructions((prev) => ({ ...prev, [modeId]: e.target.value }))
+                  setSaved(false)
+                }}
+                rows={5}
+                placeholder={`Authoritative instruction block for ${modeId} mode.`}
+                className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] p-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none'
+              />
+            </div>
+          ))}
+          <p className='text-xs text-zinc-500'>
+            Leave blank to use the built-in default behavior for that mode.
+          </p>
+        </div>
+      )}
 
       <div className='space-y-3 rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
         <h3 className='text-sm font-semibold text-zinc-200'>Global Agent Observability Dashboard</h3>

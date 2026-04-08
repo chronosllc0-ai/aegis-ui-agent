@@ -21,12 +21,15 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings as _app_settings
-from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY
+from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUCTION_KEY_PREFIX
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
 from backend.providers.base import BaseProvider, ChatMessage
+from backend.skills.parser import extract_runtime_guidance_block
+from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
 from backend.session_workspace import (
     ensure_session_workspace,
     get_session_files_root,
@@ -37,8 +40,21 @@ from backend.session_workspace import (
 logger = logging.getLogger(__name__)
 
 MAX_STEPS = 40
+MAX_BATCH_TOOL_CALLS = 3
 RESULT_CHAR_LIMIT = 12_000
 CODE_OUTPUT_LIMIT = 8_000
+PARALLEL_SAFE_TOOLS = frozenset(
+    {
+        "wait",
+        "web_search",
+        "extract_page",
+        "list_files",
+        "read_file",
+        "memory_search",
+        "memory_read",
+        "screenshot",
+    }
+)
 EXEC_ENV_BLOCKED_PREFIXES = (
     "API_",
     "AWS_",
@@ -427,6 +443,31 @@ def _connected_integrations(settings: dict[str, Any]) -> set[str]:
     return connected
 
 
+def _normalize_tool_names(raw_values: Any) -> set[str]:
+    """Normalize a raw array-like tool name payload into lowercase tool ids."""
+    if not isinstance(raw_values, list):
+        return set()
+    normalized: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str):
+            continue
+        tool = raw.strip().lower()
+        if tool:
+            normalized.add(tool)
+    return normalized
+
+
+def _resolve_skill_tool_policy(settings: dict[str, Any]) -> tuple[set[str] | None, set[str]]:
+    """Resolve effective runtime skill allow/deny policy from settings.
+
+    Allow list is treated as an intersection when provided by one or more skills.
+    Deny list is always treated as a union, and deny always wins.
+    """
+    allow_set = _normalize_tool_names(settings.get("skill_allow_tools"))
+    deny_set = _normalize_tool_names(settings.get("skill_deny_tools"))
+    return (allow_set if allow_set else None), deny_set
+
+
 def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dict[str, Any]]:
     """Resolve the current tool manifest after permissions and integration gating."""
     disabled_tools = {str(item) for item in settings.get("disabled_tools", []) or []}
@@ -447,16 +488,164 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
             continue
         if name in disabled_tools:
             continue
+        if name in skill_deny_tools:
+            continue
+        if skill_allow_tools is not None and name not in skill_allow_tools:
+            continue
         required_integration = tool.get("requires_integration")
         if required_integration and required_integration not in connected_integrations:
             continue
         if subagent_allowlist is not None and name not in subagent_allowlist:
             continue
+        if not is_tool_allowed_for_mode(agent_mode, name):
+            continue
         available.append(tool)
     return available
 
 
-async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_subagent: bool) -> str:
+def _normalize_skill_content(content: str) -> str:
+    """Trim and sanitize control characters in runtime skill content."""
+    normalized = "".join(char for char in content if char in {"\n", "\t"} or (ord(char) >= 32 and ord(char) != 127))
+    return normalized.strip()
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate prompt tokens with a lightweight character heuristic."""
+    return max(1, len(text) // 4)
+
+
+def _format_runtime_skill_block(skill: RuntimeSkill) -> str:
+    """Create bounded runtime guidance block text for a single skill."""
+    raw_markdown = _normalize_skill_content(skill.content)
+    if not raw_markdown:
+        raise ValueError("empty skill markdown")
+
+    frontmatter, runtime_guidance = extract_runtime_guidance_block(raw_markdown)
+    if not frontmatter and not runtime_guidance:
+        raise ValueError("missing runtime guidance")
+
+    slug = skill.skill_slug or skill.skill_id
+    version_label = skill.version_label or skill.version_id or "unknown"
+    source_label = f"{slug}@{version_label}"
+    header = f"[skill:{source_label} source={skill.source} version_id={skill.version_id}]"
+    parts: list[str] = [header]
+    if frontmatter:
+        parts.append("Frontmatter:\n" + frontmatter)
+    if runtime_guidance:
+        parts.append("Runtime Guidance:\n" + runtime_guidance)
+    block = "\n\n".join(parts).strip()
+
+    per_skill_max_chars = max(int(getattr(_app_settings, "SKILLS_MAX_BLOCK_CHARS", 2_000)), 200)
+    if len(block) > per_skill_max_chars:
+        return f"{block[:per_skill_max_chars].rstrip()}\n... [truncated per-skill guidance]"
+    return block
+
+
+def _assemble_runtime_skills_section(
+    runtime_skills: list[RuntimeSkill],
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build runtime skill prompt section using priority-aware deterministic budgeting."""
+    raw_budget = getattr(_app_settings, "SKILLS_MAX_TOKENS", getattr(_app_settings, "SKILLS_MAX_TOKEN", 10_000))
+    budget = max(int(raw_budget), 0)
+    min_priority = getattr(_app_settings, "SKILLS_MIN_PRIORITY", None)
+    sorted_skills = sorted(
+        runtime_skills,
+        key=lambda item: (
+            -int(item.priority),
+            item.skill_slug or item.skill_id,
+            item.version_label or item.version_id,
+            item.version_id,
+        ),
+    )
+
+    included: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    chunks: list[str] = []
+    budget_excluded_labels: list[str] = []
+    used_tokens = 0
+    for skill in sorted_skills:
+        if min_priority is not None and skill.priority < min_priority:
+            excluded.append({"skill_id": skill.skill_id, "reason": "below_min_priority"})
+            continue
+        try:
+            chunk = _format_runtime_skill_block(skill)
+        except Exception:  # noqa: BLE001
+            excluded.append({"skill_id": skill.skill_id, "reason": "parse_failed"})
+            continue
+
+        estimated_tokens = _estimate_tokens(chunk)
+        if used_tokens + estimated_tokens > budget:
+            excluded.append({"skill_id": skill.skill_id, "reason": "budget_exceeded"})
+            slug = skill.skill_slug or skill.skill_id
+            version_label = skill.version_label or skill.version_id or "unknown"
+            budget_excluded_labels.append(f"{slug}@{version_label}")
+            continue
+        used_tokens += estimated_tokens
+        chunks.append(chunk)
+        included.append(
+            {
+                "skill_id": skill.skill_id,
+                "version": skill.version_id,
+                "slug": skill.skill_slug,
+                "version_label": skill.version_label,
+                "source": skill.source,
+                "priority": skill.priority,
+            }
+        )
+
+    if not chunks:
+        return "", included, excluded
+
+    body = "\n".join(chunks).strip()
+    if budget_excluded_labels:
+        overflow_summary = ", ".join(sorted(budget_excluded_labels))
+        body = (
+            f"{body}\n\n[skills-warning] Aggregate skill token budget exceeded; "
+            f"some skills were omitted. Omitted: {overflow_summary}"
+        )
+    return f"\n\n### Active Skills (read-only directives)\n{body}\n", included, excluded
+
+
+async def _load_runtime_skills(
+    *,
+    session_id: str,
+    user_uid: str | None,
+    settings: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load and prepare runtime skills section. Fail-open unless configured otherwise."""
+    if not user_uid:
+        return "", [], []
+
+    correlation_id = str(settings.get("correlation_id") or settings.get("request_id") or session_id)
+    try:
+        from backend.database import _session_factory
+
+        if _session_factory is None:
+            return "", [], []
+
+        async with _session_factory() as db:
+            runtime_skills = await get_active_runtime_skills(db, user_uid, session_id)
+    except SQLAlchemyError as exc:
+        logger.warning("Runtime skills unavailable (correlation_id=%s): %s", correlation_id, exc)
+        if _app_settings.SKILLS_FAIL_CLOSED:
+            raise
+        return "", [], []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Runtime skills loader failed (correlation_id=%s): %s", correlation_id, exc)
+        if _app_settings.SKILLS_FAIL_CLOSED:
+            raise
+        return "", [], []
+
+    return _assemble_runtime_skills_section(runtime_skills)
+
+
+async def _build_system_prompt(
+    *,
+    session_id: str,
+    settings: dict[str, Any],
+    is_subagent: bool,
+    runtime_skills_section: str = "",
+) -> str:
     """Build the current system prompt from enabled tools and user instruction."""
     workspace_root = get_session_workspace_root(session_id)
     files_root = get_session_files_root(session_id)
@@ -520,7 +709,6 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
     try:
         from backend.database import _session_factory, PlatformSetting
         from sqlalchemy import select as _sa_select
-        from sqlalchemy.exc import SQLAlchemyError
         if _session_factory is not None:
             async with _session_factory() as _db:
                 _row = (await _db.execute(
@@ -535,9 +723,34 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
     if not global_instruction:
         global_instruction = _app_settings.AEGIS_GLOBAL_SYSTEM_INSTRUCTION.strip()
 
+    # ── Per-mode system instruction (admin-controlled, authoritative) ────────
+    mode_instruction = ""
+    mode_instruction_key = f"{MODE_INSTRUCTION_KEY_PREFIX}{agent_mode}"
+    try:
+        from backend.database import _session_factory, PlatformSetting
+        from sqlalchemy import select as _sa_select
+        if _session_factory is not None:
+            async with _session_factory() as _db:
+                _row = (await _db.execute(
+                    _sa_select(PlatformSetting).where(PlatformSetting.key == mode_instruction_key)
+                )).scalar_one_or_none()
+                if _row and _row.value.strip():
+                    mode_instruction = _row.value.strip()
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to fetch mode system instruction from DB (SQLAlchemy): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch mode system instruction from DB: %s", exc)
+    if not mode_instruction:
+        mode_instruction = MODE_SYSTEM_HINTS.get(agent_mode, "").strip()
+
     global_block = (
         f"Global operator instructions (authoritative — always follow these):\n{global_instruction}\n\n"
         if global_instruction
+        else ""
+    )
+    mode_block = (
+        f"Mode instructions for '{agent_mode}' (authoritative after global):\n{mode_instruction}\n\n"
+        if mode_instruction
         else ""
     )
 
@@ -550,6 +763,8 @@ async def _build_system_prompt(*, session_id: str, settings: dict[str, Any], is_
     )
     return (
         f"{global_block}"
+        f"{mode_block}"
+        f"{runtime_skills_section}"
         "You are Aegis, an AI agent built by Chronos AI. You can browse the web and, when enabled, use "
         "workspace, memory, automation, and GitHub repo-engineering tools while respecting runtime policy gates.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
@@ -584,6 +799,9 @@ class UniversalToolExecutor:
         self._on_message_subagent = on_message_subagent
         self._is_subagent = is_subagent
         self._disabled_tools = {str(item) for item in self._settings.get("disabled_tools", []) or []}
+        self._agent_mode = normalize_agent_mode(self._settings.get("agent_mode", ""))
+        self._mode_blocked_tools = {str(item) for item in blocked_tools_for_mode(self._agent_mode)}
+        self._skill_allow_tools, self._skill_deny_tools = _resolve_skill_tool_policy(self._settings)
         self._tool_permissions: dict[str, ToolPermission] = {
             str(key): str(value) for key, value in (self._settings.get("tool_permissions", {}) or {}).items()
         }
@@ -593,7 +811,7 @@ class UniversalToolExecutor:
         ensure_session_workspace(self._session_id)
         self._github_manager: GitHubRepoWorkspaceManager | None = None
 
-    async def run(self, tool_call: dict[str, Any]) -> tuple[str, bytes | None]:
+    async def run(self, tool_call: dict[str, Any], *, skip_policy_checks: bool = False) -> tuple[str, bytes | None]:
         """Execute a tool and return (text_result, optional_screenshot_bytes)."""
         tool = str(tool_call.get("tool", "")).strip()
         screenshot: bytes | None = None
@@ -601,13 +819,14 @@ class UniversalToolExecutor:
         if tool in {"done", "error"}:
             return "", None
 
-        unavailable_reason = self._tool_unavailable_reason(tool)
-        if unavailable_reason:
-            return unavailable_reason, None
+        if not skip_policy_checks:
+            unavailable_reason = self._tool_unavailable_reason(tool)
+            if unavailable_reason:
+                return unavailable_reason, None
 
-        blocked_by_approval = await self._confirm_if_needed(tool_call)
-        if blocked_by_approval:
-            return blocked_by_approval, None
+            blocked_by_approval = await self._confirm_if_needed(tool_call)
+            if blocked_by_approval:
+                return blocked_by_approval, None
 
         try:
             if tool == "screenshot":
@@ -838,22 +1057,57 @@ class UniversalToolExecutor:
 
     def _tool_unavailable_reason(self, tool: str) -> str | None:
         """Explain why a tool is not available in the current session."""
+        reason, _ = self._tool_unavailable_reason_with_meta(tool)
+        return reason
+
+    def _tool_unavailable_reason_with_meta(self, tool: str) -> tuple[str | None, dict[str, str] | None]:
+        """Explain why a tool is not available in the current session with safe metadata."""
         if not tool:
-            return "Tool name is required."
+            return "Tool name is required.", {"policy_source": "validation"}
         metadata = TOOL_INDEX.get(tool)
         if metadata is None:
-            return None
+            return None, None
         if self._is_subagent:
             from subagent_runtime import SUBAGENT_ALLOWED_TOOLS
 
             if tool not in SUBAGENT_ALLOWED_TOOLS:
-                return f"Tool '{tool}' is not available to sub-agents."
+                return f"Tool '{tool}' is not available to sub-agents.", {"policy_source": "subagent"}
+        if tool in self._mode_blocked_tools:
+            alternatives = allowed_tool_alternatives(self._agent_mode, limit=10)
+            return (
+                f"Tool '{tool}' is unavailable in '{self._agent_mode}' mode.",
+                {
+                    "policy_source": "mode",
+                    "agent_mode": self._agent_mode,
+                    "allowed_alternatives": alternatives,
+                    "refusal": {
+                        "type": "mode_policy_refusal",
+                        "requested_tool": tool,
+                        "effective_mode": self._agent_mode,
+                        "reason": "tool_disallowed_for_mode",
+                        "allowed_alternatives": alternatives,
+                    },
+                },
+            )
+        if tool in self._skill_deny_tools:
+            return (
+                f"Tool '{tool}' is blocked by active skill policy denylist.",
+                {"policy_source": "skill_policy", "policy_rule": "deny_union"},
+            )
+        if self._skill_allow_tools is not None and tool not in self._skill_allow_tools:
+            return (
+                f"Tool '{tool}' is blocked by active skill policy allowlist.",
+                {"policy_source": "skill_policy", "policy_rule": "allow_intersection"},
+            )
         if tool in self._disabled_tools:
-            return f"Tool '{tool}' is currently disabled in Settings → Tools."
+            return f"Tool '{tool}' is currently disabled in Settings → Tools.", {"policy_source": "settings"}
         required_integration = metadata.get("requires_integration")
         if required_integration and required_integration not in self._connected_integrations:
-            return f"Tool '{tool}' requires a connected GitHub PAT in Settings → Connections."
-        return None
+            return (
+                f"Tool '{tool}' requires a connected GitHub PAT in Settings → Connections.",
+                {"policy_source": "integration", "required_integration": str(required_integration)},
+            )
+        return None, None
 
     async def _confirm_if_needed(self, tool_call: dict[str, Any]) -> str | None:
         """Pause for approval when the current tool requires it."""
@@ -1417,6 +1671,140 @@ async def run_universal_navigation(
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider."""
     resolved_settings = settings or {}
+    active_mode = normalize_agent_mode(resolved_settings.get("agent_mode", ""))
+    if active_mode == "orchestrator" and not is_subagent:
+        route_decision = OrchestratorModeRouter.classify(
+            instruction,
+            requested_mode=str(resolved_settings.get("agent_mode", "")),
+        )
+        delegate_settings = {**resolved_settings, "agent_mode": route_decision.selected_mode}
+        delegate_timeout = min(max(int(resolved_settings.get("orchestrator_delegate_timeout_seconds", 120)), 15), 600)
+        route_trace = {
+            "type": "route_decision",
+            "router_mode": "orchestrator",
+            "selected_mode": route_decision.selected_mode,
+            "reason": route_decision.reason,
+            "confidence": route_decision.confidence,
+            "bypass_attempt_detected": route_decision.bypass_attempt_detected,
+            "timeout_seconds": delegate_timeout,
+        }
+        if on_step:
+            await on_step({"type": "route_decision", "content": json.dumps(route_trace), "steering": []})
+        if on_workflow_step:
+            await on_workflow_step(route_trace)
+
+        child_results: list[dict[str, Any]] = []
+        delegated_fallback_result: dict[str, Any] | None = None
+        primary_result: dict[str, Any] | None = None
+        try:
+            primary_result = await asyncio.wait_for(
+                run_universal_navigation(
+                    provider=provider,
+                    model=model,
+                    executor=executor,
+                    session_id=session_id,
+                    instruction=instruction,
+                    settings=delegate_settings,
+                    on_step=on_step,
+                    on_frame=on_frame,
+                    cancel_event=cancel_event,
+                    steering_context=steering_context,
+                    on_workflow_step=on_workflow_step,
+                    on_user_input=on_user_input,
+                    user_uid=user_uid,
+                    enable_reasoning=enable_reasoning,
+                    reasoning_effort=reasoning_effort,
+                    on_reasoning_delta=on_reasoning_delta,
+                    on_spawn_subagent=on_spawn_subagent,
+                    on_message_subagent=on_message_subagent,
+                    is_subagent=is_subagent,
+                ),
+                timeout=delegate_timeout,
+            )
+            child_results.append(
+                {
+                    "ref": "child:primary",
+                    "mode": route_decision.selected_mode,
+                    "status": primary_result.get("status"),
+                }
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as delegate_exc:  # noqa: BLE001
+            logger.warning("Orchestrator delegate mode failed; using fallback code mode: %s", delegate_exc)
+            fallback_settings = {**resolved_settings, "agent_mode": "code"}
+            try:
+                delegated_fallback_result = await run_universal_navigation(
+                    provider=provider,
+                    model=model,
+                    executor=executor,
+                    session_id=session_id,
+                    instruction=instruction,
+                    settings=fallback_settings,
+                    on_step=on_step,
+                    on_frame=on_frame,
+                    cancel_event=cancel_event,
+                    steering_context=steering_context,
+                    on_workflow_step=on_workflow_step,
+                    on_user_input=on_user_input,
+                    user_uid=user_uid,
+                    enable_reasoning=enable_reasoning,
+                    reasoning_effort=reasoning_effort,
+                    on_reasoning_delta=on_reasoning_delta,
+                    on_spawn_subagent=on_spawn_subagent,
+                    on_message_subagent=on_message_subagent,
+                    is_subagent=is_subagent,
+                )
+                primary_result = delegated_fallback_result
+                child_results.append(
+                    {
+                        "ref": "child:fallback",
+                        "mode": "code",
+                        "status": delegated_fallback_result.get("status"),
+                    }
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as fallback_exc:  # noqa: BLE001
+                logger.exception("Orchestrator fallback mode failed after primary delegation failure.")
+                failure_error = (
+                    f"Delegation failed in mode '{route_decision.selected_mode}' ({delegate_exc}); "
+                    f"fallback 'code' mode also failed ({fallback_exc})."
+                )
+                child_results.append({"ref": "child:fallback", "mode": "code", "status": "failed"})
+                failed_result = {
+                    "status": "failed",
+                    "instruction": instruction,
+                    "error": failure_error,
+                    "route_trace": route_trace,
+                    "child_results": child_results,
+                }
+                if on_step:
+                    await on_step(
+                        {
+                            "type": "error",
+                            "content": failure_error,
+                            "steering": [],
+                        }
+                    )
+                return failed_result
+
+        assert primary_result is not None
+        synthesis = build_synthesis(
+            decision=route_decision,
+            primary_result=primary_result,
+            fallback_result=delegated_fallback_result,
+        )
+        child_ref_step = {"type": "child_result_refs", "content": json.dumps({"references": child_results}), "steering": []}
+        if on_step:
+            await on_step(child_ref_step)
+            await on_step({"type": "result", "content": synthesis, "steering": []})
+        result_payload = dict(primary_result)
+        result_payload["summary"] = synthesis
+        result_payload["route_trace"] = route_trace
+        result_payload["child_results"] = child_results
+        return result_payload
+
     tool_executor = UniversalToolExecutor(
         executor,
         session_id=session_id,
@@ -1427,7 +1815,27 @@ async def run_universal_navigation(
         on_message_subagent=on_message_subagent,
         is_subagent=is_subagent,
     )
-    system_prompt = await _build_system_prompt(session_id=session_id, settings=resolved_settings, is_subagent=is_subagent)
+    runtime_skills_section, included_skills, excluded_skills = await _load_runtime_skills(
+        session_id=session_id,
+        user_uid=user_uid,
+        settings=resolved_settings,
+    )
+    skills_loaded_event = {
+        "type": "skills_loaded",
+        "task_id": session_id,
+        "skills": included_skills,
+        "excluded": excluded_skills,
+    }
+    logger.info("skills_loaded %s", json.dumps(skills_loaded_event, ensure_ascii=False))
+    if on_workflow_step:
+        await on_workflow_step(skills_loaded_event)
+
+    system_prompt = await _build_system_prompt(
+        session_id=session_id,
+        settings=resolved_settings,
+        is_subagent=is_subagent,
+        runtime_skills_section=runtime_skills_section,
+    )
     messages: list[ChatMessage] = []
     steps: list[dict[str, Any]] = []
     parent_step_id: str | None = None
@@ -1617,6 +2025,34 @@ async def run_universal_navigation(
                     images=[screenshot_frames[-1]],
                 )
             )
+
+        batch_complete_event = {
+            "type": "batch_tool_complete",
+            "task_id": session_id,
+            "count": len(tool_calls),
+            "ok_count": sum(1 for item in all_results if item["ok"]),
+            "error_count": sum(1 for item in all_results if not item["ok"]),
+        }
+        logger.info("batch_tool_complete %s", json.dumps(batch_complete_event, ensure_ascii=False))
+        if on_workflow_step:
+            await on_workflow_step(batch_complete_event)
+
+        screenshot_candidates = [item for item in all_results if item["ok"] and item.get("screenshot_bytes")]
+        screenshot_result = max(screenshot_candidates, key=lambda item: int(item["index"]), default=None)
+        follow_up_lines = ["Tool results:"]
+        for line_index, result in enumerate(all_results, start=1):
+            status = "ok" if result["ok"] else "error"
+            content = result["result_text"] if result["ok"] else result["error"]
+            follow_up_lines.append(f"{line_index}) [{result['tool']}] {status}: {content}")
+        follow_up_lines.append("")
+        follow_up_lines.append("Decide the next action.")
+        follow_up_text = "\n".join(follow_up_lines)
+
+        if screenshot_result:
+            screenshot_bytes = screenshot_result["screenshot_bytes"]
+            if screenshot_bytes and on_frame:
+                await on_frame(base64.b64encode(screenshot_bytes).decode())
+            messages.append(ChatMessage(role="user", content=follow_up_text, images=[screenshot_bytes]))
         else:
             messages.append(ChatMessage(role="user", content=f"{follow_up_content}\n\nDecide your next action."))
 
