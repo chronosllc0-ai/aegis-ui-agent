@@ -121,9 +121,7 @@ def mode_definitions() -> tuple[ModeDefinition, ...]:
 def serialize_mode_definition(mode: AgentMode) -> dict[str, object]:
     """Serialize one mode definition for API responses."""
     normalized_mode = normalize_agent_mode(mode)
-    definition = next((item for item in mode_definitions() if item.key == normalized_mode), None)
-    if not definition:
-        definition = mode_definitions()[0]
+    definition = next(item for item in mode_definitions() if item.key == normalized_mode)
     payload = asdict(definition)
     payload["blocked_tools_count"] = len(definition.blocked_tools)
     return payload

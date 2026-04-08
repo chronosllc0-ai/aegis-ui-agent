@@ -504,8 +504,6 @@ def _available_tools(settings: dict[str, Any], *, is_subagent: bool) -> list[dic
             continue
         if subagent_allowlist is not None and name not in subagent_allowlist:
             continue
-        if not is_tool_allowed_for_mode(agent_mode, name):
-            continue
         available.append(tool)
     return available
 
