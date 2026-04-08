@@ -1,3 +1,32 @@
+## Session 5.94 - April 8, 2026 (installed UI/UX Pro Max Codex skill)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 install + verification pass
+
+### What Was Done
+- Followed upstream installation instructions from `nextlevelbuilder/ui-ux-pro-max-skill` README for Codex CLI.
+- Installed `uipro-cli` globally with npm.
+- Ran `uipro init --ai codex` from the repository root to install the skill for this workspace.
+- Added generated Codex skill assets under `.codex/skills/ui-ux-pro-max/` (including `SKILL.md`, data CSVs, and helper scripts).
+
+### What's Working
+- UI/UX Pro Max skill is now present in `.codex/skills/ui-ux-pro-max/` and ready to be used by Codex after restart.
+
+### What's NOT Working Yet
+- None identified in this pass.
+
+### Next Steps
+1. Restart Codex/agent runtime to ensure the newly installed skill is loaded.
+2. Optionally run a small prompt-based smoke test using the installed skill workflows.
+
+### Decisions Made
+- Used the project-local Codex skill installation flow (`uipro init --ai codex`) so the skill is versioned with this repo context.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.93 - April 8, 2026 (mode selection parity across web + messaging integrations)
 
 **Agent:** GPT-5.3-Codex  
