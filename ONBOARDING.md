@@ -1,3 +1,125 @@
+## Session 5.82 - April 8, 2026 (PR review fixes: persistent admin skills policy + marketplace version label cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review warning about volatile in-memory admin policy storage in `backend/skills/router.py`:
+  - replaced module-global `_admin_skill_policy_state` usage with persistent reads/writes to `PlatformSetting` (`aegis_admin_skills_policy_v1`),
+  - added helper functions to normalize and sanitize persisted JSON shape,
+  - `GET /api/admin/skills/policy` now reads from DB,
+  - `POST /api/admin/skills/policy` now writes to DB and commits.
+- Addressed marketplace version-display nit in `frontend/src/components/settings/SkillsTab.tsx`:
+  - removed incorrect `updated_at` year-as-version rendering,
+  - now shows `Updated <date>` labels instead of fake semantic versions.
+- Hardened `savePolicy` in `frontend/src/hooks/useSkills.ts`:
+  - explicitly wraps API call in try/catch,
+  - only updates local policy state after successful response,
+  - preserves prior state on failure and propagates error for UI toast handling.
+
+### What's Working
+- Admin policy now persists across pod restarts/deploys (DB-backed) instead of resetting.
+- Marketplace list no longer mislabels years as semantic versions.
+- Policy UI state no longer risks local desync on failed saves.
+
+### What's NOT Working Yet
+- No additional issues identified in this review-fix pass.
+
+### Next Steps
+1. Optional: expose `updated_by` / `updated_at` metadata for policy changes in admin UI.
+
+### Decisions Made
+- Reused existing `PlatformSetting` key-value store instead of introducing a new table to keep migration impact minimal.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.81 - April 8, 2026 (ClawHub-style Skills marketplace/publishing UI refresh)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 UI redesign pass
+
+### What Was Done
+- Reworked `frontend/src/components/settings/SkillsTab.tsx` into a ClawHub-inspired Skills experience (Aegis color/branding):
+  - user marketplace header + search/filter/view controls,
+  - table/card listing mode,
+  - click-to-open skill detail panel with install CTA and scan/license summary styling,
+  - richer publish form section (metadata card + drag/drop folder zone + SKILL.md area + license + changelog + publish CTA),
+  - retained installed-skills management with optimistic toggle + rollback and uninstall rollback behavior,
+  - added admin publishing controls panel with review queue actions (scan / approve hub / approve global / reject) plus existing policy controls.
+- Extended `frontend/src/hooks/useSkills.ts` to support marketplace and publishing flows:
+  - load hub catalog (`/api/skills/hub`),
+  - install skill (`/api/skills/{id}/install`),
+  - submit skill (`/api/skills/submit`),
+  - admin review queue (`/api/admin/skills/review-queue`) and moderation actions (`scan`, `review`).
+
+### What's Working
+- Skills page now includes user-facing marketplace + detail + publishing UX and admin publishing controls in one cohesive screen.
+- Installed/enable/uninstall behavior remains wired and optimistic.
+- Skill submission can now be triggered directly from Settings > Skills UI.
+- Admin moderation actions are callable directly from the Skills tab.
+
+### What's NOT Working Yet
+- Marketplace/detail/publish styling is a close Aegis-themed clone but not pixel-perfect to every mobile screenshot dimension.
+- Folder drag-drop currently reads files client-side and only extracts SKILL.md text for submission payload.
+
+### Next Steps
+1. Add backend upload support for full folder/file payload storage (beyond SKILL.md text).
+2. Add compare/versions/file-tabs view in detail panel if strict parity is needed.
+3. Add integration tests around submit/install/review flows.
+
+### Decisions Made
+- Kept existing API contracts and wsConfig compatibility while expanding front-end capability.
+- Prioritized mobile-friendly dark marketplace/publishing structure matching reference hierarchy.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.80 - April 7, 2026 (Settings Skills management UI + API compatibility routes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added a new **Skills** tab to settings navigation and route mapping so `/settings/skills` resolves correctly in-app.
+- Implemented `frontend/src/components/settings/SkillsTab.tsx` with:
+  - user pane (installed skills list, enable/disable toggle, uninstall action, metadata chips for version/source/updated/risk),
+  - admin-only pane (org policy toggles + require-approval switch + default-enabled skill IDs editor).
+- Added `frontend/src/hooks/useSkills.ts` to centralize installed-skill fetch/mutations and admin policy fetch/save flows.
+- Extended `frontend/src/lib/api.ts` with a reusable authenticated `apiRequest(...)` helper and used it from `useSkills`.
+- Wired role-awareness into settings by passing `authRole` from `App.tsx` to `SettingsPage`, then gating admin controls in `SkillsTab` for `admin|superadmin` only.
+- Added backend compatibility endpoints in `backend/skills/router.py`:
+  - `POST /api/skills/toggle`
+  - `DELETE /api/skills/{skill_id}`
+  - `GET/POST /api/admin/skills/policy`
+
+### What's Working
+- Skills tab now appears in Settings and is route-addressable.
+- Installed skill toggling is optimistic in UI with rollback + toast error on failure.
+- Uninstall action updates UI and persists via backend uninstall endpoint.
+- Admin policy controls are hidden from non-admin roles and available to admin/superadmin users.
+- Frontend production build succeeds after these changes.
+
+### What's NOT Working Yet
+- Admin skills policy currently uses in-process router state (compatible API shape), not durable DB persistence yet.
+
+### Next Steps
+1. Persist admin policy in DB (or platform settings store) so policy survives backend restarts/multi-instance deployments.
+2. Optionally add policy audit logging for admin compliance tracking.
+
+### Decisions Made
+- Kept `wsConfig` shape backward-compatible and only synced `enabledSkillIds` through existing settings state.
+- Added API compatibility routes rather than replacing existing install/enable endpoints to avoid breaking existing clients.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.79 - April 7, 2026 (PR #183 follow-up: typing fix in async test helper)
 
 **Agent:** GPT-5.3-Codex  
