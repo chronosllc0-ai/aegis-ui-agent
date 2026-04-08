@@ -26,7 +26,8 @@ from backend.database import (
     SkillVersion,
     User,
 )
-from backend.skills.policy_store import get_blocklist_state, get_skills_policy
+from backend import database as database_module
+from backend.skills.policy_store import DEFAULT_SKILLS_POLICY, get_blocklist_state, get_skills_policy
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -745,21 +746,12 @@ class SkillService:
             raise ValueError("Approved skill is missing version")
 
         async def _block(reason: str) -> None:
-            session.add(
-                SkillAuditEvent(
-                    skill_id=skill.id,
-                    submission_id=None,
-                    skill_version_id=version.id,
-                    from_status=skill.status,
-                    to_status=skill.status,
-                    actor_id=user_id,
-                    actor_type="user",
-                    event_type="install_blocked",
-                    reason=reason,
-                    created_at=SkillService._now(),
-                )
+            await SkillService._log_install_blocked_event(
+                user_id=user_id,
+                skill=skill,
+                version_id=version.id,
+                reason=reason,
             )
-            await session.flush()
 
         policy = await get_skills_policy(session)
         allow_block_map = await get_blocklist_state(session)
@@ -770,15 +762,16 @@ class SkillService:
         if policy.get("require_approval_before_install") and skill_override.get("state") != "allow":
             await _block("requires_admin_approval")
             raise ValueError("Install blocked: requires admin approval before install")
-        if policy.get("block_high_risk_skills", True) and skill.risk_label in {"malicious", "suspicious"} and skill_override.get("state") != "allow":
+        if (
+            policy.get("block_high_risk_skills", DEFAULT_SKILLS_POLICY["block_high_risk_skills"])
+            and skill.risk_label in {"malicious", "suspicious"}
+            and skill_override.get("state") != "allow"
+        ):
             await _block(f"org_policy_risk_{skill.risk_label}")
             raise ValueError(f"Install blocked: org policy for risk level {skill.risk_label}")
         if skill.risk_label == "malicious":
             await _block("malicious_scan_result")
             raise ValueError("Install blocked: malicious scan result")
-        if skill.risk_label == "suspicious":
-            await _block("suspicious_requires_override")
-            raise ValueError("Install blocked: suspicious skill requires admin override")
         if skill.risk_label in {"scan_pending", "scan_failed"} and settings.VIRUSTOTAL_FALLBACK_POLICY == "block":
             await _block(f"scan_status_{skill.risk_label}")
             raise ValueError(f"Install blocked: scan status {skill.risk_label}")
@@ -831,6 +824,29 @@ class SkillService:
         )
         await session.flush()
         return install
+
+    @staticmethod
+    async def _log_install_blocked_event(*, user_id: str, skill: Skill, version_id: str, reason: str) -> None:
+        """Write blocked-install audit in an isolated transaction."""
+        if database_module._session_factory is None:
+            logger.warning("Skipping blocked install audit; database session factory unavailable")
+            return
+        async with database_module._session_factory() as audit_session:
+            audit_session.add(
+                SkillAuditEvent(
+                    skill_id=skill.id,
+                    submission_id=None,
+                    skill_version_id=version_id,
+                    from_status=skill.status,
+                    to_status=skill.status,
+                    actor_id=user_id,
+                    actor_type="user",
+                    event_type="install_blocked",
+                    reason=reason,
+                    created_at=SkillService._now(),
+                )
+            )
+            await audit_session.commit()
 
     @staticmethod
     async def uninstall_skill(session: AsyncSession, *, user_id: str, skill_id: str) -> int:

@@ -1,3 +1,41 @@
+## Session 5.84 - April 8, 2026 (PR #189 review fixes: policy semantics + exception transaction safety)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed PR review feedback in install policy enforcement:
+  1. **Default mismatch fix in runtime check**
+     - `SkillService.install_skill(...)` now uses `DEFAULT_SKILLS_POLICY["block_high_risk_skills"]` as the fallback instead of hardcoded `True`.
+  2. **Removed placebo behavior for suspicious skills**
+     - eliminated unconditional `suspicious_requires_override` hard-block branch so `block_high_risk_skills` now actually controls suspicious-risk blocking behavior.
+     - retained unconditional malicious blocking for safety.
+- Addressed review feedback about transaction safety on install failures:
+  - removed `commit()`-on-exception in router install endpoint and replaced with `rollback()`.
+  - moved `install_blocked` audit writes into an isolated DB transaction via a dedicated helper in `SkillService` using the shared async session factory (`backend.database._session_factory`) to avoid committing unrelated request state.
+- Updated tests to align with corrected policy semantics:
+  - `tests/test_skills_install_policy.py` now explicitly enables `block_high_risk_skills=True` before asserting suspicious-risk blocks.
+  - existing deterministic VT scan mocks in `tests/test_skills_api.py` continue to keep review-queue assertions stable.
+
+### What's Working
+- Review comments about default mismatch, placebo flag behavior, and exception transaction safety are now addressed in code.
+- Targeted skills/admin test set is green (`8 passed`).
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Optional: add a dedicated test that verifies suspicious installs are allowed when `block_high_risk_skills=False` and no explicit block override exists.
+
+### Decisions Made
+- Kept malicious-risk installs always blocked as a hard safety gate while making suspicious-risk behavior policy-driven.
+- Chose isolated audit transaction writes over request-transaction commit-on-error to preserve failure semantics and reduce accidental partial commits.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.83 - April 8, 2026 (fix test mismatch + deterministic scan mocks)
 
 **Agent:** GPT-5.3-Codex  
