@@ -23,16 +23,14 @@ class ModeDefinition:
 
 DEFAULT_AGENT_MODE: Final[AgentMode] = "orchestrator"
 
-# Tools blocked for read-only modes.
-READ_ONLY_BLOCKED_TOOLS: Final[set[str]] = {
+# Tools that execute side effects / mutations and are therefore code-mode only.
+EXECUTION_BLOCKED_TOOLS: Final[set[str]] = {
     "go_to_url",
     "click",
     "type_text",
     "scroll",
     "go_back",
     "wait",
-    "web_search",
-    "extract_page",
     "write_file",
     "exec_python",
     "exec_javascript",
@@ -54,9 +52,32 @@ READ_ONLY_BLOCKED_TOOLS: Final[set[str]] = {
     "github_push",
     "github_create_pr",
     "github_set_review",
+    "github_repo_diff",
+    "github_commit_changes",
+    "github_push_branch",
+    "github_create_pull_request",
 }
 
-ORCHESTRATOR_BLOCKED_TOOLS: Final[set[str]] = {"spawn_subagent"}
+READ_ONLY_ALLOWED_TOOLS: Final[frozenset[str]] = frozenset(
+    {
+        "screenshot",
+        "web_search",
+        "extract_page",
+        "list_files",
+        "read_file",
+        "ask_user_input",
+        "summarize_task",
+        "confirm_plan",
+        "memory_search",
+        "memory_read",
+        "github_list_repos",
+        "github_get_issues",
+        "github_get_pull_requests",
+        "github_get_file",
+        "done",
+        "error",
+    }
+)
 
 CANONICAL_MODE_ORDER: Final[tuple[AgentMode, ...]] = (
     "orchestrator",
@@ -76,10 +97,10 @@ MODE_REGISTRY: Final[dict[AgentMode, ModeDefinition]] = {
         label="Orchestrator",
         system_hint=(
             "Route each request to the best specialist mode (planner, architect, deep_research, or code), "
-            "synthesize outputs, and present a unified final answer."
+            "synthesize outputs, and present a unified final answer without executing tools."
         ),
-        read_only=False,
-        blocked_tools=frozenset(ORCHESTRATOR_BLOCKED_TOOLS),
+        read_only=True,
+        blocked_tools=frozenset(EXECUTION_BLOCKED_TOOLS),
         allow_subagents=False,
     ),
     "planner": ModeDefinition(
@@ -87,7 +108,7 @@ MODE_REGISTRY: Final[dict[AgentMode, ModeDefinition]] = {
         label="Planner",
         system_hint="Produce clear, executable plans, milestones, and risk-aware sequencing without executing tools.",
         read_only=True,
-        blocked_tools=frozenset(READ_ONLY_BLOCKED_TOOLS),
+        blocked_tools=frozenset(EXECUTION_BLOCKED_TOOLS),
         allow_subagents=False,
     ),
     "architect": ModeDefinition(
@@ -95,7 +116,7 @@ MODE_REGISTRY: Final[dict[AgentMode, ModeDefinition]] = {
         label="Architect",
         system_hint="Provide architecture decisions, tradeoffs, and implementation blueprints without tool execution.",
         read_only=True,
-        blocked_tools=frozenset(READ_ONLY_BLOCKED_TOOLS),
+        blocked_tools=frozenset(EXECUTION_BLOCKED_TOOLS),
         allow_subagents=False,
     ),
     "deep_research": ModeDefinition(
@@ -103,7 +124,7 @@ MODE_REGISTRY: Final[dict[AgentMode, ModeDefinition]] = {
         label="Deep Research",
         system_hint="Deliver evidence-based analysis and synthesis from available knowledge without tool execution.",
         read_only=True,
-        blocked_tools=frozenset(READ_ONLY_BLOCKED_TOOLS),
+        blocked_tools=frozenset(EXECUTION_BLOCKED_TOOLS),
         allow_subagents=False,
     ),
     "code": ModeDefinition(
@@ -119,6 +140,14 @@ MODE_REGISTRY: Final[dict[AgentMode, ModeDefinition]] = {
 MODE_LABELS: Final[dict[AgentMode, str]] = {mode: MODE_REGISTRY[mode].label for mode in CANONICAL_MODE_ORDER}
 MODE_SYSTEM_HINTS: Final[dict[AgentMode, str]] = {mode: MODE_REGISTRY[mode].system_hint for mode in CANONICAL_MODE_ORDER}
 READ_ONLY_MODES: Final[set[AgentMode]] = {mode for mode, definition in MODE_REGISTRY.items() if definition.read_only}
+MODE_CAPABILITY_MATRIX: Final[dict[AgentMode, dict[str, object]]] = {
+    mode: {
+        "read_only": definition.read_only,
+        "allow_subagents": definition.allow_subagents,
+        "blocked_tools": frozenset(definition.blocked_tools),
+    }
+    for mode, definition in MODE_REGISTRY.items()
+}
 
 
 def normalize_agent_mode(value: object) -> AgentMode:
@@ -129,10 +158,35 @@ def normalize_agent_mode(value: object) -> AgentMode:
     return DEFAULT_AGENT_MODE
 
 
+def validate_requested_mode(value: object) -> tuple[AgentMode, bool]:
+    """Return (effective_mode, is_valid_request)."""
+    raw = str(value or "").strip().lower()
+    if raw in MODE_REGISTRY:
+        return raw, True
+    return DEFAULT_AGENT_MODE, False
+
+
 def blocked_tools_for_mode(mode: AgentMode) -> set[str]:
     """Return tools that must be blocked for the requested mode."""
     normalized_mode = normalize_agent_mode(mode)
-    return set(MODE_REGISTRY[normalized_mode].blocked_tools)
+    return set(MODE_CAPABILITY_MATRIX[normalized_mode]["blocked_tools"])
+
+
+def is_tool_allowed_for_mode(mode: AgentMode, tool_name: str) -> bool:
+    """Return whether a tool is allowed for the requested mode."""
+    normalized_mode = normalize_agent_mode(mode)
+    tool = str(tool_name or "").strip().lower()
+    if not tool:
+        return False
+    return tool not in blocked_tools_for_mode(normalized_mode)
+
+
+def allowed_tool_alternatives(mode: AgentMode, *, limit: int = 8) -> list[str]:
+    """Return deterministic allowed tool suggestions for refusal payloads."""
+    normalized_mode = normalize_agent_mode(mode)
+    if normalized_mode in READ_ONLY_MODES:
+        return list(sorted(READ_ONLY_ALLOWED_TOOLS))[: max(1, limit)]
+    return []
 
 
 def mode_definitions() -> list[ModeDefinition]:

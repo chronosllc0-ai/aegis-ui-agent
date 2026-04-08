@@ -1,3 +1,49 @@
+## Session 5.87 - April 8, 2026 (backend mode policy enforcement hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Implemented a stricter, centralized backend mode policy in `backend/modes.py`:
+  - introduced a single capability matrix (`MODE_CAPABILITY_MATRIX`) derived from the canonical mode registry,
+  - added explicit execution/mutation tool blocklist for non-code modes,
+  - switched `orchestrator` to non-executing routing behavior (read-only tool surface),
+  - added helpers for strict mode validation (`validate_requested_mode`) and mode-aware alternatives (`allowed_tool_alternatives`).
+- Enforced server-side mode/tool policy in `universal_navigator.py`:
+  - tool availability now consults central mode policy helpers,
+  - mode-blocked tool attempts emit structured refusal metadata with allowed alternatives,
+  - batch workflow events now include mode denial diagnostics/refusal payloads.
+- Enforced per-turn mode validation in `main.py`:
+  - websocket messages with `mode` are validated each turn; invalid modes are rejected with structured refusal payloads,
+  - config updates validate `settings.agent_mode` before applying,
+  - runtime mode is normalized before task execution,
+  - direct websocket `spawn_subagent` action is blocked unless current mode policy allows it (effectively code mode only),
+  - `/mode` bot command now rejects invalid modes instead of silently coercing to default.
+
+### What's Working
+- Backend now blocks disallowed tools regardless of frontend payload mode/tool choices.
+- Only `code` mode can use execution/subagent capabilities based on central policy.
+- Orchestrator mode remains usable for routing/planning context without execution rights.
+
+### What's NOT Working Yet
+- No dedicated automated tests were added in this pass for the new refusal payload shape and websocket mode-validation branch behavior.
+
+### Next Steps
+1. Add focused tests for:
+   - invalid websocket mode payload rejection,
+   - `spawn_subagent` refusal outside `code`,
+   - structured mode denial payload fields (`type`, `reason`, `allowed_alternatives`).
+2. Consider exposing mode-policy refusal telemetry in an explicit client event type (in addition to `error`) for cleaner UI handling.
+
+### Decisions Made
+- Used acceptance criteria precedence: despite earlier orchestrator wording, execution/spawn is now code-mode only.
+- Kept one central policy source (`backend/modes.py`) and reused it across runtime tool filtering and websocket enforcement.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.86 - April 8, 2026 (PR #190 review follow-up: dead-code removal + message accuracy)
 
 **Agent:** GPT-5.3-Codex  
