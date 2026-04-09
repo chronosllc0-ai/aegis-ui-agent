@@ -700,6 +700,7 @@ function App() {
 
     const isNewTask = !isWorking
     const action = isWorking ? 'steer' : 'navigate'
+    console.info('[AegisUI] selected_mode=%s action=%s', selectedMode, action)
     const activeSubAgent = subAgents.find((a) => a.sub_id === selectedTaskId)
     if (activeSubAgent) {
       void messageSubAgent(activeSubAgent.sub_id, finalInstruction)
@@ -765,8 +766,10 @@ function App() {
     }
   }
 
-  const handlePrimarySend = (instruction: string, metadata?: Record<string, unknown>) => {
-    handleSend(instruction, isWorking ? 'steer' : mode, metadata)
+  const dispatchPromptFromUI = (instruction: string, metadata?: Record<string, unknown>) => {
+    const selectedMode = isWorking ? 'steer' : mode
+    console.info('[AegisUI] dispatch_source=chat_input selected_mode=%s websocket_action=%s', selectedMode, isWorking ? 'steer' : 'navigate')
+    handleSend(instruction, selectedMode, metadata)
   }
 
   const submitUrl = () => {
@@ -1196,7 +1199,7 @@ function App() {
                 mode={mode}
                 queuedMessages={queuedMessages}
                 onModeChange={setMode}
-                onPrimarySend={handlePrimarySend}
+                onPrimarySend={dispatchPromptFromUI}
                 onSend={handleSend}
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
@@ -1249,7 +1252,10 @@ function App() {
                       frameSrc={latestFrame}
                       isWorking={isWorking}
                       steeringFlashKey={steeringFlashKey}
-                      onExampleClick={(prompt) => handlePrimarySend(prompt, { task_label_source: 'chat', task_label: prompt })}
+                      onExampleClick={(prompt) => {
+                        console.info('[AegisUI] dispatch_source=browser_example')
+                        dispatchPromptFromUI(prompt, { task_label_source: 'chat', task_label: prompt })
+                      }}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}
                     />

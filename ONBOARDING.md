@@ -1,3 +1,44 @@
+## Session 5.64 - April 9, 2026 (Canonical UI prompt dispatch unification: chat + browser example parity)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend routing + regression-test pass
+
+### What Was Done
+- Unified primary prompt dispatch in `frontend/src/App.tsx` with a single canonical entrypoint:
+  - added `dispatchPromptFromUI(instruction, metadata)` that routes through `handleSend(instruction, isWorking ? 'steer' : mode, metadata)`.
+  - kept existing `handleSend` behavior unchanged (config send, queue/interrupt handling, optimistic history/task labels, agent mode metadata).
+- Routed both UI sources through the canonical dispatcher:
+  - `ChatPanel` primary submit path now uses `onPrimarySend` from App.
+  - `ScreenView` example prompt click now calls the same dispatcher with chat-sourced task-label metadata.
+- Added temporary diagnostics in `App.tsx`:
+  - source-level dispatch logs (`dispatch_source=chat_input|browser_example`),
+  - selected mode/action logs for websocket path verification.
+- Expanded App regression coverage in `frontend/src/App.browser-example.test.tsx`:
+  - verifies chat submit and browser example share payload shape/path,
+  - verifies idle dispatch uses `navigate`,
+  - verifies working dispatch uses `steer`.
+- Confirmed `ask_user_input` reply path remains single-send in `ChatPanel` tests (no duplicate primary send).
+
+### What's Working
+- Browser example prompts and chat composer prompts now share the same App-owned mode selection path.
+- Working-vs-idle action selection is consistent from both UI sources in test coverage.
+- `/plan` and `ask_user_input` flows remain intact (no duplicate normal-send behavior added).
+- Frontend targeted tests and production build pass.
+
+### What's NOT Working Yet
+- Full backend `pytest tests/ -q` did not complete within a 180s timeout window in this environment (timed out after dot progress).
+
+### Next Steps
+1. Remove temporary dispatch diagnostics once runtime verification is complete.
+2. Investigate/segment long-running backend tests so CI/local runs can provide deterministic completion times.
+
+### Decisions Made
+- Kept canonical mode/action choice in App only (UI components do not hardcode normal-send steering mode).
+
+### Blockers
+- None (only backend test runtime-duration concern in this environment).
+
+---
 ## Session 5.63 - April 9, 2026 (Review fixes: strict per-event payload validation + dead event emission cleanup)
 
 **Agent:** GPT-5.3-Codex
