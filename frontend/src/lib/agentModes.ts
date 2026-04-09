@@ -113,7 +113,57 @@ export function parseModeRuntimeEvent(input: unknown): { ok: true; event: ModeRu
   if (schemaVersion !== MODE_RUNTIME_SCHEMA_VERSION) return { ok: false, error: `unsupported_schema_version:${schemaVersion || 'empty'}` }
   if (!(MODE_RUNTIME_EVENT_NAMES as readonly string[]).includes(eventName)) return { ok: false, error: `unknown_event_name:${eventName || 'empty'}` }
   if (!isRecord(payload)) return { ok: false, error: 'invalid_payload' }
+  const payloadValidationError = validateModeRuntimePayload(eventName as ModeRuntimeEventName, payload)
+  if (payloadValidationError) return { ok: false, error: payloadValidationError }
   return { ok: true, event: input as ModeRuntimeEvent }
+}
+
+function hasStringValue(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isAgentModeId(value: unknown): value is AgentModeId {
+  return (AGENT_MODE_IDS as readonly string[]).includes(String(value ?? '').trim().toLowerCase())
+}
+
+function validateModeRuntimePayload(eventName: ModeRuntimeEventName, payload: Record<string, unknown>): string | null {
+  if (eventName === 'route_decision') {
+    if (String(payload.router_mode ?? '').trim() !== 'orchestrator') return 'invalid_payload:route_decision.router_mode'
+    if (!isAgentModeId(payload.selected_mode) || payload.selected_mode === 'orchestrator') return 'invalid_payload:route_decision.selected_mode'
+    if (!hasStringValue(payload.reason)) return 'invalid_payload:route_decision.reason'
+    if (typeof payload.confidence !== 'number') return 'invalid_payload:route_decision.confidence'
+    if (typeof payload.bypass_attempt_detected !== 'boolean') return 'invalid_payload:route_decision.bypass_attempt_detected'
+    if (!Number.isInteger(payload.timeout_seconds)) return 'invalid_payload:route_decision.timeout_seconds'
+    return null
+  }
+  if (eventName === 'mode_transition') {
+    if (!isAgentModeId(payload.from_mode)) return 'invalid_payload:mode_transition.from_mode'
+    if (!isAgentModeId(payload.to_mode)) return 'invalid_payload:mode_transition.to_mode'
+    if (!hasStringValue(payload.reason)) return 'invalid_payload:mode_transition.reason'
+    if (payload.error !== undefined && typeof payload.error !== 'string') return 'invalid_payload:mode_transition.error'
+    return null
+  }
+  if (eventName === 'worker_summary') {
+    if (!isAgentModeId(payload.worker_mode)) return 'invalid_payload:worker_summary.worker_mode'
+    if (!hasStringValue(payload.status)) return 'invalid_payload:worker_summary.status'
+    if (typeof payload.summary !== 'string') return 'invalid_payload:worker_summary.summary'
+    if (payload.fallback !== undefined && typeof payload.fallback !== 'boolean') return 'invalid_payload:worker_summary.fallback'
+    return null
+  }
+  if (eventName === 'final_synthesis') {
+    if (!hasStringValue(payload.status)) return 'invalid_payload:final_synthesis.status'
+    if (typeof payload.synthesis !== 'string') return 'invalid_payload:final_synthesis.synthesis'
+    const childResults = payload.child_results
+    if (!Array.isArray(childResults)) return 'invalid_payload:final_synthesis.child_results'
+    for (const child of childResults) {
+      if (!isRecord(child)) return 'invalid_payload:final_synthesis.child_results.item'
+      if (!hasStringValue(child.ref)) return 'invalid_payload:final_synthesis.child_results.ref'
+      if (!isAgentModeId(child.mode)) return 'invalid_payload:final_synthesis.child_results.mode'
+      if (child.status !== undefined && typeof child.status !== 'string') return 'invalid_payload:final_synthesis.child_results.status'
+    }
+    return null
+  }
+  return 'invalid_payload:unsupported_event'
 }
 
 export function modeLabel(mode: unknown): string {

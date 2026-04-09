@@ -1,3 +1,38 @@
+## Session 5.63 - April 9, 2026 (Review fixes: strict per-event payload validation + dead event emission cleanup)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review feedback in `backend/modes.py` by adding strict per-event payload validation in `parse_mode_runtime_event(...)`:
+  - validates required payload fields and types for `route_decision`, `mode_transition`, `worker_summary`, and `final_synthesis`
+  - rejects malformed envelopes with deterministic `invalid_payload:*` error codes.
+- Addressed review feedback in `frontend/src/lib/agentModes.ts` by adding strict per-event payload validation in `parseModeRuntimeEvent(...)`:
+  - validates event-specific required fields (including valid mode IDs) before returning typed events
+  - prevents blind casting of malformed payloads to runtime event union types.
+- Addressed review feedback in `universal_navigator.py`:
+  - removed unused `on_step` JSON mode-event emission path (frontend did not consume it)
+  - constrained `_emit_mode_event` argument to `ModeRuntimeEventName` for stricter typing.
+
+### What's Working
+- Backend and frontend mode-event parsers now validate both envelope and payload schema.
+- Invalid/malformed mode event payloads are rejected early with explicit parse errors.
+- Mode event emissions now flow only through the consumed workflow pathway.
+
+### What's NOT Working Yet
+- No blockers identified in this pass.
+
+### Next Steps
+1. Add dedicated unit tests for malformed payload variants per event type in both backend and frontend parsers.
+2. Consider centralizing event payload shape docs in one schema artifact (OpenAPI/JSON schema) to reduce drift risk.
+
+### Decisions Made
+- Kept strict fail-closed parsing semantics for both server and client to preserve forward-safe behavior.
+
+### Blockers
+- None.
+
+---
 ## Session 5.62 - April 9, 2026 (Explicit mode runtime contract for supervisor/worker orchestration)
 
 **Agent:** GPT-5.3-Codex

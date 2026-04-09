@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Final, Literal, TypeAlias
+from typing import Any, Final, Literal, TypeAlias, cast
 
 AgentMode = str
 ModeSchemaVersion: TypeAlias = str
@@ -126,11 +126,72 @@ def parse_mode_runtime_event(raw_event: object) -> tuple[dict[str, Any] | None, 
         return None, f"unknown_event_name:{event_name or 'empty'}"
     if not isinstance(payload, dict):
         return None, "invalid_payload"
+    payload_error = _validate_mode_runtime_payload(cast(ModeRuntimeEventName, event_name), payload)
+    if payload_error:
+        return None, payload_error
     return {
         "schema_version": schema_version,
         "event_name": event_name,
         "payload": payload,
     }, None
+
+
+def _validate_mode_runtime_payload(event_name: ModeRuntimeEventName, payload: dict[str, Any]) -> str | None:
+    """Validate event-specific payload requirements."""
+    if event_name == "route_decision":
+        if str(payload.get("router_mode", "")).strip() != "orchestrator":
+            return "invalid_payload:route_decision.router_mode"
+        selected_mode = normalize_agent_mode(payload.get("selected_mode", ""))
+        if selected_mode not in {"planner", "architect", "deep_research", "code"}:
+            return "invalid_payload:route_decision.selected_mode"
+        if not str(payload.get("reason", "")).strip():
+            return "invalid_payload:route_decision.reason"
+        if not isinstance(payload.get("confidence"), (int, float)):
+            return "invalid_payload:route_decision.confidence"
+        if not isinstance(payload.get("bypass_attempt_detected"), bool):
+            return "invalid_payload:route_decision.bypass_attempt_detected"
+        if not isinstance(payload.get("timeout_seconds"), int):
+            return "invalid_payload:route_decision.timeout_seconds"
+        return None
+    if event_name == "mode_transition":
+        if normalize_agent_mode(payload.get("from_mode", "")) not in MODE_LABELS:
+            return "invalid_payload:mode_transition.from_mode"
+        if normalize_agent_mode(payload.get("to_mode", "")) not in MODE_LABELS:
+            return "invalid_payload:mode_transition.to_mode"
+        if not str(payload.get("reason", "")).strip():
+            return "invalid_payload:mode_transition.reason"
+        error_value = payload.get("error")
+        if error_value is not None and not isinstance(error_value, str):
+            return "invalid_payload:mode_transition.error"
+        return None
+    if event_name == "worker_summary":
+        if normalize_agent_mode(payload.get("worker_mode", "")) not in MODE_LABELS:
+            return "invalid_payload:worker_summary.worker_mode"
+        if not str(payload.get("status", "")).strip():
+            return "invalid_payload:worker_summary.status"
+        if not isinstance(payload.get("summary"), str):
+            return "invalid_payload:worker_summary.summary"
+        fallback_value = payload.get("fallback")
+        if fallback_value is not None and not isinstance(fallback_value, bool):
+            return "invalid_payload:worker_summary.fallback"
+        return None
+    if event_name == "final_synthesis":
+        if not str(payload.get("status", "")).strip():
+            return "invalid_payload:final_synthesis.status"
+        if not isinstance(payload.get("synthesis"), str):
+            return "invalid_payload:final_synthesis.synthesis"
+        child_results = payload.get("child_results")
+        if not isinstance(child_results, list):
+            return "invalid_payload:final_synthesis.child_results"
+        for child in child_results:
+            if not isinstance(child, dict):
+                return "invalid_payload:final_synthesis.child_results.item"
+            if not str(child.get("ref", "")).strip():
+                return "invalid_payload:final_synthesis.child_results.ref"
+            if normalize_agent_mode(child.get("mode", "")) not in MODE_LABELS:
+                return "invalid_payload:final_synthesis.child_results.mode"
+        return None
+    return "invalid_payload:unsupported_event"
 
 
 def normalize_agent_mode(value: object) -> AgentMode:

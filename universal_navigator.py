@@ -28,6 +28,7 @@ from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUC
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
 from backend.modes import (
     MODE_SYSTEM_HINTS,
+    ModeRuntimeEventName,
     build_mode_runtime_event,
     blocked_tools_for_mode,
     normalize_agent_mode,
@@ -1700,10 +1701,8 @@ async def run_universal_navigation(
     resolved_settings = settings or {}
     active_mode = normalize_agent_mode(resolved_settings.get("agent_mode", ""))
     if active_mode == "orchestrator" and not is_subagent:
-        async def _emit_mode_event(event_name: str, payload: dict[str, Any]) -> None:
+        async def _emit_mode_event(event_name: ModeRuntimeEventName, payload: dict[str, Any]) -> None:
             event_envelope = build_mode_runtime_event(event_name, payload)
-            if on_step:
-                await on_step({"type": "mode_event", "content": json.dumps(event_envelope), "steering": []})
             if on_workflow_step:
                 await on_workflow_step(event_envelope)
 
