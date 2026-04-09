@@ -92,8 +92,20 @@ vi.mock('./components/ActionLog', () => ({
 }))
 
 vi.mock('./components/ChatPanel', () => ({
-  ChatPanel: ({ serverMessages }: { serverMessages: Array<{ role: string; content: string }> }) => (
+  ChatPanel: ({
+    serverMessages,
+    onPrimarySend,
+  }: {
+    serverMessages: Array<{ role: string; content: string }>
+    onPrimarySend: (instruction: string, metadata?: Record<string, unknown>) => void
+  }) => (
     <div>
+      <button
+        type='button'
+        onClick={() => onPrimarySend('Open the dashboard', { task_label_source: 'chat', task_label: 'Open the dashboard' })}
+      >
+        Manual Chat Send
+      </button>
       <div data-testid='chat-user-bubbles'>
         {serverMessages.filter((m) => m.role === 'user').map((m) => m.content).join(' | ')}
       </div>
@@ -167,9 +179,54 @@ describe('App browser example click UX', () => {
 
     expect(screen.getByTestId('action-log-count').textContent).toBe('0')
 
-    fireEvent.click(screen.getByRole('button', { name: /chat/i }))
+    fireEvent.click(screen.getAllByRole('button', { name: /^chat$/i })[0])
     await waitFor(() => {
       expect(screen.getByTestId('chat-user-bubbles').textContent).toContain('Open the dashboard')
     })
+  })
+
+  it('routes browser examples and manual chat sends through the same navigate path when idle', async () => {
+    const { default: App } = await import('./App')
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Trigger Example' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger Example' }))
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'navigate',
+          instruction: 'Open the dashboard',
+          metadata: expect.objectContaining({
+            task_label_source: 'chat',
+            task_label: 'Open the dashboard',
+          }),
+        }),
+      )
+    })
+
+    const callsAfterExample = sendSpy.mock.calls.length
+    fireEvent.click(screen.getAllByRole('button', { name: /^chat$/i })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Manual Chat Send' }))
+
+    await waitFor(() => {
+      expect(sendSpy.mock.calls.length).toBeGreaterThan(callsAfterExample)
+    })
+
+    const newestNavigateCall = [...sendSpy.mock.calls]
+      .map((call) => call[0] as { action?: string; instruction?: string; metadata?: Record<string, unknown> })
+      .reverse()
+      .find((payload) => payload.action === 'navigate' && payload.instruction === 'Open the dashboard')
+
+    expect(newestNavigateCall).toEqual(
+      expect.objectContaining({
+        action: 'navigate',
+        instruction: 'Open the dashboard',
+        metadata: expect.objectContaining({
+          task_label_source: 'chat',
+          task_label: 'Open the dashboard',
+        }),
+      }),
+    )
   })
 })

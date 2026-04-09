@@ -11,6 +11,7 @@ const baseChatPanelProps = {
   mode: 'steer' as const,
   queuedMessages: [],
   onModeChange: vi.fn(),
+  onPrimarySend: vi.fn(),
   onProviderChange: vi.fn(),
   onModelChange: vi.fn(),
   onAgentModeChange: vi.fn(),
@@ -36,12 +37,14 @@ function makeAskUserInputLog(): LogEntry {
 describe('ChatPanel ask_user_input reply flow', () => {
   it('creates one local user bubble and invokes user_input_response callback exactly once', async () => {
     const onUserInputResponse = vi.fn()
+    const onPrimarySend = vi.fn()
     const onSend = vi.fn()
 
     render(
       <ChatPanel
         logs={[makeAskUserInputLog()]}
         isWorking={false}
+        onPrimarySend={onPrimarySend}
         onSend={onSend}
         onDecomposePlan={vi.fn()}
         connectionStatus='connected'
@@ -64,6 +67,7 @@ describe('ChatPanel ask_user_input reply flow', () => {
     expect(onUserInputResponse).toHaveBeenCalledTimes(1)
     expect(onUserInputResponse).toHaveBeenCalledWith('Custom answer from user', 'req-123')
     expect(onSend).not.toHaveBeenCalled()
+    expect(onPrimarySend).not.toHaveBeenCalled()
 
     const userBubbleTexts = screen
       .getAllByTestId('user-bubble')
@@ -94,12 +98,14 @@ describe('resolveComposerSubmission', () => {
 describe('ChatPanel plan intent UX', () => {
   it('strips /plan token from visible bubble and routes to plan decompose', async () => {
     const onDecomposePlan = vi.fn()
+    const onPrimarySend = vi.fn()
     const onSend = vi.fn()
 
     render(
       <ChatPanel
         logs={[]}
         isWorking={false}
+        onPrimarySend={onPrimarySend}
         onSend={onSend}
         onUserInputResponse={vi.fn()}
         onDecomposePlan={onDecomposePlan}
@@ -120,6 +126,7 @@ describe('ChatPanel plan intent UX', () => {
 
     expect(onDecomposePlan).toHaveBeenCalledWith('Build onboarding flow')
     expect(onSend).not.toHaveBeenCalled()
+    expect(onPrimarySend).not.toHaveBeenCalled()
     await waitFor(() => {
       expect(screen.getByText('Build onboarding flow')).toBeInTheDocument()
     })
@@ -171,6 +178,7 @@ describe('ChatPanel steering control in composer', () => {
   })
 
   it('routes selected steering mode through outbound send action', () => {
+    const onPrimarySend = vi.fn()
     const onSend = vi.fn()
     const onModeChange = vi.fn()
 
@@ -182,6 +190,7 @@ describe('ChatPanel steering control in composer', () => {
         mode='queue'
         queuedMessages={['Follow-up task']}
         onModeChange={onModeChange}
+        onPrimarySend={onPrimarySend}
         onSend={onSend}
         onUserInputResponse={vi.fn()}
         onDecomposePlan={vi.fn()}
@@ -198,11 +207,11 @@ describe('ChatPanel steering control in composer', () => {
     fireEvent.change(composer, { target: { value: 'Do the next thing' } })
     fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
 
-    expect(onSend).toHaveBeenCalledWith(
+    expect(onPrimarySend).toHaveBeenCalledWith(
       'Do the next thing',
-      'queue',
       expect.objectContaining({ task_label: 'Do the next thing' }),
     )
+    expect(onSend).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'interrupt' }))
     expect(onModeChange).toHaveBeenCalledWith('interrupt')
   })
