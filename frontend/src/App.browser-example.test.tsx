@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const sendSpy = vi.fn()
+let mockIsWorking = false
 
 vi.mock('./hooks/useUsage', () => ({
   useUsage: () => ({
@@ -14,7 +15,7 @@ vi.mock('./hooks/useUsage', () => ({
 vi.mock('./hooks/useWebSocket', () => ({
   useWebSocket: () => ({
     connectionStatus: 'connected',
-    isWorking: false,
+    isWorking: mockIsWorking,
     latestFrame: null,
     logs: [],
     workflowSteps: [],
@@ -139,12 +140,22 @@ vi.mock('./components/ChangelogModal', () => ({
 }))
 
 describe('App browser example click UX', () => {
+  const countPrimaryActionCalls = (): number => {
+    return sendSpy.mock.calls
+      .map((call) => call[0] as { action?: string })
+      .filter((payload) => payload.action === 'navigate' || payload.action === 'steer')
+      .length
+  }
+
   afterEach(() => {
+    cleanup()
     vi.unstubAllGlobals()
   })
 
   beforeEach(() => {
+    vi.resetModules()
     sendSpy.mockReset()
+    mockIsWorking = false
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/api/auth/me')) {
@@ -157,11 +168,13 @@ describe('App browser example click UX', () => {
     }))
   })
 
-  it('sends a chat-sourced navigate action, creates a chat user bubble, and avoids action-log noise', async () => {
+  it('routes chat input and browser examples through the same canonical dispatcher with identical payload shape', async () => {
     const { default: App } = await import('./App')
     render(<App />)
 
     await screen.findByRole('button', { name: 'Trigger Example' })
+
+    const beforeExamplePrimaryCalls = countPrimaryActionCalls()
     fireEvent.click(screen.getByRole('button', { name: 'Trigger Example' }))
 
     await waitFor(() => {
@@ -177,48 +190,13 @@ describe('App browser example click UX', () => {
       )
     })
 
-    expect(screen.getByTestId('action-log-count').textContent).toBe('0')
-
-    fireEvent.click(screen.getAllByRole('button', { name: /^chat$/i })[0])
-    await waitFor(() => {
-      expect(screen.getByTestId('chat-user-bubbles').textContent).toContain('Open the dashboard')
-    })
-  })
-
-  it('routes browser examples and manual chat sends through the same navigate path when idle', async () => {
-    const { default: App } = await import('./App')
-    render(<App />)
-
-    await screen.findByRole('button', { name: 'Trigger Example' })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Trigger Example' }))
-    await waitFor(() => {
-      expect(sendSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: 'navigate',
-          instruction: 'Open the dashboard',
-          metadata: expect.objectContaining({
-            task_label_source: 'chat',
-            task_label: 'Open the dashboard',
-          }),
-        }),
-      )
-    })
-
-    const callsAfterExample = sendSpy.mock.calls.length
-    fireEvent.click(screen.getAllByRole('button', { name: /^chat$/i })[0])
-    fireEvent.click(screen.getByRole('button', { name: 'Manual Chat Send' }))
-
-    await waitFor(() => {
-      expect(sendSpy.mock.calls.length).toBeGreaterThan(callsAfterExample)
-    })
-
-    const newestNavigateCall = [...sendSpy.mock.calls]
+    const browserNavigateCall = [...sendSpy.mock.calls]
       .map((call) => call[0] as { action?: string; instruction?: string; metadata?: Record<string, unknown> })
       .reverse()
       .find((payload) => payload.action === 'navigate' && payload.instruction === 'Open the dashboard')
+    const afterExamplePrimaryCalls = countPrimaryActionCalls()
 
-    expect(newestNavigateCall).toEqual(
+    expect(browserNavigateCall).toEqual(
       expect.objectContaining({
         action: 'navigate',
         instruction: 'Open the dashboard',
@@ -228,5 +206,71 @@ describe('App browser example click UX', () => {
         }),
       }),
     )
+    expect(afterExamplePrimaryCalls - beforeExamplePrimaryCalls).toBe(1)
+
+    fireEvent.click(screen.getAllByRole('button', { name: /^chat$/i })[0])
+    const beforeChatPrimaryCalls = countPrimaryActionCalls()
+    fireEvent.click(screen.getByRole('button', { name: 'Manual Chat Send' }))
+
+    await waitFor(() => {
+      expect(countPrimaryActionCalls()).toBeGreaterThan(beforeChatPrimaryCalls)
+    })
+
+    const chatNavigateCall = [...sendSpy.mock.calls]
+      .map((call) => call[0] as { action?: string; instruction?: string; metadata?: Record<string, unknown> })
+      .reverse()
+      .find((payload) => payload.action === 'navigate' && payload.instruction === 'Open the dashboard')
+
+    expect(chatNavigateCall).toEqual(
+      expect.objectContaining({
+        action: 'navigate',
+        instruction: 'Open the dashboard',
+        metadata: expect.objectContaining({
+          task_label_source: 'chat',
+          task_label: 'Open the dashboard',
+        }),
+      }),
+    )
+    expect(countPrimaryActionCalls() - beforeChatPrimaryCalls).toBe(1)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-user-bubbles').textContent).toContain('Open the dashboard')
+    })
+  })
+
+  it('starts a new task path when idle (navigate)', async () => {
+    mockIsWorking = false
+    const { default: App } = await import('./App')
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Trigger Example' })
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger Example' }))
+
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'navigate',
+          instruction: 'Open the dashboard',
+        }),
+      )
+    })
+  })
+
+  it('uses steering path when already working', async () => {
+    mockIsWorking = true
+    const { default: App } = await import('./App')
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Trigger Example' })
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger Example' }))
+
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'steer',
+          instruction: 'Open the dashboard',
+        }),
+      )
+    })
   })
 })

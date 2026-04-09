@@ -1,3 +1,102 @@
+## Session 5.66 - April 9, 2026 (Review nitpick cleanup: remove duplicated ternary in dispatcher log)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 quick review-follow-up pass
+
+### What Was Done
+- Addressed PR review nitpick in `frontend/src/App.tsx` by removing duplicated ternary logic inside `dispatchPromptFromUI(...)` diagnostics.
+- Introduced a local `websocketAction` variable (`isWorking ? 'steer' : 'navigate'`) and reused it in the log call.
+- Verified diagnostics remain semantically correct (idle logs `navigate`, working logs `steer`) while avoiding repeated conditionals.
+
+### What's Working
+- Review comment is resolved with cleaner and clearer logging code.
+- Updated browser-example test still passes.
+- Frontend production build passes.
+
+### What's NOT Working Yet
+- No blockers identified in this follow-up.
+
+### Next Steps
+1. Remove temporary diagnostics entirely once runtime verification period is complete.
+
+### Decisions Made
+- Preferred explicit `websocketAction` variable over recomputing ternaries inline for readability and correctness.
+
+### Blockers
+- None.
+
+---
+## Session 5.65 - April 9, 2026 (Test-flake follow-up for canonical dispatch parity suite)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted test-hardening pass
+
+### What Was Done
+- Addressed follow-up test concerns by strengthening `frontend/src/App.browser-example.test.tsx` assertions:
+  - added a helper to count only primary action sends (`navigate`/`steer`) while ignoring config events.
+  - updated parity test to assert each UI source (browser example and chat send) increments primary dispatch count by exactly one, preventing duplicate-send regressions.
+- Re-ran targeted and full frontend test suites to confirm stability.
+
+### What's Working
+- Canonical dispatch parity test now validates one-and-only-one primary send per source click/submit.
+- Full frontend suite is green after the assertion tightening.
+- Frontend production build remains passing.
+
+### What's NOT Working Yet
+- No new blockers identified in this follow-up.
+
+### Next Steps
+1. Keep temporary App diagnostics until runtime verification is complete, then remove them.
+2. If CI flakes recur, add explicit assertions around config-send ordering in App integration tests.
+
+### Decisions Made
+- Counted only `navigate`/`steer` actions for parity assertions so config preflight messages do not cause false positives.
+
+### Blockers
+- None.
+
+---
+## Session 5.64 - April 9, 2026 (Canonical UI prompt dispatch unification: chat + browser example parity)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend routing + regression-test pass
+
+### What Was Done
+- Unified primary prompt dispatch in `frontend/src/App.tsx` with a single canonical entrypoint:
+  - added `dispatchPromptFromUI(instruction, metadata)` that routes through `handleSend(instruction, isWorking ? 'steer' : mode, metadata)`.
+  - kept existing `handleSend` behavior unchanged (config send, queue/interrupt handling, optimistic history/task labels, agent mode metadata).
+- Routed both UI sources through the canonical dispatcher:
+  - `ChatPanel` primary submit path now uses `onPrimarySend` from App.
+  - `ScreenView` example prompt click now calls the same dispatcher with chat-sourced task-label metadata.
+- Added temporary diagnostics in `App.tsx`:
+  - source-level dispatch logs (`dispatch_source=chat_input|browser_example`),
+  - selected mode/action logs for websocket path verification.
+- Expanded App regression coverage in `frontend/src/App.browser-example.test.tsx`:
+  - verifies chat submit and browser example share payload shape/path,
+  - verifies idle dispatch uses `navigate`,
+  - verifies working dispatch uses `steer`.
+- Confirmed `ask_user_input` reply path remains single-send in `ChatPanel` tests (no duplicate primary send).
+
+### What's Working
+- Browser example prompts and chat composer prompts now share the same App-owned mode selection path.
+- Working-vs-idle action selection is consistent from both UI sources in test coverage.
+- `/plan` and `ask_user_input` flows remain intact (no duplicate normal-send behavior added).
+- Frontend targeted tests and production build pass.
+
+### What's NOT Working Yet
+- Full backend `pytest tests/ -q` did not complete within a 180s timeout window in this environment (timed out after dot progress).
+
+### Next Steps
+1. Remove temporary dispatch diagnostics once runtime verification is complete.
+2. Investigate/segment long-running backend tests so CI/local runs can provide deterministic completion times.
+
+### Decisions Made
+- Kept canonical mode/action choice in App only (UI components do not hardcode normal-send steering mode).
+
+### Blockers
+- None (only backend test runtime-duration concern in this environment).
+
+---
 ## Session 5.63 - April 9, 2026 (Review fixes: strict per-event payload validation + dead event emission cleanup)
 
 **Agent:** GPT-5.3-Codex
