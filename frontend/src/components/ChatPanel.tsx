@@ -45,6 +45,7 @@ export interface ChatPanelProps {
   mode: SteeringMode
   queuedMessages: string[]
   onModeChange: (mode: SteeringMode) => void
+  onPrimarySend: (instruction: string, metadata?: Record<string, unknown>) => void
   onSend: (instruction: string, mode: SteeringMode, metadata?: Record<string, unknown>) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
@@ -1136,6 +1137,7 @@ export function ChatPanel({
   mode,
   queuedMessages,
   onModeChange,
+  onPrimarySend,
   onSend,
   onDecomposePlan,
   connectionStatus,
@@ -1387,7 +1389,7 @@ export function ChatPanel({
     if (parsed.mode === 'plan' && withContext) {
       onDecomposePlan(withContext)
     } else {
-      onSend(withContext || '(attachment)', mode, {
+      onPrimarySend(withContext || '(attachment)', {
         attachments: attachments.length > 0 ? attachments : undefined,
         active_connector: activeConnector
           ? { id: activeConnector.id, name: activeConnector.name }

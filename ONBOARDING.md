@@ -1,3 +1,43 @@
+## Session 5.61 - April 9, 2026 (Chat composer primary-send routing parity fix)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend routing + regression-test pass
+
+### What Was Done
+- Fixed chat composer routing so normal manual sends now go through a new `onPrimarySend(...)` path in `ChatPanel` (instead of directly using mode-bound `onSend(...)`).
+- Added `onPrimarySend` to `ChatPanel` props and switched the normal composer submit path to call it with the same metadata payload as before.
+- Kept `onSend(...)` for explicit steering-only actions already tied to active-run control flows (e.g., approval/reject buttons), preserving existing behavior.
+- Wired `App` to provide a unified callback:
+  - `handlePrimarySend(instruction, metadata) => handleSend(instruction, isWorking ? 'steer' : mode, metadata)`
+  - Reused the same callback for `ScreenView` example prompts to guarantee parity between browser examples and chat submits.
+- Confirmed `ask_user_input` reply path remains single-authority:
+  - local user bubble is created once
+  - only `onUserInputResponse(answer, requestId)` is emitted
+  - no duplicate extra send.
+- Added/updated regression tests:
+  - `ChatPanel` tests now assert ask-user-input replies do **not** call primary send.
+  - Added App-level parity test proving browser example click and manual chat send both emit the same idle `navigate`-path payload.
+
+### What's Working
+- Manual chat sends while idle now route through the same App-level primary send behavior as browser examples.
+- Browser example prompt and manual chat prompt produce equivalent `navigate` behavior in idle state.
+- `ask_user_input` custom replies produce a single local user bubble and a single callback emission (no duplicate run/send).
+- Frontend tests and production build are passing.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. If product requirements change, re-evaluate whether queue/interrupt selection should be honored for primary sends during active runs or remain constrained to steer-first behavior.
+2. Consider adding a dedicated App integration test for active-run (`isWorking=true`) primary-send behavior if websocket mocks are expanded.
+
+### Decisions Made
+- Introduced explicit `onPrimarySend` API to separate “primary submit routing” from “steering command routing,” reducing ambiguity and preventing drift between chat and browser example paths.
+
+### Blockers
+- None.
+
+---
 ## Session 5.60 - April 8, 2026 (ChatPanel steering controls parity with InputBar)
 
 **Agent:** GPT-5.3-Codex

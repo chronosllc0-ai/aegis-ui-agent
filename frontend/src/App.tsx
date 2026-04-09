@@ -762,6 +762,10 @@ function App() {
     }
   }
 
+  const handlePrimarySend = (instruction: string, metadata?: Record<string, unknown>) => {
+    handleSend(instruction, isWorking ? 'steer' : mode, metadata)
+  }
+
   const submitUrl = () => {
     const trimmed = urlInput.trim()
     if (!trimmed) return
@@ -1189,6 +1193,7 @@ function App() {
                 mode={mode}
                 queuedMessages={queuedMessages}
                 onModeChange={setMode}
+                onPrimarySend={handlePrimarySend}
                 onSend={handleSend}
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
@@ -1237,11 +1242,11 @@ function App() {
                   {showWorkflow ? (
                     <WorkflowView steps={workflowSteps} />
                   ) : (
-                    <ScreenView
+                <ScreenView
                       frameSrc={latestFrame}
                       isWorking={isWorking}
                       steeringFlashKey={steeringFlashKey}
-                      onExampleClick={(prompt) => handleSend(prompt, isWorking ? 'steer' : mode, { task_label_source: 'chat', task_label: prompt })}
+                      onExampleClick={(prompt) => handlePrimarySend(prompt, { task_label_source: 'chat', task_label: prompt })}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}
                     />
