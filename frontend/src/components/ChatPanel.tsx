@@ -5,7 +5,7 @@ import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
 import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
-import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
+import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
@@ -38,6 +38,7 @@ const IcoFile        = (p: SvgProps) => <Svg {...p}><path d='M14 2H6a2 2 0 0 0-2
 const IcoTerminal    = (p: SvgProps) => <Svg {...p}><polyline points='4 17 10 11 4 5'/><line x1='12' y1='19' x2='20' y2='19'/></Svg>
 const IcoPlan        = (p: SvgProps) => <Svg {...p}><rect x='3' y='3' width='18' height='18' rx='2'/><path d='M9 9h6M9 12h6M9 15h4'/></Svg>
 const IcoSparkle     = (p: SvgProps) => <Svg {...p}><path d='M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M17.7 6.3l-.7.7M5.6 18.4l.7-.7M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'/></Svg>
+const IcoSelectors   = (p: SvgProps) => <Svg {...p}><line x1='4' y1='7' x2='20' y2='7'/><line x1='4' y1='12' x2='20' y2='12'/><line x1='4' y1='17' x2='20' y2='17'/><circle cx='9' cy='7' r='1.5' fill='currentColor' stroke='none'/><circle cx='15' cy='12' r='1.5' fill='currentColor' stroke='none'/><circle cx='11' cy='17' r='1.5' fill='currentColor' stroke='none'/></Svg>
 
 export interface ChatPanelProps {
   logs: LogEntry[]
@@ -992,139 +993,170 @@ function InputBarCursor({
   hasFullAccess = true,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
+  const [isInputFocused, setIsInputFocused] = useState(false)
+  const isExpanded = !isWorking || isInputFocused || canSend
 
   return (
-    <div className='rounded-3xl border border-[#303030] bg-[#1a1a1a] shadow-[0_8px_30px_rgba(0,0,0,0.3)] overflow-hidden'>
-
-      {/* Connector chip inside card */}
-      {activeConnector && (
-        <div className='flex items-center gap-1.5 border-b border-[#2a2a2a] px-3 py-1.5'>
-          <img src={activeConnector.icon} alt={activeConnector.name}
-            className='h-3.5 w-3.5 rounded object-contain flex-shrink-0'
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-          <span className='flex-1 text-xs font-medium text-blue-300 truncate'>{activeConnector.name}</span>
-          <button type='button' onClick={onRemoveConnector} className='text-zinc-600 hover:text-zinc-300 transition-colors'>
-            <IcoX className='h-3 w-3' />
-          </button>
+    <div className='space-y-0'>
+      {isWorking && (
+        <div className='mx-2 -mb-1 inline-flex items-center rounded-full border border-[#353535] bg-[#202020] px-1.5 py-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]'>
+          <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
         </div>
       )}
+      <div className='overflow-hidden rounded-3xl border border-[#303030] bg-[#1a1a1a] shadow-[0_8px_30px_rgba(0,0,0,0.3)]'>
 
-      {/* Textarea */}
-      <div className='relative'>
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={onInputChange}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          disabled={isDisabled}
-          rows={1}
-          className='w-full resize-none bg-transparent px-4 pb-12 pt-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6'
-          style={{ minHeight: '70px', maxHeight: '160px', overflow: 'hidden' }}
-        />
-        {isWorking && !canSend ? (
-          <button type='button' onClick={onStop}
-            className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
-            aria-label='Stop task' title='Stop current task'>
-            <span className='relative flex h-4 w-4 items-center justify-center'>
-              <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
-              <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
-            </span>
-          </button>
-        ) : (
-          <button type='button' onClick={onSend}
-            disabled={isDisabled || !canSend}
-            className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-            aria-label='Send message'>
-            <IcoArrowUp className='h-4 w-4' />
-          </button>
-        )}
-      </div>
-
-      <div className='space-y-2 border-t border-[#242424] px-2.5 py-2'>
-        {isWorking && (
-          <div className='flex items-center'>
-            <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
+        {/* Connector chip inside card */}
+        {activeConnector && (
+          <div className='flex items-center gap-1.5 border-b border-[#2a2a2a] px-3 py-1.5'>
+            <img src={activeConnector.icon} alt={activeConnector.name}
+              className='h-3.5 w-3.5 rounded object-contain flex-shrink-0'
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            <span className='flex-1 text-xs font-medium text-blue-300 truncate'>{activeConnector.name}</span>
+            <button type='button' onClick={onRemoveConnector} className='text-zinc-600 hover:text-zinc-300 transition-colors'>
+              <IcoX className='h-3 w-3' />
+            </button>
           </div>
         )}
-        <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
-          <span className='hidden text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:inline'>Mode</span>
-          <select
-            value={agentMode}
-            onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
-            className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
-            aria-label='Agent mode'
-          >
-            {AGENT_MODES.map((option) => (
-              <option key={option.id} value={option.id} className='bg-[#0f0f0f] text-zinc-100'>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
 
-        <div className='grid grid-cols-2 gap-2'>
-          <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
-            <span className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-xs'>
-              {renderProviderIcon(providerById(provider) ?? PROVIDERS[0])}
-            </span>
-            <select
-              value={provider}
-              onChange={(event) => onProviderChange(event.target.value)}
-              className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
-              aria-label='Provider'
-            >
-              {PROVIDERS.map((item) => (
-                <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
-                  {item.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className='flex min-w-0 items-center gap-1 rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs text-zinc-300'>
-            <select
-              value={model}
-              onChange={(event) => onModelChange(event.target.value)}
-              className='w-full min-w-0 rounded-sm bg-[#0f0f0f] px-1 py-0.5 text-xs text-zinc-100 outline-none'
-              aria-label='Model'
-            >
-              {(providerById(provider) ?? PROVIDERS[0]).models.map((item) => (
-                <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        {/* Textarea */}
+        <div className='relative'>
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={onInputChange}
+            onKeyDown={onKeyDown}
+            onFocus={() => setIsInputFocused(true)}
+            onBlur={() => setIsInputFocused(false)}
+            placeholder={placeholder}
+            disabled={isDisabled}
+            rows={1}
+            className={`w-full resize-none bg-transparent px-4 pt-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6 transition-[padding,min-height] ${
+              isExpanded ? 'pb-12' : 'pb-3'
+            }`}
+            style={{ minHeight: isExpanded ? '72px' : '52px', maxHeight: '160px', overflow: 'hidden' }}
+          />
+          {isWorking && !canSend ? (
+            <button type='button' onClick={onStop}
+              className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
+              aria-label='Stop task' title='Stop current task'>
+              <span className='relative flex h-4 w-4 items-center justify-center'>
+                <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
+                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+              </span>
+            </button>
+          ) : (
+            <button type='button' onClick={onSend}
+              disabled={isDisabled || !canSend}
+              className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+              aria-label='Send message'>
+              <IcoArrowUp className='h-4 w-4' />
+            </button>
+          )}
         </div>
 
-        <SuggestionChips onSelectSuggestion={onSelectSuggestion} onOpenGallery={onOpenGallery} />
+        {isExpanded && (
+          <div className='space-y-1.5 border-t border-[#242424] px-2.5 py-2'>
+            <SuggestionChips onSelectSuggestion={onSelectSuggestion} onOpenGallery={onOpenGallery} />
 
-        <div className='flex items-center gap-1.5'>
-        {/* + button */}
-        <button type='button' onClick={onPlusClick} disabled={isDisabled}
-          className='flex items-center justify-center h-7 w-7 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0'
-          aria-label='Add files or connectors'>
-          <Icons.plus className='h-4 w-4' />
-        </button>
+            <div className='flex flex-wrap items-center gap-1 text-xs text-zinc-400'>
+              <label className='group relative inline-flex min-w-0 max-w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-[#222]'>
+                <IcoSelectors className='h-3.5 w-3.5 text-zinc-500' />
+                <select
+                  value={provider}
+                  onChange={(event) => onProviderChange(event.target.value)}
+                  className='max-w-[118px] cursor-pointer appearance-none bg-transparent pr-3 text-xs text-zinc-200 outline-none'
+                  aria-label='Provider'
+                >
+                  {PROVIDERS.map((item) => (
+                    <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
+                      {item.displayName}
+                    </option>
+                  ))}
+                </select>
+                <Icons.chevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
+              </label>
 
-        <div className='flex-1' />
+              <span className='text-zinc-700'>·</span>
 
-        {/* Mic */}
-        <button type='button' onClick={onMicClick} disabled={!micAvailable}
-          title={micTitle} aria-pressed={micIsActive}
-          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors flex-shrink-0 ${
-            micIsActive ? 'text-blue-300 bg-blue-500/10 animate-pulse' : 'text-zinc-600 hover:text-zinc-300 hover:bg-[#2a2a2a]'
-          } disabled:cursor-not-allowed disabled:opacity-40`}>
-          <IcoMic className='h-3.5 w-3.5' />
-        </button>
+              <label className='group relative inline-flex min-w-0 max-w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-[#222]'>
+                <IcoSelectors className='h-3.5 w-3.5 text-zinc-500' />
+                <select
+                  value={model}
+                  onChange={(event) => onModelChange(event.target.value)}
+                  className='max-w-[140px] cursor-pointer appearance-none bg-transparent pr-3 text-xs text-zinc-200 outline-none'
+                  aria-label='Model'
+                >
+                  {(providerById(provider) ?? PROVIDERS[0]).models.map((item) => (
+                    <option key={item.id} value={item.id} className='bg-[#0f0f0f] text-zinc-100'>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <Icons.chevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
+              </label>
 
-      </div>
-      </div>
+              <span className='text-zinc-700'>·</span>
 
-      <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
-        <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◻ Local' : '◻ Remote'}</span>
-        <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◉ Limited access'}</span>
+              <label className='group relative inline-flex min-w-0 max-w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-[#222]'>
+                <IcoSelectors className='h-3.5 w-3.5 text-zinc-500' />
+                <select
+                  value={agentMode}
+                  onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
+                  className='max-w-[124px] cursor-pointer appearance-none bg-transparent pr-3 text-xs text-zinc-200 outline-none'
+                  aria-label='Agent mode'
+                >
+                  {AGENT_MODES.map((option) => (
+                    <option key={option.id} value={option.id} className='bg-[#0f0f0f] text-zinc-100'>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <Icons.chevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
+              </label>
+            </div>
+
+            <div className='flex items-center gap-1.5'>
+              <button type='button' onClick={onPlusClick} disabled={isDisabled}
+                className='flex items-center justify-center h-7 w-7 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-40 transition-colors flex-shrink-0'
+                aria-label='Add files or connectors'>
+                <Icons.plus className='h-4 w-4' />
+              </button>
+
+              <div className='flex-1' />
+
+              <button type='button' onClick={onMicClick} disabled={!micAvailable}
+                title={micTitle} aria-pressed={micIsActive}
+                className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors flex-shrink-0 ${
+                  micIsActive ? 'text-blue-300 bg-blue-500/10 animate-pulse' : 'text-zinc-600 hover:text-zinc-300 hover:bg-[#2a2a2a]'
+                } disabled:cursor-not-allowed disabled:opacity-40`}>
+                <IcoMic className='h-3.5 w-3.5' />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isExpanded && (
+          <div className='flex items-center gap-1.5 border-t border-[#242424] px-2.5 py-1.5'>
+            <button type='button' onClick={onPlusClick} disabled={isDisabled}
+              className='flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 hover:bg-[#2a2a2a] hover:text-zinc-200 disabled:opacity-40 transition-colors'
+              aria-label='Add files or connectors'>
+              <Icons.plus className='h-4 w-4' />
+            </button>
+            <div className='flex-1' />
+            <button type='button' onClick={onMicClick} disabled={!micAvailable}
+              title={micTitle} aria-pressed={micIsActive}
+              className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+                micIsActive ? 'text-blue-300 bg-blue-500/10 animate-pulse' : 'text-zinc-600 hover:text-zinc-300 hover:bg-[#2a2a2a]'
+              } disabled:cursor-not-allowed disabled:opacity-40`}>
+              <IcoMic className='h-3.5 w-3.5' />
+            </button>
+          </div>
+        )}
+
+        <div className='flex items-center gap-3 border-t border-[#242424] px-3 py-1.5 text-[11px] text-zinc-500'>
+          <span className='inline-flex items-center gap-1'>{isLocalOnly ? '◻ Local' : '◻ Remote'}</span>
+          <span className='inline-flex items-center gap-1'>{hasFullAccess ? '◉ Full access' : '◉ Limited access'}</span>
+        </div>
       </div>
     </div>
   )
