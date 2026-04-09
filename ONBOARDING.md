@@ -1,3 +1,33 @@
+## Session 5.65 - April 9, 2026 (Test-flake follow-up for canonical dispatch parity suite)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted test-hardening pass
+
+### What Was Done
+- Addressed follow-up test concerns by strengthening `frontend/src/App.browser-example.test.tsx` assertions:
+  - added a helper to count only primary action sends (`navigate`/`steer`) while ignoring config events.
+  - updated parity test to assert each UI source (browser example and chat send) increments primary dispatch count by exactly one, preventing duplicate-send regressions.
+- Re-ran targeted and full frontend test suites to confirm stability.
+
+### What's Working
+- Canonical dispatch parity test now validates one-and-only-one primary send per source click/submit.
+- Full frontend suite is green after the assertion tightening.
+- Frontend production build remains passing.
+
+### What's NOT Working Yet
+- No new blockers identified in this follow-up.
+
+### Next Steps
+1. Keep temporary App diagnostics until runtime verification is complete, then remove them.
+2. If CI flakes recur, add explicit assertions around config-send ordering in App integration tests.
+
+### Decisions Made
+- Counted only `navigate`/`steer` actions for parity assertions so config preflight messages do not cause false positives.
+
+### Blockers
+- None.
+
+---
 ## Session 5.64 - April 9, 2026 (Canonical UI prompt dispatch unification: chat + browser example parity)
 
 **Agent:** GPT-5.3-Codex

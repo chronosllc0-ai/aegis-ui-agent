@@ -140,6 +140,13 @@ vi.mock('./components/ChangelogModal', () => ({
 }))
 
 describe('App browser example click UX', () => {
+  const countPrimaryActionCalls = (): number => {
+    return sendSpy.mock.calls
+      .map((call) => call[0] as { action?: string })
+      .filter((payload) => payload.action === 'navigate' || payload.action === 'steer')
+      .length
+  }
+
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
@@ -167,6 +174,7 @@ describe('App browser example click UX', () => {
 
     await screen.findByRole('button', { name: 'Trigger Example' })
 
+    const beforeExamplePrimaryCalls = countPrimaryActionCalls()
     fireEvent.click(screen.getByRole('button', { name: 'Trigger Example' }))
 
     await waitFor(() => {
@@ -186,6 +194,7 @@ describe('App browser example click UX', () => {
       .map((call) => call[0] as { action?: string; instruction?: string; metadata?: Record<string, unknown> })
       .reverse()
       .find((payload) => payload.action === 'navigate' && payload.instruction === 'Open the dashboard')
+    const afterExamplePrimaryCalls = countPrimaryActionCalls()
 
     expect(browserNavigateCall).toEqual(
       expect.objectContaining({
@@ -197,13 +206,14 @@ describe('App browser example click UX', () => {
         }),
       }),
     )
+    expect(afterExamplePrimaryCalls - beforeExamplePrimaryCalls).toBe(1)
 
     fireEvent.click(screen.getAllByRole('button', { name: /^chat$/i })[0])
-    const beforeChatSendCalls = sendSpy.mock.calls.length
+    const beforeChatPrimaryCalls = countPrimaryActionCalls()
     fireEvent.click(screen.getByRole('button', { name: 'Manual Chat Send' }))
 
     await waitFor(() => {
-      expect(sendSpy.mock.calls.length).toBeGreaterThan(beforeChatSendCalls)
+      expect(countPrimaryActionCalls()).toBeGreaterThan(beforeChatPrimaryCalls)
     })
 
     const chatNavigateCall = [...sendSpy.mock.calls]
@@ -221,6 +231,7 @@ describe('App browser example click UX', () => {
         }),
       }),
     )
+    expect(countPrimaryActionCalls() - beforeChatPrimaryCalls).toBe(1)
 
     await waitFor(() => {
       expect(screen.getByTestId('chat-user-bubbles').textContent).toContain('Open the dashboard')
