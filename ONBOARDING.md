@@ -1,3 +1,41 @@
+## Session 5.67 - April 9, 2026 (Chat input bar UI restructure to Codex-style compact composer)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend UX redesign + regression-test pass
+
+### What Was Done
+- Refactored the `ChatPanel` composer (`InputBarCursor`) to a more compact Codex-style structure:
+  - removed boxed/chip-style selector shells for provider/model/mode and switched to lightweight text dropdowns.
+  - removed provider-specific icon usage in selector controls.
+  - added a single shared switcher SVG icon next to the selector row for all three selectors.
+  - reordered composer controls so prompt suggestions/gallery entry render directly above selector row.
+- Implemented dynamic compact/expanded behavior while tasks are running:
+  - when a task is in progress and input is empty/unfocused, the composer collapses into a smaller compact state.
+  - focusing the textarea (or typing) expands the composer back to full control layout.
+- Moved steering controls (`steer` / `interrupt` / `queue`) out of the internal composer control stack and into a top “extension pill” visually attached to the input bar.
+- Extended shared `SteeringControl` with optional `compact` rendering mode so it can fit the new top pill while preserving behavior.
+
+### What's Working
+- All existing chat composer functions remain intact (send, stop, plus menu, mic, selector changes, suggestions, steering-mode switching).
+- The input bar now has a significantly smaller default footprint during active work, with expansion on interaction.
+- Targeted ChatPanel regression tests pass after UI restructure.
+
+### What's NOT Working Yet
+- No functional blockers identified in this pass.
+- No automated visual screenshot artifact captured in this environment (browser screenshot tool not available in this run context).
+
+### Next Steps
+1. Tune selector truncation/spacing on very narrow mobile widths if design QA flags overflow.
+2. Validate final pixel parity against reference screenshots in a live browser review pass.
+
+### Decisions Made
+- Chose a focus-and-content-aware compact state trigger (`isWorking && !focused && empty input`) to preserve usability while reducing idle active-task height.
+- Kept steering controls functionally identical but moved them into an attached top extension for clearer separation of run-control vs input controls.
+
+### Blockers
+- None.
+
+---
 ## Session 5.66 - April 9, 2026 (Review nitpick cleanup: remove duplicated ternary in dispatcher log)
 
 **Agent:** GPT-5.3-Codex
