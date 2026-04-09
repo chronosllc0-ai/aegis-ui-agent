@@ -768,7 +768,8 @@ function App() {
 
   const dispatchPromptFromUI = (instruction: string, metadata?: Record<string, unknown>) => {
     const selectedMode = isWorking ? 'steer' : mode
-    console.info('[AegisUI] dispatch_source=chat_input selected_mode=%s websocket_action=%s', selectedMode, isWorking ? 'steer' : 'navigate')
+    const websocketAction = isWorking ? 'steer' : 'navigate'
+    console.info('[AegisUI] dispatch_source=chat_input selected_mode=%s websocket_action=%s', selectedMode, websocketAction)
     handleSend(instruction, selectedMode, metadata)
   }
 
