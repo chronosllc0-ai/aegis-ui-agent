@@ -3283,3 +3283,18 @@
 
 ### Validation
 - `cd frontend && npm run test -- src/hooks/__tests__/useWebSocket.reasoning-cache.test.ts` passed.
+
+## 2026-04-09 — Railway build-timeout mitigation (Docker install step)
+
+### What changed
+- Updated `Dockerfile` runtime apt package list to remove unnecessary build-time installs (`git`, `gh`, `nodejs`, `npm`) from the Python runtime image.
+- Updated Python dependency install step to:
+  - upgrade pip in-image before dependency resolution, and
+  - force pip progress output during `requirements.txt` installation to avoid long silent periods during Railway builds.
+
+### Why
+- Railway build logs showed repeated `Build timed out` failures while the image was still in dependency installation stages.
+- The previous Dockerfile did extra runtime package installs and pip install often produced long quiet intervals; both increase timeout risk.
+
+### Validation
+- `python -m py_compile main.py` passed (sanity check after Dockerfile change).
