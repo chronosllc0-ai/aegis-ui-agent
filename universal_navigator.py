@@ -26,7 +26,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from config import settings as _app_settings
 from backend.admin.platform_settings import GLOBAL_INSTRUCTION_KEY, MODE_INSTRUCTION_KEY_PREFIX
 from backend.github_repo_workspace import GitHubRepoWorkspaceManager
-from backend.modes import MODE_SYSTEM_HINTS, blocked_tools_for_mode, normalize_agent_mode
+from backend.modes import (
+    MODE_SYSTEM_HINTS,
+    build_mode_runtime_event,
+    blocked_tools_for_mode,
+    normalize_agent_mode,
+)
 from backend.orchestrator_mode import OrchestratorModeRouter, build_synthesis
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.skills.parser import extract_runtime_guidance_block
@@ -1695,14 +1700,20 @@ async def run_universal_navigation(
     resolved_settings = settings or {}
     active_mode = normalize_agent_mode(resolved_settings.get("agent_mode", ""))
     if active_mode == "orchestrator" and not is_subagent:
+        async def _emit_mode_event(event_name: str, payload: dict[str, Any]) -> None:
+            event_envelope = build_mode_runtime_event(event_name, payload)
+            if on_step:
+                await on_step({"type": "mode_event", "content": json.dumps(event_envelope), "steering": []})
+            if on_workflow_step:
+                await on_workflow_step(event_envelope)
+
         route_decision = OrchestratorModeRouter.classify(
             instruction,
             requested_mode=str(resolved_settings.get("agent_mode", "")),
         )
         delegate_settings = {**resolved_settings, "agent_mode": route_decision.selected_mode}
         delegate_timeout = min(max(int(resolved_settings.get("orchestrator_delegate_timeout_seconds", 120)), 15), 600)
-        route_trace = {
-            "type": "route_decision",
+        route_trace_payload = {
             "router_mode": "orchestrator",
             "selected_mode": route_decision.selected_mode,
             "reason": route_decision.reason,
@@ -1710,10 +1721,19 @@ async def run_universal_navigation(
             "bypass_attempt_detected": route_decision.bypass_attempt_detected,
             "timeout_seconds": delegate_timeout,
         }
-        if on_step:
-            await on_step({"type": "route_decision", "content": json.dumps(route_trace), "steering": []})
-        if on_workflow_step:
-            await on_workflow_step(route_trace)
+        route_trace = {"type": "route_decision", **route_trace_payload}
+        await _emit_mode_event(
+            "route_decision",
+            route_trace_payload,
+        )
+        await _emit_mode_event(
+            "mode_transition",
+            {
+                "from_mode": "orchestrator",
+                "to_mode": route_decision.selected_mode,
+                "reason": "delegate_primary",
+            },
+        )
 
         child_results: list[dict[str, Any]] = []
         delegated_fallback_result: dict[str, Any] | None = None
@@ -1743,6 +1763,15 @@ async def run_universal_navigation(
                 ),
                 timeout=delegate_timeout,
             )
+            worker_summary = str(primary_result.get("summary", "")).strip() or str(primary_result.get("status", "")).strip()
+            await _emit_mode_event(
+                "worker_summary",
+                {
+                    "worker_mode": route_decision.selected_mode,
+                    "status": str(primary_result.get("status", "completed")),
+                    "summary": worker_summary,
+                },
+            )
             child_results.append(
                 {
                     "ref": "child:primary",
@@ -1755,6 +1784,15 @@ async def run_universal_navigation(
         except Exception as delegate_exc:  # noqa: BLE001
             logger.warning("Orchestrator delegate mode failed; using fallback code mode: %s", delegate_exc)
             fallback_settings = {**resolved_settings, "agent_mode": "code"}
+            await _emit_mode_event(
+                "mode_transition",
+                {
+                    "from_mode": route_decision.selected_mode,
+                    "to_mode": "code",
+                    "reason": "primary_delegate_failed",
+                    "error": str(delegate_exc),
+                },
+            )
             try:
                 delegated_fallback_result = await run_universal_navigation(
                     provider=provider,
@@ -1778,6 +1816,19 @@ async def run_universal_navigation(
                     is_subagent=is_subagent,
                 )
                 primary_result = delegated_fallback_result
+                fallback_summary = (
+                    str(delegated_fallback_result.get("summary", "")).strip()
+                    or str(delegated_fallback_result.get("status", "")).strip()
+                )
+                await _emit_mode_event(
+                    "worker_summary",
+                    {
+                        "worker_mode": "code",
+                        "status": str(delegated_fallback_result.get("status", "completed")),
+                        "summary": fallback_summary,
+                        "fallback": True,
+                    },
+                )
                 child_results.append(
                     {
                         "ref": "child:fallback",
@@ -1801,6 +1852,14 @@ async def run_universal_navigation(
                     "route_trace": route_trace,
                     "child_results": child_results,
                 }
+                await _emit_mode_event(
+                    "final_synthesis",
+                    {
+                        "status": "failed",
+                        "synthesis": failure_error,
+                        "child_results": child_results,
+                    },
+                )
                 if on_step:
                     await on_step(
                         {
@@ -1816,6 +1875,22 @@ async def run_universal_navigation(
             decision=route_decision,
             primary_result=primary_result,
             fallback_result=delegated_fallback_result,
+        )
+        await _emit_mode_event(
+            "mode_transition",
+            {
+                "from_mode": str(primary_result.get("mode", route_decision.selected_mode)),
+                "to_mode": "orchestrator",
+                "reason": "synthesize",
+            },
+        )
+        await _emit_mode_event(
+            "final_synthesis",
+            {
+                "status": str(primary_result.get("status", "completed")),
+                "synthesis": synthesis,
+                "child_results": child_results,
+            },
         )
         child_ref_step = {"type": "child_result_refs", "content": json.dumps({"references": child_results}), "steering": []}
         if on_step:

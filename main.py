@@ -33,7 +33,14 @@ from backend.connectors.router import connector_router
 from backend.integrations.text_normalization import normalize_for_channel
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
-from backend.modes import MODE_LABELS, blocked_tools_for_mode, mode_definitions, normalize_agent_mode, serialize_mode_definition
+from backend.modes import (
+    MODE_LABELS,
+    blocked_tools_for_mode,
+    mode_definitions,
+    normalize_agent_mode,
+    parse_mode_runtime_event,
+    serialize_mode_definition,
+)
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
@@ -870,6 +877,19 @@ async def _send_workflow_step(
 ) -> None:
     """Send workflow graph step payload to frontend."""
     await websocket.send_json({"type": "workflow_step", "data": workflow_step})
+    parsed_mode_event, parse_error = parse_mode_runtime_event(workflow_step)
+    if parsed_mode_event is not None:
+        await websocket.send_json({"type": "mode_event", "data": parsed_mode_event})
+    elif parse_error and isinstance(workflow_step, dict) and workflow_step.get("event_name"):
+        await websocket.send_json(
+            {
+                "type": "mode_event_parse_failed",
+                "data": {
+                    "error": parse_error,
+                    "raw_event_name": str(workflow_step.get("event_name", "")),
+                },
+            }
+        )
     if runtime and session_id:
         await _log_web_message(
             runtime,

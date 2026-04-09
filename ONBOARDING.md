@@ -1,3 +1,47 @@
+## Session 5.62 - April 9, 2026 (Explicit mode runtime contract for supervisor/worker orchestration)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 backend+frontend contract pass
+
+### What Was Done
+- Added a shared mode runtime contract in `backend/modes.py` with:
+  - canonical runtime event names (`route_decision`, `mode_transition`, `worker_summary`, `final_synthesis`)
+  - strict `schema_version` (`1.0`)
+  - builder + parser helpers (`build_mode_runtime_event`, `parse_mode_runtime_event`).
+- Refactored orchestrator delegation flow in `universal_navigator.py` so orchestrator acts as supervisor-only and emits machine-readable mode events across routing, transitions, worker summaries, and final synthesis.
+- Ensured orchestrator emits `final_synthesis` even when primary+fallback delegation fails, before returning failed result payload.
+- Updated websocket workflow forwarding in `main.py`:
+  - emits normalized `mode_event` payloads for valid contract events
+  - emits `mode_event_parse_failed` when contract parsing fails (fallback-safe behavior).
+- Added frontend shared contract types/parsers in `frontend/src/lib/agentModes.ts` with versioned parsing and guardrails.
+- Updated websocket client handling in `frontend/src/hooks/useWebSocket.ts`:
+  - handles `mode_event` and `mode_event_parse_failed`
+  - adds malformed JSON fallback (safe ignore + log)
+  - tracks `activeExecutionMode` and updates live activity detail in real time from structured events.
+- Updated `frontend/src/App.tsx` to show active execution mode inline with live activity details for real-time UI visibility.
+
+### What's Working
+- Mode routing + transitions are now surfaced as explicit, versioned machine-readable events instead of ad-hoc free text.
+- Worker modes produce structured summary events consumable by frontend/state tooling.
+- Orchestrator emits explicit final synthesis contract events in success and failure paths.
+- Frontend now reflects active execution mode in real-time and has event parse-failure fallbacks on both server and client streams.
+
+### What's NOT Working Yet
+- No blockers observed in this pass; full test suite not run in this pass (targeted checks only).
+
+### Next Steps
+1. Add dedicated backend tests for contract event emission order and schema parse failures.
+2. Add frontend hook tests validating mode-event handling and activity mode rendering transitions.
+3. Consider exposing a dedicated UI chip for active execution mode outside activity detail text for persistent visibility.
+
+### Decisions Made
+- Kept `schema_version` as a strict exact match (`1.0`) for forward-safe parsing; unknown versions fail closed and fall back safely.
+- Used a dedicated websocket message type (`mode_event`) while still preserving existing `workflow_step` stream compatibility.
+
+### Blockers
+- None.
+
+---
 ## Session 5.61 - April 9, 2026 (Chat composer primary-send routing parity fix)
 
 **Agent:** GPT-5.3-Codex

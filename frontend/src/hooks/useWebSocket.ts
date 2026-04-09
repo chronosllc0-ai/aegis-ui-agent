@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { createIdleActivityState, reduceActivityState, selectActivityView, type ActivitySelector, type ActivityState } from '../lib/activityState'
+import { modeLabel, parseModeRuntimeEvent, type AgentModeId } from '../lib/agentModes'
 
 export type SteeringMode = 'steer' | 'interrupt' | 'queue'
 
@@ -71,7 +72,7 @@ export interface PersistedThinkingMessage {
 }
 
 export type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list'
+  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_event_parse_failed'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -197,6 +198,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   // Sub-agents
   const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([])
   const [subAgentSteps, setSubAgentSteps] = useState<Record<string, SubAgentStep[]>>({})
+  const [activeExecutionMode, setActiveExecutionMode] = useState<AgentModeId>('orchestrator')
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
@@ -292,7 +294,18 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       setConnectionStatus('disconnected')
     }
     ws.onmessage = (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as WebSocketPayload
+      let payload: WebSocketPayload
+      try {
+        payload = JSON.parse(event.data) as WebSocketPayload
+      } catch {
+        appendLog({
+          message: 'Failed to parse websocket message; ignoring malformed payload.',
+          taskId: activeTaskIdRef.current,
+          type: 'error',
+          status: 'failed',
+        })
+        return
+      }
       const taskId = activeTaskIdRef.current
       setTaskActivity((prev) => reduceActivityState(prev, payload, Date.now()))
 
@@ -383,6 +396,83 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       if (payload.type === 'workflow_step') {
         const step = payload.data as WorkflowStep
         setWorkflowSteps((prev) => [...prev.filter((item) => item.step_id !== step.step_id), step])
+        return
+      }
+      if (payload.type === 'mode_event') {
+        const parsed = parseModeRuntimeEvent(payload.data)
+        if (!parsed.ok) {
+          appendLog({
+            message: `Mode event parse failed (${parsed.error}); falling back to raw event stream.`,
+            taskId,
+            type: 'error',
+            status: 'failed',
+          })
+          return
+        }
+        const modeEvent = parsed.event
+        if (modeEvent.event_name === 'route_decision') {
+          setActiveExecutionMode(modeEvent.payload.selected_mode)
+          setTaskActivity((prev) => ({
+            ...prev,
+            phase: 'thinking',
+            detail: `Routing to ${modeLabel(modeEvent.payload.selected_mode)} mode`,
+            updatedAt: new Date().toISOString(),
+            lastEventAt: Date.now(),
+          }))
+          appendLog({
+            message: `Route decision: ${modeLabel(modeEvent.payload.selected_mode)} (${modeEvent.payload.reason})`,
+            taskId,
+            type: 'step',
+            status: 'in_progress',
+          })
+          return
+        }
+        if (modeEvent.event_name === 'mode_transition') {
+          setActiveExecutionMode(modeEvent.payload.to_mode)
+          setTaskActivity((prev) => ({
+            ...prev,
+            phase: 'thinking',
+            detail: `${modeLabel(modeEvent.payload.from_mode)} → ${modeLabel(modeEvent.payload.to_mode)}`,
+            updatedAt: new Date().toISOString(),
+            lastEventAt: Date.now(),
+          }))
+          return
+        }
+        if (modeEvent.event_name === 'worker_summary') {
+          setActiveExecutionMode(modeEvent.payload.worker_mode)
+          appendLog({
+            message: `${modeLabel(modeEvent.payload.worker_mode)} summary: ${modeEvent.payload.summary || modeEvent.payload.status}`,
+            taskId,
+            type: 'result',
+            status: modeEvent.payload.status === 'failed' ? 'failed' : 'completed',
+          })
+          return
+        }
+        if (modeEvent.event_name === 'final_synthesis') {
+          setActiveExecutionMode('orchestrator')
+          setTaskActivity((prev) => ({
+            ...prev,
+            phase: 'generating',
+            detail: 'Orchestrator final synthesis',
+            updatedAt: new Date().toISOString(),
+            lastEventAt: Date.now(),
+          }))
+          appendLog({
+            message: `Final synthesis: ${modeEvent.payload.status}`,
+            taskId,
+            type: modeEvent.payload.status === 'failed' ? 'error' : 'result',
+            status: modeEvent.payload.status === 'failed' ? 'failed' : 'completed',
+          })
+          return
+        }
+      }
+      if (payload.type === 'mode_event_parse_failed') {
+        appendLog({
+          message: `Mode event parse failed on server (${String(payload.data?.error ?? 'unknown')}); using safe fallback.`,
+          taskId,
+          type: 'error',
+          status: 'failed',
+        })
         return
       }
       if (payload.type === 'transcript') {
@@ -650,6 +740,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setReasoningMap({})
     setSubAgents([])
     setSubAgentSteps({})
+    setActiveExecutionMode('orchestrator')
     reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
   }, [])
@@ -706,5 +797,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   }, [isWorking, taskActivity])
 
 
-  return { connectionStatus, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

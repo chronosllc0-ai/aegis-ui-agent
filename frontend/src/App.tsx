@@ -35,7 +35,7 @@ import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { modelInfo, PROVIDERS } from './lib/models'
-import { normalizeAgentMode } from './lib/agentModes'
+import { modeLabel, normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
 import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
@@ -84,7 +84,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -144,6 +144,9 @@ function App() {
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
+  const activityDetailWithMode = activityDetail
+    ? `${activityDetail} · Mode: ${modeLabel(activeExecutionMode)}`
+    : `Mode: ${modeLabel(activeExecutionMode)}`
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
@@ -1210,7 +1213,7 @@ function App() {
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
                 activityStatusLabel={activityStatusLabel}
-                activityDetail={activityDetail}
+                activityDetail={activityDetailWithMode}
                 isActivityVisible={isActivityVisible}
                 provider={settings.provider}
                 model={settings.model}
