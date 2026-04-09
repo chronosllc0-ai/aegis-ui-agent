@@ -367,7 +367,9 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         onSwitchToBrowser={vi.fn()}
         latestFrame={null}
         activeTaskId='task-snapshot'
-        taskActivity={{ phase: 'thinking', detail: 'Alignment regression guard text', updatedAt: '2026-04-03T10:00:00.000Z' }}
+        isActivityVisible
+        activityStatusLabel='Aegis is thinking…'
+        activityDetail='Alignment regression guard text'
         serverMessages={[]}
         {...baseChatPanelProps}
       />,

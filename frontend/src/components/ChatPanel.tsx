@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { LogEntry, SteeringMode, TaskActivity } from '../hooks/useWebSocket'
+import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { Icons } from './icons'
 import { apiUrl } from '../lib/api'
@@ -79,7 +79,9 @@ export interface ChatPanelProps {
   subAgentNames?: string[]
   browseHandoffPromptVisible?: boolean
   onDismissBrowsePrompt?: () => void
-  taskActivity?: TaskActivity
+  activityStatusLabel?: string
+  activityDetail?: string
+  isActivityVisible?: boolean
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -126,21 +128,6 @@ export function resolveComposerSubmission(input: string, planIntent: boolean): {
   }
   if (planIntent) return { mode: 'plan', text: trimmed }
   return { mode: 'normal', text: trimmed }
-}
-
-function resolveActivityLabel(activity?: TaskActivity): string {
-  switch (activity?.phase) {
-    case 'thinking':
-      return 'Aegis is thinking…'
-    case 'browsing':
-      return 'Aegis is browsing…'
-    case 'calling_tool':
-      return 'Aegis is calling tools…'
-    case 'generating':
-      return 'Aegis is generating response…'
-    default:
-      return 'Aegis is working…'
-  }
 }
 
 // ─── Live connector type ───────────────────────────────────────────────────────
@@ -1175,7 +1162,9 @@ export function ChatPanel({
   subAgentNames = [],
   browseHandoffPromptVisible = false,
   onDismissBrowsePrompt,
-  taskActivity,
+  activityStatusLabel = 'Aegis is working…',
+  activityDetail,
+  isActivityVisible = false,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1633,12 +1622,12 @@ export function ChatPanel({
           return <AssistantCard key={msg.id} msg={msg} />
         })}
 
-        {isWorking && (
+        {isActivityVisible && (
           <div className='my-1'>
             <button
               type='button'
               aria-expanded={activityExpanded}
-              aria-label={resolveActivityLabel(taskActivity)}
+              aria-label={activityStatusLabel}
               onClick={() => setActivityExpanded((prev) => !prev)}
               className='w-full rounded-xl border border-blue-500/25 bg-[#121826] px-3 py-2 text-left hover:bg-[#141c2e] transition-colors'
             >
@@ -1648,11 +1637,11 @@ export function ChatPanel({
                   <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
                   <img src='/aegis-shield.png' alt='Aegis activity' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
                 </div>
-                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{resolveActivityLabel(taskActivity)}</span>
+                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
                 <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
               </div>
-              {activityExpanded && taskActivity?.detail && (
-                <p className='mt-2 pl-10 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{taskActivity.detail}</p>
+              {activityExpanded && activityDetail && (
+                <p className='mt-2 pl-10 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
               )}
             </button>
           </div>
