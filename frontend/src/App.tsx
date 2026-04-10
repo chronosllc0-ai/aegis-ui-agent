@@ -30,7 +30,7 @@ import { useContextMeter } from './hooks/useContextMeter'
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
-import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
+import { useWebSocket, type LogEntry } from './hooks/useWebSocket'
 import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
@@ -107,8 +107,6 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [mode, setMode] = useState<SteeringMode>('steer')
-  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
@@ -279,16 +277,14 @@ function App() {
     addNotification,
   ])
 
-  // ── Browser tab title: Working… / Steering… / Aegis ──────────────
-  const titleTimeoutRef = useRef<number | null>(null)
-  const [titleMode, setTitleMode] = useState<'idle' | 'working' | 'steering'>('idle')
+  // ── Browser tab title: Working… / Aegis ───────────────────────────
+  const [titleMode, setTitleMode] = useState<'idle' | 'working'>('idle')
   useEffect(() => {
     if (!isWorking) { setTitleMode('idle'); return }
-    setTitleMode((prev) => prev === 'steering' ? 'steering' : 'working')
+    setTitleMode('working')
   }, [isWorking])
   useEffect(() => {
     if (titleMode === 'working') document.title = '⚙ Aegis - Working…'
-    else if (titleMode === 'steering') document.title = '↩ Aegis - Steering…'
     else document.title = 'Aegis'
   }, [titleMode])
 
@@ -689,7 +685,7 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enrichedLogs.length, appMode])
 
-  const handleSend = (instruction: string, selectedMode: SteeringMode, metadata?: Record<string, unknown>) => {
+  const handleSend = (instruction: string, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
     const mentionMatches = [...trimmed.matchAll(/@([a-zA-Z0-9._-]+)/g)].map((m) => m[1].toLowerCase())
@@ -700,43 +696,17 @@ function App() {
     const selectedAgentMode = normalizeAgentMode(settings.agentMode)
     send({ action: 'config', settings: wsConfig })
 
-    if (selectedMode === 'queue') {
-      setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
-      return
-    }
-    if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
-      return
-    }
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const action = isWorking ? 'steer' : 'navigate'
-    console.info('[AegisUI] selected_mode=%s action=%s', selectedMode, action)
-    // Only route to a sub-agent when actively steering an in-progress task.
-    // When starting a new task (isWorking=false) there is no active parent task,
-    // so sub-agent routing makes no sense and would silently swallow the send.
-    const activeSubAgent = isWorking ? subAgents.find((a) => a.sub_id === selectedTaskId) : null
-    if (activeSubAgent) {
-      void messageSubAgent(activeSubAgent.sub_id, finalInstruction)
+    const action = 'navigate'
+    console.info('[AegisUI] action=%s', action)
+    const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    if (!sent) {
+      toastCtx.error('Connection issue', 'Task was not sent. Please wait for reconnect and retry.')
       return
     }
-
-    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
-
-    // ── Update browser tab title for steering state ────────────────
-    if (action === 'steer') {
-      // Clear any pending timer to avoid stacked timeouts from rapid steers
-      if (titleTimeoutRef.current !== null) window.clearTimeout(titleTimeoutRef.current)
-      setTitleMode('steering')
-      // Flash "Steering…" for 3 s then revert to "Working…"
-      titleTimeoutRef.current = window.setTimeout(() => {
-        setTitleMode('working')
-        titleTimeoutRef.current = null
-      }, 3000)
-    }
 
     // Save to task history optimistically at send-time so the title always reflects
     // the real user instruction. We generate a stable taskId from a UUID that the
@@ -783,17 +753,15 @@ function App() {
   }
 
   const dispatchPromptFromUI = (instruction: string, metadata?: Record<string, unknown>) => {
-    const selectedMode = isWorking ? 'steer' : mode
-    const websocketAction = isWorking ? 'steer' : 'navigate'
-    console.info('[AegisUI] dispatch_source=chat_input selected_mode=%s websocket_action=%s', selectedMode, websocketAction)
-    handleSend(instruction, selectedMode, metadata)
+    console.info('[AegisUI] dispatch_source=chat_input websocket_action=navigate')
+    handleSend(instruction, metadata)
   }
 
   const submitUrl = () => {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, isWorking ? 'steer' : mode, { task_label_source: 'browser', task_label: normalized })
+    handleSend(normalized, { task_label_source: 'browser', task_label: normalized })
   }
 
   const handleDecomposePlan = async (prompt: string) => {
@@ -1194,7 +1162,7 @@ function App() {
             {showSettings || isAdminPath ? (
               <SettingsPage
                 onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
-                onRunWorkflow={(instruction) => handleSend(instruction, 'steer')}
+                onRunWorkflow={(instruction) => handleSend(instruction)}
                 initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
                 isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
                 authRole={authUser?.role}
@@ -1213,11 +1181,7 @@ function App() {
               <ChatPanel
                 logs={enrichedLogs}
                 isWorking={isWorking}
-                mode={mode}
-                queuedMessages={queuedMessages}
-                onModeChange={setMode}
                 onPrimarySend={dispatchPromptFromUI}
-                onSend={handleSend}
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
@@ -1343,7 +1307,7 @@ function App() {
           onTryNow={() => {
             localStorage.setItem('aegis_seen_subagent_modal', '1')
             setShowSubAgentModal(false)
-            handleSend('spawn sub-agents: ', 'steer', { task_label_source: 'chat', task_label: 'spawn sub-agents' })
+            handleSend('spawn sub-agents: ', { task_label_source: 'chat', task_label: 'spawn sub-agents' })
           }}
         />
       )}
