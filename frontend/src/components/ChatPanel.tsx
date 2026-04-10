@@ -1103,12 +1103,23 @@ function InputBarCursor({
             <FiMic className='h-3.5 w-3.5' />
           </button>
 
-          <button type='button' onClick={onSend}
-            disabled={isDisabled || !canSend}
-            className='flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-            aria-label='Send message'>
-            <FiSend className='h-3.5 w-3.5' />
-          </button>
+          {isWorking && !canSend ? (
+            <button type='button' onClick={onStop}
+              className='flex h-7 w-7 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
+              aria-label='Stop task' title='Stop current task'>
+              <span className='relative flex h-3.5 w-3.5 items-center justify-center'>
+                <span className='absolute inset-0 animate-spin rounded-full border border-red-400/50 border-t-transparent' />
+                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+              </span>
+            </button>
+          ) : (
+            <button type='button' onClick={onSend}
+              disabled={isDisabled || !canSend}
+              className='flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+              aria-label='Send message'>
+              <FiSend className='h-3.5 w-3.5' />
+            </button>
+          )}
         </div>
       </div>
     </div>

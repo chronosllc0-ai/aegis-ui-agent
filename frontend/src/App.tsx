@@ -49,6 +49,7 @@ type TaskHistoryItem = {
   title: string
   dateLabel: string
   instruction: string
+  createdAt?: string
   labelSource?: 'browser' | 'chat' | 'system'
 }
 // Stop-words to skip when picking the first meaningful word from an instruction
@@ -88,6 +89,24 @@ const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().repla
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
+
+const startOfLocalDay = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+const dayDiffFromNow = (createdAt: Date, now: Date): number => {
+  const diffMs = startOfLocalDay(now).getTime() - startOfLocalDay(createdAt).getTime()
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24))
+}
+
+const resolveTaskGroup = (task: TaskHistoryItem, now: Date): 'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Tasks' => {
+  const createdAt = task.createdAt ? new Date(task.createdAt) : new Date()
+  if (Number.isNaN(createdAt.getTime())) return 'Today'
+  const dayDiff = dayDiffFromNow(createdAt, now)
+  if (dayDiff <= 0) return 'Today'
+  if (dayDiff === 1) return 'Yesterday'
+  if (dayDiff <= 7) return 'Past 7 Days'
+  return 'Older Tasks'
+}
+
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
@@ -298,7 +317,11 @@ function App() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(taskHistoryKey(authUser?.uid ?? null))
-      setTaskHistory(saved ? (JSON.parse(saved) as TaskHistoryItem[]) : [])
+      const parsed = saved ? (JSON.parse(saved) as TaskHistoryItem[]) : []
+      setTaskHistory(parsed.map((item) => ({
+        ...item,
+        createdAt: item.createdAt ?? undefined,
+      })))
     } catch {
       setTaskHistory([])
     }
@@ -492,6 +515,7 @@ function App() {
           title: mergeTitlePreferMeaningful(undefined, conv.title, fallbackInstruction),
           dateLabel,
           instruction: isPlaceholderTitle(conv.title) ? fallbackInstruction : (conv.title ?? ''),
+          createdAt: conv.created_at ?? new Date().toISOString(),
           labelSource: 'system',
         })
       }
@@ -523,6 +547,20 @@ function App() {
     () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
     [historySearch, taskHistory],
   )
+
+  const groupedHistory = useMemo(() => {
+    const now = new Date()
+    const groups: Record<'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Tasks', TaskHistoryItem[]> = {
+      Today: [],
+      Yesterday: [],
+      'Past 7 Days': [],
+      'Older Tasks': [],
+    }
+    for (const item of filteredHistory) {
+      groups[resolveTaskGroup(item, now)].push(item)
+    }
+    return groups
+  }, [filteredHistory])
 
   const taskLabels = useMemo(
     () => Object.fromEntries(taskHistory.map((item) => [item.id, item.title])),
@@ -663,6 +701,7 @@ function App() {
     if (wasWorking && !isWorking) {
       const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
       browserActivityDuringRunRef.current = false
+      setMode('auto')
       if (hadBrowserActivityThisRun && appMode === 'browser') {
         setAppMode('chat')
       }
@@ -724,7 +763,14 @@ function App() {
       const lockedTitle = typeof metadata?.task_label === 'string' && metadata.task_label.trim()
         ? metadata.task_label.trim()
         : finalInstruction
-      const newEntry: TaskHistoryItem = { id: taskId, title: lockedTitle, dateLabel, instruction: finalInstruction, labelSource }
+      const newEntry: TaskHistoryItem = {
+        id: taskId,
+        title: lockedTitle,
+        dateLabel,
+        instruction: finalInstruction,
+        createdAt: now.toISOString(),
+        labelSource,
+      }
       setOptimisticMessagesByTask((prev) => {
         const existing = prev[taskId] ?? []
         if (existing.some((msg) => msg.role === 'user' && msg.content.trim() === finalInstruction.trim())) {
@@ -973,15 +1019,14 @@ function App() {
         )}
         <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-gradient-to-b from-[#1a1f2d] via-[#191b26] to-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
           <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
-            ⌁ New thread
+            ⌁ New Tasks
           </button>
-          <button type='button' onClick={() => setShowAutomations(true)} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/30 px-3 py-2 text-left text-sm text-zinc-400'>◷ Automations</button>
-          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Threads' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
+          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
           {/* ── Task list — Codex-style text-only threads ── */}
           <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
-            {['Today', 'Yesterday'].map((group) => {
-              const items = filteredHistory.filter((item) => item.dateLabel === group)
+            {(['Today', 'Yesterday', 'Past 7 Days', 'Older Tasks'] as const).map((group) => {
+              const items = groupedHistory[group]
               if (!items.length) return null
               return (
                 <div key={group} className='mb-4'>
