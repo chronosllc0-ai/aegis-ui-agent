@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, constr
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,18 +21,28 @@ router = APIRouter(dependencies=[Depends(get_admin_user)])
 class PaymentMethodCreate(BaseModel):
     """Payload for creating a payment method."""
 
-    type: str
-    brand: str
-    last4: str
-    exp_month: int
-    exp_year: int
+    type: constr(min_length=1)
+    brand: constr(min_length=1)
+    last4: constr(pattern=r"^\d{4}$")
+    exp_month: int = Field(ge=1, le=12)
+    exp_year: int = Field(ge=2000)
 
 
 class PlanUpdate(BaseModel):
     """Payload for updating a user's billing plan."""
 
-    plan: str
-    monthly_allowance: int
+    plan: constr(min_length=1)
+    monthly_allowance: int = Field(ge=0)
+
+
+def _get_cycle_bounds(now: datetime) -> tuple[datetime, datetime]:
+    """Return inclusive monthly cycle start/end for the month containing `now`."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cycle_start = now.astimezone(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    next_month = (cycle_start + timedelta(days=32)).replace(day=1)
+    cycle_end = next_month - timedelta(seconds=1)
+    return cycle_start, cycle_end
 
 
 async def _get_target_user(session: AsyncSession, uid: str) -> User:
@@ -253,10 +263,9 @@ async def update_user_plan(
     balance.monthly_allowance = payload.monthly_allowance
     now = datetime.now(timezone.utc)
     if balance.cycle_start is None or balance.cycle_end is None:
-        cycle_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        next_month = (cycle_start + timedelta(days=32)).replace(day=1)
+        cycle_start, cycle_end = _get_cycle_bounds(now)
         balance.cycle_start = cycle_start
-        balance.cycle_end = next_month - timedelta(seconds=1)
+        balance.cycle_end = cycle_end
 
     await session.flush()
     await log_admin_action(

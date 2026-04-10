@@ -1,3 +1,704 @@
+## Session 5.54 - April 4, 2026 (PR review fixes: batch validation + ask_user_input feedback)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed PR review comments in `universal_navigator.py`:
+  - Removed unreachable `len(tool_calls) > MAX_BATCH_TOOL_CALLS` guard in loop (batch length is already bounded by parser contract).
+  - Removed redundant per-item shape/tool-name validation blocks in batch validation loop; parsing helpers already guarantee normalized structure.
+  - Fixed batch `ask_user_input` behavior by adding an immediate consolidated-result entry (`ok`) indicating pending user response, so model receives explicit feedback in the single merged follow-up message.
+  - Tightened tool error classification heuristic by removing broad substring matching and limiting detection to explicit error prefixes.
+- Cleaned `tests/test_universal_navigator_parallel_tools.py` formatting:
+  - added proper blank-line spacing between top-level tests,
+  - removed trailing whitespace,
+  - added explicit regression test for batch `ask_user_input` consolidated feedback line.
+
+### What's Working
+- Batch orchestration remains deterministic and concurrent while now producing explicit model-visible feedback for `ask_user_input`.
+- Review-file style nitpicks in test layout were resolved.
+
+### What's NOT Working Yet
+- Long-term typed `ToolExecutionResult` return contract is still future work; current pass tightens heuristic without changing tool return API.
+
+### Next Steps
+1. Migrate `UniversalToolExecutor.run(...)` to a typed result object (`ok`, `error`, `result_text`, `screenshot`) to remove string-based status inference entirely.
+2. Add websocket-level coverage for user-input response lifecycle in batch context.
+
+### Decisions Made
+- Kept review-requested scope narrow for this pass (no breaking return-shape changes).
+
+### Blockers
+- None.
+
+---
+
+## Session 5.53 - April 4, 2026 (skills token-budget defaults follow-up)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 config/test stabilization pass
+
+### What Was Done
+- Added missing runtime skill-budget settings defaults in `config.py`:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MIN_PRIORITY=None`
+  - plus backward-compatible `SKILLS_MAX_TOKEN=10000` alias field for singular-env deployments.
+- Hardened runtime skill assembly in `universal_navigator.py`:
+  - reads `SKILLS_MAX_TOKENS` with fallback to `SKILLS_MAX_TOKEN` (default `10000`),
+  - reads `SKILLS_MIN_PRIORITY` via safe `getattr(..., None)` fallback.
+- Updated `.env.example` with:
+  - `SKILLS_MAX_TOKENS=10000`
+  - `SKILLS_MAX_TOKEN=10000`
+  - `SKILLS_MIN_PRIORITY=`
+- Re-ran runtime-skills tests that previously failed due to missing config attributes.
+
+### What's Working
+- Full `tests/test_universal_navigator_runtime_skills.py` now passes in this environment.
+- Batch-tool orchestration tests continue to pass.
+
+### What's NOT Working Yet
+- No new functional blockers found in this pass.
+
+### Next Steps
+1. Decide whether to deprecate singular `SKILLS_MAX_TOKEN` after migration period and keep only plural.
+2. Add config docs in README for runtime skill budget tuning and priority filtering.
+
+### Decisions Made
+- Kept both plural and singular env names for compatibility while standardizing logic on `SKILLS_MAX_TOKENS`.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.52 - April 4, 2026 (universal navigator batch tool-call orchestration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend orchestration + tests pass
+
+### What Was Done
+- Refactored `universal_navigator.py` loop to support backward-compatible multi-tool responses:
+  - Added batch contract parsing for `tool_calls` (max 3), with precedence over `tool` when valid.
+  - Added malformed-batch fallback behavior to legacy single-call parsing (`tool`) when available.
+  - Added per-call validation pipeline in batch mode (shape/tool checks, availability gate, confirmation gate) before execution.
+  - Added bounded concurrent execution (`asyncio.Semaphore(3)`) with deterministic transcript ordering by original index.
+  - Added consolidated single follow-up message format:
+    - `Tool results:` block with ordered per-call `ok/error` status and provenance.
+    - deterministic screenshot attachment from highest-index successful call containing screenshot bytes.
+  - Added structured observability events:
+    - `batch_tool_start`
+    - `batch_tool_result` (index/tool/status/duration)
+    - `batch_tool_complete` summary.
+- Extended `UniversalToolExecutor.run(...)` with `skip_policy_checks` flag so batch pre-validation can enforce policy gates once per call without duplicate confirmation prompts.
+- Added dedicated test suite `tests/test_universal_navigator_parallel_tools.py` covering:
+  - valid batch acceptance,
+  - over-limit rejection,
+  - deterministic ordering under async completion,
+  - mixed pass/fail consolidation,
+  - malformed batch fallback to legacy single-call,
+  - confirmation gate enforcement for high-risk tools in batch,
+  - workflow event emission + consolidated follow-up,
+  - subagent allowlist enforcement in batch mode.
+
+### What's Working
+- Single-call flow remains supported and done/error handling still works for legacy responses.
+- Batch mode now executes up to 3 validated calls concurrently while preserving ordered transcript output.
+- Existing safety controls (disabled tools/integration requirements/subagent allowlist/high-risk confirmation) remain enforced per call in batch mode.
+
+### What's NOT Working Yet
+- Batch mode currently classifies textual tool failures via conservative string-pattern detection (`error:` etc.); richer typed tool-result envelopes could improve this later.
+
+### Next Steps
+1. Consider adding a typed `ToolExecutionResult` object to avoid string-based `ok/error` inference.
+2. Extend websocket-level tests to assert UI action-log rendering for batch event types.
+3. Add provider adapter hints/examples documenting `tool_calls` response shape for stronger model compliance.
+
+### Decisions Made
+- Kept provider compatibility by preserving legacy parsing and only activating batch path when `tool_calls` is valid.
+- Kept policy enforcement semantics unchanged by reusing existing gate methods per call.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.51 - April 3, 2026 (PR follow-up: VT upload-path status handling cleanup)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused scanner-flow correctness pass
+
+### What Was Done
+- Updated `VirusTotalScanner.scan_content(...)` upload/poll path in `backend/skills/service.py`:
+  - removed post-poll re-fetch behavior for 404→upload flow,
+  - now uses completed `poll_json` as `raw` for the upload path,
+  - guarded `file_report.raise_for_status()` under the non-upload (`else`) path to avoid raising on the original 404 response after successful polling.
+- Improved VT stats extraction fallback to support both file-report (`last_analysis_stats`) and analysis payload (`stats`) shapes.
+- Simplified scan transition gate in `run_scans_for_skill(...)`:
+  - `pending_scan` when VT was attempted and returned `error`,
+  - also `pending_scan` when VT is skipped and policy scanner returns `error`.
+- Re-validated user submit rollback/status branch in `backend/skills/router.py`; no duplicate rollback lines exist in current branch.
+
+### What's Working
+- Upload path no longer invalidates successful poll completion by raising on stale 404 `file_report`.
+- Status transition logic is now explicit for VT-attempted error and VT-skipped + policy-error cases.
+
+### What's NOT Working Yet
+- VT analysis payload can vary across API versions; broader schema normalization can still be improved in a future hardening pass.
+
+### Next Steps
+1. Add focused unit tests for VT upload path parsing (`stats` fallback) and transition branching.
+2. Add integration smoke with mocked VT API fixture for 404→upload→completed-analysis flow.
+
+### Decisions Made
+- Chose completed poll payload as source of truth for upload path to avoid redundant network roundtrip and stale-status risk.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.50 - April 3, 2026 (PR review polish: submit scan_status response correctness)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted API response consistency pass
+
+### What Was Done
+- Updated `POST /api/skills/submit` response behavior in `backend/skills/router.py` to report the real scan outcome using an explicit `scan_status` field:
+  - `scan_status = "completed"` when follow-up scan commit succeeds,
+  - `scan_status = "failed"` when scan phase raises `ValueError` and transaction rolls back.
+- Preserved two-phase submission semantics (submission commit is not rolled back by scan-phase failures), while making response payload truthful for clients.
+- Re-verified `backend/skills/service.py` `VirusTotalScanner._is_open(...)` shape is clean and contains no duplicate decorator/dead-return code in current branch.
+
+### What's Working
+- `/api/skills/submit` now returns accurate post-submit scan state for UI/client handling.
+
+### What's NOT Working Yet
+- Scan phase remains synchronous in-request; async background execution remains a planned follow-up.
+
+### Next Steps
+1. Add endpoint test coverage for `scan_status` success/failure branches.
+2. Move scan phase to background worker for better request latency.
+
+### Decisions Made
+- Kept scan failure surfacing as payload state (not HTTP error) to preserve successful submission creation semantics.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.49 - April 3, 2026 (PR review fixes: JSON hardening + VT compliance gating)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend review-fix pass
+
+### What Was Done
+- Addressed review warnings in `backend/skills/service.py`:
+  - narrowed VT exception handling from broad `Exception` to expected IO/network failures (`httpx.RequestError`, `httpx.HTTPStatusError`, `OSError`),
+  - added safe handling for corrupted `metadata_json` in scan flow by raising `ValueError(\"Invalid skill metadata JSON\")`,
+  - computed scan `max_score` once and reused for risk-label branching,
+  - added `VIRUSTOTAL_REQUIRED` behavior in runtime compliance logic so `skipped` VT verdicts are only accepted when explicitly allowed (and now emit warning logs when allowed by config).
+- Addressed review suggestions in `backend/skills/router.py`:
+  - added `_safe_json_loads(...)` helper and applied it to review-queue JSON fields (`metadata_json`, scan `raw_json`) to avoid endpoint 500s on malformed stored JSON,
+  - split user submit flow into two phases:
+    1) create+commit skill/version first,
+    2) scan in a follow-up transaction,
+    so scan failures no longer roll back successful submission creation.
+- Added `VIRUSTOTAL_REQUIRED` to `config.py` and `.env.example`.
+
+### What's Working
+- Review queue endpoint now tolerates malformed persisted JSON blobs safely.
+- User submissions are preserved even if downstream scanning encounters errors.
+- Runtime compliance behavior is now explicit and configurable for skipped VT scans.
+
+### What's NOT Working Yet
+- User submission scan phase is still synchronous in-request; fully async background scan worker remains a follow-up optimization.
+
+### Next Steps
+1. Move submission scan phase to background queue for lower API latency.
+2. Add tests for malformed JSON in review queue response and `VIRUSTOTAL_REQUIRED=true` runtime gating behavior.
+3. Add metrics for `skipped` VT scans to monitor operational drift.
+
+### Decisions Made
+- Kept default `VIRUSTOTAL_REQUIRED=false` to preserve local-dev usability without API key; added warning logging + config switch for stricter environments.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.48 - April 3, 2026 (PR review hardening for skill governance pipeline)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend hardening/refinement pass
+
+### What Was Done
+- Addressed review feedback in `backend/skills/service.py`:
+  - VirusTotal poll loop now returns an explicit `error` verdict when analysis does not reach `completed` within `VIRUSTOTAL_MAX_POLLS` (instead of proceeding with potentially stale data).
+  - Added lock-guarded circuit breaker state updates (`asyncio.Lock`) for `_consecutive_failures` / `_opened_until` mutation safety under concurrent requests.
+  - Updated scan transition behavior so skills are only moved to `pending_review` when scans produce usable output; if both scanners return `error`, skill remains `pending_scan` for retry.
+  - Upgraded version handling so re-submitting an existing owned slug now creates immutable `skill_versions` with incrementing version numbers (`latest + 1`) rather than hardcoding `version=1`.
+- Addressed API review feedback in `backend/skills/router.py`:
+  - Added authenticated-user dependency to `/api/skills/global` and `/api/skills/hub`.
+  - Clarified runtime active-skill semantics by renaming service argument to `requested_for_user_id` while preserving external API contract `?user_id=...`.
+- Addressed testing feedback in `tests/test_skills_service.py`:
+  - Consolidated multiple `asyncio.run(...)` calls into a single event-loop execution in the transition test.
+
+### What's Working
+- VT timeout behavior now fails safely rather than allowing indeterminate scan status to flow through.
+- Concurrent scan failures now update breaker state through a lock-protected path.
+- Revisions to existing skill slugs now produce incremented immutable versions for the same owner.
+- Global/hub catalogs now require authentication.
+
+### What's NOT Working Yet
+- Circuit breaker state is still process-local; cross-worker shared breaker coordination (Redis/DB) is still a future enhancement.
+
+### Next Steps
+1. Add shared-store circuit breaker state for multi-worker deployments.
+2. Add API tests for authenticated `/api/skills/global` and `/api/skills/hub`.
+3. Add tests for VT timeout path and dual-error transition (`pending_scan` retry state).
+
+### Decisions Made
+- Kept process-local breaker implementation for now (hackathon-appropriate), but made it concurrency-safe within worker process boundaries.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.47 - April 3, 2026 (skills governance pipeline: model + APIs + scanners)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend governance implementation pass
+
+### What Was Done
+- Added a full versioned/auditable skill governance data model in `backend/database.py`:
+  - `skills`,
+  - `skill_versions` (immutable),
+  - `skill_scan_results`,
+  - `skill_reviews`,
+  - `skill_publish_events`.
+- Implemented skill workflow services in `backend/skills/service.py`:
+  - VirusTotal scanner flow with hash lookup/upload/poll support, timeout and simple circuit breaker behavior,
+  - prompt/policy scanner with rule-based forbidden-pattern detection and severity scoring,
+  - state-machine transitions across scan/review decisions,
+  - NEW badge expiration handling (`new_until`), visibility-target listing, and runtime active/compliance filtering.
+- Added API routes in `backend/skills/router.py` for:
+  - Admin: create/upload, scan, review queue, review decision,
+  - User: global listing, hub listing, submit, mine,
+  - Runtime: active skill fetch with compliance enforcement.
+- Wired skills routes into FastAPI app in `main.py`.
+- Added VirusTotal environment settings to `config.py` and `.env.example`.
+- Added tests in `tests/test_skills_service.py` for policy scan detection and review transition behavior.
+
+### What's Working
+- End-to-end backend shape now supports the requested dual publish targets (`global` vs `hub`) with separate review decisions.
+- Immutable version rows + publish event trail are persisted for auditability.
+- Runtime active endpoint returns only approved + scan-compliant skills.
+- Added tests pass for new scanner/transition logic.
+
+### What's NOT Working Yet
+- No dedicated background worker cron was added for nightly NEW-flag expiry; current implementation expires at read time.
+- VirusTotal scan path is implemented but not integration-tested against live VT API in this pass.
+- Admin frontend CTA buttons are not yet implemented; API response now exposes CTA decision mapping.
+
+### Next Steps
+1. Add admin UI moderation screen with explicit **Approve to Global** and **Approve to Hub** buttons.
+2. Add async job/queue scheduling for scan polling + nightly NEW flag cleanup.
+3. Add API integration tests for `/api/admin/skills/*` and `/api/skills/*` endpoints with auth fixtures.
+
+### Decisions Made
+- Chose read-time NEW-expiry enforcement now to avoid blocking on scheduler complexity while preserving correct runtime behavior.
+- Kept skill content storage as `inline://` metadata payload for now, with `storage_url` field ready for object storage migration.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.46 - April 3, 2026 (Plan mode first-class composer behavior)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend behavior + test pass
+
+### What Was Done
+- Implemented first-class plan intent behavior in `ChatPanel` composer via explicit `planIntent` state (instead of injecting `/plan ` into the textarea).
+- Added a reusable parser/normalizer helper `resolveComposerSubmission(...)` that determines submission mode (`normal` vs `plan`) and strips slash command tokens from visible user bubble text.
+- Updated send pipeline behavior:
+  - typed `/plan ...` now routes through `onDecomposePlan(...)` and shows clean bubble text without the slash token,
+  - plan-intent mode (`Plan` clicked on empty composer) sends the next prompt through decompose flow,
+  - non-plan messages continue through normal `onSend(...)` flow unchanged.
+- Updated Plan button UX:
+  - empty composer click toggles visual plan intent state,
+  - non-empty composer click immediately submits as plan request.
+- Added/updated component tests:
+  - parser unit cases for slash + intent + normal modes,
+  - UI coverage ensuring no `/plan` token injection into composer,
+  - UI coverage ensuring slash command text is cleaned in the user bubble.
+
+### What's Working
+- Plan mode now behaves like an explicit composer mode rather than slash text injection.
+- Manual slash command path and button-intent path both route to plan decomposition.
+- Existing normal send path behavior remains intact.
+- Targeted ChatPanel Vitest suite passes.
+
+### What's NOT Working Yet
+- No additional E2E browser test was added in this pass (coverage is component/unit level).
+
+### Next Steps
+1. Add an integration/E2E test covering full plan card appearance after decompose API response.
+2. Consider subtle composer hint text while `planIntent` is active (optional UX polish).
+
+### Decisions Made
+- Kept external `onSend(...)` behavior unchanged for non-plan submissions to preserve compatibility across non-chat channels.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.45 - April 3, 2026 (Railway TS6133 follow-up verification + guard test)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted frontend verification pass
+
+### What Was Done
+- Investigated Railway build failure screenshot (`TS6133: 'setThinkingOpen' is declared but its value is never read`) and verified current `ChatPanel` no longer declares `setThinkingOpen`; active state setter is `setOpenThinkingIds` and is used in hydration/toggle flows.
+- Added a regression test to cover task-scoped thinking accordion UI persistence (`aegis.chat.ui.<taskId>.openThinkingIds`) by toggling a thinking row and asserting localStorage persistence + expanded content render.
+- Re-ran frontend test suite and production build to confirm no TypeScript unused-local failures in current source.
+
+### What's Working
+- Frontend tests now include explicit coverage for open/closed thinking-row persistence behavior.
+- Local build passes (`npm run build`) with no `TS6133` error in `ChatPanel.tsx`.
+
+### What's NOT Working Yet
+- Railway build verification still depends on redeploying the latest commit hash (screenshot appears to reference an older failed deployment snapshot).
+
+### Next Steps
+1. Trigger Railway redeploy using latest commit.
+2. Confirm build logs no longer report `setThinkingOpen` TS6133.
+
+### Decisions Made
+- Added a focused guard test instead of introducing additional UI logic churn since current production code path already uses the setter correctly.
+
+### Blockers
+- None in code; only hosted redeploy confirmation remains.
+
+---
+
+## Session 5.44 - April 3, 2026 (structured thinking persistence + hydration regressions)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend persistence + test pass
+
+### What Was Done
+- Added structured persisted thinking model usage in chat rendering flow, including task-scoped hydration from `aegis.reasoning.<taskId>` and deterministic `thinking-<taskId>-<stepId>` identities.
+- Removed chat derivation of thinking rows from raw log token text and replaced malformed `[thinking]` tool fallback with structured placeholder thinking rows (no raw token rendering).
+- Implemented task-scoped thinking cache persistence in `useWebSocket`:
+  - `reasoning_start` seeds streaming rows and persists immediately,
+  - `reasoning_delta` appends text snapshots and persists,
+  - `result` marks all streaming rows for task as completed,
+  - `reasoning` final payload now persists completed content snapshots.
+- Added optional persisted thinking accordion UI state per task via `aegis.chat.ui.<taskId>.openThinkingIds`.
+- Added regression tests covering reasoning cache persistence and chat-panel restoration/visual-state behavior on thread switches and refresh simulation.
+
+### What's Working
+- Revisiting a task/thread now restores purple thinking rows from local cache instead of relying on transient raw logs.
+- Streaming/completed thought status now persists across refreshes and task switches.
+- No literal `[thinking]` token text is surfaced in chat UI.
+
+### What's NOT Working Yet
+- No full browser E2E was added in this pass; coverage is unit/component-level via Vitest.
+
+### Next Steps
+1. Extend persisted reasoning hydration to server-backed task archives if/when reasoning snapshots are stored remotely.
+2. Add E2E test proving task switch + refresh behavior in a full running app session.
+
+### Decisions Made
+- Kept `reasoningMap` as live runtime cache only; persisted local storage snapshot is now the source of truth for thought-row reconstruction.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.43 - April 3, 2026 (ask_user_input reply routing + dedupe + regressions)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend test pass
+
+### What Was Done
+- Updated `ChatPanel` ask-user-input reply handling to keep optimistic local bubble insertion while removing generic steer send from `handleUserInputReply(...)`.
+- Added optimistic reply metadata (`source: "ask_user_input"`, `request_id`) on local user bubbles and tightened merge behavior to treat those optimistic messages as dedupe candidates when equivalent server user bubbles arrive.
+- Wired `ChatPanel` to use the dedicated `onUserInputResponse(answer, requestId)` callback and updated `App.tsx` to send direct websocket payloads with `action: "user_input_response"` (not routed via `handleSend`/steering).
+- Added frontend regression test for ask-user-input card response flow (single callback call + single local user bubble).
+- Added backend websocket regression tests ensuring `user_input_response` resumes exactly one pending prompt, continues the paused task once, and logs unknown/expired request IDs at debug level.
+
+### What's Working
+- ask-user-input responses now route directly to pending prompt futures without kicking off a new steer/navigate path.
+- Optimistic ask-user-input local replies no longer double-render once server user messages hydrate.
+- Backend and frontend regression coverage added for the ask-user-input resume path.
+
+### What's NOT Working Yet
+- No additional browser E2E harness was introduced in this pass beyond websocket integration + frontend component tests.
+
+### Next Steps
+1. Add a full browser-level E2E spec (Playwright UI test) once frontend test harness scope expands.
+2. Extend dedupe metadata to all optimistic message classes (not just ask-user-input) if similar hydration duplication is observed.
+
+### Decisions Made
+- Kept `onUserInputResponse` optional in props for backward compatibility, but all ask-user-input replies now use this callback path as the only transport.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.42 - April 2, 2026 (Follow-up: @mentions + explicit sub-agent message routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused follow-up pass
+
+### What Was Done
+- Implemented composer `@` mention picker in `ChatPanel`:
+  - detects trailing `@query`,
+  - shows matching spawned sub-agent names,
+  - inserts selected mention token into the prompt.
+- Added mention-aware routing in `App.handleSend(...)`:
+  - extracts tagged sub-agent handles,
+  - forwards message copies to tagged sub-agents via `messageSubAgent(...)`,
+  - includes `target_subagents` metadata in parent-agent sends.
+- Added explicit sub-agent-thread direct messaging behavior:
+  - when user is currently in a sub-agent thread, sends route directly to that sub-agent instance instead of parent navigate/steer.
+- Standardized display-name derivation for sub-agents via shared `subAgentDisplayName(...)` helper and reused it in thread sidebar + mention source list.
+
+### What's Working
+- Users can now type `@` in chat composer and select spawned sub-agent names.
+- Parent-thread messages can fan out to tagged sub-agents.
+- Sub-agent thread context now behaves like a direct message channel to that sub-agent.
+
+### What's NOT Working Yet
+- Mention routing currently uses display-name matching; future pass should persist explicit handles/IDs for collision-proof tagging.
+
+### Next Steps
+1. Persist canonical mention handles per sub-agent in runtime events.
+2. Add UI badges indicating which sub-agents were targeted on each user message.
+3. Add integration tests for mention parse + routing semantics.
+
+### Decisions Made
+- Chose minimal invasive routing by extending existing `messageSubAgent(...)` path instead of introducing a new websocket action.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.41 - April 2, 2026 (Taskbar/sub-agent UI refresh + card redesign pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused UI pass
+
+### What Was Done
+- Redesigned sidebar thread/task bar styling toward the reference look: lighter gradient sidebar, text-forward thread rows, and nested sub-agent thread rows showing agent name + task summary rather than heavy boxed cards.
+- Updated sub-agent panel behavior to focus on background-agent status list UX (name shimmer + live status + model tooltip + open thread action), removing inline message/stop controls from that bar.
+- Added File System consent flow in Connections tab:
+  - still off by default,
+  - explicit warning prompts before enabling,
+  - desktop directory picker consent request (where supported) before activation.
+- Added persistent filesystem data-access warning copy under built-in tools section.
+- Reworked `ask_user_input` card behavior so the final option behaves like a writable slot (inline input row) while keeping selectable options + continue flow.
+- Logged this pass in onboarding.
+
+### What's Working
+- Thread list is now less boxy and closer to title/letter style requested.
+- Background agents bar now behaves more like a compact status surface with expandable list and open-thread actions.
+- Filesystem toggle now has explicit user-consent prompts and warning copy.
+- ask-user-input card now supports inline writable option slot pattern.
+
+### What's NOT Working Yet
+- Full @mention-to-subagent tagging flow and cross-thread parent↔sub-agent messaging protocol still needs dedicated wiring.
+- Native host filesystem bridging remains browser-permission scoped (cannot bypass browser sandbox).
+
+### Next Steps
+1. Implement `@` mention picker in composer tied to active spawned sub-agent names.
+2. Add explicit parent/sub-agent thread routing and message-target API payloads.
+3. Iterate summary/approval card visual polish further against reference shots.
+
+### Decisions Made
+- Prioritized interactive parity and safety semantics first, then visual-only refinements.
+
+### Blockers
+- Browser security model limits direct filesystem access beyond user-granted handles.
+
+---
+
+## Session 5.40 - April 2, 2026 (PR review follow-up: shell startup safety + release-note documentation)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Addressed review warning in `universal_navigator.py` by switching shell execution from `bash -lc` to `bash -c` in `_run_shell(...)` to avoid login-shell startup behavior.
+- Addressed review suggestion about behavior-change communication by adding a new changelog entry (`v1.2.1`) documenting:
+  - reasoning controls relocation to Settings,
+  - `enableReasoning` default now on for new profiles,
+  - shell executor safety hardening.
+
+### What's Working
+- Shell tool now launches commands without login-shell rc sourcing path.
+- Release notes now explicitly communicate the reasoning-default behavior change for users/upgraders.
+
+### What's NOT Working Yet
+- Hosted release rollout verification remains pending product deployment.
+
+### Next Steps
+1. Deploy updated build and confirm changelog modal surfaces `v1.2.1` notes.
+2. Merge PR once reviewer confirms warning/suggestion are satisfied.
+
+### Decisions Made
+- Kept the fix minimal (`-lc` → `-c`) so execution semantics stay the same while reducing startup risk.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.39 - April 2, 2026 (Railway build-log follow-up verification for ChatPanel TS2304)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 verification + hotfix confirmation pass
+
+### What Was Done
+- Reviewed the new Railway screenshots showing `TS2304` unresolved names in `frontend/src/components/ChatPanel.tsx` (`reasoningEffort`, `enableReasoning`, `currentModelSupportsReasoning`, `onToggleReasoning`).
+- Verified current branch code no longer references those undefined symbols in the cited line regions.
+- Reproduced the Railway-style frontend stage locally with a fresh install (`npm ci` then `npm run build`) to validate that the failing TypeScript path is resolved.
+
+### What's Working
+- Frontend build now passes cleanly after fresh dependency install.
+- The specific TS2304 ChatPanel unresolved-symbol cluster from Railway screenshots is not reproducible on current head.
+
+### What's NOT Working Yet
+- Hosted Railway confirmation still depends on redeploying this latest commit.
+
+### Next Steps
+1. Redeploy current head to Railway.
+2. Confirm build logs no longer show `ChatPanel.tsx` TS2304 errors.
+
+### Decisions Made
+- Kept this pass as a strict verification pass (no additional code edits) because the current source already contains the fix.
+
+### Blockers
+- None in code; only hosted redeploy verification remaining.
+
+---
+
+## Session 5.38 - April 2, 2026 (Input bar simplification + move reasoning controls to Agent settings)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend/backend pass
+
+### What Was Done
+- Simplified the chat input composer to keep only the requested controls in the action row (`+`, `Plan`, and send/stop), removing extra chips and the inline Think button.
+- Removed the “Think harder” control block from the plus-menu so reasoning controls are no longer mixed into the chat composer UI.
+- Added reasoning controls to **Settings → Agent → Provider & Model**:
+  - `Enable reasoning` toggle
+  - reasoning mode choices rendered only when the selected model supports reasoning
+  - default reasoning mode remains `medium` with support for `high`, `extended`, and `adaptive` based on model capability mapping.
+- Updated settings typing/defaults so reasoning is enabled by default and supports expanded effort values (`medium | high | extended | adaptive`).
+- Added model-aware helper `reasoningModesForModel(...)` to central model metadata logic.
+- Added provider-side normalization/mapping for extended reasoning modes to keep API compatibility:
+  - OpenAI/xAI normalize unsupported effort labels (`extended`/`adaptive`) to supported values.
+  - Google thinking budget mapping now includes `extended` and `adaptive` budgets.
+- Updated chat log parsing so `[thinking] ...` tool-like lines render as plain thinking accordion rows instead of shell cards.
+
+### What's Working
+- Input bar now matches the requested minimal control set.
+- Reasoning controls are centralized in Agent configuration where they belong.
+- Thinking traces are rendered as plain “Thinking” accordion rows with shimmer, not shell terminal cards.
+
+### What's NOT Working Yet
+- Visual QA on deployed Railway/mobile environment is still pending.
+
+### Next Steps
+1. Deploy and verify on Railway/mobile that reasoning controls appear only for reasoning-capable selected models.
+2. Optionally persist per-model preferred reasoning mode if you want automatic switching between providers/models.
+
+### Decisions Made
+- Kept reasoning as a settings-level capability rather than a per-message inline composer switch.
+- Implemented compatibility mapping in providers to avoid API rejections when UI offers extended/adaptive semantics.
+
+### Blockers
+- Hosted visual verification still requires redeploy.
+
+---
+
+## Session 5.37 - April 2, 2026 (Railway frontend build-break follow-up: undefined ChatPanel symbols)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hotfix pass
+
+### What Was Done
+- Investigated Railway build-log screenshots and traced the reported TypeScript compile failures to missing symbol references in `ChatPanel.tsx` (`currentModelMeta`, `reasoningEffort`, `isLocalOnly`, `hasFullAccess`), indicating composer UI values were referenced without reliable local declarations.
+- Hardened `InputBarCursor` by introducing explicit optional props for composer metadata (`modelChipLabel`, `effortChipLabel`, `isLocalOnly`, `hasFullAccess`) with safe defaults.
+- Updated composer chip/status rendering to consume those props rather than undeclared in-scope names.
+- Added concrete parent-level computed values in `ChatPanel` and passed them into `InputBarCursor`, ensuring all values used by the input bar are always declared in the component scope.
+- Re-ran frontend production build to verify the TypeScript failure path is resolved.
+
+### What's Working
+- `ChatPanel` now compiles with strongly defined composer metadata inputs and no unresolved symbol references.
+- Frontend production build succeeds locally after the fix.
+
+### What's NOT Working Yet
+- Railway deploy itself was not executed from this environment; confirmation on hosted infra still depends on a fresh deploy run.
+
+### Next Steps
+1. Trigger a new Railway deploy from the updated branch.
+2. Verify Build Logs no longer report TS2304 undefined-name errors from `ChatPanel.tsx`.
+3. If any residual build issues remain, capture the first error block (not the package-install scrollback) and patch iteratively.
+
+### Decisions Made
+- Kept the fix minimal and type-safe by wiring explicit props/defaults instead of relying on implicit free variables in JSX.
+
+### Blockers
+- Hosted verification requires Railway redeploy access.
+
+---
+
+## Session 5.36 - April 2, 2026 (Enable real sandbox shell command execution)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused runtime pass
+
+### What Was Done
+- Added a new universal runtime tool `exec_shell` so Aegis can execute real shell commands (for scripts/CLI workflows) inside the per-session workspace sandbox.
+- Implemented runtime execution handler `_run_shell(...)` in `universal_navigator.py` using async process execution (`bash -lc ...`) with bounded timeout, sanitized environment variable pass-through, and structured stdout/stderr/return-code output.
+- Wired `exec_shell` into the active tool dispatch path and local-workspace capability detection so the model can plan shell steps alongside file/code tools.
+- Extended sub-agent capabilities to include `exec_shell` plus existing code execution tools (`exec_python`, `exec_javascript`) so spawned sub-agents can also run commands/scripts in sandbox scope.
+- Updated sub-agent system prompt documentation to advertise the new runnable code/command tools.
+- Updated frontend Settings → Tools catalog to expose the new `Run Shell` permission toggle under Code Execution.
+
+### What's Working
+- The agent now has a first-class tool to run real shell commands for command/script tasks.
+- Sub-agents can use shell/python/javascript execution within the same session-sandbox boundary.
+- Tool permissions UI now includes `exec_shell` so users/admins can gate it like other high-risk execution tools.
+
+### What's NOT Working Yet
+- This pass did not add a terminal emulator stream transport; execution is currently command-result based (stdout/stderr snapshots after command completion).
+
+### Next Steps
+1. Add progressive stdout streaming events for long-running shell commands.
+2. Add command execution history persistence metadata (duration/resource usage) in task logs.
+3. Optionally add explicit command policy guardrails (denylist/allowlist) configurable from admin settings.
+
+### Decisions Made
+- Reused the existing session workspace sandbox and environment filtering model to keep shell execution consistent with current Python/JavaScript tool safety posture.
+- Kept `exec_shell` high-risk with default `confirm` permission.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.35 - April 2, 2026 (Chat panel UI revamp pass 1: input bar, shell cards, thinking state)
 
 **Agent:** GPT-5.3-Codex  
@@ -1588,6 +2289,37 @@
 ### Blockers
 - None in this pass.
 
+## Session 5.27 - April 3, 2026 (Railway build failure triage for `isBrowsing` TypeScript errors)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Triaged Railway production build failure screenshot and confirmed the failing errors were:
+  - `src/App.tsx(...): Cannot find name 'isBrowsing'`
+  - `src/components/ChatPanel.tsx(...): 'isBrowsing' is declared but its value is never read`
+- Verified repository source no longer contains any `isBrowsing` references in frontend code.
+- Re-ran local frontend production build to validate the exact Docker-stage command used by Railway (`npm run build`) now succeeds.
+- Confirmed no merge-conflict markers remain in repo after prior cleanup.
+
+### What's Working
+- Frontend TypeScript + Vite production build completes successfully with current branch code.
+- The `isBrowsing` compile blockers from the screenshot are resolved in source.
+
+### What's NOT Working Yet
+- Full container-image parity check with Railway could not be executed in this environment because Docker CLI is unavailable.
+
+### Next Steps
+1. Redeploy Railway from latest commit containing the `isBrowsing` removal patch.
+2. If Railway still fails, clear build cache and force rebuild from scratch.
+3. Add a CI gate that runs `cd frontend && npm run build` on every PR to prevent regression.
+
+### Decisions Made
+- Treat this as a stale-deploy artifact (older commit) unless a fresh rebuild on the latest SHA reproduces.
+
+### Blockers
+- Local runtime lacks Docker binary, so direct `docker build` verification was not possible.
+
 ---
 ## Session 3.6 — March 16, 2026 (Final Pass: Live Wiring + Demo Data Removal)
 
@@ -1856,6 +2588,220 @@
 
 ### Decisions Made
 - Chose to remove prompt-builder dependency entirely and rely on deterministic instruction layering (global baseline + optional user additive) for reliability and policy clarity.
+
+### Blockers
+- None in this pass.
+
+## Session 5.24 - April 2, 2026 (Action Log Browser-only Filtering + Task Label Source Ownership)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Updated browser Action Log behavior so it now renders only browser tool-call entries and task outcome events (result/error/interrupt), while preserving full logs for chat rendering.
+- Added browser-tool filtering in `frontend/src/App.tsx` via `isBrowserActionLogEntry(...)` with an explicit browser-tool allowlist.
+- Added task-label injection to Action Log groups by passing `taskLabels` from task history into `ActionLog`, so labels don’t depend on first log line ordering.
+- Added panel-origin label metadata on new task creation:
+  - Chat composer sends `task_label_source: "chat"` and `task_label`.
+  - Browser URL submit sends `task_label_source: "browser"` and `task_label`.
+  - Task history entries now persist `labelSource` for source ownership.
+- Updated shared docs content (`shared/docs/content.ts`) changelog and WebSocket reference notes to document the new Action Log behavior.
+- Updated root `README.md` with a “Clean action log” feature row and a UX note explaining source-owned task labels.
+
+### What's Working
+- Browser Action Log surface is now scoped to browser tool telemetry + task outcomes.
+- Chat panel still receives full execution/log stream (including non-browser tools).
+- Task titles render from history labels in Action Log groups, reducing missing/unstable labels.
+- Shared docs + README now reflect these UX/telemetry rules.
+
+### What's NOT Working Yet
+- No end-to-end UI test run was completed in this pass to validate all panel interactions under live session traffic.
+
+### Next Steps
+1. Add a focused frontend test for Action Log filtering (browser tools included, non-browser tools excluded).
+2. Add regression coverage for task label source ownership when starting tasks from chat vs browser URL bar.
+3. Validate on a live session that restored task history keeps Action Log group labels stable after refresh.
+
+### Decisions Made
+- Chose presentation-layer filtering for Action Log (in `App.tsx`) so non-browser tool logs remain available for chat and future observability surfaces.
+
+### Blockers
+- None in this pass.
+
+## Session 5.25 - April 2, 2026 (Phase 2-4 Split-Surface UX: Handoff Prompt, Auto-Return, Feature Flags)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Implemented phase 2 contextual handoff UX:
+  - Added a transition-based browse prompt in chat that appears when a task starts browsing while the user is in chat mode.
+  - Prompt is shown at most once per task id and can be dismissed.
+- Implemented phase 3 auto-return behavior:
+  - Added optional auto-switch from browser surface back to chat after task completion.
+  - Added completion notification when auto-return triggers.
+- Implemented phase 4 safety-net rollout controls:
+  - Added feature flags in settings (`separateExecutionSurfaces`, `promptToSwitchOnBrowse`, `autoReturnToChat`) with defaults enabled.
+  - Added Agent settings toggles for all three controls.
+- Updated shared docs changelog and README UX notes to reflect phase 2-4 behavior.
+
+### What's Working
+- Handoff prompt now triggers on idle→working transition (chat mode only) and is non-spammy per task.
+- Auto-return to chat works on working→idle transition when user is on browser surface and setting is enabled.
+- Safety flags allow turning split-surface UX off or tuning prompt/auto-return independently.
+- Frontend compiles cleanly.
+
+### What's NOT Working Yet
+- No dedicated UI integration test harness exists yet for multi-transition chat/browser state flows.
+
+### Next Steps
+1. Add integration tests for:
+   - handoff prompt appears once per task,
+   - dismiss behavior,
+   - auto-return enabled/disabled paths.
+2. Add telemetry counters for prompt shown, prompt dismissed, and auto-return triggered.
+3. Consider exposing a short in-product tooltip that explains these toggles under Agent settings.
+
+### Decisions Made
+- Implemented transition-based effects in `App.tsx` (instead of continuous prompt rendering) to avoid prompt fatigue and duplicate prompts.
+
+### Blockers
+- None in this pass.
+
+## Session 5.26 - April 2, 2026 (Mobile chat bubble fallback + ask_user_input inline reply polish + export fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Fixed a mobile/alternate-entry chat visibility gap by allowing user-role log messages to render in chat as fallback when there is no matching optimistic/server user bubble.
+- Updated `ask_user_input` parsing to support structured option payloads (`[{ label, ... }]`) in addition to raw string lists so quick replies always render as clickable chips.
+- Kept ask-user-input interaction inline (chat-native):
+  - option click sends immediately,
+  - the final chip is always a custom-answer slot,
+  - custom answer sends on Enter or Continue.
+- Removed assistant timestamp assignment in chat message mapping so agent replies are timestamp-free while user bubbles keep timestamps.
+- Fixed package-level import surfaces used by downstream modules:
+  - exported `_get_cycle_bounds` from `backend.admin`,
+  - exported `TelegramAPIError` from `integrations`.
+
+### What's Working
+- Targeted frontend behavior now supports structured quick-reply options for ask-user-input flows.
+- User prompts sent from non-chat composer paths can still appear in chat via user-log fallback.
+- Admin billing and Telegram targeted tests are passing.
+
+### What's NOT Working Yet
+- Full mobile visual verification was not captured in this environment (no browser screenshot tool available in this runtime).
+
+### Next Steps
+1. Add frontend tests for structured ask-user-input option payloads and user-log fallback dedupe.
+2. Validate mobile portrait behavior on-device for composer + quick-reply spacing around the input bar.
+3. Consider adding richer per-option metadata support (e.g., description text) in quick-reply rendering.
+
+### Decisions Made
+- Chose a fallback merge strategy (not hard replacement) so chat remains robust when messages originate from multiple composer surfaces.
+
+### Blockers
+- None in this pass.
+
+## Session 5.27 - April 3, 2026 (Runtime Skill Loader + Prompt Injection + Provenance Logging)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added `backend/skills/runtime_loader.py` with a dedicated `RuntimeSkill` dataclass and runtime skill-loading policy gate that only returns skills with approved status, latest version, resolved scans/review, and not disabled for the active user/session context.
+- Added runtime skill prompt assembly in `universal_navigator.py` including:
+  - control-char sanitization,
+  - priority-based ordering,
+  - token-budget enforcement via `len(text)/4` heuristic,
+  - explicit truncation marker when the budget is exceeded.
+- Added runtime-skill config knobs in `config.py`:
+  - `SKILLS_MAX_TOKENS`
+  - `SKILLS_MIN_PRIORITY`
+  - `SKILLS_FAIL_CLOSED`
+- Wired one-time runtime skill loading into `run_universal_navigation(...)` startup and appended the `### Active Skills (read-only directives)` section to the system prompt once per run.
+- Added structured provenance logging/event emission at task start with `type: skills_loaded`, including `skills[]` and `excluded[]` metadata.
+- Preserved existing tool safety path (`_tool_requires_confirmation` / `_confirm_if_needed`) unchanged.
+
+### What's Working
+- Runtime skills are now injected once at task startup through the system prompt build path.
+- Budget truncation behavior is deterministic by priority order and emits an explicit truncation marker.
+- Skills provenance is emitted to logs and the workflow event callback.
+- High-risk tool confirmation is still enforced even if an injected skill directive attempts to bypass it.
+
+### What's NOT Working Yet
+- There is no dedicated DB-backed assignment model yet for per-user/per-session disablement beyond metadata-driven disable flags.
+
+### Next Steps
+1. Add explicit relational tables for user/session skill assignment & disable rules (instead of metadata-only checks).
+2. Extend runtime loader API to return first-class exclusion reasons alongside active skills for richer observability.
+3. Add admin UI visibility for runtime loaded/excluded skills per task.
+
+### Decisions Made
+- Implemented fail-open runtime behavior by default (`SKILLS_FAIL_CLOSED=False`) to prioritize task availability; fail-closed can be enabled by config.
+
+### Blockers
+- None in this pass.
+
+## Session 5.28 - April 3, 2026 (PR Review Follow-up: runtime skills perf + edge-case fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed code review feedback on runtime skill loading performance by removing per-skill scan/review DB lookups and switching to batched fetching:
+  - batched latest version resolution,
+  - batched review resolution,
+  - batched scan resolution.
+- Added a cap to the runtime skill catalog query (`MAX_RUNTIME_SKILLS=100`) to avoid unbounded in-memory loading during prompt assembly.
+- Extended `RuntimeSkill` with optional `created_at` and updated prompt skill sorting to use real recency metadata (priority desc, then created_at, then version id).
+- Fixed token-budget edge case where `SKILLS_MAX_TOKENS=0` previously behaved as unbounded; now zero budget excludes all skills.
+- Tightened skill-content sanitization to exclude DEL (`0x7F`) in addition to other control-character handling.
+- Added regression coverage for the zero-budget behavior.
+
+### What's Working
+- Runtime loader avoids the previous N+1 query behavior and resolves security metadata in bulk.
+- Prompt inclusion ordering now has a meaningful recency tie-breaker.
+- Zero-budget behavior now correctly excludes all runtime skills.
+- Targeted tests pass including the new edge-case test.
+
+### What's NOT Working Yet
+- Loader exclusion reasons from DB-level filtering (e.g., malformed metadata, unresolved review) are logged but not yet surfaced as a first-class return payload from `get_active_runtime_skills`.
+
+### Next Steps
+1. Expand runtime loader return type to include structured exclusion reasons directly (not only active skills).
+2. Add integration coverage that asserts batched loader behavior at scale (mock/spy query counts).
+3. Consider moving `MAX_RUNTIME_SKILLS` to env config for deployment-level tuning.
+
+### Decisions Made
+- Kept the loader API contract stable (`list[RuntimeSkill]`) for now and handled review suggestions with internal batching + limit to minimize broader API churn.
+
+### Blockers
+- None in this pass.
+
+## Session 5.29 - April 3, 2026 (PR Review Follow-up: runtime skill cap moved to config)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed the remaining review suggestion by removing the hardcoded `MAX_RUNTIME_SKILLS` module constant from `backend/skills/runtime_loader.py`.
+- Added `MAX_RUNTIME_SKILLS` to `config.py` settings so runtime-skill cap is environment-configurable.
+- Updated runtime loader query to consume `settings.MAX_RUNTIME_SKILLS` with defensive clamping (`>= 1`).
+
+### What's Working
+- Runtime skill fetch cap is now configurable and no longer a hidden magic number in module scope.
+
+### What's NOT Working Yet
+- No dedicated API/admin surface exists yet to adjust this setting at runtime without redeploying env configuration.
+
+### Next Steps
+1. Expose runtime skill cap in admin platform settings if live tuning is required.
+2. Add a focused unit test that monkeypatches `MAX_RUNTIME_SKILLS` and asserts capped fetch behavior.
+
+### Decisions Made
+- Used simple integer clamping in loader (`max(int(settings.MAX_RUNTIME_SKILLS), 1)`) to prevent accidental zero/negative caps.
 
 ### Blockers
 - None in this pass.

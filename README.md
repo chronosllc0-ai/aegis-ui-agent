@@ -16,6 +16,7 @@ interacts with any web UI using multimodal vision and real-time browser automati
 | 🎙️ **Voice control** | Real-time voice steering via Live API |
 | 🧠 **Vision-first** | Multimodal screenshots → reasoning → Playwright actions |
 | ⚡ **Real-time** | WebSocket streams of actions, frames, and logs |
+| 🧾 **Clean action log** | Browser Action Log shows browser tool calls + task outcomes only; non-browser tools stay in chat |
 | 🔗 **Integrations** | Telegram, Slack, and Discord connectors for agent delegation |
 | 💳 **Credit system** | Per-model cost tracking, usage dashboard, spending caps |
 | 🚀 **Deploy anywhere** | Railway (full-stack), Netlify (frontend) + Railway (API), Docker |
@@ -27,6 +28,17 @@ interacts with any web UI using multimodal vision and real-time browser automati
 - **Database**: PostgreSQL (async via SQLAlchemy + asyncpg)
 - **LLM SDK**: `openai`, `anthropic`, `google-genai`, `mistralai`, `groq`
 - **Deploy**: Docker, Railway, Netlify, docker-compose
+
+## UX Notes
+
+- Task labels are source-owned at creation:
+  - Tasks started from the browser panel keep the browser-provided label.
+  - Tasks started from chat keep the chat-provided label.
+  - Other panels do not overwrite an existing task label.
+- Split-surface navigation controls are feature-flagged in Agent settings:
+  - Prompt to switch to browser when browsing starts.
+  - Auto-return to chat after task completion.
+  - Master toggle for split chat/browser surfaces rollout.
 
 ---
 
