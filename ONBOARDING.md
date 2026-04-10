@@ -3439,3 +3439,45 @@
 
 ### Validation
 - `python -m py_compile main.py` passed (sanity check after Dockerfile change).
+
+## 2026-04-10 — Chat composer UI restructured to Codex-style compact layout
+
+### What changed
+- Reworked `InputBarCursor` in `frontend/src/components/ChatPanel.tsx` to a slimmer, Codex-style bottom control row that keeps all selectors in one straight line.
+- Enforced requested left-to-right order in the control row: **Plus button → Provider selector → Model selector → Mode selector → (right side) Mic + Send**.
+- Moved prompt gallery chips to sit directly above the selector/action row.
+- Tightened textarea spacing and composer min-height to reduce the overall input bar footprint.
+- Removed the bottom capability/status strip (`Local` / `Full access`) from the composer.
+- Replaced generic selector UI icons with stronger `react-icons` glyphs:
+  - provider: `FiServer`
+  - model: `FiCpu` (laptop-like compute icon)
+  - mode: `FaBrain`
+  - plus/mic/send/chevrons also updated to `react-icons` variants for visual consistency.
+- No new dependency was added; `react-icons` was already installed in `frontend/package.json`.
+
+### What's working
+- Frontend production build passes with the new compact composer layout.
+- Selector ordering and grouping now mirrors the requested Codex-style arrangement.
+
+### What's not / caveats
+- Screenshot capture was not produced in this pass because a browser screenshot tool was not available in the current toolset.
+
+### Next steps
+- If you want pixel-perfect parity, we can do a second pass for exact spacing/radius/token matching after visual QA on your target mobile viewport.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Review follow-up for compact composer PR
+
+### What changed
+- Addressed review nit in `frontend/src/components/ChatPanel.tsx` by removing a no-op ternary (`isExpanded ? 'pb-3' : 'pb-3'`) and replacing it with a direct `pb-3` class.
+- Added an explicit inline code comment documenting why Stop remains intentionally gated behind `isWorking && !canSend`:
+  - while there is draft content (`canSend === true`), the composer prioritizes send affordance and keeps steering flow active.
+
+### Why
+- Keeps the code cleaner for the nitpick without changing behavior.
+- Preserves the intentional stop/send interaction model requested for steering while making that decision explicit for reviewers.
+
+### Validation
+- `cd frontend && npm run build` passed.
