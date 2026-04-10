@@ -39,6 +39,7 @@ const IcoFile        = (p: SvgProps) => <Svg {...p}><path d='M14 2H6a2 2 0 0 0-2
 const IcoTerminal    = (p: SvgProps) => <Svg {...p}><polyline points='4 17 10 11 4 5'/><line x1='12' y1='19' x2='20' y2='19'/></Svg>
 const IcoPlan        = (p: SvgProps) => <Svg {...p}><rect x='3' y='3' width='18' height='18' rx='2'/><path d='M9 9h6M9 12h6M9 15h4'/></Svg>
 const IcoSparkle     = (p: SvgProps) => <Svg {...p}><path d='M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M17.7 6.3l-.7.7M5.6 18.4l.7-.7M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'/></Svg>
+const IcoSelectors   = (p: SvgProps) => <Svg {...p}><line x1='4' y1='7' x2='20' y2='7'/><line x1='4' y1='12' x2='20' y2='12'/><line x1='4' y1='17' x2='20' y2='17'/><circle cx='9' cy='7' r='1.5' fill='currentColor' stroke='none'/><circle cx='15' cy='12' r='1.5' fill='currentColor' stroke='none'/><circle cx='11' cy='17' r='1.5' fill='currentColor' stroke='none'/></Svg>
 
 export interface ChatPanelProps {
   logs: LogEntry[]
