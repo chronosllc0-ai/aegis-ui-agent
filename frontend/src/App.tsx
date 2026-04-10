@@ -1143,9 +1143,8 @@ function App() {
                   modelId: contextMeter.current.modelId,
                   isCompacting: contextMeter.isCompacting,
                 }}
-                subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
-                browseHandoffPromptVisible={settings.separateExecutionSurfaces && showBrowseHandoffPrompt}
-                onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
+                examplePrompt={examplePrompt}
+                onExampleHandled={() => setExamplePrompt(null)}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */

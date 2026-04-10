@@ -64,10 +64,10 @@ export interface ChatPanelProps {
   }
   /** Display name of the logged-in user for personalised CTA */
   userName?: string
-  /** Mentionable sub-agent handles (used for @ picker in composer) */
-  subAgentNames?: string[]
-  browseHandoffPromptVisible?: boolean
-  onDismissBrowsePrompt?: () => void
+  /** When set, pre-fills the input bar with this prompt (e.g. from example chips in ScreenView) */
+  examplePrompt?: string | null
+  /** Called after the example prompt has been consumed so the parent can clear it */
+  onExampleHandled?: () => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1259,13 +1259,25 @@ export function ChatPanel({
   reasoningMap,
   contextSnapshot,
   userName,
-  subAgentNames = [],
-  browseHandoffPromptVisible = false,
-  onDismissBrowsePrompt,
+  examplePrompt,
+  onExampleHandled,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [planIntent, setPlanIntent] = useState(false)
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
+
+  // ── Example prompt injection (from ScreenView chips / browser frame) ──────
+  // Mirrors the same logic in InputBar so that example prompts populate the
+  // ChatPanel input bar regardless of which app mode is active.
+  useEffect(() => {
+    if (!examplePrompt) return
+    const instruction = examplePrompt.trim()
+    const timeout = window.setTimeout(() => {
+      if (instruction) setInput((prev) => prev || instruction)
+      onExampleHandled?.()
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [examplePrompt, onExampleHandled])
 
   // ── Conversation persistence ──────────────────────────────────────────────
   const CHAT_KEY = (id: string) => `aegis.chat.${id}`
