@@ -82,6 +82,10 @@ export interface ChatPanelProps {
   activityStatusLabel?: string
   activityDetail?: string
   isActivityVisible?: boolean
+  /** Pre-fill the composer with this prompt (e.g. from an example click). Consumed on first render. */
+  pendingPrompt?: string | null
+  /** Called once the pending prompt has been loaded into the composer */
+  onPendingPromptConsumed?: () => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1163,6 +1167,8 @@ export function ChatPanel({
   activityStatusLabel = 'Aegis is working…',
   activityDetail,
   isActivityVisible = false,
+  pendingPrompt,
+  onPendingPromptConsumed,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1303,6 +1309,21 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
+
+  // Pre-fill composer when a pending prompt arrives (e.g. from example click in browser panel)
+  useEffect(() => {
+    if (!pendingPrompt) return
+    setInput(pendingPrompt)
+    window.setTimeout(() => {
+      textareaRef.current?.focus()
+      // Auto-resize
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+      }
+    }, 0)
+    onPendingPromptConsumed?.()
+  }, [pendingPrompt, onPendingPromptConsumed])
 
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
