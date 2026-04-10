@@ -18,6 +18,15 @@ from universal_navigator import run_universal_navigation
 logger = logging.getLogger(__name__)
 
 
+def _is_pydantic_ai_available() -> bool:
+    """Return whether pydantic_ai is importable in the current runtime."""
+    try:
+        import pydantic_ai  # noqa: F401
+    except (ImportError, ModuleNotFoundError):
+        return False
+    return True
+
+
 async def run_pydantic_adk_navigation(
     *,
     provider: BaseProvider,
@@ -46,11 +55,17 @@ async def run_pydantic_adk_navigation(
     execution semantics while exposing a dedicated adapter boundary for
     PydanticAI-native orchestration.
     """
+    pydantic_ai_available = _is_pydantic_ai_available()
+
     if on_step is not None:
         await on_step(
             {
                 "type": "message",
-                "content": "Using non-Gemini ADK runtime adapter.",
+                "content": (
+                    "Using non-Gemini PydanticAI ADK runtime."
+                    if pydantic_ai_available
+                    else "Using non-Gemini ADK runtime adapter (pydantic_ai unavailable; using compatibility mode)."
+                ),
                 "steering": [],
             }
         )

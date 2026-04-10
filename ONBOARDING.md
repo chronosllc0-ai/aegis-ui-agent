@@ -3642,3 +3642,25 @@
 ### Next steps
 - Add a focused frontend unit test for auto-reset behavior (working→idle) and mode-to-websocket action mapping for dispatch.
 - Implement full PydanticAI-native tool orchestration inside `backend/pydantic_adk_runner.py` (current implementation remains runtime-compatible delegate behavior).
+
+## 2026-04-10 — Review follow-up: requirements wiring + dead-code ternary cleanup
+
+### What changed
+- Added `pydantic-ai>=0.0.43` to `requirements.txt` so non-Gemini ADK runtime dependency is explicitly wired in backend requirements.
+- Tightened `backend/pydantic_adk_runner.py` runtime messaging:
+  - detects whether `pydantic_ai` is importable,
+  - emits runtime step content indicating native vs compatibility mode.
+- Applied review nit fix in `frontend/src/App.tsx` by removing unreachable ternary branch in action selection after early returns for queue/interrupt:
+  - simplified to `const action = isWorking ? 'steer' : 'navigate'`.
+
+### Why
+- Makes dependency intent explicit for deployment/build environments.
+- Addresses reviewer feedback on dead/unreachable control-flow branch.
+- Keeps runtime action logic simpler and easier to reason about.
+
+### Validation
+- `cd frontend && npm run build` passed.
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+### Next steps
+- Implement full PydanticAI-native tool loop (beyond compatibility delegation) inside `backend/pydantic_adk_runner.py` and add dedicated conformance tests.
