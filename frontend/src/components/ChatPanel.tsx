@@ -353,7 +353,7 @@ function GeneratingCanvas({ label }: { label: string }) {
       <div className='relative flex h-9 w-9 flex-shrink-0 items-center justify-center'>
         <span className='absolute inset-0 rounded-full border border-blue-500/40 animate-spin' style={{ animationDuration: '2.5s' }} />
         <span className='absolute inset-[3px] rounded-full border border-cyan-400/25 animate-spin' style={{ animationDuration: '1.8s', animationDirection: 'reverse' }} />
-        <img src='/aegis-shield.png' alt='Aegis' className='h-6 w-6 object-contain' />
+        <img src='/shield.svg' alt='Aegis' className='h-6 w-6 object-contain mix-blend-screen' />
       </div>
       <div className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium text-zinc-300'>{label}</span>
@@ -1053,12 +1053,12 @@ function InputBarCursor({
             <FiPlus className='h-4 w-4' />
           </button>
 
-          <label className='group relative inline-flex min-w-0 items-center gap-1 rounded-md px-1 py-1 hover:bg-[#222]'>
+          <label className='group relative inline-flex h-7 w-8 items-center justify-center rounded-md px-1 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1'>
             <FiServer className='h-3.5 w-3.5 text-zinc-500' />
             <select
               value={provider}
               onChange={(event) => onProviderChange(event.target.value)}
-              className='max-w-[98px] cursor-pointer appearance-none bg-transparent pr-3 text-[11px] sm:text-xs text-zinc-200 outline-none'
+              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none sm:static sm:max-w-[98px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100'
               aria-label='Provider'
             >
               {PROVIDERS.map((item) => (
@@ -1070,12 +1070,12 @@ function InputBarCursor({
             <FiChevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
           </label>
 
-          <label className='group relative inline-flex min-w-0 items-center gap-1 rounded-md px-1 py-1 hover:bg-[#222]'>
+          <label className='group relative inline-flex h-7 w-8 items-center justify-center rounded-md px-1 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1'>
             <FiCpu className='h-3.5 w-3.5 text-zinc-500' />
             <select
               value={model}
               onChange={(event) => onModelChange(event.target.value)}
-              className='max-w-[110px] cursor-pointer appearance-none bg-transparent pr-3 text-[11px] sm:text-xs text-zinc-200 outline-none'
+              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none sm:static sm:max-w-[110px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100'
               aria-label='Model'
             >
               {(providerById(provider) ?? PROVIDERS[0]).models.map((item) => (
@@ -1087,12 +1087,12 @@ function InputBarCursor({
             <FiChevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
           </label>
 
-          <label className='group relative inline-flex min-w-0 items-center gap-1 rounded-md px-1 py-1 hover:bg-[#222]'>
+          <label className='group relative inline-flex h-7 w-8 items-center justify-center rounded-md px-1 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1'>
             <FaBrain className='h-3.5 w-3.5 text-zinc-500' />
             <select
               value={agentMode}
               onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
-              className='max-w-[104px] cursor-pointer appearance-none bg-transparent pr-3 text-[11px] sm:text-xs text-zinc-200 outline-none'
+              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none sm:static sm:max-w-[104px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100'
               aria-label='Agent mode'
             >
               {AGENT_MODES.map((option) => (
@@ -1546,6 +1546,31 @@ export function ChatPanel({
           </div>
         )}
 
+        {isActivityVisible && (
+          <div className='my-1'>
+            <button
+              type='button'
+              aria-expanded={activityExpanded}
+              aria-label={activityStatusLabel}
+              onClick={() => setActivityExpanded((prev) => !prev)}
+              className='w-full px-1 py-1 text-left'
+            >
+              <div className='flex items-center gap-2.5'>
+                <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
+                  <span className='absolute inset-0 rounded-full border border-blue-500/25 animate-spin' style={{ animationDuration: '3s' }} />
+                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                  <img src='/shield.svg' alt='Aegis activity' className='h-[18px] w-[18px] object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+                </div>
+                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
+                <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
+              </div>
+              {activityExpanded && activityDetail && (
+                <p className='mt-2 pl-8 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
+              )}
+            </button>
+          </div>
+        )}
+
         {threadReady && allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
@@ -1617,31 +1642,6 @@ export function ChatPanel({
 
           return <AssistantCard key={msg.id} msg={msg} />
         })}
-
-        {isActivityVisible && (
-          <div className='my-1'>
-            <button
-              type='button'
-              aria-expanded={activityExpanded}
-              aria-label={activityStatusLabel}
-              onClick={() => setActivityExpanded((prev) => !prev)}
-              className='w-full rounded-xl border border-blue-500/25 bg-[#121826] px-3 py-2 text-left hover:bg-[#141c2e] transition-colors'
-            >
-              <div className='flex items-center gap-3'>
-                <div className='relative flex h-7 w-7 flex-shrink-0 items-center justify-center'>
-                  <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
-                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-                  <img src='/aegis-shield.png' alt='Aegis activity' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
-                </div>
-                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
-                <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
-              </div>
-              {activityExpanded && activityDetail && (
-                <p className='mt-2 pl-10 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
-              )}
-            </button>
-          </div>
-        )}
 
         <div ref={messagesEndRef} />
       </div>

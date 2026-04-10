@@ -3496,3 +3496,37 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Mobile selector icons-only treatment (Codex parity)
+
+### What changed
+- Updated the compact composer selector controls to render **icons + chevrons only on mobile** for provider/model/mode.
+- On mobile, each selector now uses a compact fixed-width control (`h-7 w-8`) with visible icon + arrow.
+- The `<select>` remains present as an invisible full-hit-area overlay on mobile for tap interaction.
+- On `sm+` breakpoints, selectors revert to normal text-visible dropdowns (font bumped back to `text-xs`).
+
+### Why
+- Matches requested Codex-style mobile affordance where selector labels are hidden and only icon/arrow affordances remain.
+- Eliminates mobile text/chevron overlap while preserving desktop readability.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Activity status styling + ordering fix, shield background removal
+
+### What changed
+- Refactored the in-chat activity status UI in `ChatPanel` from a bordered chip/card to a plain Codex-style inline status row:
+  - removed chip border/background container
+  - kept chevron affordance
+  - kept animated shimmer/beam text and orbital spinner treatment
+- Moved activity status rendering to appear **before** message list rendering so newly streamed messages render under the status indicator (instead of visually competing above it).
+- Switched activity/generating shield icon usage in chat from `/aegis-shield.png` to `/shield.svg`.
+- Updated `frontend/public/shield.svg` to remove dark shield fill (`fill="none"`) so the shield appears standalone without the square/dark fill look.
+
+### Why
+- Aligns status presentation with requested Codex-like pattern (no chip, lighter inline row).
+- Fixes the odd visual ordering where message stream appeared above the status marker.
+- Removes perceived dark box/background from the shield treatment in chat activity surfaces.
+
+### Validation
+- `cd frontend && npm run build` passed.
