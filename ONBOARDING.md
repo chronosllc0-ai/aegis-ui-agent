@@ -1,3 +1,84 @@
+## Session 5.68 - April 9, 2026 (Composer layout correction: strict Codex-style row order + icon swap)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend UI correction pass
+
+### What Was Done
+- Reworked the `InputBarCursor` layout again in `frontend/src/components/ChatPanel.tsx` to strictly match requested ordering and compactness:
+  - kept selectors in one straight horizontal control row,
+  - arranged controls as: **plus → provider selector → model selector → mode selector → mic → send/stop**.
+- Removed previous generic selector SVG usage and replaced selector-leading visuals with stronger React icons (`react-icons/fa6`):
+  - provider selector uses laptop icon,
+  - model selector uses brain icon,
+  - mode selector uses sliders icon.
+- Tightened selector spacing and dropdown arrow placement for denser Codex-like control packing.
+- Kept prompt gallery suggestions directly above the selector/control row.
+- Removed the bottom “Local / Full access” status row from the composer.
+- Reduced composer vertical footprint further by tightening textarea/footer paddings and moving send/stop action into the selector row’s right edge.
+
+### What's Working
+- Requested UI order is now enforced in a single horizontal row.
+- Prompt gallery placement remains directly above the control row.
+- Send/stop, plus-menu, mic, and selector callbacks remain wired.
+- ChatPanel tests pass and frontend production build passes.
+
+### What's NOT Working Yet
+- No functional blockers identified in this pass.
+- Visual QA screenshot artifact could not be captured in this environment due unavailable browser screenshot tooling.
+
+### Next Steps
+1. Do manual visual QA on mobile viewport to fine-tune long-label truncation and horizontal scroll behavior.
+2. If desired, reduce font/icon size by one more step for ultra-compact devices.
+
+### Decisions Made
+- Chose `react-icons/fa6` icon set to satisfy “strong react icons” request and keep the selectors visually distinct while compact.
+
+### Blockers
+- None.
+
+---
+## Session 5.67 - April 9, 2026 (Chat input bar UI restructure to compact Codex-style composer)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend UI restructuring pass
+
+### What Was Done
+- Reworked the `ChatPanel` composer (`InputBarCursor`) to mirror a compact Codex-like structure while preserving behavior:
+  - moved steer/interrupt/queue controls out of the composer body into a top extension pill attached above the input bar during active runs.
+  - replaced boxed/chip-style selector controls (provider/model/mode) with compact text-first inline selectors that all share a single generic selector SVG icon plus chevron.
+  - removed provider brand icon usage from selector controls in the composer.
+- Implemented responsive working-state compact behavior:
+  - composer now auto-collapses while working when unfocused and empty.
+  - composer re-expands when user focuses the input or starts typing, preserving quick-edit UX.
+- Reordered composer utility rows so prompt-gallery suggestions appear directly above selector controls.
+- Kept existing functional wiring intact for:
+  - sending/stop behavior,
+  - mode switching,
+  - provider/model/agent mode updates,
+  - plus/mic actions,
+  - connector chip handling.
+
+### What's Working
+- New compact composer layout renders and builds successfully.
+- ChatPanel unit tests pass after the UI restructure.
+- Frontend production build passes.
+
+### What's NOT Working Yet
+- No functional regressions found in this pass.
+- Visual QA screenshot artifact was not captured in this environment because browser screenshot tooling is not available in this run context.
+
+### Next Steps
+1. Do a manual mobile-device visual QA sweep for spacing/line-wrap across long provider and model names.
+2. If desired, further tune selector truncation widths for very narrow viewports.
+
+### Decisions Made
+- Used focus + content presence as the expansion trigger during active runs to match the “shrinks while working, opens when typing” behavior.
+- Kept the queue/steer/interrupt logic and callbacks unchanged while only changing structural presentation.
+
+### Blockers
+- None.
+
+---
 ## Session 5.66 - April 9, 2026 (Review nitpick cleanup: remove duplicated ternary in dispatcher log)
 
 **Agent:** GPT-5.3-Codex
