@@ -3548,3 +3548,330 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — WebSocket navigate prompt handling fix (silent startup failure)
+
+### What changed
+- Fixed `/ws/navigate` message parsing in `main.py` so `metadata` always normalizes to a dictionary.
+  - This prevents a crash when the client sends `navigate` without a `metadata` object.
+- Added explicit instruction validation for control actions:
+  - `navigate` now returns `{"type":"error","data":{"message":"navigate: instruction is required"}}` when instruction is empty.
+  - `steer`, `interrupt`, and `queue` now also reject empty instructions with clear protocol error messages.
+- Added regression coverage in `tests/test_main_websocket.py`:
+  - new test `test_websocket_navigate_requires_instruction_and_keeps_socket_open` verifies the server returns an error for empty prompts and still accepts a valid follow-up prompt in the same socket session.
+
+### Why
+- Root cause of the reported "agent refuses to start / no error" behavior was an unhandled `AttributeError` (`client_metadata` was `None` and `.get(...)` was called), which disconnected the socket before a proper error payload could be emitted.
+- Empty prompts previously could also enter task flow without a user-facing validation error, making failures look like no-op behavior.
+
+### What's working / not working
+- Working:
+  - WebSocket no longer crashes on `navigate` payloads that omit metadata.
+  - Empty prompt now reliably returns an explicit error instead of silent failure.
+  - Connection remains usable after the validation error.
+- Not addressed in this pass:
+  - Existing unrelated websocket config-skill-resolution test failures remain outside this narrow fix scope.
+
+### Next steps
+- Triage and fix the `config` + runtime skills resolution path so server-authoritative resolved IDs are propagated consistently in runtime settings.
+- Add integration-level test for frontend `useWebSocket.send` + backend `/ws/navigate` handshake to ensure malformed payloads always produce protocol errors instead of disconnects.
+
+### Blockers / decisions needed
+- Decide whether empty `interrupt` should require an instruction or default to "stop current task" semantics when no text is supplied.
+
+## 2026-04-10 — Non-Gemini ADK adapter seam + navigate-first idle start flow
+
+### What changed
+- Added `backend/pydantic_adk_runner.py` with `run_pydantic_adk_navigation(...)` as the dedicated non-Gemini ADK adapter seam.
+  - The adapter currently preserves existing Universal Navigator execution semantics while giving us a single integration boundary for PydanticAI-native orchestration.
+- Updated `orchestrator.py` non-Gemini branch to route through `run_pydantic_adk_navigation(...)` instead of calling `run_universal_navigation(...)` directly.
+- Updated WebSocket message parsing in `main.py`:
+  - Accepts `prompt` as a compatibility alias when `instruction` is missing.
+  - Enforces `navigate` as the **only** action that can start a task when idle.
+  - `steer` / `queue` / `interrupt` now return a clear idle error: "Use navigate to start a new task."
+  - `navigate` now guarantees required start metadata by synthesizing `frontend_task_id` server-side when absent and setting default `agent_mode` metadata.
+
+### Why
+- We need a clean path to evolve non-Gemini execution toward a provider-agnostic ADK runtime without destabilizing current behavior.
+- Main startup reliability issue was still tied to start-action ambiguity and prompt payload inconsistencies; forcing idle starts through `navigate` and accepting `prompt` alias removes prompt-shape friction.
+- Server-side metadata defaults make task start more deterministic when clients omit fields.
+
+### What's working / not working
+- Working:
+  - Idle start flow is now explicit and deterministic (`navigate` only).
+  - Prompt-centric clients that send `prompt` instead of `instruction` can still start tasks.
+  - Missing client task metadata no longer blocks task start.
+  - Existing targeted websocket and orchestrator/provider tests pass.
+- Not yet complete:
+  - `pydantic_adk_runner` is currently an adapter seam preserving Universal Navigator behavior; full PydanticAI-native tool orchestration migration is still pending.
+
+### Next steps
+- Implement full PydanticAI agent loop in `pydantic_adk_runner` with typed tool registration for browser + connector + workflow tools.
+- Add provider conformance tests for tool-calling behavior (parallel calls, schema strictness, retries).
+- Add telemetry to compare non-Gemini task success/latency before vs after full PydanticAI migration.
+
+### Blockers / decisions needed
+- Decide whether idle `queue` should remain rejected long-term or enqueue without starting (current behavior rejects to enforce navigate-first semantics).
+- Decide rollout strategy for full PydanticAI runner (feature flag vs default switch).
+
+## 2026-04-10 — Runtime control UX clarification (Auto default) + navigate alignment
+
+### What changed
+- Updated runtime control mode model to include `auto` as first-class control mode (`auto | steer | interrupt | queue`).
+- Updated steering UI control to render an explicit **Auto** button ahead of steer/interrupt/queue for in-flight tasks.
+- Updated input behavior in `App.tsx`:
+  - default control mode now initializes to `auto` (instead of `steer`),
+  - while task is active, `auto` maps to steer behavior,
+  - when a task transitions from working → idle, mode automatically resets back to `auto`.
+- Updated prompt dispatch routing so in-flight sends respect the selected control mode:
+  - `auto`/`steer` → steer
+  - `interrupt` → interrupt
+  - `queue` → queue
+  - idle always starts through navigate path.
+- Browser URL submit path now follows the same `auto` semantics.
+
+### Why
+- Main confusion source was the control selector defaulting to steer semantics and not clearly communicating that idle starts are navigate-first.
+- The explicit Auto label aligns UI language with backend navigate-first startup semantics while preserving mid-flight controls.
+- Automatic reset to Auto after task completion prevents stale interrupt/queue/steer selections leaking into the next task.
+
+### Validation
+- `cd frontend && npm run build` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_websocket_navigate_requires_instruction_and_keeps_socket_open tests/test_orchestrator_startup.py` passed.
+
+### Next steps
+- Add a focused frontend unit test for auto-reset behavior (working→idle) and mode-to-websocket action mapping for dispatch.
+- Implement full PydanticAI-native tool orchestration inside `backend/pydantic_adk_runner.py` (current implementation remains runtime-compatible delegate behavior).
+
+## 2026-04-10 — Review follow-up: requirements wiring + dead-code ternary cleanup
+
+### What changed
+- Added `pydantic-ai>=0.0.43` to `requirements.txt` so non-Gemini ADK runtime dependency is explicitly wired in backend requirements.
+- Tightened `backend/pydantic_adk_runner.py` runtime messaging:
+  - detects whether `pydantic_ai` is importable,
+  - emits runtime step content indicating native vs compatibility mode.
+- Applied review nit fix in `frontend/src/App.tsx` by removing unreachable ternary branch in action selection after early returns for queue/interrupt:
+  - simplified to `const action = isWorking ? 'steer' : 'navigate'`.
+
+### Why
+- Makes dependency intent explicit for deployment/build environments.
+- Addresses reviewer feedback on dead/unreachable control-flow branch.
+- Keeps runtime action logic simpler and easier to reason about.
+
+### Validation
+- `cd frontend && npm run build` passed.
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+### Next steps
+- Implement full PydanticAI-native tool loop (beyond compatibility delegation) inside `backend/pydantic_adk_runner.py` and add dedicated conformance tests.
+
+## 2026-04-10 — Full non-Gemini PydanticAI runtime implementation (with universal fallback)
+
+### What changed
+- Replaced the prior non-Gemini adapter-only stub with a PydanticAI-native runtime implementation in `backend/pydantic_adk_runner.py`.
+- Added provider-to-PydanticAI model wiring via `_build_pydantic_model(...)` for:
+  - OpenAI
+  - OpenRouter (OpenAI-compatible base URL)
+  - Fireworks (OpenAI-compatible base URL)
+  - Anthropic
+  - Groq
+  - Mistral
+  - xAI
+- Implemented an ADK tool execution bridge using PydanticAI tools:
+  - `run_tool(tool, args_json)` delegates tool execution to `UniversalToolExecutor` so existing browser/connectors/workflow tool stack remains available.
+  - `finish_task(summary)` and `fail_task(reason)` provide explicit completion signaling.
+- Added robust fallback behavior:
+  - if `pydantic_ai` import fails, fallback to `run_universal_navigation`
+  - if PydanticAI runtime execution errors, emit a diagnostic step and fallback to `run_universal_navigation`
+
+### Why
+- User requested full PydanticAI ADK setup (not just seam wiring).
+- This change makes non-Gemini path run through a true PydanticAI Agent + tool-calling runtime while preserving Universal Navigator as resilience fallback.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+### Notes
+- Local environment install of `pydantic-ai` pulled newer OpenTelemetry packages that can conflict with strict `google-adk` constraints; repository dependency pin remains explicit in `requirements.txt` and runtime fallback path remains in place.
+
+## 2026-04-10 — Review fixes for PydanticAI runner safety issues
+
+### What changed
+- Tightened import fallback handling in `backend/pydantic_adk_runner.py`:
+  - changed broad `except Exception` around `from pydantic_ai import Agent` to `except ImportError`.
+- Fixed tool-call overwrite bug in `run_tool(...)`:
+  - changed `{"tool": tool, **payload}` to `{**payload, "tool": tool}` so payload cannot override the selected tool name.
+- Updated runtime fallback exception handling:
+  - explicitly re-raises `asyncio.CancelledError` to preserve cancellation semantics,
+  - keeps standard fallback behavior for other runtime exceptions.
+
+### Why
+- Addresses three review warnings directly (import over-catch, tool-name overwrite, cancellation swallowing risk).
+- Preserves graceful fallback while preventing control-flow and payload integrity bugs.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+## 2026-04-10 — Dependency conflict patch (PydanticAI vs Google ADK)
+
+### What changed
+- Replaced broad `pydantic-ai` dependency with targeted `pydantic-ai-slim` extras in `requirements.txt`:
+  - `pydantic-ai-slim[openai,anthropic,groq,mistral,xai]>=1.79.0`
+- Added `constraints.txt` to pin OpenTelemetry versions compatible with current `google-adk` constraints:
+  - `opentelemetry-api<1.39.0`
+  - `opentelemetry-sdk<1.39.0`
+  - `opentelemetry-semantic-conventions<0.60b0`
+
+### Why
+- Installing full `pydantic-ai` pulled transitive telemetry packages that exceeded `google-adk` version bounds.
+- Slim extras + explicit constraints reduce dependency surface and stabilize installs.
+
+### Validation
+- `pip check` now expected to be run with constraints-aware installs in CI/deploy workflows.
+
+## 2026-04-10 — Follow-up polish: cancel_event handling + import cleanup in Pydantic runner
+
+### What changed
+- Updated `backend/pydantic_adk_runner.py` to honor `cancel_event` during `agent.run(...)`:
+  - wraps agent execution in an asyncio task,
+  - races it against `cancel_event.wait()` with `asyncio.wait(FIRST_COMPLETED)`,
+  - cancels in-flight run and raises `asyncio.CancelledError` when cancellation is signaled.
+- Moved `base64` import from inline branch scope to module top-level import section.
+
+### Why
+- Addresses review suggestion about previously ignored cancellation input for PydanticAI runs.
+- Cleans minor style nit around inline imports.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+## 2026-04-10 — Railway build fix: avoid numpy source builds and dependency resolver conflict
+
+### What changed
+- Updated `requirements.txt` PydanticAI extras to remove `mistral` extra from `pydantic-ai-slim`:
+  - from `pydantic-ai-slim[openai,anthropic,groq,mistral,xai]` to `pydantic-ai-slim[openai,anthropic,groq,xai]`.
+- Kept `mistralai==1.12.4` pinned to stay compatible with current OpenTelemetry constraints used by `google-adk` stack.
+- Refactored `_build_pydantic_model(...)` imports in `backend/pydantic_adk_runner.py` to provider-branch lazy imports, so missing optional provider deps do not break unrelated providers at import time.
+- Dockerfile already installs with `--prefer-binary` and constraints file to reduce source-build attempts.
+
+### Why
+- Railway build log showed pip backtracking into old numpy source metadata builds and failing due missing Fortran/BLAS toolchain.
+- Root cause was dependency conflict between:
+  - `pydantic-ai-slim` mistral extra requiring `mistralai>=2.0.0`
+  - project pin/constraints aligned to Google ADK telemetry bounds.
+- Removing the mistral extra resolves resolver conflict and avoids the numpy source-build path.
+
+### Validation
+- `python -m pip install --dry-run -r requirements.txt -c constraints.txt` no longer attempts numpy source resolution in this dependency set.
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+## 2026-04-10 — Frontend steering label + WebSocket send error surfacing
+
+### What changed
+- Updated `frontend/src/components/SteeringControl.tsx` to rename the steering option label from `auto` to `Navigate` while preserving the existing in-flight mode mapping (`steer`) and idle-start mapping (`navigate`).
+- Updated `frontend/src/App.tsx` to handle failed WebSocket sends with explicit user-facing toast errors in three paths:
+  - queued message resend,
+  - interrupt (`stop`) action,
+  - standard task send path.
+- Ensured failed normal sends do not proceed with optimistic follow-up handling by returning early when `sendMessage(...)` fails.
+
+### Why
+- Users reported that tasks could appear in the UI but not actually start when the connection dropped, with no visible error.
+- Explicit failure toasts make connectivity/send failures immediately obvious and reduce false impression that navigation started.
+- The `Navigate` label better matches the backend `navigate` action terminology used to start a run.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+### Notes
+- Build still reports the existing Vite large-chunk warning (>500 kB), which is unrelated to this fix.
+
+## 2026-04-10 — Simplify chat flow: remove runtime controls and force direct navigate runs
+
+### What changed
+- Simplified `frontend/src/App.tsx` send pipeline to always dispatch user prompts as `navigate` actions.
+  - Removed queue/interrupt/steer branching from `handleSend(...)`.
+  - Removed chat-level steering mode state/queue state wiring.
+  - Kept connection failure toast handling so failed sends are visible.
+- Simplified title state in `App.tsx` from `idle|working|steering` to `idle|working` after removing steering-mode UX.
+- Removed steering control UI from the active chat composer in `frontend/src/components/ChatPanel.tsx`.
+  - Dropped `mode`, `queuedMessages`, and `onModeChange` props in the active input bar path.
+  - Removed `SteeringControl` usage from the cursor-style composer.
+- Updated composer behavior so users cannot type while a task is running:
+  - `isDisabled` now includes `isWorking`, which disables textarea/send/plus actions during execution.
+  - Stop button remains visible while running.
+- Updated ask-user-input quick actions to send straightforward prompt messages via `onPrimarySend(...)`.
+
+### Why
+- Requested product direction is to remove runtime control features temporarily and make task start behavior immediate and predictable.
+- This enforces a single path: any submitted prompt starts a run directly via `navigate`.
+- Disabling input during active runs prevents mid-run steer/control complexity until runtime controls are reintroduced.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+### Notes
+- Existing Vite chunk-size warning (>500 kB) remains unrelated to this behavior change.
+
+## 2026-04-10 — Netlify follow-up fixes: missing setMode regression + review nits
+
+### What changed
+- Verified the Netlify-reported TS2304 regression (`Cannot find name 'setMode'`) is resolved in current `frontend/src/App.tsx` by removing stale `setMode(...)` references in the simplified navigate-only flow.
+- Updated `main.py` WebSocket metadata normalization to avoid mutating inbound client metadata objects directly:
+  - `client_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}`
+- Improved cancellation handling in `backend/pydantic_adk_runner.py`:
+  - still races `agent.run(...)` against `cancel_event.wait()`,
+  - now properly awaits cancelled tasks using `contextlib.suppress(asyncio.CancelledError)` to avoid leaked task exceptions.
+- Updated Docker build pip invocation to disable progress bars in CI/non-interactive logs:
+  - `--progress-bar off`
+
+### Why
+- Netlify build failed on a stale `setMode` reference after runtime-control UI removal.
+- Review requested safer handling for mutable client payloads and cleaner async task cancellation behavior.
+- CI logs are cleaner and more diagnosable without pip progress bar spam.
+
+### Validation
+- `npm run -w frontend build` passed (same command used by Netlify workspace build).
+- `python -m py_compile main.py backend/pydantic_adk_runner.py` passed.
+
+### Notes
+- Frontend build still reports the existing Vite chunk-size warning (>500 kB), unrelated to this fix.
+
+## 2026-04-10 — Post-merge hardening on main: Netlify verification + Pydantic runner safety
+
+### What changed
+- Hardened `backend/pydantic_adk_runner.py` based on review feedback:
+  - tightened `cancel_event` type hint from `Any` to `asyncio.Event | None` in `run_pydantic_adk_navigation(...)`,
+  - added JSON decode guard for `run_tool(..., args_json)` so malformed LLM-emitted JSON returns a controlled tool error string instead of raising,
+  - retained fallback-on-error behavior with an explicit comment clarifying intentional broad exception handling.
+- Re-verified the previously reported Netlify build path on main with the exact workspace command.
+
+### Why
+- Post-merge review identified a production risk from unhandled `json.loads(...)` failures on untrusted model output.
+- Stronger typing and explicit fallback intent improve maintainability and reduce ambiguity in future reviews.
+- Running the Netlify-equivalent build command confirms the merged branch no longer fails the frontend build stage.
+
+### Validation
+- `npm ci && npm run -w frontend build` passed.
+- `python -m py_compile backend/pydantic_adk_runner.py` passed.
+
+### Notes
+- Vite chunk-size warning (>500 kB) remains and is unrelated to these safety fixes.
+
+## 2026-04-10 — Startup reliability follow-up: auto-retry pending navigate on reconnect
+
+### What changed
+- Updated `frontend/src/App.tsx` to retain one pending navigate request when a send fails due transient WebSocket connectivity (`pendingNavigation` state).
+- On reconnection (`connectionStatus === connected`), the app now auto-retries the stored prompt once (while idle), so users do not need to manually retype/re-send after reconnect.
+- Kept existing explicit toast error so users still get immediate feedback that the first send did not go through.
+
+### Why
+- User reported the agent still not starting reliably.
+- The previous flow surfaced send failure, but still required manual retry. This patch closes that UX gap by auto-resuming the exact pending prompt after reconnect.
+
+### Validation
+- `npm run -w frontend build` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke -q` passed.
+
+### Notes
+- Vite chunk-size warning (>500 kB) remains unrelated to this retry behavior.
