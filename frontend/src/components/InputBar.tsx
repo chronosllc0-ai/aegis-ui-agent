@@ -4,7 +4,6 @@ import { apiUrl } from '../lib/api'
 import { PROVIDERS, providerById, renderProviderIcon } from '../lib/models'
 import { Icons } from './icons'
 import { MessageQueue } from './MessageQueue'
-import { PromptGallery } from './PromptGallery'
 import { SuggestionChips } from './SuggestionChips'
 import { SteeringControl } from './SteeringControl'
 
@@ -109,7 +108,6 @@ export function InputBar({
 }: InputBarProps) {
   const [value, setValue] = useState('')
   const [queueOpen, setQueueOpen] = useState(true)
-  const [galleryOpen, setGalleryOpen] = useState(false)
   const [planMode, setPlanMode] = useState(false)
   const pendingExampleRef = useRef<string | null>(null)
 
@@ -167,11 +165,6 @@ export function InputBar({
     } catch { /* silent */ }
   }
 
-  const handleTemplateSelect = (prompt: string) => {
-    setValue(prompt)
-    setGalleryOpen(false)
-  }
-
   const playTranscript = (text: string) => {
     if (!speechSupported) return
     window.speechSynthesis.cancel()
@@ -207,7 +200,7 @@ export function InputBar({
         <ModelPicker provider={provider} model={model} onProviderChange={onProviderChange} onModelChange={onModelChange} />
       </div>
 
-      <SuggestionChips onSelectSuggestion={(id) => void handleSuggestionSelect(id)} onOpenGallery={() => setGalleryOpen(true)} />
+      <SuggestionChips onSelectSuggestion={(id) => void handleSuggestionSelect(id)} />
 
       {/* Main input row - [Plan] [textarea] [↑] */}
       <div className='flex items-end gap-1.5 sm:gap-2'>
@@ -295,15 +288,6 @@ export function InputBar({
       {/* Queue */}
       {queuedMessages.length > 0 && (
         <MessageQueue queuedMessages={queuedMessages} isOpen={queueOpen} onToggle={() => setQueueOpen((p) => !p)} onDelete={onDeleteQueueItem} />
-      )}
-
-      {/* Prompt gallery modal */}
-      {galleryOpen && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
-          <div className='h-[85vh] w-full max-w-6xl'>
-            <PromptGallery onSelectTemplate={handleTemplateSelect} onClose={() => setGalleryOpen(false)} />
-          </div>
-        </div>
       )}
     </section>
   )

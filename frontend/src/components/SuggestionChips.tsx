@@ -9,10 +9,9 @@ type Suggestion = {
 
 type SuggestionChipsProps = {
   onSelectSuggestion: (templateId: string) => void
-  onOpenGallery: () => void
 }
 
-export function SuggestionChips({ onSelectSuggestion, onOpenGallery }: SuggestionChipsProps) {
+export function SuggestionChips({ onSelectSuggestion }: SuggestionChipsProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
 
   const fetchSuggestions = useCallback(async () => {
@@ -36,13 +35,6 @@ export function SuggestionChips({ onSelectSuggestion, onOpenGallery }: Suggestio
 
   return (
     <div className='flex items-center gap-2 overflow-x-auto px-2 py-1.5'>
-      <button
-        type='button'
-        onClick={onOpenGallery}
-        className='shrink-0 rounded-full border border-blue-600/50 bg-blue-900/20 px-3 py-1 text-xs font-medium text-blue-300 hover:bg-blue-900/40'
-      >
-        From the gallery
-      </button>
       {suggestions.map((s) => (
         <button
           key={s.id}

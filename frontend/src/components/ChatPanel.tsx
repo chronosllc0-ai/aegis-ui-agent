@@ -1273,7 +1273,7 @@ export function ChatPanel({
     if (!examplePrompt) return
     const instruction = examplePrompt.trim()
     const timeout = window.setTimeout(() => {
-      if (instruction) setInput(instruction)
+      if (instruction) setInput((prev) => prev || instruction)
       onExampleHandled?.()
     }, 0)
     return () => window.clearTimeout(timeout)
