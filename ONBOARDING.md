@@ -3728,3 +3728,19 @@
 
 ### Validation
 - `pip check` now expected to be run with constraints-aware installs in CI/deploy workflows.
+
+## 2026-04-10 — Follow-up polish: cancel_event handling + import cleanup in Pydantic runner
+
+### What changed
+- Updated `backend/pydantic_adk_runner.py` to honor `cancel_event` during `agent.run(...)`:
+  - wraps agent execution in an asyncio task,
+  - races it against `cancel_event.wait()` with `asyncio.wait(FIRST_COMPLETED)`,
+  - cancels in-flight run and raises `asyncio.CancelledError` when cancellation is signaled.
+- Moved `base64` import from inline branch scope to module top-level import section.
+
+### Why
+- Addresses review suggestion about previously ignored cancellation input for PydanticAI runs.
+- Cleans minor style nit around inline imports.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
