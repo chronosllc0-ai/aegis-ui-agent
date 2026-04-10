@@ -1,4 +1,4 @@
-export const PLACEHOLDER_TITLES = new Set(['new task', 'untitled', ''])
+export const PLACEHOLDER_TITLES = new Set(['new task', 'new web conversation', 'untitled', ''])
 
 export const normalizeTitle = (t?: string | null): string => (t ?? '').trim()
 
