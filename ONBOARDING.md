@@ -3511,3 +3511,22 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Activity status styling + ordering fix, shield background removal
+
+### What changed
+- Refactored the in-chat activity status UI in `ChatPanel` from a bordered chip/card to a plain Codex-style inline status row:
+  - removed chip border/background container
+  - kept chevron affordance
+  - kept animated shimmer/beam text and orbital spinner treatment
+- Moved activity status rendering to appear **before** message list rendering so newly streamed messages render under the status indicator (instead of visually competing above it).
+- Switched activity/generating shield icon usage in chat from `/aegis-shield.png` to `/shield.svg`.
+- Updated `frontend/public/shield.svg` to remove dark shield fill (`fill="none"`) so the shield appears standalone without the square/dark fill look.
+
+### Why
+- Aligns status presentation with requested Codex-like pattern (no chip, lighter inline row).
+- Fixes the odd visual ordering where message stream appeared above the status marker.
+- Removes perceived dark box/background from the shield treatment in chat activity surfaces.
+
+### Validation
+- `cd frontend && npm run build` passed.

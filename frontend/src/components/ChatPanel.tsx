@@ -353,7 +353,7 @@ function GeneratingCanvas({ label }: { label: string }) {
       <div className='relative flex h-9 w-9 flex-shrink-0 items-center justify-center'>
         <span className='absolute inset-0 rounded-full border border-blue-500/40 animate-spin' style={{ animationDuration: '2.5s' }} />
         <span className='absolute inset-[3px] rounded-full border border-cyan-400/25 animate-spin' style={{ animationDuration: '1.8s', animationDirection: 'reverse' }} />
-        <img src='/aegis-shield.png' alt='Aegis' className='h-6 w-6 object-contain' />
+        <img src='/shield.svg' alt='Aegis' className='h-6 w-6 object-contain mix-blend-screen' />
       </div>
       <div className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium text-zinc-300'>{label}</span>
@@ -1546,6 +1546,31 @@ export function ChatPanel({
           </div>
         )}
 
+        {isActivityVisible && (
+          <div className='my-1'>
+            <button
+              type='button'
+              aria-expanded={activityExpanded}
+              aria-label={activityStatusLabel}
+              onClick={() => setActivityExpanded((prev) => !prev)}
+              className='w-full px-1 py-1 text-left'
+            >
+              <div className='flex items-center gap-2.5'>
+                <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
+                  <span className='absolute inset-0 rounded-full border border-blue-500/25 animate-spin' style={{ animationDuration: '3s' }} />
+                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                  <img src='/shield.svg' alt='Aegis activity' className='h-[18px] w-[18px] object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+                </div>
+                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
+                <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
+              </div>
+              {activityExpanded && activityDetail && (
+                <p className='mt-2 pl-8 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
+              )}
+            </button>
+          </div>
+        )}
+
         {threadReady && allMessages.map((msg) => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
@@ -1617,31 +1642,6 @@ export function ChatPanel({
 
           return <AssistantCard key={msg.id} msg={msg} />
         })}
-
-        {isActivityVisible && (
-          <div className='my-1'>
-            <button
-              type='button'
-              aria-expanded={activityExpanded}
-              aria-label={activityStatusLabel}
-              onClick={() => setActivityExpanded((prev) => !prev)}
-              className='w-full rounded-xl border border-blue-500/25 bg-[#121826] px-3 py-2 text-left hover:bg-[#141c2e] transition-colors'
-            >
-              <div className='flex items-center gap-3'>
-                <div className='relative flex h-7 w-7 flex-shrink-0 items-center justify-center'>
-                  <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
-                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-                  <img src='/aegis-shield.png' alt='Aegis activity' className='h-5 w-5 object-contain animate-pulse' style={{ animationDuration: '2s' }} />
-                </div>
-                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
-                <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
-              </div>
-              {activityExpanded && activityDetail && (
-                <p className='mt-2 pl-10 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
-              )}
-            </button>
-          </div>
-        )}
 
         <div ref={messagesEndRef} />
       </div>
