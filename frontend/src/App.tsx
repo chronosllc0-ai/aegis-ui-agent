@@ -741,11 +741,17 @@ function App() {
 
     if (selectedMode === 'queue') {
       setQueuedMessages((prev) => [...prev, trimmed])
-      send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      const queued = send({ action: 'queue', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      if (!queued) {
+        toastCtx.error('Connection issue', 'Could not queue task because WebSocket is not connected.')
+      }
       return
     }
     if (selectedMode === 'interrupt') {
-      send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      const interrupted = send({ action: 'interrupt', instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+      if (!interrupted) {
+        toastCtx.error('Connection issue', 'Could not send interrupt because WebSocket is not connected.')
+      }
       return
     }
     setSteeringFlashKey((prev) => prev + 1)
@@ -762,7 +768,11 @@ function App() {
       return
     }
 
-    send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    if (!sent) {
+      toastCtx.error('Connection issue', 'Task was not sent. Please wait for reconnect and retry.')
+      return
+    }
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // ── Update browser tab title for steering state ────────────────

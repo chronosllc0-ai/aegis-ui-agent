@@ -3764,3 +3764,24 @@
 ### Validation
 - `python -m pip install --dry-run -r requirements.txt -c constraints.txt` no longer attempts numpy source resolution in this dependency set.
 - `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+## 2026-04-10 — Frontend steering label + WebSocket send error surfacing
+
+### What changed
+- Updated `frontend/src/components/SteeringControl.tsx` to rename the steering option label from `auto` to `Navigate` while preserving the existing in-flight mode mapping (`steer`) and idle-start mapping (`navigate`).
+- Updated `frontend/src/App.tsx` to handle failed WebSocket sends with explicit user-facing toast errors in three paths:
+  - queued message resend,
+  - interrupt (`stop`) action,
+  - standard task send path.
+- Ensured failed normal sends do not proceed with optimistic follow-up handling by returning early when `sendMessage(...)` fails.
+
+### Why
+- Users reported that tasks could appear in the UI but not actually start when the connection dropped, with no visible error.
+- Explicit failure toasts make connectivity/send failures immediately obvious and reduce false impression that navigation started.
+- The `Navigate` label better matches the backend `navigate` action terminology used to start a run.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+### Notes
+- Build still reports the existing Vite large-chunk warning (>500 kB), which is unrelated to this fix.
