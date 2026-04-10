@@ -3,7 +3,7 @@ import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../l
 import { createIdleActivityState, reduceActivityState, selectActivityView, type ActivitySelector, type ActivityState } from '../lib/activityState'
 import { modeLabel, parseModeRuntimeEvent, type AgentModeId } from '../lib/agentModes'
 
-export type SteeringMode = 'steer' | 'interrupt' | 'queue'
+export type SteeringMode = 'auto' | 'steer' | 'interrupt' | 'queue'
 
 export type ActivityPhase = 'idle' | 'thinking' | 'browsing' | 'calling_tool' | 'generating'
 
