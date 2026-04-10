@@ -701,7 +701,10 @@ function App() {
     const isNewTask = !isWorking
     const action = isWorking ? 'steer' : 'navigate'
     console.info('[AegisUI] selected_mode=%s action=%s', selectedMode, action)
-    const activeSubAgent = subAgents.find((a) => a.sub_id === selectedTaskId)
+    // Only route to a sub-agent when actively steering an in-progress task.
+    // When starting a new task (isWorking=false) there is no active parent task,
+    // so sub-agent routing makes no sense and would silently swallow the send.
+    const activeSubAgent = isWorking ? subAgents.find((a) => a.sub_id === selectedTaskId) : null
     if (activeSubAgent) {
       void messageSubAgent(activeSubAgent.sub_id, finalInstruction)
       return
