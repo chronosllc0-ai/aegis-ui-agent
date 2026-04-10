@@ -3744,3 +3744,23 @@
 
 ### Validation
 - `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+## 2026-04-10 — Railway build fix: avoid numpy source builds and dependency resolver conflict
+
+### What changed
+- Updated `requirements.txt` PydanticAI extras to remove `mistral` extra from `pydantic-ai-slim`:
+  - from `pydantic-ai-slim[openai,anthropic,groq,mistral,xai]` to `pydantic-ai-slim[openai,anthropic,groq,xai]`.
+- Kept `mistralai==1.12.4` pinned to stay compatible with current OpenTelemetry constraints used by `google-adk` stack.
+- Refactored `_build_pydantic_model(...)` imports in `backend/pydantic_adk_runner.py` to provider-branch lazy imports, so missing optional provider deps do not break unrelated providers at import time.
+- Dockerfile already installs with `--prefer-binary` and constraints file to reduce source-build attempts.
+
+### Why
+- Railway build log showed pip backtracking into old numpy source metadata builds and failing due missing Fortran/BLAS toolchain.
+- Root cause was dependency conflict between:
+  - `pydantic-ai-slim` mistral extra requiring `mistralai>=2.0.0`
+  - project pin/constraints aligned to Google ADK telemetry bounds.
+- Removing the mistral extra resolves resolver conflict and avoids the numpy source-build path.
+
+### Validation
+- `python -m pip install --dry-run -r requirements.txt -c constraints.txt` no longer attempts numpy source resolution in this dependency set.
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.

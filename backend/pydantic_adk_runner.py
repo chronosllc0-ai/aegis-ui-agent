@@ -18,25 +18,20 @@ logger = logging.getLogger(__name__)
 
 def _build_pydantic_model(provider: BaseProvider, model_name: str) -> Any:
     """Build a PydanticAI model instance from the active provider adapter."""
-    from pydantic_ai.models.anthropic import AnthropicModel
-    from pydantic_ai.models.groq import GroqModel
-    from pydantic_ai.models.mistral import MistralModel
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.models.xai import XaiModel
-    from pydantic_ai.providers.anthropic import AnthropicProvider
-    from pydantic_ai.providers.groq import GroqProvider
-    from pydantic_ai.providers.mistral import MistralProvider
-    from pydantic_ai.providers.openai import OpenAIProvider
-    from pydantic_ai.providers.xai import XaiProvider
-
     provider_name = str(getattr(provider, "provider_name", "")).strip().lower()
     api_key = str(getattr(provider, "api_key", "")).strip() or None
     default_model = str(getattr(provider, "default_model", "")).strip()
     selected_model = model_name or default_model
 
     if provider_name == "openai":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
         return OpenAIChatModel(selected_model, provider=OpenAIProvider(api_key=api_key))
     if provider_name == "openrouter":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
         return OpenAIChatModel(
             selected_model,
             provider=OpenAIProvider(
@@ -45,6 +40,9 @@ def _build_pydantic_model(provider: BaseProvider, model_name: str) -> Any:
             ),
         )
     if provider_name == "fireworks":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
         return OpenAIChatModel(
             selected_model,
             provider=OpenAIProvider(
@@ -53,12 +51,24 @@ def _build_pydantic_model(provider: BaseProvider, model_name: str) -> Any:
             ),
         )
     if provider_name == "anthropic":
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
+
         return AnthropicModel(selected_model, provider=AnthropicProvider(api_key=api_key))
     if provider_name == "groq":
+        from pydantic_ai.models.groq import GroqModel
+        from pydantic_ai.providers.groq import GroqProvider
+
         return GroqModel(selected_model, provider=GroqProvider(api_key=api_key))
     if provider_name == "mistral":
+        from pydantic_ai.models.mistral import MistralModel
+        from pydantic_ai.providers.mistral import MistralProvider
+
         return MistralModel(selected_model, provider=MistralProvider(api_key=api_key))
     if provider_name == "xai":
+        from pydantic_ai.models.xai import XaiModel
+        from pydantic_ai.providers.xai import XaiProvider
+
         return XaiModel(selected_model, provider=XaiProvider(api_key=api_key))
 
     raise ValueError(f"Unsupported non-Gemini provider for PydanticAI runtime: {provider_name}")
