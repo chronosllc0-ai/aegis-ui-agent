@@ -84,6 +84,10 @@ export interface ChatPanelProps {
   activityStatusLabel?: string
   activityDetail?: string
   isActivityVisible?: boolean
+  /** Pre-fill the composer with this text (e.g. from a clicked example prompt). Cleared after consumption. */
+  pendingInput?: string
+  /** Called once the pending input has been loaded into the composer so the parent can clear it. */
+  onPendingInputConsumed?: () => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1199,6 +1203,8 @@ export function ChatPanel({
   activityStatusLabel = 'Aegis is working…',
   activityDetail,
   isActivityVisible = false,
+  pendingInput,
+  onPendingInputConsumed,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1339,6 +1345,17 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
+
+  // ── Pre-fill composer from external source (e.g. example prompt click) ───
+  useEffect(() => {
+    if (!pendingInput) return
+    setInput(pendingInput)
+    // Small delay lets React render the new input value before focusing
+    window.setTimeout(() => textareaRef.current?.focus(), 50)
+    onPendingInputConsumed?.()
+  // pendingInput changing is the only trigger — consuming it resets parent state
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingInput])
 
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 

@@ -128,6 +128,7 @@ function App() {
   const [showTour, setShowTour] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>('browser')
   const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
+  const [pendingChatInput, setPendingChatInput] = useState<string>('')
   const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
   const prevIsWorkingRef = useRef(false)
   // Use case page routing
@@ -236,11 +237,16 @@ function App() {
       return
     }
 
-    if (startedWorking && appMode === 'chat' && settings.promptToSwitchOnBrowse) {
+    if (startedWorking && appMode === 'chat') {
       const activeTaskId = activeTaskIdRef.current
       if (activeTaskId && !promptShownTaskIdsRef.current.has(activeTaskId)) {
         promptShownTaskIdsRef.current.add(activeTaskId)
-        setShowBrowseHandoffPrompt(true)
+        if (settings.promptToSwitchOnBrowse) {
+          // Auto-switch to browser mode immediately so the user can see live activity.
+          // The existing auto-return-to-chat logic will bring them back when done.
+          setAppMode('browser')
+        }
+        setShowBrowseHandoffPrompt(false)
       }
     }
 
@@ -1237,6 +1243,8 @@ function App() {
                 subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
                 browseHandoffPromptVisible={settings.separateExecutionSurfaces && showBrowseHandoffPrompt}
                 onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
+                pendingInput={pendingChatInput}
+                onPendingInputConsumed={() => setPendingChatInput('')}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
@@ -1254,8 +1262,11 @@ function App() {
                       isWorking={isWorking}
                       steeringFlashKey={steeringFlashKey}
                       onExampleClick={(prompt) => {
-                        console.info('[AegisUI] dispatch_source=browser_example')
-                        dispatchPromptFromUI(prompt, { task_label_source: 'chat', task_label: prompt })
+                        // Populate the chat composer with the example text so the
+                        // user can review/edit it before sending — single unified path.
+                        console.info('[AegisUI] dispatch_source=browser_example_to_composer')
+                        setPendingChatInput(prompt)
+                        setAppMode('chat')
                       }}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}
