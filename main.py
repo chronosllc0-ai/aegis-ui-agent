@@ -12,6 +12,7 @@ from pathlib import Path
 import time as _time
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -1022,24 +1023,28 @@ async def _start_idle_navigation_from_control_action(
     title_candidate: str,
     client_metadata: dict[str, Any] | None,
 ) -> None:
-    """Treat control actions as fresh task starts when the runtime is idle."""
+    """Reject control actions while idle; only navigate can start a new run."""
+    await websocket.send_json(
+        {
+            "type": "error",
+            "data": {
+                "message": f"{action}: no active task. Use navigate to start a new task.",
+            },
+        }
+    )
     await _log_web_message(
         runtime,
         session_id,
-        "user",
-        instruction,
-        title=instruction[:200],
-        title_candidate=title_candidate,
+        "assistant",
+        f"Rejected idle {action} action. Navigate is required to start a task.",
         metadata={
             "source": "websocket",
-            "action": f"navigate_from_idle_{action}",
+            "action": f"idle_{action}_rejected",
             "task_label": task_label,
+            "title_candidate": title_candidate,
             "client": client_metadata or {},
         },
     )
-    if runtime.conversation_id:
-        await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
-    _start_navigation_task(websocket, runtime, session_id, instruction)
 
 
 async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: SessionRuntime, session_id: str) -> None:
@@ -1259,7 +1264,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_json()
             action = data.get("action")
-            instruction = str(data.get("instruction", "")).strip()
+            raw_instruction = data.get("instruction")
+            raw_prompt = data.get("prompt")
+            instruction = str(raw_instruction if raw_instruction is not None else raw_prompt or "").strip()
             requested_mode_raw = data.get("mode")
             if requested_mode_raw is not None:
                 requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw)
@@ -1277,16 +1284,23 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     continue
             active_mode = _normalize_runtime_mode(runtime.settings)
             raw_metadata = data.get("metadata")
-            client_metadata = raw_metadata if isinstance(raw_metadata, dict) else None
-            task_label = str(client_metadata.get("task_label", "")).strip() if client_metadata else ""
+            client_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            task_label = str(client_metadata.get("task_label", "")).strip()
             title_candidate = task_label or instruction
 
             if action == "navigate":
                 if runtime.task_running:
                     await websocket.send_json({"type": "error", "data": {"message": "Task already running"}})
                     continue
-                # Track the frontend-generated task ID so sub-agents can be scoped to the right parent task
-                runtime.current_frontend_task_id = str(client_metadata.get("frontend_task_id", "") or "").strip() or None
+                if not instruction:
+                    await websocket.send_json({"type": "error", "data": {"message": "navigate: instruction is required"}})
+                    continue
+                # Track the frontend-generated task ID so sub-agents can be scoped to the right parent task.
+                # If the client does not provide one, synthesize a server-side fallback.
+                frontend_task_id = str(client_metadata.get("frontend_task_id", "") or "").strip() or str(uuid4())
+                runtime.current_frontend_task_id = frontend_task_id
+                client_metadata["frontend_task_id"] = frontend_task_id
+                client_metadata.setdefault("agent_mode", active_mode)
                 await _log_web_message(
                     runtime,
                     session_id,
@@ -1298,13 +1312,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         "source": "websocket",
                         "action": "navigate",
                         "task_label": task_label,
-                        "client": client_metadata or {},
+                        "client": client_metadata,
                     },
                 )
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "steer":
+                if not instruction:
+                    await websocket.send_json({"type": "error", "data": {"message": "steer: instruction is required"}})
+                    continue
                 if not runtime.task_running:
                     await _start_idle_navigation_from_control_action(
                         websocket,
@@ -1329,9 +1346,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     session_id,
                     "user",
                     instruction,
-                    metadata={"source": "websocket", "action": "steer", "client": client_metadata or {}},
+                    metadata={"source": "websocket", "action": "steer", "client": client_metadata},
                 )
             elif action == "interrupt":
+                if not instruction:
+                    await websocket.send_json({"type": "error", "data": {"message": "interrupt: instruction is required"}})
+                    continue
                 if not runtime.task_running:
                     await _start_idle_navigation_from_control_action(
                         websocket,
@@ -1364,10 +1384,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "interrupt", "client": client_metadata or {}},
+                    metadata={"source": "websocket", "action": "interrupt", "client": client_metadata},
                 )
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "queue":
+                if not instruction:
+                    await websocket.send_json({"type": "error", "data": {"message": "queue: instruction is required"}})
+                    continue
                 if not runtime.task_running:
                     await _start_idle_navigation_from_control_action(
                         websocket,
@@ -1393,7 +1416,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "user",
                     instruction,
                     title=instruction[:200],
-                    metadata={"source": "websocket", "action": "queue", "client": client_metadata or {}},
+                    metadata={"source": "websocket", "action": "queue", "client": client_metadata},
                 )
             elif action == "dequeue":
                 raw_index = data.get("index", -1)
