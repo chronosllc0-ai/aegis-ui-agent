@@ -3664,3 +3664,32 @@
 
 ### Next steps
 - Implement full PydanticAI-native tool loop (beyond compatibility delegation) inside `backend/pydantic_adk_runner.py` and add dedicated conformance tests.
+
+## 2026-04-10 — Full non-Gemini PydanticAI runtime implementation (with universal fallback)
+
+### What changed
+- Replaced the prior non-Gemini adapter-only stub with a PydanticAI-native runtime implementation in `backend/pydantic_adk_runner.py`.
+- Added provider-to-PydanticAI model wiring via `_build_pydantic_model(...)` for:
+  - OpenAI
+  - OpenRouter (OpenAI-compatible base URL)
+  - Fireworks (OpenAI-compatible base URL)
+  - Anthropic
+  - Groq
+  - Mistral
+  - xAI
+- Implemented an ADK tool execution bridge using PydanticAI tools:
+  - `run_tool(tool, args_json)` delegates tool execution to `UniversalToolExecutor` so existing browser/connectors/workflow tool stack remains available.
+  - `finish_task(summary)` and `fail_task(reason)` provide explicit completion signaling.
+- Added robust fallback behavior:
+  - if `pydantic_ai` import fails, fallback to `run_universal_navigation`
+  - if PydanticAI runtime execution errors, emit a diagnostic step and fallback to `run_universal_navigation`
+
+### Why
+- User requested full PydanticAI ADK setup (not just seam wiring).
+- This change makes non-Gemini path run through a true PydanticAI Agent + tool-calling runtime while preserving Universal Navigator as resilience fallback.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.
+
+### Notes
+- Local environment install of `pydantic-ai` pulled newer OpenTelemetry packages that can conflict with strict `google-adk` constraints; repository dependency pin remains explicit in `requirements.txt` and runtime fallback path remains in place.
