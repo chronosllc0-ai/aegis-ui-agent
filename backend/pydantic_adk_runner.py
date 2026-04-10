@@ -22,7 +22,7 @@ def _is_pydantic_ai_available() -> bool:
     """Return whether pydantic_ai is importable in the current runtime."""
     try:
         import pydantic_ai  # noqa: F401
-    except Exception:  # noqa: BLE001
+    except (ImportError, ModuleNotFoundError):
         return False
     return True
 
