@@ -20,7 +20,7 @@ WORKDIR /app
 
 COPY requirements.txt constraints.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir --prefer-binary --progress-bar on -r requirements.txt -c constraints.txt
+    && pip install --no-cache-dir --prefer-binary --progress-bar off -r requirements.txt -c constraints.txt
 RUN playwright install chromium
 
 COPY . ./

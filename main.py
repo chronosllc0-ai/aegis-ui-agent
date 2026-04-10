@@ -1284,7 +1284,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     continue
             active_mode = _normalize_runtime_mode(runtime.settings)
             raw_metadata = data.get("metadata")
-            client_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            client_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
             task_label = str(client_metadata.get("task_label", "")).strip()
             title_candidate = task_label or instruction
 

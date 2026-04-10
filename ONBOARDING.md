@@ -3812,3 +3812,27 @@
 
 ### Notes
 - Existing Vite chunk-size warning (>500 kB) remains unrelated to this behavior change.
+
+## 2026-04-10 — Netlify follow-up fixes: missing setMode regression + review nits
+
+### What changed
+- Verified the Netlify-reported TS2304 regression (`Cannot find name 'setMode'`) is resolved in current `frontend/src/App.tsx` by removing stale `setMode(...)` references in the simplified navigate-only flow.
+- Updated `main.py` WebSocket metadata normalization to avoid mutating inbound client metadata objects directly:
+  - `client_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}`
+- Improved cancellation handling in `backend/pydantic_adk_runner.py`:
+  - still races `agent.run(...)` against `cancel_event.wait()`,
+  - now properly awaits cancelled tasks using `contextlib.suppress(asyncio.CancelledError)` to avoid leaked task exceptions.
+- Updated Docker build pip invocation to disable progress bars in CI/non-interactive logs:
+  - `--progress-bar off`
+
+### Why
+- Netlify build failed on a stale `setMode` reference after runtime-control UI removal.
+- Review requested safer handling for mutable client payloads and cleaner async task cancellation behavior.
+- CI logs are cleaner and more diagnosable without pip progress bar spam.
+
+### Validation
+- `npm run -w frontend build` passed (same command used by Netlify workspace build).
+- `python -m py_compile main.py backend/pydantic_adk_runner.py` passed.
+
+### Notes
+- Frontend build still reports the existing Vite chunk-size warning (>500 kB), unrelated to this fix.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 import json
 import logging
 from typing import Any
@@ -189,16 +190,21 @@ async def run_pydantic_adk_navigation(
         if cancel_event is not None:
             run_task = asyncio.create_task(agent.run(prompt))
             cancel_task = asyncio.create_task(cancel_event.wait())
-            done, pending = await asyncio.wait(
-                {run_task, cancel_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for pending_task in pending:
-                pending_task.cancel()
-            if cancel_task in done and cancel_event.is_set():
-                run_task.cancel()
-                raise asyncio.CancelledError
-            run_result = await run_task
+            try:
+                done, _ = await asyncio.wait(
+                    {run_task, cancel_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if cancel_task in done and cancel_event.is_set():
+                    run_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await run_task
+                    raise asyncio.CancelledError
+                run_result = await run_task
+            finally:
+                cancel_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await cancel_task
         else:
             run_result = await agent.run(prompt)
         output = str(run_result.output)
