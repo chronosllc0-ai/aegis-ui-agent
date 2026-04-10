@@ -1031,17 +1031,6 @@ function InputBarCursor({
             className='w-full resize-none bg-transparent px-4 pt-3 pb-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6 transition-[padding,min-height]'
             style={{ minHeight: isExpanded ? '58px' : '52px', maxHeight: '140px', overflow: 'hidden' }}
           />
-          {/* Keep Stop visible only when there is no draft input: when canSend is true, send stays available while steering remains active. */}
-          {isWorking && !canSend && (
-            <button type='button' onClick={onStop}
-              className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
-              aria-label='Stop task' title='Stop current task'>
-              <span className='relative flex h-4 w-4 items-center justify-center'>
-                <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
-                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
-              </span>
-            </button>
-          )}
         </div>
 
         {isExpanded && (
@@ -1118,12 +1107,23 @@ function InputBarCursor({
             <FiMic className='h-3.5 w-3.5' />
           </button>
 
-          <button type='button' onClick={onSend}
-            disabled={isDisabled || !canSend}
-            className='flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-            aria-label='Send message'>
-            <FiSend className='h-3.5 w-3.5' />
-          </button>
+          {isWorking && !canSend ? (
+            <button type='button' onClick={onStop}
+              className='flex h-7 w-7 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
+              aria-label='Stop task' title='Stop current task'>
+              <span className='relative flex h-3.5 w-3.5 items-center justify-center'>
+                <span className='absolute inset-0 animate-spin rounded-full border border-red-400/50 border-t-transparent' />
+                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
+              </span>
+            </button>
+          ) : (
+            <button type='button' onClick={onSend}
+              disabled={isDisabled || !canSend}
+              className='flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+              aria-label='Send message'>
+              <FiSend className='h-3.5 w-3.5' />
+            </button>
+          )}
         </div>
       </div>
     </div>
