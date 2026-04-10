@@ -3481,3 +3481,18 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Mobile selector typography tweak (composer)
+
+### What changed
+- Reduced selector text size on mobile for the three inline dropdowns in the compact composer row:
+  - Provider selector
+  - Model selector
+  - Agent mode selector
+- Implemented as `text-[11px] sm:text-xs` so only small/mobile viewports render smaller labels while `sm+` remains unchanged.
+
+### Why
+- Prevents chevron overlap pressure in narrow mobile widths while preserving the compact Codex-style row ordering and spacing.
+
+### Validation
+- `cd frontend && npm run build` passed.

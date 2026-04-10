@@ -1058,7 +1058,7 @@ function InputBarCursor({
             <select
               value={provider}
               onChange={(event) => onProviderChange(event.target.value)}
-              className='max-w-[98px] cursor-pointer appearance-none bg-transparent pr-3 text-xs text-zinc-200 outline-none'
+              className='max-w-[98px] cursor-pointer appearance-none bg-transparent pr-3 text-[11px] sm:text-xs text-zinc-200 outline-none'
               aria-label='Provider'
             >
               {PROVIDERS.map((item) => (
@@ -1075,7 +1075,7 @@ function InputBarCursor({
             <select
               value={model}
               onChange={(event) => onModelChange(event.target.value)}
-              className='max-w-[110px] cursor-pointer appearance-none bg-transparent pr-3 text-xs text-zinc-200 outline-none'
+              className='max-w-[110px] cursor-pointer appearance-none bg-transparent pr-3 text-[11px] sm:text-xs text-zinc-200 outline-none'
               aria-label='Model'
             >
               {(providerById(provider) ?? PROVIDERS[0]).models.map((item) => (
@@ -1092,7 +1092,7 @@ function InputBarCursor({
             <select
               value={agentMode}
               onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
-              className='max-w-[104px] cursor-pointer appearance-none bg-transparent pr-3 text-xs text-zinc-200 outline-none'
+              className='max-w-[104px] cursor-pointer appearance-none bg-transparent pr-3 text-[11px] sm:text-xs text-zinc-200 outline-none'
               aria-label='Agent mode'
             >
               {AGENT_MODES.map((option) => (
