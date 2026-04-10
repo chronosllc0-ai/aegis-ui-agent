@@ -610,7 +610,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'subagent_spawned') {
         const agent = payload.data as unknown as SubAgentInfo
-        const parentTaskId = activeTaskIdRef.current
+        // Prefer parent_task_id from the payload (set by backend from frontend_task_id),
+        // falling back to the current active task ID tracked client-side.
+        const parentTaskId = (payload.data as Record<string, unknown>)['parent_task_id'] as string | undefined ?? activeTaskIdRef.current
         setSubAgents((prev) => {
           const exists = prev.find((a) => a.sub_id === agent.sub_id)
           if (exists) return prev
@@ -700,6 +702,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           })
           const maybeUrl = String(message.instruction ?? '')
           if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
+          // Embed frontend task ID in metadata so backend can scope sub-agents to this task
+          const existingMeta = (message.metadata as Record<string, unknown> | undefined) ?? {}
+          wsRef.current.send(JSON.stringify({ ...message, metadata: { ...existingMeta, frontend_task_id: nextTaskId } }))
+          return true
         }
         wsRef.current.send(JSON.stringify(message))
         return true
@@ -763,11 +769,13 @@ export function useWebSocket(options?: UseWebSocketOptions) {
 
   const spawnSubAgent = useCallback((instruction: string, model: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ action: 'spawn_subagent', instruction, model }))
+      // Include the current task ID so the backend can track which parent task owns this sub-agent.
+      // This is echoed back in subagent_list so the frontend can correctly scope sub-agents.
+      wsRef.current.send(JSON.stringify({ action: 'spawn_subagent', instruction, model, parent_task_id: activeTaskIdRef.current }))
       return true
     }
     return false
-  }, [])
+  }, [activeTaskIdRef])
 
   const messageSubAgent = useCallback((sub_id: string, message: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

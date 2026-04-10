@@ -429,6 +429,9 @@ class SessionRuntime:
         self.user_uid: str | None = None
         # Pending user-input futures keyed by request_id
         self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
+        # Tracks the frontend-generated task UUID for the currently active navigate action.
+        # Sent by the client in spawn_subagent so sub-agents can be scoped to the right parent task.
+        self.current_frontend_task_id: str | None = None
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
@@ -1133,6 +1136,7 @@ async def _run_navigation_task(
             parent_settings=runtime.settings,
             send_to_parent=_sub_send,
             on_user_input=None,
+            parent_task_id=runtime.current_frontend_task_id,
         )
         # Send updated agent list to frontend
         await websocket.send_json({
@@ -1281,6 +1285,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if runtime.task_running:
                     await websocket.send_json({"type": "error", "data": {"message": "Task already running"}})
                     continue
+                # Track the frontend-generated task ID so sub-agents can be scoped to the right parent task
+                runtime.current_frontend_task_id = str(client_metadata.get("frontend_task_id", "") or "").strip() or None
                 await _log_web_message(
                     runtime,
                     session_id,
@@ -1484,6 +1490,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     except Exception:  # noqa: BLE001
                         pass
 
+                # Use parent_task_id from the client payload (frontend-generated task UUID),
+                # falling back to the last known task ID from the navigate action.
+                fe_task_id = str(data.get("parent_task_id", "") or "").strip() or runtime.current_frontend_task_id
                 sub_id = await runtime.subagent_manager.spawn(
                     instruction=sub_instruction,
                     model=sub_model,
@@ -1492,6 +1501,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     parent_settings=runtime.settings,
                     send_to_parent=_sub_send,
                     on_user_input=None,  # sub-agents don't forward user-input to parent for now
+                    parent_task_id=fe_task_id,
                 )
                 await websocket.send_json({
                     "type": "subagent_spawned",
@@ -1499,6 +1509,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         "sub_id": sub_id,
                         "instruction": sub_instruction,
                         "model": sub_model,
+                        "parent_task_id": fe_task_id,
                     },
                 })
                 # Also send updated agent count

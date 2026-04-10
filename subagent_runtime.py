@@ -114,11 +114,13 @@ class SubAgentRuntime:
         instruction: str,
         model: str,
         parent_user_uid: str | None,
+        parent_task_id: str | None = None,
     ) -> None:
         self.sub_id = sub_id
         self.instruction = instruction
         self.model = model
         self.parent_user_uid = parent_user_uid
+        self.parent_task_id = parent_task_id  # frontend task ID that owns this sub-agent
         self.cancel_event = asyncio.Event()
         self.steering_context: list[str] = []
         self.task: asyncio.Task[None] | None = None
@@ -140,6 +142,7 @@ class SubAgentManager:
                 "model": a.model,
                 "status": a.status,
                 "step_count": len(a.steps),
+                "parent_task_id": a.parent_task_id,  # lets frontend scope agents to the right task
             }
             for a in self._agents.values()
         ]
@@ -157,6 +160,7 @@ class SubAgentManager:
         parent_settings: dict[str, Any],
         send_to_parent: Callable[[dict[str, Any]], Awaitable[None]],
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None,
+        parent_task_id: str | None = None,
     ) -> str:
         """Create and start a sub-agent. Returns sub_session_id."""
         sub_id = str(uuid4())
@@ -165,6 +169,7 @@ class SubAgentManager:
             instruction=instruction,
             model=model,
             parent_user_uid=parent_user_uid,
+            parent_task_id=parent_task_id,
         )
         self._agents[sub_id] = runtime
 
@@ -175,6 +180,7 @@ class SubAgentManager:
                 "sub_id": sub_id,
                 "instruction": instruction,
                 "model": model,
+                "parent_task_id": parent_task_id,
             },
         })
 
