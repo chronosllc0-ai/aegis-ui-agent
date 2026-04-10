@@ -3613,3 +3613,32 @@
 ### Blockers / decisions needed
 - Decide whether idle `queue` should remain rejected long-term or enqueue without starting (current behavior rejects to enforce navigate-first semantics).
 - Decide rollout strategy for full PydanticAI runner (feature flag vs default switch).
+
+## 2026-04-10 — Runtime control UX clarification (Auto default) + navigate alignment
+
+### What changed
+- Updated runtime control mode model to include `auto` as first-class control mode (`auto | steer | interrupt | queue`).
+- Updated steering UI control to render an explicit **Auto** button ahead of steer/interrupt/queue for in-flight tasks.
+- Updated input behavior in `App.tsx`:
+  - default control mode now initializes to `auto` (instead of `steer`),
+  - while task is active, `auto` maps to steer behavior,
+  - when a task transitions from working → idle, mode automatically resets back to `auto`.
+- Updated prompt dispatch routing so in-flight sends respect the selected control mode:
+  - `auto`/`steer` → steer
+  - `interrupt` → interrupt
+  - `queue` → queue
+  - idle always starts through navigate path.
+- Browser URL submit path now follows the same `auto` semantics.
+
+### Why
+- Main confusion source was the control selector defaulting to steer semantics and not clearly communicating that idle starts are navigate-first.
+- The explicit Auto label aligns UI language with backend navigate-first startup semantics while preserving mid-flight controls.
+- Automatic reset to Auto after task completion prevents stale interrupt/queue/steer selections leaking into the next task.
+
+### Validation
+- `cd frontend && npm run build` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke tests/test_main_websocket.py::test_websocket_navigate_requires_instruction_and_keeps_socket_open tests/test_orchestrator_startup.py` passed.
+
+### Next steps
+- Add a focused frontend unit test for auto-reset behavior (working→idle) and mode-to-websocket action mapping for dispatch.
+- Implement full PydanticAI-native tool orchestration inside `backend/pydantic_adk_runner.py` (current implementation remains runtime-compatible delegate behavior).

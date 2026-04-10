@@ -32,7 +32,7 @@ type InputBarProps = {
   transcripts?: TranscriptEntry[]
 }
 
-const MODE_ORDER: SteeringMode[] = ['steer', 'interrupt', 'queue']
+const MODE_ORDER: SteeringMode[] = ['auto', 'steer', 'interrupt', 'queue']
 
 /* ── Provider + Model picker ────────────────────────────────────────── */
 function ModelPicker({
@@ -160,7 +160,9 @@ export function InputBar({
   if (voiceError) voiceButtonTitle = voiceError
 
   const modeStyling =
-    mode === 'steer'
+    mode === 'auto'
+      ? 'border-emerald-500/40 shadow-[0_0_30px_rgba(16,185,129,0.12)]'
+      : mode === 'steer'
       ? 'border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.15)]'
       : mode === 'interrupt'
         ? 'border-orange-500/50'
