@@ -177,7 +177,7 @@ async def run_pydantic_adk_navigation(
         if steering_notes:
             prompt += f"Steering notes: {steering_notes}\n"
 
-        run_result = await agent.run(prompt)
+        run_result = await agent.run(prompt, cancel_on=cancel_event) if cancel_event is not None else await agent.run(prompt)
         output = str(run_result.output)
 
         if output.startswith("failed::"):
