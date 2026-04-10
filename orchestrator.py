@@ -16,6 +16,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 
 from analyzer import ScreenshotAnalyzer, detect_available_model
+from backend.pydantic_adk_runner import run_pydantic_adk_navigation
 from config import settings as settings_module
 from executor import ActionExecutor
 from mcp_client import MCPClient
@@ -289,8 +290,7 @@ class AgentOrchestrator:
             enable_reasoning = bool(session_settings.get("enable_reasoning", False))
             reasoning_effort = str(session_settings.get("reasoning_effort", "medium"))
 
-            from universal_navigator import run_universal_navigation
-            return await run_universal_navigation(
+            return await run_pydantic_adk_navigation(
                 provider=provider_instance,
                 model=model_id,
                 executor=self.executor,
