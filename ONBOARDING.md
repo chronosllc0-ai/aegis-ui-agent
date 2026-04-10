@@ -3530,3 +3530,21 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Follow-up corrections: selector spacing, status placement, and logo handling
+
+### What changed
+- Increased mobile selector control width/spacing so icon and chevron have visible separation matching the reference style.
+- Reworked activity status placement logic so it is rendered after the latest user message (not above user prompts).
+  - If no user message exists yet, status falls back to a standalone row.
+- Removed custom `/shield.svg` usage from chat status/generating surfaces and switched back to the existing `/aegis-shield.png` asset.
+- Restored `frontend/public/shield.svg` to its previous state (dark fill) to avoid introducing a parallel logo treatment.
+- Applied app-wide display treatment updates for existing `/aegis-shield.png` image usage to reduce visible background boxing (`mix-blend-screen`) without replacing the brand asset.
+
+### Why
+- Aligns icon/chevron spacing with requested Codex-like control density.
+- Fixes the incorrect status placement above user prompts.
+- Honors request to keep a single Aegis logo source while improving perceived background blending globally.
+
+### Validation
+- `cd frontend && npm run build` passed.

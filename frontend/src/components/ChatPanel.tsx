@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
@@ -353,7 +353,7 @@ function GeneratingCanvas({ label }: { label: string }) {
       <div className='relative flex h-9 w-9 flex-shrink-0 items-center justify-center'>
         <span className='absolute inset-0 rounded-full border border-blue-500/40 animate-spin' style={{ animationDuration: '2.5s' }} />
         <span className='absolute inset-[3px] rounded-full border border-cyan-400/25 animate-spin' style={{ animationDuration: '1.8s', animationDirection: 'reverse' }} />
-        <img src='/shield.svg' alt='Aegis' className='h-6 w-6 object-contain mix-blend-screen' />
+        <img src='/aegis-shield.png' alt='Aegis' className='h-6 w-6 object-contain mix-blend-screen' />
       </div>
       <div className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium text-zinc-300'>{label}</span>
@@ -1053,7 +1053,7 @@ function InputBarCursor({
             <FiPlus className='h-4 w-4' />
           </button>
 
-          <label className='group relative inline-flex h-7 w-8 items-center justify-center rounded-md px-1 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1'>
+          <label className='group relative inline-flex h-7 w-11 items-center justify-between rounded-md px-1.5 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1 sm:px-1'>
             <FiServer className='h-3.5 w-3.5 text-zinc-500' />
             <select
               value={provider}
@@ -1067,10 +1067,10 @@ function InputBarCursor({
                 </option>
               ))}
             </select>
-            <FiChevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
+            <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
           </label>
 
-          <label className='group relative inline-flex h-7 w-8 items-center justify-center rounded-md px-1 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1'>
+          <label className='group relative inline-flex h-7 w-11 items-center justify-between rounded-md px-1.5 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1 sm:px-1'>
             <FiCpu className='h-3.5 w-3.5 text-zinc-500' />
             <select
               value={model}
@@ -1084,10 +1084,10 @@ function InputBarCursor({
                 </option>
               ))}
             </select>
-            <FiChevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
+            <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
           </label>
 
-          <label className='group relative inline-flex h-7 w-8 items-center justify-center rounded-md px-1 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1'>
+          <label className='group relative inline-flex h-7 w-11 items-center justify-between rounded-md px-1.5 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1 sm:px-1'>
             <FaBrain className='h-3.5 w-3.5 text-zinc-500' />
             <select
               value={agentMode}
@@ -1101,7 +1101,7 @@ function InputBarCursor({
                 </option>
               ))}
             </select>
-            <FiChevronDown className='pointer-events-none absolute right-0.5 h-3 w-3 text-zinc-500' />
+            <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
           </label>
 
           <div className='flex-1' />
@@ -1491,6 +1491,10 @@ export function ChatPanel({
   const firstName = userName ? userName.split(' ')[0] : null
   const ctaText = firstName ? `Hi ${firstName}, what do you want me to do today?` : 'What do you want me to do today?'
   const ctaSubtext = 'Send an instruction, attach files, or use a connector'
+  const lastUserMessageIndex = useMemo(
+    () => allMessages.map((m) => m.role).lastIndexOf('user'),
+    [allMessages],
+  )
 
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
@@ -1546,32 +1550,10 @@ export function ChatPanel({
           </div>
         )}
 
-        {isActivityVisible && (
-          <div className='my-1'>
-            <button
-              type='button'
-              aria-expanded={activityExpanded}
-              aria-label={activityStatusLabel}
-              onClick={() => setActivityExpanded((prev) => !prev)}
-              className='w-full px-1 py-1 text-left'
-            >
-              <div className='flex items-center gap-2.5'>
-                <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
-                  <span className='absolute inset-0 rounded-full border border-blue-500/25 animate-spin' style={{ animationDuration: '3s' }} />
-                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-                  <img src='/shield.svg' alt='Aegis activity' className='h-[18px] w-[18px] object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
-                </div>
-                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
-                <IcoChevronRight className={`ml-auto h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
-              </div>
-              {activityExpanded && activityDetail && (
-                <p className='mt-2 pl-8 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
-              )}
-            </button>
-          </div>
-        )}
+        {threadReady && allMessages.map((msg, idx) => {
+          const showStatusAfterThisMessage = isActivityVisible && idx === lastUserMessageIndex
 
-        {threadReady && allMessages.map((msg) => {
+          const messageNode = (() => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
 
@@ -1641,7 +1623,63 @@ export function ChatPanel({
           }
 
           return <AssistantCard key={msg.id} msg={msg} />
+          })()
+
+          return (
+            <Fragment key={msg.id}>
+              {messageNode}
+              {showStatusAfterThisMessage && (
+                <div className='my-1'>
+                  <button
+                    type='button'
+                    aria-expanded={activityExpanded}
+                    aria-label={activityStatusLabel}
+                    onClick={() => setActivityExpanded((prev) => !prev)}
+                    className='w-full px-1 py-1 text-left'
+                  >
+                    <div className='flex items-center gap-2.5'>
+                      <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
+                        <span className='absolute inset-0 rounded-full border border-blue-500/25 animate-spin' style={{ animationDuration: '3s' }} />
+                        <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                        <img src='/aegis-shield.png' alt='Aegis activity' className='h-[18px] w-[18px] object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+                      </div>
+                      <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
+                      <IcoChevronRight className={`ml-auto mr-1 h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
+                    </div>
+                    {activityExpanded && activityDetail && (
+                      <p className='mt-2 pl-8 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
+                    )}
+                  </button>
+                </div>
+              )}
+            </Fragment>
+          )
         })}
+
+        {isActivityVisible && lastUserMessageIndex === -1 && (
+          <div className='my-1'>
+            <button
+              type='button'
+              aria-expanded={activityExpanded}
+              aria-label={activityStatusLabel}
+              onClick={() => setActivityExpanded((prev) => !prev)}
+              className='w-full px-1 py-1 text-left'
+            >
+              <div className='flex items-center gap-2.5'>
+                <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
+                  <span className='absolute inset-0 rounded-full border border-blue-500/25 animate-spin' style={{ animationDuration: '3s' }} />
+                  <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                  <img src='/aegis-shield.png' alt='Aegis activity' className='h-[18px] w-[18px] object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+                </div>
+                <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
+                <IcoChevronRight className={`ml-auto mr-1 h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
+              </div>
+              {activityExpanded && activityDetail && (
+                <p className='mt-2 pl-8 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap'>{activityDetail}</p>
+              )}
+            </button>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
       </div>

@@ -1139,7 +1139,7 @@ function App() {
                 <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
                 </button>
-                <img src='/aegis-shield.png' alt='Aegis' className='h-5 w-5 sm:h-6 sm:w-6 object-contain' />
+                <img src='/aegis-shield.png' alt='Aegis' className='h-5 w-5 sm:h-6 sm:w-6 object-contain mix-blend-screen' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
                 {/* ── Chat ↔ Browser mode switcher ── */}
                 {!showSettings && !showAutomations && (
