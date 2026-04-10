@@ -3785,3 +3785,30 @@
 
 ### Notes
 - Build still reports the existing Vite large-chunk warning (>500 kB), which is unrelated to this fix.
+
+## 2026-04-10 — Simplify chat flow: remove runtime controls and force direct navigate runs
+
+### What changed
+- Simplified `frontend/src/App.tsx` send pipeline to always dispatch user prompts as `navigate` actions.
+  - Removed queue/interrupt/steer branching from `handleSend(...)`.
+  - Removed chat-level steering mode state/queue state wiring.
+  - Kept connection failure toast handling so failed sends are visible.
+- Simplified title state in `App.tsx` from `idle|working|steering` to `idle|working` after removing steering-mode UX.
+- Removed steering control UI from the active chat composer in `frontend/src/components/ChatPanel.tsx`.
+  - Dropped `mode`, `queuedMessages`, and `onModeChange` props in the active input bar path.
+  - Removed `SteeringControl` usage from the cursor-style composer.
+- Updated composer behavior so users cannot type while a task is running:
+  - `isDisabled` now includes `isWorking`, which disables textarea/send/plus actions during execution.
+  - Stop button remains visible while running.
+- Updated ask-user-input quick actions to send straightforward prompt messages via `onPrimarySend(...)`.
+
+### Why
+- Requested product direction is to remove runtime control features temporarily and make task start behavior immediate and predictable.
+- This enforces a single path: any submitted prompt starts a run directly via `navigate`.
+- Disabling input during active runs prevents mid-run steer/control complexity until runtime controls are reintroduced.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+### Notes
+- Existing Vite chunk-size warning (>500 kB) remains unrelated to this behavior change.
