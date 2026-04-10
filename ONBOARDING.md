@@ -3693,3 +3693,21 @@
 
 ### Notes
 - Local environment install of `pydantic-ai` pulled newer OpenTelemetry packages that can conflict with strict `google-adk` constraints; repository dependency pin remains explicit in `requirements.txt` and runtime fallback path remains in place.
+
+## 2026-04-10 — Review fixes for PydanticAI runner safety issues
+
+### What changed
+- Tightened import fallback handling in `backend/pydantic_adk_runner.py`:
+  - changed broad `except Exception` around `from pydantic_ai import Agent` to `except ImportError`.
+- Fixed tool-call overwrite bug in `run_tool(...)`:
+  - changed `{"tool": tool, **payload}` to `{**payload, "tool": tool}` so payload cannot override the selected tool name.
+- Updated runtime fallback exception handling:
+  - explicitly re-raises `asyncio.CancelledError` to preserve cancellation semantics,
+  - keeps standard fallback behavior for other runtime exceptions.
+
+### Why
+- Addresses three review warnings directly (import over-catch, tool-name overwrite, cancellation swallowing risk).
+- Preserves graceful fallback while preventing control-flow and payload integrity bugs.
+
+### Validation
+- `pytest -q tests/test_orchestrator_startup.py tests/test_main_websocket.py::test_websocket_navigate_smoke` passed.

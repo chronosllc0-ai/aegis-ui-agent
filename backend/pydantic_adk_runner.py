@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 import json
 import logging
@@ -87,7 +88,7 @@ async def run_pydantic_adk_navigation(
     """Execute non-Gemini navigation with PydanticAI; fall back to universal runtime on errors."""
     try:
         from pydantic_ai import Agent
-    except Exception as exc:  # noqa: BLE001
+    except ImportError as exc:
         logger.warning("pydantic_ai unavailable; using universal fallback: %s", exc)
         return await run_universal_navigation(
             provider=provider,
@@ -148,7 +149,7 @@ async def run_pydantic_adk_navigation(
             payload = json.loads(args_json) if args_json.strip() else {}
             if not isinstance(payload, dict):
                 return "run_tool error: args_json must decode to an object."
-            tool_call = {"tool": tool, **payload}
+            tool_call = {**payload, "tool": tool}
             if on_step is not None:
                 await on_step({"type": "tool-call", "content": json.dumps(tool_call), "steering": []})
             result_text, image_bytes = await tool_executor.run(tool_call)
@@ -176,7 +177,7 @@ async def run_pydantic_adk_navigation(
         if steering_notes:
             prompt += f"Steering notes: {steering_notes}\n"
 
-        run_result = await agent.run(prompt)
+        run_result = await agent.run(prompt, cancel_on=cancel_event) if cancel_event is not None else await agent.run(prompt)
         output = str(run_result.output)
 
         if output.startswith("failed::"):
@@ -189,6 +190,8 @@ async def run_pydantic_adk_navigation(
         if on_step is not None:
             await on_step({"type": "result", "content": summary or "Task completed.", "steering": []})
         return {"status": "completed", "instruction": instruction, "summary": summary, "steps": []}
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("PydanticAI runtime failed; falling back to universal navigator")
         if on_step is not None:
