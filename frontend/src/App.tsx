@@ -1054,6 +1054,8 @@ function App() {
                   modelId: contextMeter.current.modelId,
                   isCompacting: contextMeter.isCompacting,
                 }}
+                examplePrompt={examplePrompt}
+                onExampleHandled={() => setExamplePrompt(null)}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */

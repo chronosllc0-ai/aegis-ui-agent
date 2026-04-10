@@ -305,13 +305,6 @@ export function InputBar({
           </div>
         </div>
       )}
-      {galleryOpen && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6'>
-          <div className='h-[85vh] w-full max-w-6xl'>
-            <PromptGallery onSelectTemplate={handleTemplateSelect} onClose={() => setGalleryOpen(false)} />
-          </div>
-        </div>
-      )}
     </section>
   )
 }
