@@ -3548,3 +3548,43 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Critical fix: duplicate send/stop action conflict in composer
+
+### What changed
+- Fixed the compact composer action-button logic in `frontend/src/components/ChatPanel.tsx` to ensure only one primary action exists at a time.
+- Removed the floating Stop button from inside the textarea area.
+- Implemented a single conditional action slot in the bottom control row:
+  - show **Stop** only when `isWorking && !canSend`
+  - otherwise show **Send**
+
+### Why
+- Prevents duplicate/conflicting action affordances introduced by the previous merge (review reported two send controls competing in active steering states).
+- Keeps action placement consistent in one location to reduce accidental double-send behavior.
+
+### Validation
+- `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Task history date buckets + thread title fallback + sidebar tab cleanup
+
+### What changed
+- Updated sidebar task grouping in `frontend/src/App.tsx` to use **local-time day boundaries** from task `createdAt` instead of string `dateLabel` equality.
+- Added new history buckets in the task list:
+  - `Today`
+  - `Yesterday`
+  - `Past 7 Days` (2-7 days old)
+  - `Older Tasks` (>7 days old)
+- Added `createdAt?: string` to `TaskHistoryItem` and persist it for new optimistic tasks; also hydrate server-seeded tasks with `conversation.created_at`.
+- Fixed placeholder-title merging by treating `"new web conversation"` as a placeholder title in `frontend/src/lib/title.ts`, so first prompt-derived titles win.
+- Updated top sidebar controls:
+  - renamed `New thread` to `New Tasks`
+  - removed the duplicate top `Automations` tab button
+  - renamed search placeholder from `Threads` to `Search task`
+
+### Why
+- Prevents timezone/day-boundary drift where old tasks were incorrectly shown under `Today`/`Yesterday`.
+- Restores expected naming behavior for fresh tasks by prioritizing the first real user prompt over placeholder backend titles.
+- Removes duplicate Automations entry at top while preserving the existing lower Automations entry and routing behavior.
+
+### Validation
+- `cd frontend && npm run build` passed.
