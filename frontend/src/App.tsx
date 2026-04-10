@@ -139,6 +139,9 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>('browser')
+  // Prompt staged for the chat composer (e.g. from a browser-frame example click).
+  // ChatPanel consumes it and calls onPendingPromptConsumed to clear it.
+  const [pendingPrompt, setPendingPrompt] = useState<string | undefined>(undefined)
   const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
   const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
   const prevIsWorkingRef = useRef(false)
@@ -1252,6 +1255,8 @@ function App() {
                 subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
                 browseHandoffPromptVisible={settings.separateExecutionSurfaces && showBrowseHandoffPrompt}
                 onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
+                pendingPrompt={pendingPrompt}
+                onPendingPromptConsumed={() => setPendingPrompt(undefined)}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
@@ -1269,8 +1274,13 @@ function App() {
                       isWorking={isWorking}
                       steeringFlashKey={steeringFlashKey}
                       onExampleClick={(prompt) => {
-                        console.info('[AegisUI] dispatch_source=browser_example')
-                        dispatchPromptFromUI(prompt, { task_label_source: 'chat', task_label: prompt })
+                        // Route the example prompt through the chat composer (single send path).
+                        // Switch to chat mode so the user sees the pre-filled text, can edit it,
+                        // and sends it themselves — Aegis then decides whether to use the browser
+                        // or respond in chat.
+                        console.info('[AegisUI] dispatch_source=browser_example -> composer')
+                        setAppMode('chat')
+                        setPendingPrompt(prompt)
                       }}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}

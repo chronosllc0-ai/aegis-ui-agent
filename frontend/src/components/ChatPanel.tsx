@@ -82,6 +82,13 @@ export interface ChatPanelProps {
   activityStatusLabel?: string
   activityDetail?: string
   isActivityVisible?: boolean
+  /**
+   * When set, pre-fills the composer input and focuses it (e.g. from an example prompt click
+   * in the browser frame). Clear after setting to avoid re-triggering on re-render.
+   */
+  pendingPrompt?: string
+  /** Called once the pending prompt has been consumed so the parent can clear it. */
+  onPendingPromptConsumed?: () => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1163,6 +1170,8 @@ export function ChatPanel({
   activityStatusLabel = 'Aegis is working…',
   activityDetail,
   isActivityVisible = false,
+  pendingPrompt,
+  onPendingPromptConsumed,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -1303,6 +1312,22 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
+
+  // ── Pending prompt from parent (e.g. example prompt clicked in browser frame) ──
+  // When pendingPrompt is set, pre-fill the composer and focus it so the user
+  // can review / edit and send — single send path through the composer.
+  useEffect(() => {
+    if (!pendingPrompt) return
+    setInput(pendingPrompt)
+    // Focus and move cursor to end
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.selectionStart = el.selectionEnd = el.value.length
+    })
+    onPendingPromptConsumed?.()
+  }, [pendingPrompt, onPendingPromptConsumed])
 
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
