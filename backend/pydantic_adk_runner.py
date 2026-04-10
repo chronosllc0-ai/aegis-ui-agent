@@ -85,7 +85,7 @@ async def run_pydantic_adk_navigation(
     settings: dict[str, Any],
     on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_frame: Callable[[str], Awaitable[None]] | None = None,
-    cancel_event: Any = None,
+    cancel_event: asyncio.Event | None = None,
     steering_context: list[str] | None = None,
     on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
@@ -158,7 +158,10 @@ async def run_pydantic_adk_navigation(
 
         @agent.tool_plain(name="run_tool")
         async def run_tool(tool: str, args_json: str = "{}") -> str:
-            payload = json.loads(args_json) if args_json.strip() else {}
+            try:
+                payload = json.loads(args_json) if args_json.strip() else {}
+            except json.JSONDecodeError as exc:
+                return f"run_tool error: args_json must be valid JSON ({exc.msg})."
             if not isinstance(payload, dict):
                 return "run_tool error: args_json must decode to an object."
             tool_call = {**payload, "tool": tool}
@@ -221,7 +224,9 @@ async def run_pydantic_adk_navigation(
         return {"status": "completed", "instruction": instruction, "summary": summary, "steps": []}
     except asyncio.CancelledError:
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
+        # Intentionally broad: this adapter should degrade to the universal runtime
+        # on any provider/runtime failure instead of breaking the user task flow.
         logger.exception("PydanticAI runtime failed; falling back to universal navigator")
         if on_step is not None:
             await on_step(

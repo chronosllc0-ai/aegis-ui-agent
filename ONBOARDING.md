@@ -3836,3 +3836,24 @@
 
 ### Notes
 - Frontend build still reports the existing Vite chunk-size warning (>500 kB), unrelated to this fix.
+
+## 2026-04-10 — Post-merge hardening on main: Netlify verification + Pydantic runner safety
+
+### What changed
+- Hardened `backend/pydantic_adk_runner.py` based on review feedback:
+  - tightened `cancel_event` type hint from `Any` to `asyncio.Event | None` in `run_pydantic_adk_navigation(...)`,
+  - added JSON decode guard for `run_tool(..., args_json)` so malformed LLM-emitted JSON returns a controlled tool error string instead of raising,
+  - retained fallback-on-error behavior with an explicit comment clarifying intentional broad exception handling.
+- Re-verified the previously reported Netlify build path on main with the exact workspace command.
+
+### Why
+- Post-merge review identified a production risk from unhandled `json.loads(...)` failures on untrusted model output.
+- Stronger typing and explicit fallback intent improve maintainability and reduce ambiguity in future reviews.
+- Running the Netlify-equivalent build command confirms the merged branch no longer fails the frontend build stage.
+
+### Validation
+- `npm ci && npm run -w frontend build` passed.
+- `python -m py_compile backend/pydantic_adk_runner.py` passed.
+
+### Notes
+- Vite chunk-size warning (>500 kB) remains and is unrelated to these safety fixes.

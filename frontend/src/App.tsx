@@ -743,7 +743,10 @@ function App() {
     const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     if (!sent) {
       toastCtx.error('Connection issue', 'Task was not sent. Please wait for reconnect and retry.')
+    if (!sent) {
+      toastCtx.error('Connection issue', 'Task was not sent. Please wait for reconnect and retry.')
       return
+    }
     }
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
