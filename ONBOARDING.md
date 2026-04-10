@@ -3467,3 +3467,17 @@
 
 ### Validation
 - `cd frontend && npm run build` passed.
+
+## 2026-04-10 — Review follow-up for compact composer PR
+
+### What changed
+- Addressed review nit in `frontend/src/components/ChatPanel.tsx` by removing a no-op ternary (`isExpanded ? 'pb-3' : 'pb-3'`) and replacing it with a direct `pb-3` class.
+- Added an explicit inline code comment documenting why Stop remains intentionally gated behind `isWorking && !canSend`:
+  - while there is draft content (`canSend === true`), the composer prioritizes send affordance and keeps steering flow active.
+
+### Why
+- Keeps the code cleaner for the nitpick without changing behavior.
+- Preserves the intentional stop/send interaction model requested for steering while making that decision explicit for reviewers.
+
+### Validation
+- `cd frontend && npm run build` passed.
