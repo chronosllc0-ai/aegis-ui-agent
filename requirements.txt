@@ -27,7 +27,7 @@ groq>=0.12.0
 
 # Agent framework
 google-adk>=0.1.0,<2.0.0
-pydantic-ai>=0.0.43
+pydantic-ai-slim[openai,anthropic,groq,mistral,xai]>=1.79.0
 
 # Browser automation
 playwright>=1.49.0

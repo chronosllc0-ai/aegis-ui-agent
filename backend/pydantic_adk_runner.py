@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Awaitable, Callable
 import json
 import logging
@@ -154,8 +155,6 @@ async def run_pydantic_adk_navigation(
                 await on_step({"type": "tool-call", "content": json.dumps(tool_call), "steering": []})
             result_text, image_bytes = await tool_executor.run(tool_call)
             if image_bytes and on_frame is not None:
-                import base64
-
                 await on_frame(base64.b64encode(image_bytes).decode())
             return result_text
 
@@ -177,7 +176,21 @@ async def run_pydantic_adk_navigation(
         if steering_notes:
             prompt += f"Steering notes: {steering_notes}\n"
 
-        run_result = await agent.run(prompt, cancel_on=cancel_event) if cancel_event is not None else await agent.run(prompt)
+        if cancel_event is not None:
+            run_task = asyncio.create_task(agent.run(prompt))
+            cancel_task = asyncio.create_task(cancel_event.wait())
+            done, pending = await asyncio.wait(
+                {run_task, cancel_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for pending_task in pending:
+                pending_task.cancel()
+            if cancel_task in done and cancel_event.is_set():
+                run_task.cancel()
+                raise asyncio.CancelledError
+            run_result = await run_task
+        else:
+            run_result = await agent.run(prompt)
         output = str(run_result.output)
 
         if output.startswith("failed::"):
