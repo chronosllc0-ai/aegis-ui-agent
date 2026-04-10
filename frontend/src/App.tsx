@@ -126,7 +126,7 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [mode, setMode] = useState<SteeringMode>('steer')
+  const [mode, setMode] = useState<SteeringMode>('auto')
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
@@ -705,6 +705,7 @@ function App() {
     if (wasWorking && !isWorking) {
       const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
       browserActivityDuringRunRef.current = false
+      setMode('auto')
       if (hadBrowserActivityThisRun && appMode === 'browser') {
         setAppMode('chat')
       }
@@ -750,7 +751,7 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const action = isWorking ? 'steer' : 'navigate'
+    const action = isWorking ? (selectedMode === 'steer' || selectedMode === 'auto' ? 'steer' : 'navigate') : 'navigate'
     console.info('[AegisUI] selected_mode=%s action=%s', selectedMode, action)
     // Only route to a sub-agent when actively steering an in-progress task.
     // When starting a new task (isWorking=false) there is no active parent task,
@@ -828,8 +829,14 @@ function App() {
   }
 
   const dispatchPromptFromUI = (instruction: string, metadata?: Record<string, unknown>) => {
-    const selectedMode = isWorking ? 'steer' : mode
-    const websocketAction = isWorking ? 'steer' : 'navigate'
+    const selectedMode = isWorking ? mode : 'auto'
+    const websocketAction = isWorking
+      ? selectedMode === 'interrupt'
+        ? 'interrupt'
+        : selectedMode === 'queue'
+          ? 'queue'
+          : 'steer'
+      : 'navigate'
     console.info('[AegisUI] dispatch_source=chat_input selected_mode=%s websocket_action=%s', selectedMode, websocketAction)
     handleSend(instruction, selectedMode, metadata)
   }
@@ -838,7 +845,7 @@ function App() {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, isWorking ? 'steer' : mode, { task_label_source: 'browser', task_label: normalized })
+    handleSend(normalized, isWorking ? mode : 'auto', { task_label_source: 'browser', task_label: normalized })
   }
 
   const handleDecomposePlan = async (prompt: string) => {
