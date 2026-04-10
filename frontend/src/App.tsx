@@ -51,8 +51,20 @@ type TaskHistoryItem = {
   instruction: string
   labelSource?: 'browser' | 'chat' | 'system'
 }
+// Stop-words to skip when picking the first meaningful word from an instruction
+const STOP_WORDS = new Set(['a', 'an', 'the', 'to', 'do', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'with', 'by', 'from', 'please', 'now', 'then', 'that', 'this', 'it', 'is', 'be', 'can', 'will', 'your', 'my', 'our', 'their'])
+
+/**
+ * Derive a short, unique, human-readable display name for a sub-agent.
+ * Format: "<FirstMeaningfulWord>-<4-char sub_id suffix>"
+ * The sub_id suffix guarantees uniqueness even when instructions share the same opening words.
+ */
 function subAgentDisplayName(agent: { instruction: string; sub_id: string }): string {
-  return agent.instruction.split(' ').slice(0, 2).join(' ').trim() || `agent-${agent.sub_id.slice(0, 4)}`
+  const words = agent.instruction.trim().split(/\s+/)
+  const first = words.find((w) => w.length > 1 && !STOP_WORDS.has(w.toLowerCase()))
+  const label = first ? first.replace(/[^a-zA-Z0-9]/g, '') : 'Agent'
+  const shortId = agent.sub_id.replace(/-/g, '').slice(0, 4)
+  return `${label}-${shortId}`
 }
 const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {

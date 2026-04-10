@@ -1670,6 +1670,14 @@ export function ChatPanel({
 
       {/* Input area */}
       <div className='relative border-t border-[#1e1e1e] bg-[#111] px-3 py-3'>
+        {/* Sub-agent SLA hint: shown when agents are active and no @ query is active */}
+        {subAgentNames.length > 0 && mentionQuery === null && (
+          <div className='mb-2 flex items-center gap-1.5 rounded-lg bg-[#171717] px-2.5 py-1.5'>
+            <span className='text-[10px] font-medium text-zinc-500'>Sub-agents active</span>
+            <span className='text-[10px] text-zinc-600'>·</span>
+            <span className='text-[10px] text-zinc-500'>Type <span className='font-mono text-zinc-400'>@</span> to direct a task to a specific agent</span>
+          </div>
+        )}
         {mentionOptions.length > 0 && (
           <div className='mb-2 rounded-xl border border-[#2a2a2a] bg-[#141414] p-1.5'>
             {mentionOptions.map((name) => (
