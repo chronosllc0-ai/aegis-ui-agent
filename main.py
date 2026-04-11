@@ -562,10 +562,12 @@ def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -
     merged = {**current, **incoming}
     provider = str(merged.get("provider", "")).strip().lower()
     if not provider:
-        merged["provider"] = "chronos"
+        # Use server-configured default; fall back to Google Gemini which needs only GEMINI_API_KEY.
+        # Override via DEFAULT_PROVIDER env var (e.g. DEFAULT_PROVIDER=chronos to use OpenRouter).
+        merged["provider"] = settings.DEFAULT_PROVIDER or "google"
     model = str(merged.get("model", "")).strip()
     if not model:
-        merged["model"] = "nvidia/nemotron-3-super-120b-a12b:free"
+        merged["model"] = settings.DEFAULT_MODEL or "gemini-2.5-pro"
     return merged
 
 
