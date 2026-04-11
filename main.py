@@ -170,6 +170,12 @@ ops_app.add_middleware(
 )
 
 
+@ops_app.get("/health")
+async def ops_health() -> dict[str, str]:
+    """Health probe for Railway on the ops port."""
+    return {"status": "ok", "port": "ops"}
+
+
 @ops_app.websocket("/ws/ops")
 async def websocket_ops(websocket: WebSocket) -> None:
     """Operations port — background tasks, sub-agents, heartbeat, cron results."""
