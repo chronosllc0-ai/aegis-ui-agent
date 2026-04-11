@@ -1,3 +1,34 @@
+## Session 5.68 - April 10, 2026 (Post-merge fix: Netlify TypeScript build break + send-path regression cleanup)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted frontend hotfix pass
+
+### What Was Done
+- Fixed Netlify/TypeScript build failure in `frontend/src/App.tsx`:
+  - removed an orphaned `setMode('auto')` call in the task-finish effect (no `setMode` state exists in this component), which was causing `TS2304: Cannot find name 'setMode'`.
+- Fixed merged-control-flow regression in `handleSend(...)`:
+  - removed duplicated nested `if (!sent)` block and extra braces introduced by merge churn.
+  - preserved user-facing connection error toast while ensuring the function no longer exits via the unintended duplicated branch.
+- Kept behavior stable for task-history optimistic updates and subagent dispatch flow after send attempt.
+
+### What's Working
+- Frontend TypeScript + Vite production build now succeeds locally.
+- The send path compiles cleanly and retains existing error notification behavior.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add a small regression test around `handleSend` failure behavior (`send` returns false) to prevent future control-flow duplication regressions.
+2. Consider enabling stricter lint/format checks in CI for brace/duplicate-block detection on large merge diffs.
+
+### Decisions Made
+- Chose minimal surgical fixes to restore mainline stability without broader behavior refactors.
+
+### Blockers
+- None.
+
+---
 ## Session 5.67 - April 9, 2026 (Chat input bar UI restructure to compact Codex-style composer)
 
 **Agent:** GPT-5.3-Codex
