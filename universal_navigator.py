@@ -43,6 +43,15 @@ from backend.session_workspace import (
     get_session_workspace_root,
     resolve_session_path,
 )
+from backend.user_memory import (
+    read_memory,
+    write_memory,
+    patch_memory,
+    add_automation,
+    list_automations as _list_automations,
+    remove_automation,
+    read_heartbeat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +262,48 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "name": "cron_delete",
         "description": "Delete a scheduled automation.",
         "example": {"tool": "cron_delete", "task_id": "uuid"},
+        "risk": "high",
+        "default_permission": "confirm",
+    },
+    {
+        "name": "read_memory",
+        "description": "Read the user's memory file (preferences, facts, context you've stored).",
+        "example": {"tool": "read_memory"},
+        "risk": "low",
+        "default_permission": "auto",
+    },
+    {
+        "name": "write_memory",
+        "description": "Overwrite the user's entire memory.md file.",
+        "example": {"tool": "write_memory", "content": "# Memory\n\n## Preferences\nUser prefers concise updates."},
+        "risk": "medium",
+        "default_permission": "auto",
+    },
+    {
+        "name": "patch_memory",
+        "description": "Update or append a named section in the user's memory.md.",
+        "example": {"tool": "patch_memory", "section": "Preferences", "content": "Prefers bullet-point summaries."},
+        "risk": "medium",
+        "default_permission": "auto",
+    },
+    {
+        "name": "add_automation",
+        "description": "Schedule a recurring task for Aegis to run automatically.",
+        "example": {"tool": "add_automation", "task": "Send daily standup summary", "schedule": "9am every weekday", "label": "Daily standup"},
+        "risk": "medium",
+        "default_permission": "confirm",
+    },
+    {
+        "name": "list_automations",
+        "description": "Show all scheduled automations for this user.",
+        "example": {"tool": "list_automations"},
+        "risk": "low",
+        "default_permission": "auto",
+    },
+    {
+        "name": "remove_automation",
+        "description": "Delete a scheduled automation by its ID.",
+        "example": {"tool": "remove_automation", "automation_id": "auto_1"},
         "risk": "high",
         "default_permission": "confirm",
     },
@@ -1079,6 +1130,38 @@ class UniversalToolExecutor:
                     head=str(tool_call.get("head", "")).strip() or None,
                     draft=bool(tool_call.get("draft", False)),
                 )), None
+
+            if tool == "read_memory":
+                return read_memory(self._session_id), None
+
+            if tool == "write_memory":
+                write_memory(self._session_id, str(tool_call.get("content", "")))
+                return "Memory updated.", None
+
+            if tool == "patch_memory":
+                result = patch_memory(
+                    self._session_id,
+                    str(tool_call.get("section", "")),
+                    str(tool_call.get("content", "")),
+                )
+                return result, None
+
+            if tool == "add_automation":
+                auto = add_automation(
+                    self._session_id,
+                    str(tool_call.get("task", "")),
+                    str(tool_call.get("schedule", "")),
+                    str(tool_call.get("label", "")),
+                )
+                return f"Automation '{auto['label']}' scheduled. ID: {auto['id']}", None
+
+            if tool == "list_automations":
+                autos = _list_automations(self._session_id)
+                return json.dumps(autos, indent=2) if autos else "No automations configured.", None
+
+            if tool == "remove_automation":
+                ok = remove_automation(self._session_id, str(tool_call.get("automation_id", "")))
+                return "Automation removed." if ok else "Automation not found.", None
 
             return f"Unknown tool: {tool}", None
         except Exception as exc:  # noqa: BLE001

@@ -35,3 +35,6 @@ Pillow>=11.0.0
 
 # AWS S3 file storage
 boto3>=1.35.0
+
+# Heartbeat pinger — cron expression evaluation
+croniter>=3.0.0
