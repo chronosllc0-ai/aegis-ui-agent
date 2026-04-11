@@ -106,6 +106,31 @@ def test_websocket_navigate_smoke() -> None:
     assert result["data"]["status"] == "completed"
 
 
+def test_websocket_navigate_requires_instruction_and_keeps_socket_open() -> None:
+    """Empty navigate instructions should return a protocol error without disconnecting."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate", "instruction": "   "})
+        error = ws.receive_json()
+
+        ws.send_json({"action": "navigate", "instruction": "hello after error"})
+        step = ws.receive_json()
+        frame = ws.receive_json()
+        workflow_step = ws.receive_json()
+        result = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert error["type"] == "error"
+    assert error["data"]["message"] == "navigate: instruction is required"
+    assert step["type"] == "step"
+    assert frame["type"] == "frame"
+    assert workflow_step["type"] == "workflow_step"
+    assert result["type"] == "result"
+
+
 def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
     """Malformed dequeue payload should return protocol error and keep socket open."""
     main.orchestrator = _StubOrchestrator()
@@ -126,48 +151,57 @@ def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
     assert "Queued instruction: later" in queue_ack["data"]["content"]
 
 
-def test_idle_steer_starts_task_instead_of_only_buffering_steering() -> None:
-    """Steer action should start a new task when no task is currently running."""
+def test_idle_steer_requires_navigate_when_no_task_is_running() -> None:
+    """Steer action should be rejected while idle; navigate is the sole start action."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
     with client.websocket_connect("/ws/navigate") as ws:
         _ = ws.receive_json()
         ws.send_json({"action": "steer", "instruction": "open example.com"})
+        error = ws.receive_json()
+        ws.send_json({"action": "navigate", "instruction": "open example.com"})
         step = ws.receive_json()
-        frame = ws.receive_json()
-        workflow_step = ws.receive_json()
-        result = ws.receive_json()
         ws.send_json({"action": "stop"})
 
+    assert error["type"] == "error"
+    assert "Use navigate to start a new task" in error["data"]["message"]
     assert step["type"] == "step"
     assert step["data"]["content"] == "stub:open example.com"
-    assert frame["type"] == "frame"
-    assert workflow_step["type"] == "workflow_step"
-    assert result["type"] == "result"
-    assert result["data"]["status"] == "completed"
 
 
-def test_idle_queue_starts_task_instead_of_queuing() -> None:
-    """Queue action should start immediately when no task is running."""
+def test_idle_queue_requires_navigate_when_no_task_is_running() -> None:
+    """Queue action should be rejected while idle; navigate is the sole start action."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
     with client.websocket_connect("/ws/navigate") as ws:
         _ = ws.receive_json()
         ws.send_json({"action": "queue", "instruction": "search for laptops"})
+        error = ws.receive_json()
+        ws.send_json({"action": "navigate", "instruction": "search for laptops"})
         step = ws.receive_json()
-        frame = ws.receive_json()
-        workflow_step = ws.receive_json()
-        result = ws.receive_json()
+        ws.send_json({"action": "stop"})
+
+    assert error["type"] == "error"
+    assert "Use navigate to start a new task" in error["data"]["message"]
+    assert step["type"] == "step"
+    assert step["data"]["content"] == "stub:search for laptops"
+
+
+def test_navigate_accepts_prompt_alias_when_instruction_missing() -> None:
+    """Navigate should accept a `prompt` field for compatibility with prompt-centric clients."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate", "prompt": "open docs homepage"})
+        step = ws.receive_json()
         ws.send_json({"action": "stop"})
 
     assert step["type"] == "step"
-    assert step["data"]["content"] == "stub:search for laptops"
-    assert frame["type"] == "frame"
-    assert workflow_step["type"] == "workflow_step"
-    assert result["type"] == "result"
-    assert result["data"]["status"] == "completed"
+    assert step["data"]["content"] == "stub:open docs homepage"
 
 
 def test_health_reports_initializing_database_state() -> None:

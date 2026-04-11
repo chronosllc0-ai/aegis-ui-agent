@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { LogEntry, SteeringMode } from '../hooks/useWebSocket'
+import type { LogEntry } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { apiUrl } from '../lib/api'
 import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
@@ -10,7 +10,6 @@ import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
 import { SuggestionChips } from './SuggestionChips'
 import { PromptGallery } from './PromptGallery'
-import { SteeringControl } from './SteeringControl'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
 import { FaBrain } from 'react-icons/fa6'
 
@@ -41,11 +40,7 @@ const IcoSparkle     = (p: SvgProps) => <Svg {...p}><path d='M12 3v1M12 20v1M3 1
 export interface ChatPanelProps {
   logs: LogEntry[]
   isWorking: boolean
-  mode: SteeringMode
-  queuedMessages: string[]
-  onModeChange: (mode: SteeringMode) => void
   onPrimarySend: (instruction: string, metadata?: Record<string, unknown>) => void
-  onSend: (instruction: string, mode: SteeringMode, metadata?: Record<string, unknown>) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
@@ -962,9 +957,6 @@ interface InputBarCursorProps {
   onPlusClick: () => void
   onOpenGallery: () => void
   onSelectSuggestion: (templateId: string) => void
-  mode: SteeringMode
-  queuedMessages: string[]
-  onModeChange: (mode: SteeringMode) => void
   provider: string
   model: string
   agentMode: AgentModeId
@@ -985,7 +977,6 @@ interface InputBarCursorProps {
 
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
-  mode, queuedMessages, onModeChange,
   provider, model, agentMode, onProviderChange, onModelChange, onAgentModeChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments,
@@ -996,11 +987,6 @@ function InputBarCursor({
 
   return (
     <div className='space-y-0'>
-      {isWorking && (
-        <div className='mx-2 -mb-1 inline-flex items-center rounded-full border border-[#353535] bg-[#202020] px-1.5 py-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]'>
-          <SteeringControl mode={mode} queueCount={queuedMessages.length} onChange={onModeChange} />
-        </div>
-      )}
       <div className='overflow-hidden rounded-3xl border border-[#303030] bg-[#1a1a1a] shadow-[0_8px_30px_rgba(0,0,0,0.3)]'>
 
         {/* Connector chip inside card */}
@@ -1031,7 +1017,6 @@ function InputBarCursor({
             className='w-full resize-none bg-transparent px-4 pt-3 pb-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6 transition-[padding,min-height]'
             style={{ minHeight: isExpanded ? '58px' : '52px', maxHeight: '140px', overflow: 'hidden' }}
           />
-          {/* Keep Stop visible only when there is no draft input: when canSend is true, send stays available while steering remains active. */}
           {isWorking && !canSend && (
             <button type='button' onClick={onStop}
               className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
@@ -1134,11 +1119,7 @@ function InputBarCursor({
 export function ChatPanel({
   logs,
   isWorking,
-  mode,
-  queuedMessages,
-  onModeChange,
   onPrimarySend,
-  onSend,
   onDecomposePlan,
   connectionStatus,
   onSwitchToBrowser,
@@ -1467,8 +1448,8 @@ export function ChatPanel({
     e.target.value = ''
   }
 
-  const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onSend('approved', 'steer') }
-  const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onSend('rejected', 'steer') }
+  const handleApprove = (msgId: string) => { setApprovedIds((prev) => new Set([...prev, msgId])); onPrimarySend('approved') }
+  const handleReject  = (msgId: string) => { setRejectedIds((prev) => new Set([...prev, msgId])); onPrimarySend('rejected') }
   const setToolCollapsed = useCallback((toolId: string, collapsed: boolean) => {
     setThreadUi((prev) => {
       const next = new Set(prev.collapsedToolIds)
@@ -1506,7 +1487,7 @@ export function ChatPanel({
     onUserInputResponse(trimmed, requestId)
   }
 
-  const isDisabled = connectionStatus !== 'connected'
+  const isDisabled = connectionStatus !== 'connected' || isWorking
 
   // Personalised CTA — first name only
   const firstName = userName ? userName.split(' ')[0] : null
@@ -1771,9 +1752,6 @@ export function ChatPanel({
           onPlusClick={() => setShowPlusMenu((v) => !v)}
           onOpenGallery={() => setGalleryOpen(true)}
           onSelectSuggestion={handleSuggestionSelect}
-          mode={mode}
-          queuedMessages={queuedMessages}
-          onModeChange={onModeChange}
           provider={provider}
           model={model}
           agentMode={agentMode}

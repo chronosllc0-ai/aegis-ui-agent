@@ -1,0 +1,4 @@
+# Keep OpenTelemetry aligned with google-adk compatibility range.
+opentelemetry-api<1.39.0
+opentelemetry-sdk<1.39.0
+opentelemetry-semantic-conventions<0.60b0
