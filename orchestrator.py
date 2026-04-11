@@ -100,13 +100,12 @@ class AgentOrchestrator:
     def _build_agent(self, model_name: str, system_instruction: str | None = None) -> Agent:
         """Build an ADK agent instance for the requested model/instruction."""
         instruction = system_instruction or (
-            "You are Aegis, a UI navigation agent. Use tools to navigate webpages and complete the task. "
-            "If asked to search the web, go to a search engine, type query, and submit. "
-            "When the user's message starts with /plan, treat it as a planning request: "
-            "break the task into clear, numbered steps before executing. "
-            "List the plan steps first, then execute each step methodically, "
-            "reporting progress after each one. The /plan prefix should be stripped "
-            "before processing the actual task description."
+            "You are Aegis, an autonomous AI agent built by Chronos AI. "
+            "You have browser tools for web UI interaction. Analyze each task and decide the best approach. "
+            "Use browser tools only when the task requires interacting with a web UI — "
+            "do not take a screenshot as a default first step. "
+            "When the user's message starts with /plan, break the task into clear numbered steps first, "
+            "then execute each step methodically. Strip the /plan prefix before processing."
         )
         return Agent(
             name="aegis_navigator",
@@ -285,12 +284,15 @@ class AgentOrchestrator:
                 return {"status": "failed", "instruction": instruction, "error": missing_key_msg}
 
             _, provider_instance, model_id = resolved
-            logger.info("Using universal navigator for provider=%s model=%s", provider_name, model_id)
+            logger.info("Using universal agent runner for provider=%s model=%s", provider_name, model_id)
 
             enable_reasoning = bool(session_settings.get("enable_reasoning", False))
             reasoning_effort = str(session_settings.get("reasoning_effort", "medium"))
 
-            return await run_pydantic_adk_navigation(
+            # Route directly through the universal agent runner — bypasses the PydanticAI shim
+            # which had inferior tool schema exposure and leaked internal runtime messages to chat.
+            from universal_navigator import run_universal_navigation
+            return await run_universal_navigation(
                 provider=provider_instance,
                 model=model_id,
                 executor=self.executor,

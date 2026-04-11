@@ -147,6 +147,8 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Model response (no tool call):',
   'Session settings updated',
   'Workflow step update',
+  'Starting task:',
+  'Processing ',
 ]
 
 function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
@@ -155,7 +157,11 @@ function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
 
 function isDeniedChatText(text: string): boolean {
   const normalized = text.trim().toLowerCase()
-  return CHAT_HARD_DENY_PREFIXES.some((prefix) => normalized.startsWith(prefix.toLowerCase()))
+  if (CHAT_HARD_DENY_PREFIXES.some((prefix) => normalized.startsWith(prefix.toLowerCase()))) return true
+  // Filter raw JSON tool blobs that leaked through (e.g. {"tool":"extract_page",...})
+  const t = text.trim()
+  if (t.startsWith('{') && t.includes('"tool"') && t.includes('"')) return true
+  return false
 }
 
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
@@ -189,7 +195,13 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     }
 
     if (msg.includes('[summarize_task]')) {
-      msgs.push({ id: entry.id, role: 'task_summary', text: msg.replace('[summarize_task]', '').trim() })
+      const rawJson = msg.replace('[summarize_task]', '').trim()
+      let summaryText = rawJson
+      try {
+        const parsed = JSON.parse(rawJson)
+        summaryText = parsed.content ?? parsed.summary ?? parsed.notes ?? rawJson
+      } catch { /* use raw */ }
+      msgs.push({ id: entry.id, role: 'task_summary', text: summaryText })
       continue
     }
 
@@ -215,7 +227,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
 
-    const isUser       = entry.stepKind === 'navigate' && entry.elapsedSeconds === 0
+    const isUser       = entry.isUserMessage === true
     const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
     const isApproval   = entry.type === 'interrupt'
     const isModelResponse = entry.type === 'step' && RE_MODEL_RESPONSE.test(msg)

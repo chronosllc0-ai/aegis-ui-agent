@@ -1430,9 +1430,13 @@ async def _run_navigation_task(
 # ── WebSocket navigation endpoint ────────────────────────────────────
 
 
+@app.websocket("/ws/agent")
 @app.websocket("/ws/navigate")
 async def websocket_navigate(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time UI navigation sessions."""
+    """WebSocket endpoint for real-time agent sessions.
+
+    Accepts both /ws/agent (new) and /ws/navigate (legacy alias).
+    """
     await websocket.accept()
     session_id = await live_manager.create_session()
     runtime = SessionRuntime()
@@ -1447,7 +1451,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_json()
             action = data.get("action")
-            if action == "navigate":
+            # Normalize action aliases → canonical internal names
+            if action in {"navigate", "task"}:
                 action = "navigate_start"
             if action == "stop":
                 action = "stop_task"
