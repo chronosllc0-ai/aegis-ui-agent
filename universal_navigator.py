@@ -43,6 +43,15 @@ from backend.session_workspace import (
     get_session_workspace_root,
     resolve_session_path,
 )
+from backend.user_memory import (
+    read_memory,
+    write_memory,
+    patch_memory,
+    add_automation,
+    list_automations as _list_automations,
+    remove_automation,
+    read_heartbeat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +262,48 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "name": "cron_delete",
         "description": "Delete a scheduled automation.",
         "example": {"tool": "cron_delete", "task_id": "uuid"},
+        "risk": "high",
+        "default_permission": "confirm",
+    },
+    {
+        "name": "read_memory",
+        "description": "Read the user's memory file (preferences, facts, context you've stored).",
+        "example": {"tool": "read_memory"},
+        "risk": "low",
+        "default_permission": "auto",
+    },
+    {
+        "name": "write_memory",
+        "description": "Overwrite the user's entire memory.md file.",
+        "example": {"tool": "write_memory", "content": "# Memory\n\n## Preferences\nUser prefers concise updates."},
+        "risk": "medium",
+        "default_permission": "auto",
+    },
+    {
+        "name": "patch_memory",
+        "description": "Update or append a named section in the user's memory.md.",
+        "example": {"tool": "patch_memory", "section": "Preferences", "content": "Prefers bullet-point summaries."},
+        "risk": "medium",
+        "default_permission": "auto",
+    },
+    {
+        "name": "add_automation",
+        "description": "Schedule a recurring task for Aegis to run automatically.",
+        "example": {"tool": "add_automation", "task": "Send daily standup summary", "schedule": "9am every weekday", "label": "Daily standup"},
+        "risk": "medium",
+        "default_permission": "confirm",
+    },
+    {
+        "name": "list_automations",
+        "description": "Show all scheduled automations for this user.",
+        "example": {"tool": "list_automations"},
+        "risk": "low",
+        "default_permission": "auto",
+    },
+    {
+        "name": "remove_automation",
+        "description": "Delete a scheduled automation by its ID.",
+        "example": {"tool": "remove_automation", "automation_id": "auto_1"},
         "risk": "high",
         "default_permission": "confirm",
     },
@@ -1079,6 +1130,38 @@ class UniversalToolExecutor:
                     head=str(tool_call.get("head", "")).strip() or None,
                     draft=bool(tool_call.get("draft", False)),
                 )), None
+
+            if tool == "read_memory":
+                return read_memory(self._session_id), None
+
+            if tool == "write_memory":
+                write_memory(self._session_id, str(tool_call.get("content", "")))
+                return "Memory updated.", None
+
+            if tool == "patch_memory":
+                result = patch_memory(
+                    self._session_id,
+                    str(tool_call.get("section", "")),
+                    str(tool_call.get("content", "")),
+                )
+                return result, None
+
+            if tool == "add_automation":
+                auto = add_automation(
+                    self._session_id,
+                    str(tool_call.get("task", "")),
+                    str(tool_call.get("schedule", "")),
+                    str(tool_call.get("label", "")),
+                )
+                return f"Automation '{auto['label']}' scheduled. ID: {auto['id']}", None
+
+            if tool == "list_automations":
+                autos = _list_automations(self._session_id)
+                return json.dumps(autos, indent=2) if autos else "No automations configured.", None
+
+            if tool == "remove_automation":
+                ok = remove_automation(self._session_id, str(tool_call.get("automation_id", "")))
+                return "Automation removed." if ok else "Automation not found.", None
 
             return f"Unknown tool: {tool}", None
         except Exception as exc:  # noqa: BLE001
@@ -2008,6 +2091,7 @@ async def run_universal_navigation(
             }
             if not enable_reasoning:
                 stream_kwargs["temperature"] = 0.2
+            message_id = str(uuid4())[:8]
             async for chunk in provider.stream(messages, **stream_kwargs):
                 if cancel_event and cancel_event.is_set():
                     break
@@ -2017,8 +2101,16 @@ async def run_universal_navigation(
                         await on_reasoning_delta(thinking_step_id, chunk.reasoning_delta)
                 if chunk.delta:
                     reply_parts.append(chunk.delta)
+                    if on_step:
+                        await on_step({
+                            "type": "stream_chunk",
+                            "content": chunk.delta,
+                            "message_id": message_id,
+                        })
 
             reply = "".join(reply_parts).strip()
+            if on_step and reply:
+                await on_step({"type": "stream_done", "message_id": message_id})
             if reasoning_parts and on_step:
                 await on_step(
                     {
@@ -2046,6 +2138,8 @@ async def run_universal_navigation(
             # (conversational reply, clarification, etc.).  Emit it straight to the
             # chat and complete the task.  We never filter or retry plain-text replies;
             # the model decides whether tools are needed.
+            # stream_chunk/stream_done already delivered tokens; assistant_message is a
+            # fallback for clients that missed streaming (frontend deduplicates by message_id).
             if reply:
                 await emit_step(reply, step_type="assistant_message")
             return {
@@ -2186,8 +2280,37 @@ async def run_universal_navigation(
                     )
                 return result
 
-            await emit_step(f"[{tool_name}] {json.dumps({key: value for key, value in tool_call.items() if key != 'tool'})[:220]}")
-            result_text, screenshot_bytes = await tool_executor.run(tool_call, skip_policy_checks=True)
+            call_id = str(uuid4())[:8]
+            # Emit tool_start — card appears with spinner
+            await emit_step(json.dumps({
+                "tool": tool_name,
+                "args": {k: v for k, v in tool_call.items() if k != "tool"},
+                "call_id": call_id,
+            }), step_type="tool_start")
+
+            try:
+                result_text, screenshot_bytes = await tool_executor.run(tool_call, skip_policy_checks=True)
+            except Exception as _tool_exc:  # noqa: BLE001
+                # Always emit tool_result so the frontend spinner resolves — never leave a
+                # permanent loading card on an unhandled exception.
+                err_msg = f"Tool error ({tool_name}): {_tool_exc}"
+                logger.warning(err_msg)
+                await emit_step(json.dumps({
+                    "call_id": call_id,
+                    "tool": tool_name,
+                    "result": err_msg[:500],
+                    "ok": False,
+                }), step_type="tool_result")
+                return {
+                    "index": index,
+                    "tool": tool_name,
+                    "ok": False,
+                    "result_text": err_msg,
+                    "error": err_msg,
+                    "screenshot_bytes": None,
+                    "denial_debug": None,
+                }
+
             lowered_result = str(result_text).lower()
             is_ok = not lowered_result.startswith(
                 ("tool error", "unknown tool", "denied", "blocked", "user declined", "error")
@@ -2203,6 +2326,13 @@ async def run_universal_navigation(
                 "screenshot_bytes": screenshot_bytes,
                 "denial_debug": None,
             }
+            # Emit tool_result — card resolves
+            await emit_step(json.dumps({
+                "call_id": call_id,
+                "tool": tool_name,
+                "result": str(result_text)[:500],
+                "ok": is_ok,
+            }), step_type="tool_result")
             if on_workflow_step:
                 await on_workflow_step(
                     {

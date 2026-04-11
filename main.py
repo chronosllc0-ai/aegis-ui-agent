@@ -65,6 +65,7 @@ from integrations.telegram import TelegramIntegration
 from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
 from backend.session_workspace import cleanup_session_workspace
+from backend.heartbeat_pinger import HeartbeatPinger
 
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -114,6 +115,78 @@ key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 db_init_task: asyncio.Task[None] | None = None
 db_init_error: str | None = None
 db_ready = False
+
+
+# ─── Ops port (port 8001) ─────────────────────────────────────────────────────
+
+class OpsManager:
+    """Manages multiplexed operations WebSocket connections.
+
+    Each session_id may have *multiple* simultaneous connections (multiple browser
+    tabs). Events are fanned out to all live sockets for that session so no tab
+    misses a background result.
+    """
+
+    def __init__(self) -> None:
+        self._connections: dict[str, list[WebSocket]] = {}  # session_id → [ws, ...]
+
+    async def connect(self, session_id: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._connections.setdefault(session_id, []).append(websocket)
+
+    def disconnect(self, session_id: str, websocket: WebSocket) -> None:
+        sockets = self._connections.get(session_id, [])
+        try:
+            sockets.remove(websocket)
+        except ValueError:
+            pass
+        if not sockets:
+            self._connections.pop(session_id, None)
+
+    async def send(self, session_id: str, event: dict[str, Any]) -> None:
+        dead: list[WebSocket] = []
+        for ws in list(self._connections.get(session_id, [])):
+            try:
+                await ws.send_json(event)
+            except Exception:  # noqa: BLE001
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(session_id, ws)
+
+    async def broadcast(self, event: dict[str, Any]) -> None:
+        for session_id in list(self._connections.keys()):
+            await self.send(session_id, event)
+
+
+ops_manager = OpsManager()
+
+ops_app = FastAPI(title="Aegis Ops Port", version="1.0.0")
+ops_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@ops_app.websocket("/ws/ops")
+async def websocket_ops(websocket: WebSocket) -> None:
+    """Operations port — background tasks, sub-agents, heartbeat, cron results."""
+    session_id = websocket.query_params.get("session_id", str(uuid4()))
+    await ops_manager.connect(session_id, websocket)
+    try:
+        # Send initial ready event
+        await websocket.send_json({"type": "ops_ready", "data": {"session_id": session_id}})
+        # Keep connection alive, receiving pings
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        ops_manager.disconnect(session_id, websocket)
+    except Exception:  # noqa: BLE001
+        ops_manager.disconnect(session_id, websocket)
 background_worker = BackgroundWorker(max_concurrent=3, poll_interval=5.0)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -209,12 +282,15 @@ async def startup_event() -> None:
 
     start_scheduler()
     await background_worker.start()
+    _pinger.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     """Cancel any outstanding background initialization tasks."""
     global db_init_task
+
+    _pinger.stop()
 
     if db_init_task is not None and not db_init_task.done():
         db_init_task.cancel()
@@ -336,6 +412,24 @@ github_registry = GitHubRegistry()
 
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
+# Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
+_session_runtimes: dict[str, "SessionRuntime"] = {}
+
+
+async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
+    """Called by HeartbeatPinger when an automation is due.
+
+    Uses the O(1) _session_runtimes reverse index instead of iterating all runtimes.
+    """
+    runtime = _session_runtimes.get(session_id)
+    if runtime is not None:
+        logger.info("Heartbeat dispatch matched runtime uid=%s session=%s task=%s", runtime.user_uid, session_id, instruction)
+    else:
+        logger.info("Heartbeat dispatch (no active runtime): session=%s task=%s", session_id, instruction)
+    # TODO: when dual-port ops is running, send via ops_manager
+
+
+_pinger = HeartbeatPinger(dispatch=_heartbeat_dispatch, interval_seconds=60)
 
 # Stream subscribers: user_uid -> {platform, integration_id, chat_id, last_sent_at}
 _stream_subscribers: dict[str, dict[str, Any]] = {}
@@ -1282,10 +1376,15 @@ async def _run_navigation_task(
             on_user_input=None,
             parent_task_id=runtime.current_frontend_task_id,
         )
-        # Send updated agent list to frontend
-        await websocket.send_json({
+        # Send updated agent list to frontend (main WS + ops port)
+        subagent_list_event = {
             "type": "subagent_list",
             "data": {"agents": runtime.subagent_manager.list_agents()},
+        }
+        await websocket.send_json(subagent_list_event)
+        await ops_manager.send(session_id, {
+            "type": "subagent_result",
+            "data": {"sub_id": sub_id, "agents": runtime.subagent_manager.list_agents()},
         })
         return sub_id
 
@@ -1443,6 +1542,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     runtime.user_uid = _extract_websocket_user_uid(websocket)
     if runtime.user_uid:
         _user_runtimes[runtime.user_uid] = runtime
+    # O(1) reverse index for heartbeat dispatch
+    _session_runtimes[session_id] = runtime
 
     try:
         await _get_orchestrator().executor.ensure_browser()
@@ -1928,6 +2029,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         logger.info("All sub-agents cancelled for session %s", session_id)
         if runtime.user_uid:
             _user_runtimes.pop(runtime.user_uid, None)
+        _session_runtimes.pop(session_id, None)
         await cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
 
@@ -3009,5 +3111,15 @@ if FRONTEND_DIST_DIR.exists():
         return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)
 
 
+async def _start_servers() -> None:
+    """Start main app (PORT) and ops app (OPS_PORT) concurrently."""
+    import os as _os
+    config_main = uvicorn.Config(app, host="0.0.0.0", port=int(_os.environ.get("PORT", settings.PORT)))
+    config_ops  = uvicorn.Config(ops_app, host="0.0.0.0", port=int(_os.environ.get("OPS_PORT", 8001)))
+    server_main = uvicorn.Server(config_main)
+    server_ops  = uvicorn.Server(config_ops)
+    await asyncio.gather(server_main.serve(), server_ops.serve())
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)
+    asyncio.run(_start_servers())

@@ -25,6 +25,11 @@ export type LogEntry = {
   elapsedSeconds: number
   stepId?: string           // links reasoning to its step
   isUserMessage?: boolean   // true when this entry represents the user's task instruction
+  isStreaming?: boolean      // true while stream_chunk deltas are still arriving
+  rawStepType?: string       // original step type string from backend
+  toolCallId?: string        // call_id linking tool_start → tool_result
+  toolResult?: string        // resolved result text for tool_result entries
+  toolOk?: boolean           // whether the tool call succeeded
 }
 
 export type TranscriptEntry = {
@@ -185,6 +190,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const userId = options?.userId ?? null
   const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+  const [opsConnectionStatus, setOpsConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected')
   const [executionState, setExecutionState] = useState<ExecutionState>('idle')
   const [isWorking, setIsWorking] = useState(false)
   const [taskActivity, setTaskActivity] = useState<ActivityState>(() => createIdleActivityState())
@@ -203,6 +209,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const [subAgentSteps, setSubAgentSteps] = useState<Record<string, SubAgentStep[]>>({})
   const [activeExecutionMode, setActiveExecutionMode] = useState<AgentModeId>('orchestrator')
   const wsRef = useRef<WebSocket | null>(null)
+  const opsWsRef = useRef<WebSocket | null>(null)
+  const _sessionIdRef = useRef<string>(crypto.randomUUID())
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
@@ -410,14 +418,117 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
         if (urlMatch?.[0]) setCurrentUrl(urlMatch[0])
-        // assistant_message = direct model text reply (no tools used); treat as a
+
+        // ── stream_chunk: accumulate token deltas into a streaming bubble ──
+        if (stepType === 'stream_chunk') {
+          const msgId = String(payload.data?.message_id ?? '')
+          const delta = String(payload.data?.content ?? '')
+          setLogs((prev) => {
+            const existing = prev.find((e) => e.id === `stream_${msgId}`)
+            if (existing) {
+              return prev.map((e) =>
+                e.id === `stream_${msgId}` ? { ...e, message: e.message + delta } : e,
+              )
+            }
+            return [
+              ...prev,
+              {
+                id: `stream_${msgId}`,
+                message: delta,
+                taskId,
+                type: 'result' as const,
+                status: 'in_progress' as const,
+                stepKind: 'other' as const,
+                elapsedSeconds: 0,
+                timestamp: new Date().toISOString(),
+                isStreaming: true,
+                rawStepType: 'stream_chunk',
+              },
+            ]
+          })
+          return
+        }
+
+        // ── stream_done: mark bubble as complete ───────────────────────────
+        if (stepType === 'stream_done') {
+          const msgId = String(payload.data?.message_id ?? '')
+          setLogs((prev) =>
+            prev.map((e) =>
+              e.id === `stream_${msgId}`
+                ? { ...e, isStreaming: false, status: 'completed' as const }
+                : e,
+            ),
+          )
+          return
+        }
+
+        // ── tool_start: emit card with spinner ─────────────────────────────
+        if (stepType === 'tool_start') {
+          try {
+            const data = JSON.parse(content) as { call_id?: string }
+            appendLog({
+              message: content,
+              taskId,
+              type: 'step',
+              status: 'in_progress',
+              rawStepType: 'tool_start',
+              toolCallId: data.call_id,
+            })
+          } catch {
+            appendLog({ message: content, taskId, type: 'step', status: 'in_progress', rawStepType: 'tool_start' })
+          }
+          return
+        }
+
+        // ── tool_result: resolve matching tool_start card ──────────────────
+        // If the result arrives before the start (out-of-order / race), buffer it
+        // and apply once the start card appears via a follow-up setState.
+        if (stepType === 'tool_result') {
+          try {
+            const data = JSON.parse(content) as { call_id?: string; result?: string; ok?: boolean }
+            setLogs((prev) => {
+              const matched = prev.some((e) => e.toolCallId === data.call_id)
+              if (matched) {
+                // Normal case: start card exists — resolve it
+                return prev.map((e) =>
+                  e.toolCallId === data.call_id
+                    ? { ...e, status: 'completed' as const, rawStepType: 'tool_result', toolResult: data.result, toolOk: data.ok }
+                    : e,
+                )
+              }
+              // Out-of-order: synthesise a completed card so no spinner is ever left hanging
+              return [
+                ...prev,
+                {
+                  id: `tool_${data.call_id ?? crypto.randomUUID()}`,
+                  message: content,
+                  taskId,
+                  type: 'step' as const,
+                  status: 'completed' as const,
+                  stepKind: 'other' as const,
+                  elapsedSeconds: 0,
+                  timestamp: new Date().toISOString(),
+                  rawStepType: 'tool_result',
+                  toolCallId: data.call_id,
+                  toolResult: data.result,
+                  toolOk: data.ok,
+                },
+              ]
+            })
+          } catch { /* ignore malformed */ }
+          return
+        }
+
+        // ── assistant_message = direct model text reply (no tools used); treat as a
         // completed result so ChatPanel renders it as a plain assistant bubble.
+        // The frontend deduplicates against stream_chunk entries by message_id.
         const isAssistantMsg = stepType === 'assistant_message' || stepType === 'result'
         appendLog({
           message: content,
           taskId,
           type: stepType === 'interrupt' ? 'interrupt' : isAssistantMsg ? 'result' : 'step',
           status: isAssistantMsg ? 'completed' : stepType === 'steer' ? 'steered' : 'in_progress',
+          rawStepType: stepType,
         })
         return
       }
@@ -775,6 +886,64 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     }
   }, [connect])
 
+  // ─── Ops WebSocket (port 8001) ────────────────────────────────────────────
+  const connectOps = useCallback(function connectOpsSocket() {
+    setOpsConnectionStatus('connecting')
+    const configuredOpsUrl = (import.meta.env.VITE_OPS_WS_URL as string | undefined)?.trim()
+    let opsUrl = configuredOpsUrl && configuredOpsUrl.length > 0 ? configuredOpsUrl : ''
+    if (!opsUrl) {
+      // Derive from current location: swap protocol and replace port 8000 → 8001
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.hostname
+      const opsPort = (import.meta.env.VITE_OPS_PORT as string | undefined)?.trim() || '8001'
+      opsUrl = `${protocol}//${host}:${opsPort}/ws/ops`
+    }
+    const ows = new WebSocket(`${opsUrl}?session_id=${_sessionIdRef.current}`)
+    opsWsRef.current = ows
+
+    ows.onopen = () => {
+      setOpsConnectionStatus('connected')
+    }
+    ows.onclose = () => {
+      setOpsConnectionStatus('disconnected')
+    }
+    ows.onerror = () => {
+      setOpsConnectionStatus('disconnected')
+    }
+    ows.onmessage = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as Record<string, unknown>
+        if (payload.type === 'ops_ready') {
+          // Ops channel confirmed — session_id echoed back from server
+          setOpsConnectionStatus('connected')
+        } else if (payload.type === 'background_task_result') {
+          // Background task completed — consumers can subscribe via their own state
+        } else if (payload.type === 'heartbeat_triggered') {
+          // Heartbeat notification — no UI action needed here
+        } else if (payload.type === 'subagent_result') {
+          // Sub-agent list update delivered via ops channel
+          const data = payload.data as Record<string, unknown> | undefined
+          if (data?.agents) {
+            setSubAgents(data.agents as SubAgentInfo[])
+          }
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    connectOps()
+    return () => {
+      if (opsWsRef.current) {
+        opsWsRef.current.onclose = null
+        opsWsRef.current.close()
+        opsWsRef.current = null
+      }
+    }
+  }, [connectOps])
+
   const send = useCallback(
     (message: Record<string, unknown>) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -910,5 +1079,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   }, [isWorking, taskActivity])
 
 
-  return { connectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, opsConnectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }
