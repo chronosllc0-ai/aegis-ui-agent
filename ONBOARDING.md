@@ -1,3 +1,43 @@
+## Session 5.69 - April 11, 2026 (Post-merge review bugfix sweep on `main`)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 backend+frontend stabilization pass
+
+### What Was Done
+- Fixed non-Gemini Pydantic runtime safety limits in `backend/pydantic_adk_runner.py`:
+  - added `asyncio.wait_for(...)` guard around `agent.run(...)` with a 120s timeout.
+  - added a hard max tool-step guard (`MAX_TOOL_STEPS = 100`) enforced inside `run_tool(...)`.
+  - added explicit failed-result handling for timeout and step-limit exceptions so sessions fail fast instead of hanging.
+- Fixed WebSocket instruction parsing in `main.py`:
+  - replaced falsy-coalescing (`raw_instruction or raw_prompt`) with explicit `None` checks to avoid accidental coercion edge cases.
+- Fixed `handleSend` callback churn in `frontend/src/App.tsx`:
+  - moved sub-agent lookup to a `useRef` mirror (`subAgentsRef`) to avoid callback identity changes from `subAgents` dependency updates.
+  - removed unnecessary `selectedTaskId` dependency from `handleSend`.
+- Fixed composer stop/send overlap in `frontend/src/components/ChatPanel.tsx`:
+  - stop button now only renders while running *and* input is empty (`isWorking && !canSend`).
+- Removed dead unused component file `frontend/src/components/InputBar.tsx` per review nitpick.
+
+### What's Working
+- Runtime now has bounded execution behavior for non-Gemini Pydantic paths (time and step caps).
+- WebSocket instruction normalization is deterministic for `None` vs provided values.
+- Task-history selection / sub-agent list updates no longer force `handleSend` callback recreation.
+- Composer action area no longer stacks stop button over send when user is typing.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add targeted backend tests for timeout and step-limit behavior in `run_pydantic_adk_navigation`.
+2. Add frontend regression tests for stop-button visibility while typing during active runs.
+3. If desired, further reduce `handleSend` dependency surface with stable callback wrappers for other mutable inputs.
+
+### Decisions Made
+- Chose fail-fast return payloads for timeout/step-limit instead of silent fallback to keep failure reason explicit to users.
+
+### Blockers
+- None.
+
+---
 ## Session 5.68 - April 10, 2026 (Post-merge fix: Netlify TypeScript build break + send-path regression cleanup)
 
 **Agent:** GPT-5.3-Codex
