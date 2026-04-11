@@ -745,7 +745,7 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const action = 'task'
+    const action = 'chat'
     console.info('[AegisUI] action=%s', action)
     const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     if (!sent) {
@@ -1215,10 +1215,10 @@ function App() {
 
           {!showSettings && !showAutomations && appMode === 'browser' && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
+              <button type='button' onClick={() => send({ action: 'chat', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
               </button>
-              <button type='button' onClick={() => send({ action: 'navigate', instruction: 'go forward' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Forward'>
+              <button type='button' onClick={() => send({ action: 'chat', instruction: 'go forward' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Forward'>
                 {Icons.chevronRight({ className: 'h-4 w-4' })}
               </button>
               <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>

@@ -1452,7 +1452,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             data = await websocket.receive_json()
             action = data.get("action")
             # Normalize action aliases → canonical internal names
-            if action in {"navigate", "task"}:
+            if action in {"navigate", "task", "chat", "message"}:
                 action = "navigate_start"
             if action == "stop":
                 action = "stop_task"

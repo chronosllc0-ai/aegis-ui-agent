@@ -685,9 +685,10 @@ async def _build_system_prompt(
     agent_mode = normalize_agent_mode(settings.get("agent_mode", ""))
 
     rules: list[str] = [
-        "Return JSON only: either one tool call object, or a {\"tool_calls\": [...]} batch for parallel-safe tools.",
+        "Respond naturally to every message. For simple questions or conversation, reply with plain text. For tasks requiring actions (browse, search, code, file ops, GitHub, etc.), use JSON tool calls.",
+        "Tool call format: one JSON object {\"tool\": \"name\", ...args} OR a {\"tool_calls\": [...]} batch for parallel-safe tools.",
         "Only use tools listed below. If a tool is not listed, it is not available in this session.",
-        "Use concise, efficient steps and finish with the done tool when the task is complete.",
+        "Use concise, efficient steps. When the task is done, either call the done tool with a summary or just respond with a plain-text completion message.",
     ]
     if browser_tools_enabled:
         rules.extend(
@@ -2041,24 +2042,20 @@ async def run_universal_navigation(
         messages.append(ChatMessage(role="assistant", content=reply))
         tool_calls = _parse_tool_calls(reply)
         if not tool_calls:
-            parsed_raw = _parse_tool_call(reply)
-            if isinstance(parsed_raw, dict) and isinstance(parsed_raw.get("tool_calls"), list):
-                await emit_step("Malformed tool_calls payload. Return 1-3 valid JSON tool calls.", step_type="error")
-                messages.append(
-                    ChatMessage(
-                        role="user",
-                        content="Malformed tool_calls payload. Return 1-3 valid JSON tool calls.",
-                    )
-                )
-                continue
-            await emit_step(f"Model response (no tool call): {reply[:200]}")
-            messages.append(
-                ChatMessage(
-                    role="user",
-                    content="Please return JSON tool call(s): either one tool object or a {\"tool_calls\": [...]} array.",
-                )
-            )
-            continue
+            # The model responded with plain text — this is a valid direct answer
+            # (conversational reply, clarification, etc.).  Emit it straight to the
+            # chat and complete the task.  We never filter or retry plain-text replies;
+            # the model decides whether tools are needed.
+            if reply:
+                await emit_step(reply, step_type="assistant_message")
+            return {
+                "status": "completed",
+                "instruction": instruction,
+                "steps": steps,
+                "summary": reply,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+            }
         # Fast path: done/error as a single terminal call.
         if len(tool_calls) == 1:
             tool_call = tool_calls[0]
