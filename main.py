@@ -1266,7 +1266,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             action = data.get("action")
             raw_instruction = data.get("instruction")
             raw_prompt = data.get("prompt")
-            instruction = str(raw_instruction or raw_prompt or "").strip()
+            instruction = str(
+                raw_instruction
+                if raw_instruction is not None
+                else raw_prompt
+                if raw_prompt is not None
+                else ""
+            ).strip()
             requested_mode_raw = data.get("mode")
             if requested_mode_raw is not None:
                 requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw)

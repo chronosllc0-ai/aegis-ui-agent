@@ -1017,7 +1017,7 @@ function InputBarCursor({
             className='w-full resize-none bg-transparent px-4 pt-3 pb-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6 transition-[padding,min-height]'
             style={{ minHeight: isExpanded ? '58px' : '52px', maxHeight: '140px', overflow: 'hidden' }}
           />
-          {isWorking && (
+          {isWorking && !canSend && (
             <button type='button' onClick={onStop}
               className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
               aria-label='Stop task' title='Stop current task'>

@@ -158,6 +158,7 @@ function App() {
   const [appMode, setAppMode] = useState<AppMode>('browser')
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const [pendingNavigation, setPendingNavigation] = useState<{ instruction: string; metadata?: Record<string, unknown> } | null>(null)
+  const subAgentsRef = useRef(subAgents)
   const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
   const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
   const prevIsWorkingRef = useRef(false)
@@ -193,6 +194,10 @@ function App() {
       void stopVoice()
     }
   }, [connectionStatus, voiceActive, stopVoice])
+
+  useEffect(() => {
+    subAgentsRef.current = subAgents
+  }, [subAgents])
 
   // Track WebSocket connection changes → notify on disconnect / reconnect
   useEffect(() => {
@@ -728,7 +733,9 @@ function App() {
     const trimmed = instruction.trim()
     if (!trimmed) return
     const mentionMatches = [...trimmed.matchAll(/@([a-zA-Z0-9._-]+)/g)].map((m) => m[1].toLowerCase())
-    const mentionedAgents = subAgents.filter((agent) => mentionMatches.includes(subAgentDisplayName(agent).toLowerCase()))
+    const mentionedAgents = subAgentsRef.current.filter((agent) =>
+      mentionMatches.includes(subAgentDisplayName(agent).toLowerCase()),
+    )
     const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
     const finalInstruction = cleanedInstruction || trimmed
 
@@ -803,10 +810,8 @@ function App() {
     authUser?.uid,
     isWorking,
     messageSubAgent,
-    selectedTaskId,
     send,
     settings.agentMode,
-    subAgents,
     toastCtx,
     wsConfig,
   ])

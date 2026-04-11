@@ -15,6 +15,12 @@ from executor import ActionExecutor
 from universal_navigator import UniversalToolExecutor, _available_tools, run_universal_navigation
 
 logger = logging.getLogger(__name__)
+AGENT_RUN_TIMEOUT_SECONDS = 120
+MAX_TOOL_STEPS = 100
+
+
+class _PydanticRuntimeLimitExceeded(RuntimeError):
+    """Raised when the non-Gemini runtime exceeds configured safety limits."""
 
 
 def _build_pydantic_model(provider: BaseProvider, model_name: str) -> Any:
@@ -156,8 +162,18 @@ async def run_pydantic_adk_navigation(
             retries=1,
         )
 
+        tool_steps = 0
+        tool_steps_lock = asyncio.Lock()
+
         @agent.tool_plain(name="run_tool")
         async def run_tool(tool: str, args_json: str = "{}") -> str:
+            nonlocal tool_steps
+            async with tool_steps_lock:
+                tool_steps += 1
+                if tool_steps > MAX_TOOL_STEPS:
+                    raise _PydanticRuntimeLimitExceeded(
+                        f"Exceeded max tool steps ({MAX_TOOL_STEPS}) in non-Gemini runtime."
+                    )
             try:
                 payload = json.loads(args_json) if args_json.strip() else {}
             except json.JSONDecodeError as exc:
@@ -192,8 +208,11 @@ async def run_pydantic_adk_navigation(
         if steering_notes:
             prompt += f"Steering notes: {steering_notes}\n"
 
+        async def _run_agent_with_timeout() -> Any:
+            return await asyncio.wait_for(agent.run(prompt), timeout=AGENT_RUN_TIMEOUT_SECONDS)
+
         if cancel_event is not None:
-            run_task = asyncio.create_task(agent.run(prompt))
+            run_task = asyncio.create_task(_run_agent_with_timeout())
             cancel_task = asyncio.create_task(cancel_event.wait())
             try:
                 done, _ = await asyncio.wait(
@@ -211,7 +230,7 @@ async def run_pydantic_adk_navigation(
                 with suppress(asyncio.CancelledError):
                     await cancel_task
         else:
-            run_result = await agent.run(prompt)
+            run_result = await _run_agent_with_timeout()
         output = str(run_result.output)
 
         if output.startswith("failed::"):
@@ -224,6 +243,16 @@ async def run_pydantic_adk_navigation(
         if on_step is not None:
             await on_step({"type": "result", "content": summary or "Task completed.", "steering": []})
         return {"status": "completed", "instruction": instruction, "summary": summary, "steps": []}
+    except asyncio.TimeoutError:
+        message = f"Non-Gemini runtime timed out after {AGENT_RUN_TIMEOUT_SECONDS}s."
+        if on_step is not None:
+            await on_step({"type": "error", "content": message, "steering": []})
+        return {"status": "failed", "instruction": instruction, "error": message, "steps": []}
+    except _PydanticRuntimeLimitExceeded as exc:
+        message = str(exc)
+        if on_step is not None:
+            await on_step({"type": "error", "content": message, "steering": []})
+        return {"status": "failed", "instruction": instruction, "error": message, "steps": []}
     except asyncio.CancelledError:
         raise
     except Exception as exc:
