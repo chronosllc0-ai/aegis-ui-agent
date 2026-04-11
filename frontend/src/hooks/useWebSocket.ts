@@ -165,7 +165,11 @@ export function useWebSocket(onUsageMessage?: (msg: Record<string, unknown>) => 
     }
     ws.onmessage = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as WebSocketPayload
-      const taskId = activeTaskIdRef.current
+      const payloadTaskId = typeof payload.data?.task_id === 'string' ? payload.data.task_id : null
+      if (payloadTaskId && payloadTaskId.trim()) {
+        activeTaskIdRef.current = payloadTaskId
+      }
+      const taskId = payloadTaskId && payloadTaskId.trim() ? payloadTaskId : activeTaskIdRef.current
 
       if (payload.type === 'conversation_id') {
         const convId = String(payload.data?.conversation_id ?? '')

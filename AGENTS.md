@@ -5,10 +5,9 @@
 ## Project Identity
 
 **Name:** Aegis
-**Tagline:** AI-powered universal UI navigator
-**Competition:** Gemini Live Agent Challenge 2026 (Devpost)
-**Track:** UI Navigator (visual UI understanding & interaction)
-**Deadline:** March 16, 2026 @ 5:00 PM PDT
+**Tagline:** AI-powered universal AI coworker agent
+**Product Scope:** Full AI coworker platform (multi-provider, multi-channel, browser + tools + skills)
+**Legacy Context:** Built during Gemini Live Agent Challenge 2026, now expanded beyond hackathon scope
 **Repo:** `chronosllc0-ai/aegis-ui-agent`
 
 ## What Aegis Does
@@ -54,9 +53,9 @@ No DOM parsing. No CSS selectors. No APIs. Pure visual intelligence.
 
 ---
 
-## Competition Requirements (Must-Haves)
+## Legacy Hackathon Notes (Historical)
 
-All of these are REQUIRED for a valid submission:
+These were original launch constraints and remain useful context, but are not the current product limit:
 
 | Requirement | How We Meet It |
 |---|---|
