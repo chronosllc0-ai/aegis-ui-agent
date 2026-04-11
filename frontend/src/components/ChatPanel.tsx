@@ -1450,7 +1450,7 @@ export function ChatPanel({
   useEffect(() => {
     if (!pendingPrompt) return
     setInput(pendingPrompt)
-    window.setTimeout(() => {
+    const t = window.setTimeout(() => {
       textareaRef.current?.focus()
       // Auto-resize
       if (textareaRef.current) {
@@ -1459,6 +1459,7 @@ export function ChatPanel({
       }
     }, 0)
     onPendingPromptConsumed?.()
+    return () => window.clearTimeout(t)
   }, [pendingPrompt, onPendingPromptConsumed])
 
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])

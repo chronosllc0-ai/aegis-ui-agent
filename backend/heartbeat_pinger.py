@@ -131,7 +131,11 @@ class HeartbeatPinger:
                     last_run = datetime.fromisoformat(last_run_str) if last_run_str else None
                     seconds_since = (now - prev_run).total_seconds()
                     already_ran = last_run is not None and last_run >= prev_run
-                    if seconds_since <= self._interval and not already_ran:
+                    # Use 20% grace buffer so late ticks (network jitter, CPU contention)
+                    # don't silently drop a scheduled task. E.g. 60s interval → fires
+                    # if prev_run was within the last 72s and hasn't run yet.
+                    grace = self._interval * 1.2
+                    if seconds_since <= grace and not already_ran:
                         logger.info(
                             "Firing automation '%s' for session %s", auto.get("label"), session_id
                         )

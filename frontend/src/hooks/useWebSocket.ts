@@ -481,22 +481,40 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         }
 
         // ── tool_result: resolve matching tool_start card ──────────────────
+        // If the result arrives before the start (out-of-order / race), buffer it
+        // and apply once the start card appears via a follow-up setState.
         if (stepType === 'tool_result') {
           try {
             const data = JSON.parse(content) as { call_id?: string; result?: string; ok?: boolean }
-            setLogs((prev) =>
-              prev.map((e) =>
-                e.toolCallId === data.call_id
-                  ? {
-                      ...e,
-                      status: 'completed' as const,
-                      rawStepType: 'tool_result',
-                      toolResult: data.result,
-                      toolOk: data.ok,
-                    }
-                  : e,
-              ),
-            )
+            setLogs((prev) => {
+              const matched = prev.some((e) => e.toolCallId === data.call_id)
+              if (matched) {
+                // Normal case: start card exists — resolve it
+                return prev.map((e) =>
+                  e.toolCallId === data.call_id
+                    ? { ...e, status: 'completed' as const, rawStepType: 'tool_result', toolResult: data.result, toolOk: data.ok }
+                    : e,
+                )
+              }
+              // Out-of-order: synthesise a completed card so no spinner is ever left hanging
+              return [
+                ...prev,
+                {
+                  id: `tool_${data.call_id ?? crypto.randomUUID()}`,
+                  message: content,
+                  taskId,
+                  type: 'step' as const,
+                  status: 'completed' as const,
+                  stepKind: 'other' as const,
+                  elapsedSeconds: 0,
+                  timestamp: new Date().toISOString(),
+                  rawStepType: 'tool_result',
+                  toolCallId: data.call_id,
+                  toolResult: data.result,
+                  toolOk: data.ok,
+                },
+              ]
+            })
           } catch { /* ignore malformed */ }
           return
         }

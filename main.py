@@ -120,35 +120,42 @@ db_ready = False
 # ─── Ops port (port 8001) ─────────────────────────────────────────────────────
 
 class OpsManager:
-    """Manages multiplexed operations WebSocket connections."""
+    """Manages multiplexed operations WebSocket connections.
+
+    Each session_id may have *multiple* simultaneous connections (multiple browser
+    tabs). Events are fanned out to all live sockets for that session so no tab
+    misses a background result.
+    """
 
     def __init__(self) -> None:
-        self._connections: dict[str, WebSocket] = {}  # session_id → ws
+        self._connections: dict[str, list[WebSocket]] = {}  # session_id → [ws, ...]
 
     async def connect(self, session_id: str, websocket: WebSocket) -> None:
         await websocket.accept()
-        self._connections[session_id] = websocket
+        self._connections.setdefault(session_id, []).append(websocket)
 
-    def disconnect(self, session_id: str) -> None:
-        self._connections.pop(session_id, None)
+    def disconnect(self, session_id: str, websocket: WebSocket) -> None:
+        sockets = self._connections.get(session_id, [])
+        try:
+            sockets.remove(websocket)
+        except ValueError:
+            pass
+        if not sockets:
+            self._connections.pop(session_id, None)
 
     async def send(self, session_id: str, event: dict[str, Any]) -> None:
-        ws = self._connections.get(session_id)
-        if ws:
+        dead: list[WebSocket] = []
+        for ws in list(self._connections.get(session_id, [])):
             try:
                 await ws.send_json(event)
             except Exception:  # noqa: BLE001
-                self.disconnect(session_id)
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(session_id, ws)
 
     async def broadcast(self, event: dict[str, Any]) -> None:
-        dead: list[str] = []
-        for sid, ws in self._connections.items():
-            try:
-                await ws.send_json(event)
-            except Exception:  # noqa: BLE001
-                dead.append(sid)
-        for sid in dead:
-            self.disconnect(sid)
+        for session_id in list(self._connections.keys()):
+            await self.send(session_id, event)
 
 
 ops_manager = OpsManager()
@@ -177,9 +184,9 @@ async def websocket_ops(websocket: WebSocket) -> None:
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
-        ops_manager.disconnect(session_id)
+        ops_manager.disconnect(session_id, websocket)
     except Exception:  # noqa: BLE001
-        ops_manager.disconnect(session_id)
+        ops_manager.disconnect(session_id, websocket)
 background_worker = BackgroundWorker(max_concurrent=3, poll_interval=5.0)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -405,20 +412,16 @@ github_registry = GitHubRegistry()
 
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
+# Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
+_session_runtimes: dict[str, "SessionRuntime"] = {}
 
 
 async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
     """Called by HeartbeatPinger when an automation is due.
 
-    Finds the matching user runtime by session_id and queues the task.
-    Full ops-queue dispatch is wired in when dual-port ops is running.
+    Uses the O(1) _session_runtimes reverse index instead of iterating all runtimes.
     """
-    runtime = None
-    for uid, rt in _user_runtimes.items():
-        # Match by session_id if the runtime exposes it; otherwise log for all
-        if getattr(rt, "session_id", None) == session_id or getattr(rt, "_session_id", None) == session_id:
-            runtime = rt
-            break
+    runtime = _session_runtimes.get(session_id)
     if runtime is not None:
         logger.info("Heartbeat dispatch matched runtime uid=%s session=%s task=%s", runtime.user_uid, session_id, instruction)
     else:
@@ -1539,6 +1542,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     runtime.user_uid = _extract_websocket_user_uid(websocket)
     if runtime.user_uid:
         _user_runtimes[runtime.user_uid] = runtime
+    # O(1) reverse index for heartbeat dispatch
+    _session_runtimes[session_id] = runtime
 
     try:
         await _get_orchestrator().executor.ensure_browser()
@@ -2024,6 +2029,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         logger.info("All sub-agents cancelled for session %s", session_id)
         if runtime.user_uid:
             _user_runtimes.pop(runtime.user_uid, None)
+        _session_runtimes.pop(session_id, None)
         await cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
 

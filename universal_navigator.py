@@ -2288,7 +2288,29 @@ async def run_universal_navigation(
                 "call_id": call_id,
             }), step_type="tool_start")
 
-            result_text, screenshot_bytes = await tool_executor.run(tool_call, skip_policy_checks=True)
+            try:
+                result_text, screenshot_bytes = await tool_executor.run(tool_call, skip_policy_checks=True)
+            except Exception as _tool_exc:  # noqa: BLE001
+                # Always emit tool_result so the frontend spinner resolves — never leave a
+                # permanent loading card on an unhandled exception.
+                err_msg = f"Tool error ({tool_name}): {_tool_exc}"
+                logger.warning(err_msg)
+                await emit_step(json.dumps({
+                    "call_id": call_id,
+                    "tool": tool_name,
+                    "result": err_msg[:500],
+                    "ok": False,
+                }), step_type="tool_result")
+                return {
+                    "index": index,
+                    "tool": tool_name,
+                    "ok": False,
+                    "result_text": err_msg,
+                    "error": err_msg,
+                    "screenshot_bytes": None,
+                    "denial_debug": None,
+                }
+
             lowered_result = str(result_text).lower()
             is_ok = not lowered_result.startswith(
                 ("tool error", "unknown tool", "denied", "blocked", "user declined", "error")
