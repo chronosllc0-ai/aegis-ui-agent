@@ -1690,7 +1690,7 @@ export function ChatPanel({
           <div className='flex-1 px-3 py-3 text-xs text-zinc-500'>Loading thread…</div>
         )}
 
-        {threadReady && allMessages.length === 0 && (
+        {threadReady && allMessages.length === 0 && !isWorking && (
           <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-4'>
             <div className='flex h-12 w-12 items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a]'>
               <IcoMessage className='h-5 w-5 text-zinc-500' />
@@ -1710,8 +1710,23 @@ export function ChatPanel({
           </div>
         )}
 
+        {/* Immediate thinking indicator — shows as soon as isWorking flips true,
+            before any WS step events arrive or sentMessages hydrates */}
+        {threadReady && allMessages.length === 0 && isWorking && (
+          <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-4'>
+            <div className='relative flex h-10 w-10 flex-shrink-0 items-center justify-center'>
+              <span className='absolute inset-0 rounded-full border border-blue-500/30 animate-spin' style={{ animationDuration: '3s' }} />
+              <span className='absolute inset-[3px] rounded-full border border-cyan-400/20 animate-spin' style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+              <img src='/aegis-shield.png' alt='Aegis' className='h-6 w-6 object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+            </div>
+            <p className='thinking-shimmer text-sm font-medium text-zinc-300'>{activityStatusLabel || 'Aegis is thinking…'}</p>
+            {activityDetail && <p className='text-[11px] font-mono text-zinc-500 max-w-xs'>{activityDetail}</p>}
+          </div>
+        )}
+
         {threadReady && allMessages.map((msg, idx) => {
-          const showStatusAfterThisMessage = isActivityVisible && idx === lastUserMessageIndex
+          // Show thinking indicator directly from isWorking — don't wait for isActivityVisible useEffect
+          const showStatusAfterThisMessage = (isActivityVisible || isWorking) && idx === lastUserMessageIndex
 
           const messageNode = (() => {
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
@@ -1827,7 +1842,7 @@ export function ChatPanel({
           )
         })}
 
-        {isActivityVisible && lastUserMessageIndex === -1 && (
+        {(isActivityVisible || isWorking) && lastUserMessageIndex === -1 && (
           <div className='my-1'>
             <button
               type='button'

@@ -395,6 +395,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         }
         setExecutionState('completed')
         setIsWorking(false)
+        setTaskActivity(createIdleActivityState())
         // The model's actual response was already emitted as a step — don't double-print.
         // Only surface a fallback summary if no step content came through.
         return
@@ -406,7 +407,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         }
         setExecutionState('failed')
         setIsWorking(false)
-        appendLog({ message: String(payload.data?.message ?? 'Task failed'), taskId, type: 'error', status: 'failed' })
+        setTaskActivity(createIdleActivityState())
+        const errorMsg = String(payload.data?.message ?? payload.data?.code ?? 'Task failed')
+        appendLog({ message: `⚠️ ${errorMsg}`, taskId, type: 'error', status: 'failed' })
         return
       }
       if (payload.type === 'step') {
