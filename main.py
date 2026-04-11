@@ -436,10 +436,25 @@ class SessionRuntime:
         self.current_request_id: str | None = None
         self.current_task_id: str | None = None
         self.completed_task_ids: set[str] = set()
-        self.request_idempotency: dict[str, dict[str, Any]] = {}
+        self.request_idempotency: dict[str, tuple[float, dict[str, Any]]] = {}
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
+
+    def get_idempotent_ack(self, request_id: str) -> dict[str, Any] | None:
+        """Return cached idempotent ack payload for request_id when available."""
+        cached = self.request_idempotency.get(request_id)
+        return cached[1] if cached else None
+
+    def remember_idempotent_ack(self, request_id: str, payload: dict[str, Any], *, max_entries: int = 256) -> None:
+        """Store idempotent ack payload and prune old entries to prevent leaks."""
+        self.request_idempotency[request_id] = (_time.monotonic(), payload)
+        if len(self.request_idempotency) <= max_entries:
+            return
+        # Keep the most-recent entries only.
+        oldest = sorted(self.request_idempotency.items(), key=lambda item: item[1][0])[: len(self.request_idempotency) - max_entries]
+        for stale_request_id, _ in oldest:
+            self.request_idempotency.pop(stale_request_id, None)
 
 
 def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
@@ -974,7 +989,24 @@ def _normalize_start_metadata(raw_metadata: object) -> dict[str, Any]:
     """Return a normalized metadata object without mutating inbound payloads."""
     if not isinstance(raw_metadata, dict):
         return {}
-    return {str(key): value for key, value in raw_metadata.items()}
+    allowed_keys = {
+        "frontend_task_id",
+        "agent_mode",
+        "task_label",
+        "task_label_source",
+        "source",
+        "target_subagents",
+    }
+    normalized: dict[str, Any] = {}
+    for key, value in raw_metadata.items():
+        key_str = str(key)
+        if key_str not in allowed_keys:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            normalized[key_str] = value
+        elif isinstance(value, list):
+            normalized[key_str] = [item for item in value if isinstance(item, (str, int, float, bool))]
+    return normalized
 
 
 async def _log_web_message(
@@ -1009,8 +1041,8 @@ async def _log_web_message(
                 title_candidate=title_candidate,
             )
             break
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to persist web message to DB for session %s", session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to persist web message to DB for session %s: %s", session_id, exc)
 
 
 async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str | None) -> None:
@@ -1055,6 +1087,18 @@ def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, sessio
             task_id=runtime.current_task_id or str(uuid4()),
         )
     )
+    def _task_done_callback(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.info("Navigation task cancellation finalized for session %s", session_id)
+        except Exception:
+            logger.exception("Navigation background task crashed for session %s", session_id)
+        finally:
+            if runtime.current_task is task:
+                runtime.current_task = None
+
+    runtime.current_task.add_done_callback(_task_done_callback)
 
 
 async def _start_idle_navigation_from_control_action(
@@ -1128,6 +1172,30 @@ async def _run_navigation_task(
     task_id: str,
 ) -> None:
     """Execute a single navigation task and optionally schedule one queued follow-up."""
+    terminal_event_sent = False
+
+    async def _emit_terminal_result(*, summary: str, status: str) -> None:
+        nonlocal terminal_event_sent
+        if terminal_event_sent:
+            return
+        terminal_event_sent = True
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_state", "data": {"task_id": task_id, "state": status, "timestamp": _time.time()}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_state_terminal",
+        )
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_result", "data": {"task_id": task_id, "summary": summary, "timestamp": _time.time()}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_result_terminal",
+        )
+
     async def callback(step: dict[str, Any]) -> None:
         await _send_step(websocket, step, runtime=runtime, session_id=session_id)
         step_type = str(step.get("type") or "").lower()
@@ -1227,6 +1295,11 @@ async def _run_navigation_task(
     try:
         max_duration_seconds = int(runtime.settings.get("model_timeout_seconds") or settings.NAVIGATION_TASK_TIMEOUT_SECONDS)
         max_tool_calls = int(runtime.settings.get("max_tool_calls") or settings.NAVIGATION_MAX_TOOL_CALLS)
+        effective_runtime_settings = {
+            "max_tool_calls": max_tool_calls,
+            "model_timeout_seconds": max_duration_seconds,
+            **runtime.settings,
+        }
         result = await asyncio.wait_for(
             _get_orchestrator().execute_task(
             session_id=session_id,
@@ -1246,7 +1319,7 @@ async def _run_navigation_task(
             on_reasoning_delta=_on_reasoning_delta,
             on_spawn_subagent=_on_spawn_subagent,
             on_message_subagent=_on_message_subagent,
-            settings={**runtime.settings, "max_tool_calls": max_tool_calls, "model_timeout_seconds": max_duration_seconds},
+            settings=effective_runtime_settings,
         ),
             timeout=max_duration_seconds,
         )
@@ -1303,68 +1376,25 @@ async def _run_navigation_task(
             },
         )
         terminal_state = "succeeded" if result_status == "completed" else "failed"
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_state", "data": {"task_id": task_id, "state": terminal_state, "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_state_terminal",
-        )
-        await _safe_ws_send(
-            websocket,
-            {
-                "type": "task_result",
-                "data": {
-                    "task_id": task_id,
-                    "summary": str((result or {}).get("summary") or (result or {}).get("error") or result_status),
-                    "artifacts": (result or {}).get("artifacts") if isinstance(result, dict) else None,
-                    "metrics": {"max_tool_calls": max_tool_calls, "timeout_seconds": max_duration_seconds},
-                    "timestamp": _time.time(),
-                },
-            },
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_result",
+        await _emit_terminal_result(
+            summary=str((result or {}).get("summary") or (result or {}).get("error") or result_status),
+            status=terminal_state,
         )
         await _safe_ws_send(websocket, {"type": "result", "data": result}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result")
     except asyncio.CancelledError:
         logger.info("Navigation task cancelled for session %s", session_id)
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_state", "data": {"task_id": task_id, "state": "cancelled", "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_cancelled",
-        )
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_result", "data": {"task_id": task_id, "summary": "Task cancelled", "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_result_cancelled",
-        )
+        await _emit_terminal_result(summary="Task cancelled", status="cancelled")
         raise
     except asyncio.TimeoutError:
         await _safe_ws_send(
             websocket,
-            {"type": "task_state", "data": {"task_id": task_id, "state": "failed", "detail": "Model timeout", "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_timeout_state",
-        )
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_MODEL_TIMEOUT", "message": "Task timed out", "retryable": True}},
+            {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_TIMEOUT", "message": "Task execution timed out", "retryable": True}},
             request_id=request_id,
             task_id=task_id,
             ws_session_id=session_id,
             phase="task_timeout_error",
         )
+        await _emit_terminal_result(summary="Task timed out", status="failed")
     except Exception as exc:  # noqa: BLE001
         logger.exception("Navigation task failed for session %s", session_id)
         await _log_web_message(
@@ -1381,20 +1411,13 @@ async def _run_navigation_task(
         )
         await _safe_ws_send(
             websocket,
-            {"type": "task_state", "data": {"task_id": task_id, "state": "failed", "detail": str(exc), "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_exception_state",
-        )
-        await _safe_ws_send(
-            websocket,
             {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_EXCEPTION", "message": str(exc), "retryable": True}},
             request_id=request_id,
             task_id=task_id,
             ws_session_id=session_id,
             phase="task_exception_error",
         )
+        await _emit_terminal_result(summary=str(exc), status="failed")
         await _safe_ws_send(websocket, {"type": "error", "data": {"message": str(exc)}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_error_exception")
         await _safe_ws_send(websocket, {"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result_exception")
     finally:
@@ -1482,22 +1505,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 request_id = str(data.get("request_id") or "").strip()
                 if not request_id:
                     request_id = str(uuid4())
-                if request_id in runtime.request_idempotency:
-                    logger.info(
-                        "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=ack outcome=idempotent",
-                        request_id,
-                        runtime.request_idempotency[request_id].get("task_id"),
-                        session_id,
-                    )
-                    await _safe_ws_send(
-                        websocket,
-                        {"type": "navigate_ack", "data": runtime.request_idempotency[request_id]},
-                        request_id=request_id,
-                        task_id=runtime.request_idempotency[request_id].get("task_id"),
-                        ws_session_id=session_id,
-                        phase="navigate_ack_idempotent",
-                    )
-                    continue
                 if not instruction:
                     logger.info(
                         "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=validate outcome=rejected error_code=E_BAD_PAYLOAD",
@@ -1520,10 +1527,28 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         phase="navigate_error_bad_payload",
                     )
                     continue
+
+                cached_ack = runtime.get_idempotent_ack(request_id)
+                if cached_ack is not None:
+                    logger.info(
+                        "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=ack outcome=idempotent",
+                        request_id,
+                        cached_ack.get("task_id"),
+                        session_id,
+                    )
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "navigate_ack", "data": cached_ack},
+                        request_id=request_id,
+                        task_id=cached_ack.get("task_id"),
+                        ws_session_id=session_id,
+                        phase="navigate_ack_idempotent",
+                    )
+                    continue
                 if runtime.task_running:
                     busy_task_id = runtime.current_task_id or ""
                     ack_payload = {"request_id": request_id, "task_id": busy_task_id, "accepted": False, "reason": "E_START_REJECTED_BUSY"}
-                    runtime.request_idempotency[request_id] = ack_payload
+                    runtime.remember_idempotent_ack(request_id, ack_payload)
                     logger.info(
                         "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=validate outcome=rejected error_code=E_START_REJECTED_BUSY",
                         request_id,
@@ -1550,7 +1575,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     session_id,
                 )
                 ack_payload = {"request_id": request_id, "task_id": task_id, "accepted": True}
-                runtime.request_idempotency[request_id] = ack_payload
+                runtime.remember_idempotent_ack(request_id, ack_payload)
                 await _safe_ws_send(
                     websocket,
                     {"type": "navigate_ack", "data": ack_payload},

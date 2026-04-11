@@ -4031,3 +4031,25 @@
 
 ### Blockers / decisions
 - Decide timeline for fully removing legacy websocket event types (`step/result/error`) versus keeping a transition window.
+
+## 2026-04-11 — Review follow-up: addressed 12 PR issues
+
+### What changed
+- Added bounded idempotency cache pruning in websocket runtime (`remember_idempotent_ack`) to prevent unbounded memory growth per session.
+- Reordered `navigate_start` flow to validate payload first, then evaluate/request idempotency cache for accepted payloads.
+- Added background task done-callback handling for navigation task lifecycle cleanup and crash logging.
+- Hardened metadata normalization with key allowlist + primitive/list value filtering.
+- Improved timeout/error mapping: execution timeout now reports `E_TASK_TIMEOUT` and terminal emission is deduplicated with a single helper.
+- Preserved user-provided runtime settings precedence when injecting timeout/tool-call defaults.
+- Frontend: fixed pending-start timer cleanup/reset, replaced hardcoded start timeout with env-backed config fallback, and added queued-state timeout guard.
+
+### Validation
+- `npm run -w frontend build` passed.
+- `python -m py_compile main.py backend/pydantic_adk_runner.py` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke -q` passed.
+- Contract regression subset passed (`ack`, `reject-open-socket`, `terminal`, `idempotency`).
+
+### Next steps
+1. Add explicit frontend retry CTA component wired to stored pending instruction + fresh request_id.
+2. Add backend unit tests for idempotency prune behavior and metadata normalization allowlist.
+3. Add end-to-end timeout test covering queued-timeout client behavior and `E_TASK_TIMEOUT` server mapping.

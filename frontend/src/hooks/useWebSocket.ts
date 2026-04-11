@@ -212,6 +212,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const lastNotConnectedAtRef = useRef(0)
   const connectRef = useRef<() => void>(() => undefined)
   const pendingStartRef = useRef<{ requestId: string; timer: number | null; instruction: string } | null>(null)
+  const pendingQueuedStateTimeoutRef = useRef<number | null>(null)
+  const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
+  const queuedTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_QUEUED_TIMEOUT_MS ?? 20000)
 
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
@@ -276,6 +279,15 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }, 25000)
     }
     ws.onclose = () => {
+      if (pendingQueuedStateTimeoutRef.current !== null) {
+        window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+        pendingQueuedStateTimeoutRef.current = null
+      }
+      const pendingStart = pendingStartRef.current
+      if (pendingStart && pendingStart.timer !== null) {
+        window.clearTimeout(pendingStart.timer)
+      }
+      pendingStartRef.current = null
       if (pingIntervalRef.current !== null) {
         window.clearInterval(pingIntervalRef.current)
         pingIntervalRef.current = null
@@ -322,13 +334,17 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const requestId = String(payload.data?.request_id ?? '')
         if (pendingStartRef.current?.requestId === requestId && pendingStartRef.current.timer !== null) {
           window.clearTimeout(pendingStartRef.current.timer)
-          pendingStartRef.current.timer = null
+          pendingStartRef.current = null
         }
         if (!accepted) {
           setExecutionState('failed')
           setIsWorking(false)
           appendLog({ message: `Start rejected: ${String(payload.data?.reason ?? 'unknown')}`, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
           return
+        }
+        if (pendingQueuedStateTimeoutRef.current !== null) {
+          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+          pendingQueuedStateTimeoutRef.current = null
         }
         setExecutionState('running')
         return
@@ -338,6 +354,19 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         if (state === 'running' || state === 'tool_call' || state === 'queued' || state === 'waiting_input') {
           setExecutionState(state === 'queued' ? 'starting' : 'running')
           setIsWorking(true)
+          if (state === 'queued') {
+            if (pendingQueuedStateTimeoutRef.current !== null) {
+              window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+            }
+            pendingQueuedStateTimeoutRef.current = window.setTimeout(() => {
+              setExecutionState('failed')
+              setIsWorking(false)
+              appendLog({ message: 'Task stayed queued too long (E_START_TIMEOUT). Retry from chat.', taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
+            }, queuedTimeoutMs)
+          } else if (pendingQueuedStateTimeoutRef.current !== null) {
+            window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+            pendingQueuedStateTimeoutRef.current = null
+          }
         } else if (state === 'succeeded') {
           setExecutionState('completed')
           setIsWorking(false)
@@ -351,12 +380,20 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'task_result') {
+        if (pendingQueuedStateTimeoutRef.current !== null) {
+          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+          pendingQueuedStateTimeoutRef.current = null
+        }
         setExecutionState('completed')
         setIsWorking(false)
         appendLog({ message: `[summarize_task] ${String(payload.data?.summary ?? 'Task completed')}`, taskId, type: 'result', status: 'completed' })
         return
       }
       if (payload.type === 'task_error') {
+        if (pendingQueuedStateTimeoutRef.current !== null) {
+          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+          pendingQueuedStateTimeoutRef.current = null
+        }
         setExecutionState('failed')
         setIsWorking(false)
         appendLog({ message: String(payload.data?.message ?? 'Task failed'), taskId, type: 'error', status: 'failed' })
@@ -771,7 +808,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             setExecutionState('failed')
             setIsWorking(false)
             appendLog({ message: 'Start timed out (E_START_TIMEOUT). Retry from chat.', taskId: nextTaskId, type: 'error', status: 'failed' })
-          }, 5000)
+            pendingStartRef.current = null
+          }, ackTimeoutMs)
           pendingStartRef.current = { requestId, timer, instruction: String(message.instruction ?? '') }
           wsRef.current.send(JSON.stringify({ action: 'navigate_start', request_id: requestId, instruction: message.instruction, metadata: { ...existingMeta, frontend_task_id: nextTaskId } }))
           return true
@@ -793,7 +831,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       return false
     },
-    [appendLog],
+    [ackTimeoutMs, appendLog, queuedTimeoutMs],
   )
 
   const sendAudioChunk = useCallback((audio: string) => {
