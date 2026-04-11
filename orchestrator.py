@@ -17,6 +17,7 @@ from google.adk.sessions import InMemorySessionService
 
 from analyzer import ScreenshotAnalyzer, detect_available_model
 # pydantic_adk_runner removed — universal_navigator handles all providers
+from universal_navigator import run_universal_navigation
 from config import settings as settings_module
 from executor import ActionExecutor
 from mcp_client import MCPClient
@@ -291,7 +292,6 @@ class AgentOrchestrator:
 
             # Route directly through the universal agent runner — bypasses the PydanticAI shim
             # which had inferior tool schema exposure and leaked internal runtime messages to chat.
-            from universal_navigator import run_universal_navigation
             return await run_universal_navigation(
                 provider=provider_instance,
                 model=model_id,
