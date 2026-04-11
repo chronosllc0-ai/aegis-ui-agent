@@ -3888,3 +3888,21 @@
 
 ### Notes
 - Vite chunk-size warning (>500 kB) remains and is unrelated to these safety fixes.
+
+## 2026-04-10 — Startup reliability follow-up: auto-retry pending navigate on reconnect
+
+### What changed
+- Updated `frontend/src/App.tsx` to retain one pending navigate request when a send fails due transient WebSocket connectivity (`pendingNavigation` state).
+- On reconnection (`connectionStatus === connected`), the app now auto-retries the stored prompt once (while idle), so users do not need to manually retype/re-send after reconnect.
+- Kept existing explicit toast error so users still get immediate feedback that the first send did not go through.
+
+### Why
+- User reported the agent still not starting reliably.
+- The previous flow surfaced send failure, but still required manual retry. This patch closes that UX gap by auto-resuming the exact pending prompt after reconnect.
+
+### Validation
+- `npm run -w frontend build` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke -q` passed.
+
+### Notes
+- Vite chunk-size warning (>500 kB) remains unrelated to this retry behavior.

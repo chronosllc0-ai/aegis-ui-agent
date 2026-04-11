@@ -157,6 +157,7 @@ function App() {
   const [showTour, setShowTour] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>('browser')
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
+  const [pendingNavigation, setPendingNavigation] = useState<{ instruction: string; metadata?: Record<string, unknown> } | null>(null)
   const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
   const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
   const prevIsWorkingRef = useRef(false)
@@ -741,8 +742,11 @@ function App() {
     console.info('[AegisUI] action=%s', action)
     const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     if (!sent) {
+      setPendingNavigation({ instruction: finalInstruction, metadata })
       toastCtx.error('Connection issue', 'Task was not sent. Please wait for reconnect and retry.')
+      return
     }
+    setPendingNavigation(null)
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
     // Save to task history optimistically at send-time so the title always reflects
@@ -800,6 +804,12 @@ function App() {
     console.info('[AegisUI] dispatch_source=chat_input websocket_action=navigate')
     handleSend(instruction, metadata)
   }
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected' || !pendingNavigation || isWorking) return
+    handleSend(pendingNavigation.instruction, pendingNavigation.metadata)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionStatus, isWorking, pendingNavigation])
 
   const submitUrl = () => {
     const trimmed = urlInput.trim()
