@@ -43,6 +43,8 @@ export interface ChatPanelProps {
   onPrimarySend: (instruction: string, metadata?: Record<string, unknown>) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
+  /** Status of the secondary ops WebSocket on port 8001 */
+  opsConnectionStatus?: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
   onSwitchToBrowser: () => void
   latestFrame: string | null
@@ -1274,6 +1276,7 @@ export function ChatPanel({
   onPrimarySend,
   onDecomposePlan,
   connectionStatus,
+  opsConnectionStatus,
   onSwitchToBrowser,
   latestFrame,
   transcripts = [],
@@ -1946,6 +1949,18 @@ export function ChatPanel({
           <p className='mt-1.5 text-center text-[10px] text-zinc-600'>
             {connectionStatus === 'connecting' ? 'Reconnecting to agent…' : 'Disconnected — check your connection'}
           </p>
+        )}
+        {/* Ops port indicator — subtle dot shown when ops channel is active */}
+        {opsConnectionStatus !== undefined && (
+          <div className='flex items-center justify-end px-3 pb-0.5 gap-1' title={`Ops channel: ${opsConnectionStatus}`}>
+            <span
+              className={[
+                'inline-block h-1.5 w-1.5 rounded-full',
+                opsConnectionStatus === 'connected' ? 'bg-emerald-400' : opsConnectionStatus === 'connecting' ? 'bg-yellow-400 animate-pulse' : 'bg-zinc-600',
+              ].join(' ')}
+            />
+            <span className='text-[9px] text-zinc-600'>ops</span>
+          </div>
         )}
       </div>
       {galleryOpen && (
