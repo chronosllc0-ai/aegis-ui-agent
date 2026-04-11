@@ -1266,7 +1266,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             action = data.get("action")
             raw_instruction = data.get("instruction")
             raw_prompt = data.get("prompt")
-            instruction = str(raw_instruction if raw_instruction is not None else raw_prompt or "").strip()
+            instruction = str(raw_instruction or raw_prompt or "").strip()
             requested_mode_raw = data.get("mode")
             if requested_mode_raw is not None:
                 requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw)
@@ -1299,8 +1299,11 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 # If the client does not provide one, synthesize a server-side fallback.
                 frontend_task_id = str(client_metadata.get("frontend_task_id", "") or "").strip() or str(uuid4())
                 runtime.current_frontend_task_id = frontend_task_id
-                client_metadata["frontend_task_id"] = frontend_task_id
-                client_metadata.setdefault("agent_mode", active_mode)
+                server_metadata = {
+                    **client_metadata,
+                    "frontend_task_id": frontend_task_id,
+                    "agent_mode": str(client_metadata.get("agent_mode", "") or active_mode),
+                }
                 await _log_web_message(
                     runtime,
                     session_id,
@@ -1312,7 +1315,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         "source": "websocket",
                         "action": "navigate",
                         "task_label": task_label,
-                        "client": client_metadata,
+                        "client": server_metadata,
                     },
                 )
                 if runtime.conversation_id:

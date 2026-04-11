@@ -3906,3 +3906,30 @@
 
 ### Notes
 - Vite chunk-size warning (>500 kB) remains unrelated to this retry behavior.
+
+## 2026-04-10 — Review fix pass: tool allowlist validation, hook deps, metadata purity, null-instruction parsing
+
+### What changed
+- `backend/pydantic_adk_runner.py`:
+  - Added explicit allowlist validation in `run_tool(...)` to reject tool names not present in `available_tool_names`.
+- `frontend/src/App.tsx`:
+  - Memoized `handleSend(...)` via `useCallback(...)` and included it in reconnect retry effect dependencies.
+  - Removed the prior exhaustive-deps suppression for the pending-retry effect.
+- `main.py`:
+  - Updated instruction parsing to avoid turning `None` into the literal string "None" by using `instruction = str(raw_instruction or raw_prompt or "").strip()`.
+  - Preserved original client metadata and introduced `server_metadata` for server-enriched fields (`frontend_task_id`, resolved `agent_mode`) before logging.
+
+### Why
+- Addresses four review findings:
+  - critical: missing tool-name validation in the Pydantic runner,
+  - critical: reconnect retry effect dependency risk,
+  - warning: telemetry pollution by mutating client metadata,
+  - warning: null instruction coercion bug.
+
+### Validation
+- `npm run -w frontend build` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke -q` passed.
+- `python -m py_compile main.py backend/pydantic_adk_runner.py` passed.
+
+### Notes
+- Vite chunk-size warning (>500 kB) remains unrelated to this fix set.

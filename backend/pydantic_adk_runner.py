@@ -164,6 +164,8 @@ async def run_pydantic_adk_navigation(
                 return f"run_tool error: args_json must be valid JSON ({exc.msg})."
             if not isinstance(payload, dict):
                 return "run_tool error: args_json must decode to an object."
+            if tool not in available_tool_names:
+                return f"run_tool error: invalid tool '{tool}'"
             tool_call = {**payload, "tool": tool}
             if on_step is not None:
                 await on_step({"type": "tool-call", "content": json.dumps(tool_call), "steering": []})

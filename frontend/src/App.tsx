@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionLog } from './components/ActionLog'
 import { ChangelogModal, SubAgentModal, useChangelog } from './components/ChangelogModal'
 import { NotificationBell } from './components/NotificationBell'
@@ -724,7 +724,7 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enrichedLogs.length, appMode])
 
-  const handleSend = (instruction: string, metadata?: Record<string, unknown>) => {
+  const handleSend = useCallback((instruction: string, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
     const mentionMatches = [...trimmed.matchAll(/@([a-zA-Z0-9._-]+)/g)].map((m) => m[1].toLowerCase())
@@ -798,7 +798,18 @@ function App() {
       })
       setSelectedTaskId(taskId)
     }
-  }
+  }, [
+    activeTaskIdRef,
+    authUser?.uid,
+    isWorking,
+    messageSubAgent,
+    selectedTaskId,
+    send,
+    settings.agentMode,
+    subAgents,
+    toastCtx,
+    wsConfig,
+  ])
 
   const dispatchPromptFromUI = (instruction: string, metadata?: Record<string, unknown>) => {
     console.info('[AegisUI] dispatch_source=chat_input websocket_action=navigate')
@@ -808,8 +819,7 @@ function App() {
   useEffect(() => {
     if (connectionStatus !== 'connected' || !pendingNavigation || isWorking) return
     handleSend(pendingNavigation.instruction, pendingNavigation.metadata)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionStatus, isWorking, pendingNavigation])
+  }, [connectionStatus, handleSend, isWorking, pendingNavigation])
 
   const submitUrl = () => {
     const trimmed = urlInput.trim()
