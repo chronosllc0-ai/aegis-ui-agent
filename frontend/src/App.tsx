@@ -884,7 +884,7 @@ function App() {
   }
 
   const newSession = () => {
-    send({ action: 'stop' })
+    send({ action: 'stop_task' })
     setTaskStartedAt(null)
     setDurationSeconds(0)
     resetClientState()
@@ -1260,7 +1260,7 @@ function App() {
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
                 activeTaskId={selectedTaskId}
                 serverMessages={mergedChatMessages}
-                onStop={() => send({ action: 'stop' })}
+                onStop={() => send({ action: 'stop_task' })}
                 onUserInputResponse={handleUserInputResponse}
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
@@ -1327,7 +1327,7 @@ function App() {
             <div className='flex justify-end pb-1 pr-1'>
               <button
                 type='button'
-                onClick={() => { send({ action: 'stop' }) }}
+                onClick={() => { send({ action: 'stop_task' }) }}
                 className='flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-500/20 hover:border-red-400/60'
                 title='Stop current task'
               >

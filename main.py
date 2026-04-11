@@ -433,9 +433,28 @@ class SessionRuntime:
         # Tracks the frontend-generated task UUID for the currently active navigate action.
         # Sent by the client in spawn_subagent so sub-agents can be scoped to the right parent task.
         self.current_frontend_task_id: str | None = None
+        self.current_request_id: str | None = None
+        self.current_task_id: str | None = None
+        self.completed_task_ids: set[str] = set()
+        self.request_idempotency: dict[str, tuple[float, dict[str, Any]]] = {}
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
+
+    def get_idempotent_ack(self, request_id: str) -> dict[str, Any] | None:
+        """Return cached idempotent ack payload for request_id when available."""
+        cached = self.request_idempotency.get(request_id)
+        return cached[1] if cached else None
+
+    def remember_idempotent_ack(self, request_id: str, payload: dict[str, Any], *, max_entries: int = 256) -> None:
+        """Store idempotent ack payload and prune old entries to prevent leaks."""
+        self.request_idempotency[request_id] = (_time.monotonic(), payload)
+        if len(self.request_idempotency) <= max_entries:
+            return
+        # Keep the most-recent entries only.
+        oldest = sorted(self.request_idempotency.items(), key=lambda item: item[1][0])[: len(self.request_idempotency) - max_entries]
+        for stale_request_id, _ in oldest:
+            self.request_idempotency.pop(stale_request_id, None)
 
 
 def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
@@ -941,6 +960,55 @@ async def _send_context_update(
         )
 
 
+async def _safe_ws_send(
+    websocket: WebSocket,
+    payload: dict[str, Any],
+    *,
+    request_id: str | None = None,
+    task_id: str | None = None,
+    ws_session_id: str | None = None,
+    phase: str = "send",
+) -> bool:
+    """Send a websocket payload and emit structured diagnostics on failures."""
+    try:
+        await websocket.send_json(payload)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "ws_send_failed request_id=%s task_id=%s ws_session_id=%s phase=%s outcome=error error_code=E_SOCKET_SEND_FAILED error=%s",
+            request_id or "",
+            task_id or "",
+            ws_session_id or "",
+            phase,
+            exc,
+        )
+        return False
+
+
+def _normalize_start_metadata(raw_metadata: object) -> dict[str, Any]:
+    """Return a normalized metadata object without mutating inbound payloads."""
+    if not isinstance(raw_metadata, dict):
+        return {}
+    allowed_keys = {
+        "frontend_task_id",
+        "agent_mode",
+        "task_label",
+        "task_label_source",
+        "source",
+        "target_subagents",
+    }
+    normalized: dict[str, Any] = {}
+    for key, value in raw_metadata.items():
+        key_str = str(key)
+        if key_str not in allowed_keys:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            normalized[key_str] = value
+        elif isinstance(value, list):
+            normalized[key_str] = [item for item in value if isinstance(item, (str, int, float, bool))]
+    return normalized
+
+
 async def _log_web_message(
     runtime: "SessionRuntime",
     session_id: str,
@@ -973,8 +1041,8 @@ async def _log_web_message(
                 title_candidate=title_candidate,
             )
             break
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to persist web message to DB for session %s", session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to persist web message to DB for session %s: %s", session_id, exc)
 
 
 async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str | None) -> None:
@@ -1009,7 +1077,28 @@ async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str
 
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
     """Create and store the background navigation task for the current session."""
-    runtime.current_task = asyncio.create_task(_run_navigation_task(websocket, runtime, session_id, instruction))
+    runtime.current_task = asyncio.create_task(
+        _run_navigation_task(
+            websocket,
+            runtime,
+            session_id,
+            instruction,
+            request_id=runtime.current_request_id or "",
+            task_id=runtime.current_task_id or str(uuid4()),
+        )
+    )
+    def _task_done_callback(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.info("Navigation task cancellation finalized for session %s", session_id)
+        except Exception:
+            logger.exception("Navigation background task crashed for session %s", session_id)
+        finally:
+            if runtime.current_task is task:
+                runtime.current_task = None
+
+    runtime.current_task.add_done_callback(_task_done_callback)
 
 
 async def _start_idle_navigation_from_control_action(
@@ -1078,17 +1167,67 @@ async def _run_navigation_task(
     runtime: SessionRuntime,
     session_id: str,
     instruction: str,
+    *,
+    request_id: str,
+    task_id: str,
 ) -> None:
     """Execute a single navigation task and optionally schedule one queued follow-up."""
-    callback: Callable[[dict[str, Any]], Awaitable[None]] = lambda step: _send_step(
-        websocket,
-        step,
-        runtime=runtime,
-        session_id=session_id,
-    )
+    terminal_event_sent = False
+
+    async def _emit_terminal_result(*, summary: str, status: str) -> None:
+        nonlocal terminal_event_sent
+        if terminal_event_sent:
+            return
+        terminal_event_sent = True
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_state", "data": {"task_id": task_id, "state": status, "timestamp": _time.time()}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_state_terminal",
+        )
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_result", "data": {"task_id": task_id, "summary": summary, "timestamp": _time.time()}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_result_terminal",
+        )
+
+    async def callback(step: dict[str, Any]) -> None:
+        await _send_step(websocket, step, runtime=runtime, session_id=session_id)
+        step_type = str(step.get("type") or "").lower()
+        task_state = "tool_call" if step_type in {"tool-call", "tool_call"} else "running"
+        await _safe_ws_send(
+            websocket,
+            {
+                "type": "task_state",
+                "data": {
+                    "task_id": task_id,
+                    "state": task_state,
+                    "detail": str(step.get("content") or step_type or "task_update"),
+                    "timestamp": _time.time(),
+                },
+            },
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_state",
+        )
+
     runtime.task_running = True
     runtime.cancel_event.clear()
     _normalize_runtime_mode(runtime.settings)
+    await _safe_ws_send(
+        websocket,
+        {"type": "task_state", "data": {"task_id": task_id, "state": "running", "timestamp": _time.time()}},
+        request_id=request_id,
+        task_id=task_id,
+        ws_session_id=session_id,
+        phase="task_state_running",
+    )
 
     async def _on_user_input(question: str, options: list[str]) -> str:
         """Send a user_input_request WS message and await the user's response."""
@@ -1154,14 +1293,21 @@ async def _run_navigation_task(
         return await runtime.subagent_manager.send_message(sub_id, message)
 
     try:
-        result = await _get_orchestrator().execute_task(
+        max_duration_seconds = int(runtime.settings.get("model_timeout_seconds") or settings.NAVIGATION_TASK_TIMEOUT_SECONDS)
+        max_tool_calls = int(runtime.settings.get("max_tool_calls") or settings.NAVIGATION_MAX_TOOL_CALLS)
+        effective_runtime_settings = {
+            "max_tool_calls": max_tool_calls,
+            "model_timeout_seconds": max_duration_seconds,
+            **runtime.settings,
+        }
+        result = await asyncio.wait_for(
+            _get_orchestrator().execute_task(
             session_id=session_id,
             instruction=instruction,
             on_step=callback,
             on_frame=lambda image_b64: _on_frame_combined(websocket, image_b64, runtime.user_uid),
             cancel_event=runtime.cancel_event,
             steering_context=runtime.steering_context,
-            settings=runtime.settings,
             on_workflow_step=lambda step: _send_workflow_step(
                 websocket,
                 step,
@@ -1173,6 +1319,9 @@ async def _run_navigation_task(
             on_reasoning_delta=_on_reasoning_delta,
             on_spawn_subagent=_on_spawn_subagent,
             on_message_subagent=_on_message_subagent,
+            settings=effective_runtime_settings,
+        ),
+            timeout=max_duration_seconds,
         )
         result_status = result.get("status") if isinstance(result, dict) else "completed"
 
@@ -1205,7 +1354,15 @@ async def _run_navigation_task(
         # If execute_task returned a failure (e.g. unsupported provider), surface it as an error
         if result_status == "failed":
             error_msg = (result.get("error") or "Task failed") if isinstance(result, dict) else "Task failed"
-            await websocket.send_json({"type": "error", "data": {"message": error_msg}})
+            await _safe_ws_send(
+                websocket,
+                {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_FAILED", "message": error_msg, "retryable": True}},
+                request_id=request_id,
+                task_id=task_id,
+                ws_session_id=session_id,
+                phase="task_error",
+            )
+            await _safe_ws_send(websocket, {"type": "error", "data": {"message": error_msg}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_error")
         await _log_web_message(
             runtime,
             session_id,
@@ -1218,10 +1375,26 @@ async def _run_navigation_task(
                 "result": result if isinstance(result, dict) else str(result),
             },
         )
-        await websocket.send_json({"type": "result", "data": result})
+        terminal_state = "succeeded" if result_status == "completed" else "failed"
+        await _emit_terminal_result(
+            summary=str((result or {}).get("summary") or (result or {}).get("error") or result_status),
+            status=terminal_state,
+        )
+        await _safe_ws_send(websocket, {"type": "result", "data": result}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result")
     except asyncio.CancelledError:
         logger.info("Navigation task cancelled for session %s", session_id)
+        await _emit_terminal_result(summary="Task cancelled", status="cancelled")
         raise
+    except asyncio.TimeoutError:
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_TIMEOUT", "message": "Task execution timed out", "retryable": True}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_timeout_error",
+        )
+        await _emit_terminal_result(summary="Task timed out", status="failed")
     except Exception as exc:  # noqa: BLE001
         logger.exception("Navigation task failed for session %s", session_id)
         await _log_web_message(
@@ -1236,10 +1409,20 @@ async def _run_navigation_task(
                 "error": str(exc),
             },
         )
-        await websocket.send_json({"type": "error", "data": {"message": str(exc)}})
-        await websocket.send_json({"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}})
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_EXCEPTION", "message": str(exc), "retryable": True}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="task_exception_error",
+        )
+        await _emit_terminal_result(summary=str(exc), status="failed")
+        await _safe_ws_send(websocket, {"type": "error", "data": {"message": str(exc)}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_error_exception")
+        await _safe_ws_send(websocket, {"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result_exception")
     finally:
         runtime.task_running = False
+        runtime.completed_task_ids.add(task_id)
 
     await _start_next_queued_task_if_ready(websocket, runtime, session_id)
 
@@ -1264,6 +1447,10 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_json()
             action = data.get("action")
+            if action == "navigate":
+                action = "navigate_start"
+            if action == "stop":
+                action = "stop_task"
             raw_instruction = data.get("instruction")
             raw_prompt = data.get("prompt")
             instruction = str(
@@ -1294,21 +1481,126 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             task_label = str(client_metadata.get("task_label", "")).strip()
             title_candidate = task_label or instruction
 
-            if action == "navigate":
-                if runtime.task_running:
-                    await websocket.send_json({"type": "error", "data": {"message": "Task already running"}})
-                    continue
+            if action in {"steer", "interrupt", "queue", "dequeue"}:
+                await _safe_ws_send(
+                    websocket,
+                    {
+                        "type": "task_error",
+                        "data": {
+                            "request_id": str(data.get("request_id") or ""),
+                            "task_id": runtime.current_task_id,
+                            "code": "E_BAD_PAYLOAD",
+                            "message": f"{action} is disabled. Use navigate_start as the sole command action.",
+                            "retryable": False,
+                        },
+                    },
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    ws_session_id=session_id,
+                    phase="disabled_runtime_control",
+                )
+                continue
+
+            if action == "navigate_start":
+                request_id = str(data.get("request_id") or "").strip()
+                if not request_id:
+                    request_id = str(uuid4())
                 if not instruction:
-                    await websocket.send_json({"type": "error", "data": {"message": "navigate: instruction is required"}})
+                    logger.info(
+                        "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=validate outcome=rejected error_code=E_BAD_PAYLOAD",
+                        request_id,
+                        "",
+                        session_id,
+                    )
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "navigate_ack", "data": {"request_id": request_id, "task_id": None, "accepted": False, "reason": "E_BAD_PAYLOAD"}},
+                        request_id=request_id,
+                        ws_session_id=session_id,
+                        phase="navigate_ack_bad_payload",
+                    )
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"request_id": request_id, "code": "E_BAD_PAYLOAD", "message": "navigate_start: instruction is required", "retryable": True}},
+                        request_id=request_id,
+                        ws_session_id=session_id,
+                        phase="navigate_error_bad_payload",
+                    )
                     continue
+
+                cached_ack = runtime.get_idempotent_ack(request_id)
+                if cached_ack is not None:
+                    logger.info(
+                        "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=ack outcome=idempotent",
+                        request_id,
+                        cached_ack.get("task_id"),
+                        session_id,
+                    )
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "navigate_ack", "data": cached_ack},
+                        request_id=request_id,
+                        task_id=cached_ack.get("task_id"),
+                        ws_session_id=session_id,
+                        phase="navigate_ack_idempotent",
+                    )
+                    continue
+                if runtime.task_running:
+                    busy_task_id = runtime.current_task_id or ""
+                    ack_payload = {"request_id": request_id, "task_id": busy_task_id, "accepted": False, "reason": "E_START_REJECTED_BUSY"}
+                    runtime.remember_idempotent_ack(request_id, ack_payload)
+                    logger.info(
+                        "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=validate outcome=rejected error_code=E_START_REJECTED_BUSY",
+                        request_id,
+                        busy_task_id,
+                        session_id,
+                    )
+                    await _safe_ws_send(websocket, {"type": "navigate_ack", "data": ack_payload}, request_id=request_id, task_id=busy_task_id, ws_session_id=session_id, phase="navigate_ack_busy")
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"request_id": request_id, "task_id": busy_task_id, "code": "E_START_REJECTED_BUSY", "message": "Task already running", "retryable": True}},
+                        request_id=request_id,
+                        task_id=busy_task_id,
+                        ws_session_id=session_id,
+                        phase="navigate_error_busy",
+                    )
+                    continue
+                task_id = str(uuid4())
+                runtime.current_request_id = request_id
+                runtime.current_task_id = task_id
+                logger.info(
+                    "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=ack outcome=accepted",
+                    request_id,
+                    task_id,
+                    session_id,
+                )
+                ack_payload = {"request_id": request_id, "task_id": task_id, "accepted": True}
+                runtime.remember_idempotent_ack(request_id, ack_payload)
+                await _safe_ws_send(
+                    websocket,
+                    {"type": "navigate_ack", "data": ack_payload},
+                    request_id=request_id,
+                    task_id=task_id,
+                    ws_session_id=session_id,
+                    phase="navigate_ack_accept",
+                )
+                await _safe_ws_send(
+                    websocket,
+                    {"type": "task_state", "data": {"task_id": task_id, "state": "queued", "timestamp": _time.time()}},
+                    request_id=request_id,
+                    task_id=task_id,
+                    ws_session_id=session_id,
+                    phase="task_queued",
+                )
                 # Track the frontend-generated task ID so sub-agents can be scoped to the right parent task.
                 # If the client does not provide one, synthesize a server-side fallback.
-                frontend_task_id = str(client_metadata.get("frontend_task_id", "") or "").strip() or str(uuid4())
+                normalized_metadata = _normalize_start_metadata(data.get("metadata"))
+                frontend_task_id = str(normalized_metadata.get("frontend_task_id", "") or "").strip() or task_id
                 runtime.current_frontend_task_id = frontend_task_id
                 server_metadata = {
-                    **client_metadata,
+                    **normalized_metadata,
                     "frontend_task_id": frontend_task_id,
-                    "agent_mode": str(client_metadata.get("agent_mode", "") or active_mode),
+                    "agent_mode": str(normalized_metadata.get("agent_mode", "") or active_mode),
                 }
                 await _log_web_message(
                     runtime,
@@ -1327,6 +1619,28 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
                 _start_navigation_task(websocket, runtime, session_id, instruction)
+            elif action == "stop_task":
+                requested_task_id = str(data.get("task_id") or "").strip()
+                if runtime.current_task is None or runtime.current_task.done():
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"task_id": requested_task_id or runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "No running task to stop", "retryable": False}},
+                        request_id=runtime.current_request_id,
+                        task_id=requested_task_id or runtime.current_task_id,
+                        ws_session_id=session_id,
+                        phase="stop_task_idle",
+                    )
+                    continue
+                runtime.cancel_event.set()
+                runtime.current_task.cancel()
+                await _safe_ws_send(
+                    websocket,
+                    {"type": "task_state", "data": {"task_id": runtime.current_task_id, "state": "cancelled", "timestamp": _time.time()}},
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    ws_session_id=session_id,
+                    phase="stop_task_cancelled",
+                )
             elif action == "steer":
                 if not instruction:
                     await websocket.send_json({"type": "error", "data": {"message": "steer: instruction is required"}})
@@ -1450,6 +1764,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if not isinstance(candidate_settings, dict):
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: settings must be an object"}})
                     continue
+                enabled_skill_ids = candidate_settings.get("enabled_skill_ids")
+                if enabled_skill_ids is not None:
+                    if not isinstance(enabled_skill_ids, list) or any(not isinstance(item, str) for item in enabled_skill_ids):
+                        await websocket.send_json({"type": "error", "data": {"message": "Invalid config payload: enabled_skill_ids must be a list of strings"}})
+                        continue
+                    resolved_context = await resolve_runtime_skills(runtime.user_uid, enabled_skill_ids)
+                    candidate_settings = {
+                        **candidate_settings,
+                        **resolved_context.as_settings_fragment(),
+                    }
                 runtime.settings = _merge_runtime_settings(runtime.settings, candidate_settings)
                 await _send_step(
                     websocket,
@@ -1489,8 +1813,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 else:
                     logger.debug("user_input_response for unknown/expired request_id=%s", request_id)
             elif action == "ping":
-                # Client keepalive ping — just ignore silently (server already handles ws-level pings)
-                pass
+                await _safe_ws_send(websocket, {"type": "pong"}, ws_session_id=session_id, phase="pong")
             elif action == "spawn_subagent":
                 # ── Spawn a sub-agent ──────────────────────────────────
                 active_mode = _normalize_runtime_mode(runtime.settings)

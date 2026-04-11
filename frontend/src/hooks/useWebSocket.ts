@@ -6,6 +6,7 @@ import { modeLabel, parseModeRuntimeEvent, type AgentModeId } from '../lib/agent
 export type SteeringMode = 'auto' | 'steer' | 'interrupt' | 'queue'
 
 export type ActivityPhase = 'idle' | 'thinking' | 'browsing' | 'calling_tool' | 'generating'
+export type ExecutionState = 'idle' | 'starting' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export type TaskActivity = {
   phase: ActivityPhase
@@ -72,7 +73,7 @@ export interface PersistedThinkingMessage {
 }
 
 export type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_event_parse_failed'
+  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -183,6 +184,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const userId = options?.userId ?? null
   const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+  const [executionState, setExecutionState] = useState<ExecutionState>('idle')
   const [isWorking, setIsWorking] = useState(false)
   const [taskActivity, setTaskActivity] = useState<ActivityState>(() => createIdleActivityState())
   const [latestFrame, setLatestFrame] = useState('')
@@ -209,6 +211,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const lastStepAtRef = useRef(0)
   const lastNotConnectedAtRef = useRef(0)
   const connectRef = useRef<() => void>(() => undefined)
+  const pendingStartRef = useRef<{ requestId: string; timer: number | null; instruction: string } | null>(null)
+  const pendingQueuedStateTimeoutRef = useRef<number | null>(null)
+  const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
+  const queuedTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_QUEUED_TIMEOUT_MS ?? 20000)
 
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
@@ -273,6 +279,15 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }, 25000)
     }
     ws.onclose = () => {
+      if (pendingQueuedStateTimeoutRef.current !== null) {
+        window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+        pendingQueuedStateTimeoutRef.current = null
+      }
+      const pendingStart = pendingStartRef.current
+      if (pendingStart && pendingStart.timer !== null) {
+        window.clearTimeout(pendingStart.timer)
+      }
+      pendingStartRef.current = null
       if (pingIntervalRef.current !== null) {
         window.clearInterval(pingIntervalRef.current)
         pingIntervalRef.current = null
@@ -314,6 +329,76 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         if (convId) setActiveConversationId(convId)
         return
       }
+      if (payload.type === 'navigate_ack') {
+        const accepted = Boolean(payload.data?.accepted)
+        const requestId = String(payload.data?.request_id ?? '')
+        if (pendingStartRef.current?.requestId === requestId && pendingStartRef.current.timer !== null) {
+          window.clearTimeout(pendingStartRef.current.timer)
+          pendingStartRef.current = null
+        }
+        if (!accepted) {
+          setExecutionState('failed')
+          setIsWorking(false)
+          appendLog({ message: `Start rejected: ${String(payload.data?.reason ?? 'unknown')}`, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
+          return
+        }
+        if (pendingQueuedStateTimeoutRef.current !== null) {
+          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+          pendingQueuedStateTimeoutRef.current = null
+        }
+        setExecutionState('running')
+        return
+      }
+      if (payload.type === 'task_state') {
+        const state = String(payload.data?.state ?? '')
+        if (state === 'running' || state === 'tool_call' || state === 'queued' || state === 'waiting_input') {
+          setExecutionState(state === 'queued' ? 'starting' : 'running')
+          setIsWorking(true)
+          if (state === 'queued') {
+            if (pendingQueuedStateTimeoutRef.current !== null) {
+              window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+            }
+            pendingQueuedStateTimeoutRef.current = window.setTimeout(() => {
+              setExecutionState('failed')
+              setIsWorking(false)
+              appendLog({ message: 'Task stayed queued too long (E_START_TIMEOUT). Retry from chat.', taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
+            }, queuedTimeoutMs)
+          } else if (pendingQueuedStateTimeoutRef.current !== null) {
+            window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+            pendingQueuedStateTimeoutRef.current = null
+          }
+        } else if (state === 'succeeded') {
+          setExecutionState('completed')
+          setIsWorking(false)
+        } else if (state === 'failed') {
+          setExecutionState('failed')
+          setIsWorking(false)
+        } else if (state === 'cancelled') {
+          setExecutionState('cancelled')
+          setIsWorking(false)
+        }
+        return
+      }
+      if (payload.type === 'task_result') {
+        if (pendingQueuedStateTimeoutRef.current !== null) {
+          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+          pendingQueuedStateTimeoutRef.current = null
+        }
+        setExecutionState('completed')
+        setIsWorking(false)
+        appendLog({ message: `[summarize_task] ${String(payload.data?.summary ?? 'Task completed')}`, taskId, type: 'result', status: 'completed' })
+        return
+      }
+      if (payload.type === 'task_error') {
+        if (pendingQueuedStateTimeoutRef.current !== null) {
+          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
+          pendingQueuedStateTimeoutRef.current = null
+        }
+        setExecutionState('failed')
+        setIsWorking(false)
+        appendLog({ message: String(payload.data?.message ?? 'Task failed'), taskId, type: 'error', status: 'failed' })
+        return
+      }
       if (payload.type === 'step') {
         const stepType = String(payload.data?.type ?? '').toLowerCase()
         const nonExecutionStepTypes = new Set(['queue', 'steer', 'config'])
@@ -353,6 +438,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'result') {
         setIsWorking(false)
+        setExecutionState('completed')
         const persisted = readPersistedThinking(taskId)
         if (persisted.length > 0) {
           const nowIso = new Date().toISOString()
@@ -687,9 +773,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const send = useCallback(
     (message: Record<string, unknown>) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        if (message.action === 'navigate' || message.action === 'interrupt') {
+        if (message.action === 'navigate') {
           const nextTaskId = crypto.randomUUID()
+          const requestId = crypto.randomUUID()
           activeTaskIdRef.current = nextTaskId
+          setExecutionState('starting')
           setIsWorking(true)
           setTaskActivity((prev) => ({ ...prev, phase: 'thinking', detail: String(message.instruction ?? 'New task'), updatedAt: new Date().toISOString(), lastEventAt: Date.now() }))
           appendLog({
@@ -702,9 +790,28 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           })
           const maybeUrl = String(message.instruction ?? '')
           if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
+          appendLog({
+            message: 'Starting…',
+            taskId: nextTaskId,
+            type: 'step',
+            status: 'in_progress',
+            stepKind: 'navigate',
+            elapsedSeconds: 0,
+          })
           // Embed frontend task ID in metadata so backend can scope sub-agents to this task
           const existingMeta = (message.metadata as Record<string, unknown> | undefined) ?? {}
-          wsRef.current.send(JSON.stringify({ ...message, metadata: { ...existingMeta, frontend_task_id: nextTaskId } }))
+          const pendingStart = pendingStartRef.current
+          if (pendingStart && pendingStart.timer !== null) {
+            window.clearTimeout(pendingStart.timer)
+          }
+          const timer = window.setTimeout(() => {
+            setExecutionState('failed')
+            setIsWorking(false)
+            appendLog({ message: 'Start timed out (E_START_TIMEOUT). Retry from chat.', taskId: nextTaskId, type: 'error', status: 'failed' })
+            pendingStartRef.current = null
+          }, ackTimeoutMs)
+          pendingStartRef.current = { requestId, timer, instruction: String(message.instruction ?? '') }
+          wsRef.current.send(JSON.stringify({ action: 'navigate_start', request_id: requestId, instruction: message.instruction, metadata: { ...existingMeta, frontend_task_id: nextTaskId } }))
           return true
         }
         wsRef.current.send(JSON.stringify(message))
@@ -724,7 +831,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       return false
     },
-    [appendLog],
+    [ackTimeoutMs, appendLog, queuedTimeoutMs],
   )
 
   const sendAudioChunk = useCallback((audio: string) => {
@@ -805,5 +912,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   }, [isWorking, taskActivity])
 
 
-  return { connectionStatus, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

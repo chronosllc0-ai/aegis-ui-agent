@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     BROWSER_HEADLESS: bool = True
     VIEWPORT_WIDTH: int = 1280
     VIEWPORT_HEIGHT: int = 720
+    NAVIGATION_TASK_TIMEOUT_SECONDS: int = 180
+    NAVIGATION_MAX_TOOL_CALLS: int = 100
+    NAVIGATION_ACK_TIMEOUT_SECONDS: int = 5
 
     # ── Gemini-specific (kept for backwards compatibility) ───────────
     GEMINI_MODEL: str = "gemini-2.5-pro"

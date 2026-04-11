@@ -4000,3 +4000,56 @@
 
 ### Notes
 - Vite chunk-size warning (>500 kB) remains unrelated to this fix set.
+
+## 2026-04-11 — WebSocket startup hardening + AI coworker repositioning
+
+### What changed
+- Reworked websocket startup contract around explicit `navigate_start`/`navigate_ack` and deterministic `task_state`/`task_result`/`task_error` events.
+- Added request-id idempotency for duplicate starts and explicit rejection/error taxonomy for bad payloads and busy-state rejects.
+- Added websocket send safety wrapper and structured diagnostic logging fields (`request_id`, `task_id`, `ws_session_id`, phase/outcome/error_code).
+- Introduced frontend execution-state progression (`idle -> starting -> running -> completed|failed|cancelled`) with explicit start timeout handling.
+- Updated `stop` semantics to `stop_task` path while keeping compatibility aliasing.
+- Made Pydantic runtime limits settings-driven for model timeout and max tool-call bounds.
+- Rewrote AGENTS.md from hackathon framing to production AI coworker positioning.
+- Added repo-tailored execution system prompt doc at `docs/prompts/execution-agent-system-prompt.md`.
+- Extended websocket tests for ack guarantee, idempotency, rejection handling, and terminal event guarantee.
+
+### Working
+- Start requests now have explicit protocol-level ack/error and deterministic task state events.
+- Duplicate `request_id` returns the same ack payload/task correlation.
+- Frontend now shows immediate “Starting…” behavior tied to protocol events rather than inferred logs.
+
+### Not yet fully verified
+- Full frontend UX polish around retry CTA wiring is partially covered by timeout log + failure state and may need dedicated button UX in ChatPanel.
+- Legacy websocket actions still exist in backend for compatibility, though runtime-control actions are now hard-rejected.
+
+### Next steps
+1. Add first-class retry CTA in ChatPanel bound to last failed start instruction (new request_id each retry).
+2. Add explicit surfaced badges for `starting/running/completed/failed/cancelled` in chat header.
+3. Expand backend failure taxonomy mapping to include provider/tool-limit specific hard codes from orchestrator internals.
+4. Add integration test that forces orchestrator timeout and asserts `E_MODEL_TIMEOUT` end-to-end.
+
+### Blockers / decisions
+- Decide timeline for fully removing legacy websocket event types (`step/result/error`) versus keeping a transition window.
+
+## 2026-04-11 — Review follow-up: addressed 12 PR issues
+
+### What changed
+- Added bounded idempotency cache pruning in websocket runtime (`remember_idempotent_ack`) to prevent unbounded memory growth per session.
+- Reordered `navigate_start` flow to validate payload first, then evaluate/request idempotency cache for accepted payloads.
+- Added background task done-callback handling for navigation task lifecycle cleanup and crash logging.
+- Hardened metadata normalization with key allowlist + primitive/list value filtering.
+- Improved timeout/error mapping: execution timeout now reports `E_TASK_TIMEOUT` and terminal emission is deduplicated with a single helper.
+- Preserved user-provided runtime settings precedence when injecting timeout/tool-call defaults.
+- Frontend: fixed pending-start timer cleanup/reset, replaced hardcoded start timeout with env-backed config fallback, and added queued-state timeout guard.
+
+### Validation
+- `npm run -w frontend build` passed.
+- `python -m py_compile main.py backend/pydantic_adk_runner.py` passed.
+- `pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke -q` passed.
+- Contract regression subset passed (`ack`, `reject-open-socket`, `terminal`, `idempotency`).
+
+### Next steps
+1. Add explicit frontend retry CTA component wired to stored pending instruction + fresh request_id.
+2. Add backend unit tests for idempotency prune behavior and metadata normalization allowlist.
+3. Add end-to-end timeout test covering queued-timeout client behavior and `E_TASK_TIMEOUT` server mapping.
