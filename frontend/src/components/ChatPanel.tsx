@@ -153,7 +153,9 @@ function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
   return isBrowserOnlyEvent({ message: msg, entry })
 }
 
-function isDeniedChatText(text: string): boolean {
+function isDeniedChatText(text: string, rawStepType?: string): boolean {
+  // tool_start / tool_result are typed JSON events — always let them through
+  if (rawStepType === 'tool_start' || rawStepType === 'tool_result') return false
   const normalized = text.trim().toLowerCase()
   if (CHAT_HARD_DENY_PREFIXES.some((prefix) => normalized.startsWith(prefix.toLowerCase()))) return true
   // Filter raw JSON tool blobs that leaked through (e.g. {"tool":"extract_page",...})
@@ -167,7 +169,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   for (const entry of logs) {
     const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
     const msg = normalizeTextPreservingMarkdown(rawMessage)
-    if (isDeniedChatText(msg)) continue
+    if (isDeniedChatText(msg, entry.rawStepType)) continue
 
     if (msg.trim() === '[thinking]') continue
 
@@ -225,6 +227,40 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
       continue
     }
 
+    // ── Streaming token bubbles ───────────────────────────────────────────
+    if (entry.isStreaming !== undefined || entry.rawStepType === 'stream_chunk') {
+      msgs.push({
+        id: entry.id,
+        role: 'assistant',
+        text: entry.message + (entry.isStreaming ? '▋' : ''),
+      })
+      continue
+    }
+
+    // ── Typed tool events (tool_start / tool_result) ──────────────────────
+    if (entry.rawStepType === 'tool_start' || entry.rawStepType === 'tool_result') {
+      try {
+        const data = JSON.parse(rawMessage) as {
+          tool?: string; args?: Record<string, unknown>
+          call_id?: string; result?: string; ok?: boolean
+        }
+        msgs.push({
+          id: entry.id,
+          role: 'tool',
+          text: rawMessage,
+          toolName: data.tool ?? 'tool',
+          toolArgs: data.args ? JSON.stringify(data.args) : undefined,
+          toolResult: entry.toolResult ?? data.result,
+          toolStatus: entry.rawStepType === 'tool_result'
+            ? (entry.toolOk === false ? 'failed' : 'completed')
+            : 'in_progress',
+        })
+      } catch {
+        msgs.push({ id: entry.id, role: 'tool', text: rawMessage, toolStatus: 'in_progress' })
+      }
+      continue
+    }
+
     const isUser       = entry.isUserMessage === true
     const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
     const isApproval   = entry.type === 'interrupt'
@@ -266,6 +302,15 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     }
     if (isStepText || entry.type === 'result' || entry.type === 'error') {
       const role: ChatRole = isUser ? 'user' : 'assistant'
+      // Dedup: skip assistant_message entries whose content was already delivered via
+      // streaming (stream_chunk / stream_done). The streaming bubble already holds the
+      // full text, so showing a duplicate would give the user two identical replies.
+      if (role === 'assistant' && entry.rawStepType === 'assistant_message') {
+        const alreadyStreamed = msgs.some(
+          (m) => m.role === 'assistant' && m.id.startsWith('stream_') && m.text.trim() === displayText.trim(),
+        )
+        if (alreadyStreamed) continue
+      }
       msgs.push({ id: entry.id, role, text: displayText, timestamp: role === 'user' ? entry.timestamp : undefined })
       continue
     }
@@ -523,6 +568,99 @@ function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProp
         {result && <span className='text-zinc-400'>{result}</span>}
         {isRunning && <span className='shell-cursor' />}
       </pre>
+    </div>
+  )
+}
+
+// ─── ToolCallCard — typed tool_start / tool_result event card ────────────────
+function toolIcon(toolName: string): ReactNode {
+  const n = toolName.toLowerCase()
+  if (n.includes('search') || n.includes('web') || n.includes('browse')) return <IcoSearch className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
+  if (n.includes('github') || n.includes('git')) return (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' aria-hidden='true'>
+      <path d='M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z'/>
+    </svg>
+  )
+  if (n.includes('file') || n.includes('read') || n.includes('write')) return <IcoFile className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
+  if (n.includes('execute') || n.includes('run') || n.includes('shell') || n.includes('bash')) return <IcoTerminal className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
+  return <IcoSparkle className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
+}
+
+function SpinnerIcon() {
+  return (
+    <svg className='h-4 w-4 animate-spin text-zinc-500 flex-shrink-0' viewBox='0 0 24 24' fill='none' aria-hidden='true'>
+      <circle className='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' strokeWidth='3' />
+      <path className='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z' />
+    </svg>
+  )
+}
+
+function ToolCallCard({ msg }: { msg: ChatMessage }) {
+  const isRunning = msg.toolStatus === 'in_progress'
+  const isFailed  = msg.toolStatus === 'failed'
+  const isDone    = msg.toolStatus === 'completed'
+  const [collapsed, setCollapsed] = useState(false)
+
+  // Auto-collapse 1.5s after completion using CSS transition (no re-render loop)
+  const doneRef = useRef(false)
+  useEffect(() => {
+    if (isDone && !doneRef.current) {
+      doneRef.current = true
+      const t = setTimeout(() => setCollapsed(true), 1500)
+      return () => clearTimeout(t)
+    }
+  }, [isDone])
+
+  let toolName = msg.toolName ?? 'tool'
+  let argsObj: Record<string, unknown> | null = null
+  try {
+    const raw = JSON.parse(msg.text)
+    toolName = raw.tool ?? toolName
+    argsObj  = raw.args ?? null
+  } catch { /* use msg.toolArgs if available */ }
+  const argsDisplay = argsObj
+    ? Object.entries(argsObj).map(([k, v]) => `${k}: ${String(v)}`).join('  ·  ')
+    : (msg.toolArgs ?? '')
+  const resultText = msg.toolResult ?? ''
+
+  const statusBadge = isRunning ? (
+    <span className='flex items-center gap-1 bg-zinc-800/60 text-zinc-400 text-xs rounded-full px-2 py-0.5'>
+      <SpinnerIcon />
+      running
+    </span>
+  ) : isFailed ? (
+    <span className='bg-red-500/10 text-red-400 text-xs rounded-full px-2 py-0.5'>failed</span>
+  ) : (
+    <span className='bg-green-500/10 text-green-400 text-xs rounded-full px-2 py-0.5'>done</span>
+  )
+
+  return (
+    <div
+      className='my-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] cursor-pointer overflow-hidden transition-[max-height] duration-500 ease-in-out'
+      style={{ maxHeight: collapsed ? '36px' : '180px' }}
+      onClick={() => setCollapsed((c) => !c)}
+      role='button'
+      aria-expanded={!collapsed}
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setCollapsed((c) => !c) }}
+    >
+      {/* Header row */}
+      <div className='flex items-center gap-2 px-3 py-2'>
+        {toolIcon(toolName)}
+        <span className='text-sm font-semibold text-white flex-1 truncate'>{toolName.replace(/_/g, ' ')}</span>
+        {statusBadge}
+      </div>
+      {/* Body: args + result */}
+      {!collapsed && (
+        <div className='px-3 pb-2 space-y-1'>
+          {argsDisplay && (
+            <p className='text-xs text-zinc-500 font-mono truncate'>{argsDisplay}</p>
+          )}
+          {resultText && (
+            <p className='text-xs text-zinc-300 line-clamp-3 whitespace-pre-wrap'>{resultText}</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1573,8 +1711,19 @@ export function ChatPanel({
           if (msg.role === 'user') return <UserBubble key={msg.id} msg={msg} />
           if (msg.role === 'generating') return <GeneratingCanvas key={msg.id} label={msg.text || 'Creating…'} />
 
-          // Tool calls → ShellCard (collapsed accordion by default when done, open while running)
+          // Tool calls — typed JSON events use ToolCallCard, legacy [tool_name] entries use ShellCard
           if (msg.role === 'tool') {
+            // Detect new typed tool events by checking if text is valid JSON with call_id
+            let isTypedToolEvent = false
+            try {
+              const parsed = JSON.parse(msg.text) as Record<string, unknown>
+              isTypedToolEvent = 'call_id' in parsed || ('tool' in parsed && 'args' in parsed)
+            } catch { /* legacy format */ }
+
+            if (isTypedToolEvent) {
+              return <ToolCallCard key={msg.id} msg={msg} />
+            }
+
             const isLive = isWorking && msg.toolStatus === 'in_progress'
             const collapsed = threadUi.collapsedToolIds.includes(msg.id)
             return (

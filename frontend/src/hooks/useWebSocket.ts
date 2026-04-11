@@ -25,6 +25,11 @@ export type LogEntry = {
   elapsedSeconds: number
   stepId?: string           // links reasoning to its step
   isUserMessage?: boolean   // true when this entry represents the user's task instruction
+  isStreaming?: boolean      // true while stream_chunk deltas are still arriving
+  rawStepType?: string       // original step type string from backend
+  toolCallId?: string        // call_id linking tool_start → tool_result
+  toolResult?: string        // resolved result text for tool_result entries
+  toolOk?: boolean           // whether the tool call succeeded
 }
 
 export type TranscriptEntry = {
@@ -410,14 +415,99 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
         if (urlMatch?.[0]) setCurrentUrl(urlMatch[0])
-        // assistant_message = direct model text reply (no tools used); treat as a
+
+        // ── stream_chunk: accumulate token deltas into a streaming bubble ──
+        if (stepType === 'stream_chunk') {
+          const msgId = String(payload.data?.message_id ?? '')
+          const delta = String(payload.data?.content ?? '')
+          setLogs((prev) => {
+            const existing = prev.find((e) => e.id === `stream_${msgId}`)
+            if (existing) {
+              return prev.map((e) =>
+                e.id === `stream_${msgId}` ? { ...e, message: e.message + delta } : e,
+              )
+            }
+            return [
+              ...prev,
+              {
+                id: `stream_${msgId}`,
+                message: delta,
+                taskId,
+                type: 'result' as const,
+                status: 'in_progress' as const,
+                stepKind: 'other' as const,
+                elapsedSeconds: 0,
+                timestamp: new Date().toISOString(),
+                isStreaming: true,
+                rawStepType: 'stream_chunk',
+              },
+            ]
+          })
+          return
+        }
+
+        // ── stream_done: mark bubble as complete ───────────────────────────
+        if (stepType === 'stream_done') {
+          const msgId = String(payload.data?.message_id ?? '')
+          setLogs((prev) =>
+            prev.map((e) =>
+              e.id === `stream_${msgId}`
+                ? { ...e, isStreaming: false, status: 'completed' as const }
+                : e,
+            ),
+          )
+          return
+        }
+
+        // ── tool_start: emit card with spinner ─────────────────────────────
+        if (stepType === 'tool_start') {
+          try {
+            const data = JSON.parse(content) as { call_id?: string }
+            appendLog({
+              message: content,
+              taskId,
+              type: 'step',
+              status: 'in_progress',
+              rawStepType: 'tool_start',
+              toolCallId: data.call_id,
+            })
+          } catch {
+            appendLog({ message: content, taskId, type: 'step', status: 'in_progress', rawStepType: 'tool_start' })
+          }
+          return
+        }
+
+        // ── tool_result: resolve matching tool_start card ──────────────────
+        if (stepType === 'tool_result') {
+          try {
+            const data = JSON.parse(content) as { call_id?: string; result?: string; ok?: boolean }
+            setLogs((prev) =>
+              prev.map((e) =>
+                e.toolCallId === data.call_id
+                  ? {
+                      ...e,
+                      status: 'completed' as const,
+                      rawStepType: 'tool_result',
+                      toolResult: data.result,
+                      toolOk: data.ok,
+                    }
+                  : e,
+              ),
+            )
+          } catch { /* ignore malformed */ }
+          return
+        }
+
+        // ── assistant_message = direct model text reply (no tools used); treat as a
         // completed result so ChatPanel renders it as a plain assistant bubble.
+        // The frontend deduplicates against stream_chunk entries by message_id.
         const isAssistantMsg = stepType === 'assistant_message' || stepType === 'result'
         appendLog({
           message: content,
           taskId,
           type: stepType === 'interrupt' ? 'interrupt' : isAssistantMsg ? 'result' : 'step',
           status: isAssistantMsg ? 'completed' : stepType === 'steer' ? 'steered' : 'in_progress',
+          rawStepType: stepType,
         })
         return
       }

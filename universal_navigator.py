@@ -2008,6 +2008,7 @@ async def run_universal_navigation(
             }
             if not enable_reasoning:
                 stream_kwargs["temperature"] = 0.2
+            message_id = str(uuid4())[:8]
             async for chunk in provider.stream(messages, **stream_kwargs):
                 if cancel_event and cancel_event.is_set():
                     break
@@ -2017,8 +2018,16 @@ async def run_universal_navigation(
                         await on_reasoning_delta(thinking_step_id, chunk.reasoning_delta)
                 if chunk.delta:
                     reply_parts.append(chunk.delta)
+                    if on_step:
+                        await on_step({
+                            "type": "stream_chunk",
+                            "content": chunk.delta,
+                            "message_id": message_id,
+                        })
 
             reply = "".join(reply_parts).strip()
+            if on_step and reply:
+                await on_step({"type": "stream_done", "message_id": message_id})
             if reasoning_parts and on_step:
                 await on_step(
                     {
@@ -2046,6 +2055,8 @@ async def run_universal_navigation(
             # (conversational reply, clarification, etc.).  Emit it straight to the
             # chat and complete the task.  We never filter or retry plain-text replies;
             # the model decides whether tools are needed.
+            # stream_chunk/stream_done already delivered tokens; assistant_message is a
+            # fallback for clients that missed streaming (frontend deduplicates by message_id).
             if reply:
                 await emit_step(reply, step_type="assistant_message")
             return {
@@ -2186,7 +2197,14 @@ async def run_universal_navigation(
                     )
                 return result
 
-            await emit_step(f"[{tool_name}] {json.dumps({key: value for key, value in tool_call.items() if key != 'tool'})[:220]}")
+            call_id = str(uuid4())[:8]
+            # Emit tool_start — card appears with spinner
+            await emit_step(json.dumps({
+                "tool": tool_name,
+                "args": {k: v for k, v in tool_call.items() if k != "tool"},
+                "call_id": call_id,
+            }), step_type="tool_start")
+
             result_text, screenshot_bytes = await tool_executor.run(tool_call, skip_policy_checks=True)
             lowered_result = str(result_text).lower()
             is_ok = not lowered_result.startswith(
@@ -2203,6 +2221,13 @@ async def run_universal_navigation(
                 "screenshot_bytes": screenshot_bytes,
                 "denial_debug": None,
             }
+            # Emit tool_result — card resolves
+            await emit_step(json.dumps({
+                "call_id": call_id,
+                "tool": tool_name,
+                "result": str(result_text)[:500],
+                "ok": is_ok,
+            }), step_type="tool_result")
             if on_workflow_step:
                 await on_workflow_step(
                     {
