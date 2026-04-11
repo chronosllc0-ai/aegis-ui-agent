@@ -152,34 +152,6 @@ class OpsManager:
 
 
 ops_manager = OpsManager()
-
-ops_app = FastAPI(title="Aegis Ops Port", version="1.0.0")
-ops_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@ops_app.websocket("/ws/ops")
-async def websocket_ops(websocket: WebSocket) -> None:
-    """Operations port — background tasks, sub-agents, heartbeat, cron results."""
-    session_id = websocket.query_params.get("session_id", str(uuid4()))
-    await ops_manager.connect(session_id, websocket)
-    try:
-        # Send initial ready event
-        await websocket.send_json({"type": "ops_ready", "data": {"session_id": session_id}})
-        # Keep connection alive, receiving pings
-        while True:
-            data = await websocket.receive_json()
-            if data.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        ops_manager.disconnect(session_id)
-    except Exception:  # noqa: BLE001
-        ops_manager.disconnect(session_id)
 background_worker = BackgroundWorker(max_concurrent=3, poll_interval=5.0)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -1524,6 +1496,25 @@ async def _run_navigation_task(
 
 
 # ── WebSocket navigation endpoint ────────────────────────────────────
+
+
+@app.websocket("/ws/ops")
+async def websocket_ops(websocket: WebSocket) -> None:
+    """Operations channel — background tasks, sub-agents, heartbeat, cron results.
+    Runs on the same port as the main app so no second Railway domain is needed.
+    """
+    session_id = websocket.query_params.get("session_id", str(uuid4()))
+    await ops_manager.connect(session_id, websocket)
+    try:
+        await websocket.send_json({"type": "ops_ready", "data": {"session_id": session_id}})
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        ops_manager.disconnect(session_id)
+    except Exception:  # noqa: BLE001
+        ops_manager.disconnect(session_id)
 
 
 @app.websocket("/ws/agent")
@@ -3105,15 +3096,6 @@ if FRONTEND_DIST_DIR.exists():
         return FileResponse(FRONTEND_DIST_DIR / "404.html", status_code=404)
 
 
-async def _start_servers() -> None:
-    """Start main app (PORT) and ops app (OPS_PORT) concurrently."""
-    import os as _os
-    config_main = uvicorn.Config(app, host="0.0.0.0", port=int(_os.environ.get("PORT", settings.PORT)))
-    config_ops  = uvicorn.Config(ops_app, host="0.0.0.0", port=int(_os.environ.get("OPS_PORT", 8001)))
-    server_main = uvicorn.Server(config_main)
-    server_ops  = uvicorn.Server(config_ops)
-    await asyncio.gather(server_main.serve(), server_ops.serve())
-
-
 if __name__ == "__main__":
-    asyncio.run(_start_servers())
+    import os as _os
+    uvicorn.run(app, host="0.0.0.0", port=int(_os.environ.get("PORT", settings.PORT)))

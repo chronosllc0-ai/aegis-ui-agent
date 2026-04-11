@@ -874,11 +874,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     const configuredOpsUrl = (import.meta.env.VITE_OPS_WS_URL as string | undefined)?.trim()
     let opsUrl = configuredOpsUrl && configuredOpsUrl.length > 0 ? configuredOpsUrl : ''
     if (!opsUrl) {
-      // Derive from current location: swap protocol and replace port 8000 → 8001
+      // /ws/ops is on the same host:port as the main app — no second domain needed
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.hostname
-      const opsPort = (import.meta.env.VITE_OPS_PORT as string | undefined)?.trim() || '8001'
-      opsUrl = `${protocol}//${host}:${opsPort}/ws/ops`
+      opsUrl = `${protocol}//${window.location.host}/ws/ops`
     }
     const ows = new WebSocket(`${opsUrl}?session_id=${_sessionIdRef.current}`)
     opsWsRef.current = ows
