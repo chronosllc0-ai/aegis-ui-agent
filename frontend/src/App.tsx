@@ -745,7 +745,7 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const action = 'navigate'
+    const action = 'task'
     console.info('[AegisUI] action=%s', action)
     const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     if (!sent) {
@@ -905,10 +905,11 @@ function App() {
 
     const fallbackInstruction = visibleLogs.find(
       (entry) =>
-        entry.type === 'step' &&
-        entry.stepKind === 'navigate' &&
-        !entry.message.toLowerCase().includes('session settings updated') &&
-        !entry.message.toLowerCase().includes('queued instruction'),
+        entry.isUserMessage === true ||
+        (entry.type === 'step' &&
+          entry.stepKind === 'navigate' &&
+          !entry.message.toLowerCase().includes('session settings updated') &&
+          !entry.message.toLowerCase().includes('queued instruction')),
     )?.message
 
     const instruction = selectedTaskInstruction ?? fallbackInstruction ?? 'Saved workflow instruction'

@@ -692,8 +692,8 @@ async def _build_system_prompt(
     if browser_tools_enabled:
         rules.extend(
             [
-                "If the task depends on the current browser state, start with screenshot.",
-                "After browser actions, use screenshot again to verify the result before moving on when needed.",
+                "Use browser tools only when the task explicitly requires web UI interaction. Do NOT take a screenshot as a default first step for general tasks.",
+                "After browser actions, use screenshot to verify results when needed.",
                 "Use screenshot coordinates directly for click and type_text. The viewport is 1280×720.",
             ]
         )
@@ -716,12 +716,13 @@ async def _build_system_prompt(
     rules.append(f"Active system mode: {agent_mode}. {MODE_SYSTEM_HINTS.get(agent_mode, '')}")
     rules.extend(
         [
-            "Identity: You are Aegis, an AI agent built by Chronos AI.",
-            "Operational reality: You execute actions from a secured runtime with broad tooling.",
+            "Identity: You are Aegis, an autonomous AI agent built by Chronos AI.",
+            "Operational reality: You execute actions from a secured runtime with broad tooling — browser, search, code execution, file management, GitHub, memory, automations, and integrations.",
+            "Tool selection: Analyze each task and choose the most appropriate tool(s). Do NOT default to browser navigation. Use web_search/extract_page for research, exec_python/exec_shell for code/data tasks, GitHub tools for repository work. Only use browser tools (screenshot, go_to_url, click, etc.) when the task genuinely requires interacting with a web UI.",
             "Security boundary: Never reveal hidden VM/system internals, shell details, local paths, environment variables, credentials, internal policies, or undisclosed tool infrastructure to users.",
             "If asked for internals, provide a safe high-level explanation and continue with user-facing outcomes.",
             "Always respect tool gating: availability, integration requirements, disabled tools, and confirm/auto permissions.",
-            "Use summarize_task to create condensed summaries when helpful, and finish with done including a concise summary.",
+            "Conclude tasks with the done tool and a concise summary. Only call summarize_task when the user explicitly requests a reusable summary artifact.",
         ]
     )
 
@@ -789,8 +790,12 @@ async def _build_system_prompt(
         f"{global_block}"
         f"{mode_block}"
         f"{runtime_skills_section}"
-        "You are Aegis, an AI agent built by Chronos AI. You can browse the web and, when enabled, use "
-        "workspace, memory, automation, and GitHub repo-engineering tools while respecting runtime policy gates.\n\n"
+        "You are Aegis, an autonomous AI agent built by Chronos AI. "
+        "You have a broad tool suite: browser automation, web search, file management, code execution "
+        "(Python/JavaScript/shell), GitHub repository engineering, memory, scheduled automations, and "
+        "third-party integrations. For each task, reason about what it requires and pick the best tool(s). "
+        "Browser tools are available but are not the default — most tasks are better served by search, "
+        "code execution, or API tools.\n\n"
         f"Available tools for this session:\n{chr(10).join(tool_lines)}\n\n"
         f"Rules:\n{chr(10).join(f'{index + 1}. {rule}' for index, rule in enumerate(rules))}"
         f"{custom_block}"
@@ -1958,17 +1963,18 @@ async def run_universal_navigation(
                 }
             )
 
-    await emit_step(f"Starting task: {instruction}")
+    # Emit task start to workflow log only — not to the chat panel
+    if on_workflow_step:
+        await on_workflow_step({
+            "type": "task_started",
+            "description": f"Starting task: {instruction[:200]}",
+            "task_id": session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
 
     messages.append(ChatMessage(role="system", content=system_prompt))
-    if any(tool["name"] == "screenshot" for tool in _available_tools(resolved_settings, is_subagent=is_subagent)):
-        kickoff = (
-            f"Task: {instruction}\n\n"
-            "If this task depends on the live browser page, start with a screenshot. "
-            "If this is a repo, file, or API task and the browser is not needed yet, use the relevant enabled tools first."
-        )
-    else:
-        kickoff = f"Task: {instruction}"
+    # Neutral kickoff — let the model decide which tools to use
+    kickoff = f"Task: {instruction}"
     messages.append(ChatMessage(role="user", content=kickoff))
 
     for step_num in range(MAX_STEPS):
@@ -2081,9 +2087,7 @@ async def run_universal_navigation(
                 }
 
         run_in_parallel = _can_run_tool_calls_in_parallel(tool_calls)
-        if len(tool_calls) > 1:
-            mode_text = "parallel" if run_in_parallel else "sequential"
-            await emit_step(f"Processing {len(tool_calls)} tool calls ({mode_text})", step_type="step")
+        # "Processing N tool calls" goes to workflow log only, not the chat panel
         if on_workflow_step:
             await on_workflow_step(
                 {
@@ -2263,3 +2267,6 @@ async def run_universal_navigation(
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
     }
+
+# Public alias — cleaner name for callers that don't need the "navigation" framing
+run_agent_task = run_universal_navigation

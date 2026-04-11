@@ -24,6 +24,7 @@ export type LogEntry = {
   stepKind: 'analyze' | 'click' | 'type' | 'scroll' | 'navigate' | 'other'
   elapsedSeconds: number
   stepId?: string           // links reasoning to its step
+  isUserMessage?: boolean   // true when this entry represents the user's task instruction
 }
 
 export type TranscriptEntry = {
@@ -257,13 +258,13 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         if (basePath.endsWith('/api')) {
           basePath = basePath.slice(0, -4)
         }
-        wsUrl = `${protocol}//${parsed.host}${basePath}/ws/navigate`
+        wsUrl = `${protocol}//${parsed.host}${basePath}/ws/agent`
       } catch {
         wsUrl = ''
       }
     }
     if (!wsUrl) {
-      wsUrl = `${window.location.origin.replace('http', 'ws')}/ws/navigate`
+      wsUrl = `${window.location.origin.replace('http', 'ws')}/ws/agent`
     }
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
@@ -773,7 +774,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const send = useCallback(
     (message: Record<string, unknown>) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        if (message.action === 'navigate') {
+        if (message.action === 'navigate' || message.action === 'task') {
           const nextTaskId = crypto.randomUUID()
           const requestId = crypto.randomUUID()
           activeTaskIdRef.current = nextTaskId
@@ -787,6 +788,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             status: 'in_progress',
             stepKind: 'navigate',
             elapsedSeconds: 0,
+            isUserMessage: true,
           })
           const maybeUrl = String(message.instruction ?? '')
           if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
