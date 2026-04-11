@@ -145,6 +145,8 @@ const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generat
 const CHAT_HARD_DENY_PREFIXES = [
   'Session settings updated',
   'Workflow step update',
+  'Starting task:',
+  'Processing ',
 ]
 
 function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
