@@ -603,14 +603,16 @@ function ToolCallCard({ msg }: { msg: ChatMessage }) {
   const isDone    = msg.toolStatus === 'completed'
   const [collapsed, setCollapsed] = useState(false)
 
-  // Auto-collapse 1.5s after completion using CSS transition (no re-render loop)
+  // Auto-collapse 1.5s after completion using CSS transition (no re-render loop).
+  // Always return a cleanup so the timer is cancelled on unmount regardless of isDone state.
   const doneRef = useRef(false)
   useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined
     if (isDone && !doneRef.current) {
       doneRef.current = true
-      const t = setTimeout(() => setCollapsed(true), 1500)
-      return () => clearTimeout(t)
+      t = setTimeout(() => setCollapsed(true), 1500)
     }
+    return () => clearTimeout(t)
   }, [isDone])
 
   let toolName = msg.toolName ?? 'tool'
