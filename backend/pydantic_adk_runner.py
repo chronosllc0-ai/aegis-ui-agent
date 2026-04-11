@@ -163,15 +163,17 @@ async def run_pydantic_adk_navigation(
         )
 
         tool_steps = 0
+        tool_steps_lock = asyncio.Lock()
 
         @agent.tool_plain(name="run_tool")
         async def run_tool(tool: str, args_json: str = "{}") -> str:
             nonlocal tool_steps
-            tool_steps += 1
-            if tool_steps > MAX_TOOL_STEPS:
-                raise _PydanticRuntimeLimitExceeded(
-                    f"Exceeded max tool steps ({MAX_TOOL_STEPS}) in non-Gemini runtime."
-                )
+            async with tool_steps_lock:
+                tool_steps += 1
+                if tool_steps > MAX_TOOL_STEPS:
+                    raise _PydanticRuntimeLimitExceeded(
+                        f"Exceeded max tool steps ({MAX_TOOL_STEPS}) in non-Gemini runtime."
+                    )
             try:
                 payload = json.loads(args_json) if args_json.strip() else {}
             except json.JSONDecodeError as exc:

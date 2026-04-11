@@ -1,3 +1,30 @@
+## Session 5.70 - April 11, 2026 (Follow-up review fix: async-safe tool step cap)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused backend concurrency fix pass
+
+### What Was Done
+- Addressed follow-up review warning in `backend/pydantic_adk_runner.py` for step-counter race safety.
+- Added `tool_steps_lock = asyncio.Lock()` scoped to the runtime invocation.
+- Wrapped `tool_steps` increment + max-step validation in `async with tool_steps_lock:` inside `run_tool(...)` so concurrent tool invocations cannot bypass the step cap through interleaving updates.
+
+### What's Working
+- Tool-step accounting is now serialized per navigation run.
+- Existing step-limit behavior and failure messaging remain unchanged.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add a targeted async test that simulates concurrent `run_tool` invocations and asserts deterministic enforcement of `MAX_TOOL_STEPS`.
+
+### Decisions Made
+- Kept lock scope minimal (increment/check only) to avoid unnecessary contention around tool execution itself.
+
+### Blockers
+- None.
+
+---
 ## Session 5.69 - April 11, 2026 (Post-merge review bugfix sweep on `main`)
 
 **Agent:** GPT-5.3-Codex
