@@ -387,7 +387,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         }
         setExecutionState('completed')
         setIsWorking(false)
-        appendLog({ message: `[summarize_task] ${String(payload.data?.summary ?? 'Task completed')}`, taskId, type: 'result', status: 'completed' })
+        // The model's actual response was already emitted as a step — don't double-print.
+        // Only surface a fallback summary if no step content came through.
         return
       }
       if (payload.type === 'task_error') {
@@ -409,11 +410,14 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const content = String(payload.data?.content ?? payload.data?.type ?? 'Step update')
         const urlMatch = content.match(/https?:\/\/[^\s)]+/)
         if (urlMatch?.[0]) setCurrentUrl(urlMatch[0])
+        // assistant_message = direct model text reply (no tools used); treat as a
+        // completed result so ChatPanel renders it as a plain assistant bubble.
+        const isAssistantMsg = stepType === 'assistant_message' || stepType === 'result'
         appendLog({
           message: content,
           taskId,
-          type: stepType === 'interrupt' ? 'interrupt' : 'step',
-          status: stepType === 'steer' ? 'steered' : 'in_progress',
+          type: stepType === 'interrupt' ? 'interrupt' : isAssistantMsg ? 'result' : 'step',
+          status: isAssistantMsg ? 'completed' : stepType === 'steer' ? 'steered' : 'in_progress',
         })
         return
       }
@@ -774,7 +778,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const send = useCallback(
     (message: Record<string, unknown>) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        if (message.action === 'navigate' || message.action === 'task') {
+        if (message.action === 'navigate' || message.action === 'task' || message.action === 'chat' || message.action === 'message') {
           const nextTaskId = crypto.randomUUID()
           const requestId = crypto.randomUUID()
           activeTaskIdRef.current = nextTaskId
@@ -792,14 +796,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           })
           const maybeUrl = String(message.instruction ?? '')
           if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
-          appendLog({
-            message: 'Starting…',
-            taskId: nextTaskId,
-            type: 'step',
-            status: 'in_progress',
-            stepKind: 'navigate',
-            elapsedSeconds: 0,
-          })
           // Embed frontend task ID in metadata so backend can scope sub-agents to this task
           const existingMeta = (message.metadata as Record<string, unknown> | undefined) ?? {}
           const pendingStart = pendingStartRef.current

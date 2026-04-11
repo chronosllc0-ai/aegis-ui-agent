@@ -139,12 +139,10 @@ interface ConnectorMeta {
 }
 
 // ─── Log parsing ──────────────────────────────────────────────────────────────
-const RE_MODEL_RESPONSE  = /^Model response/i
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
+// Noise entries that are workflow-internal and never belong in the chat thread
 const CHAT_HARD_DENY_PREFIXES = [
-  '(no tool call):',
-  'Model response (no tool call):',
   'Session settings updated',
   'Workflow step update',
   'Starting task:',
@@ -230,13 +228,10 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     const isUser       = entry.isUserMessage === true
     const isGenerating = entry.type === 'step' && RE_GENERATION_TOOL.test(msg)
     const isApproval   = entry.type === 'interrupt'
-    const isModelResponse = entry.type === 'step' && RE_MODEL_RESPONSE.test(msg)
-    const isToolCall   = entry.type === 'step' && !isUser && !isModelResponse && RE_TOOL_CALL.test(msg)
-    const isStepText   = entry.type === 'step' && !isUser && !isGenerating && !isModelResponse && !isToolCall
+    const isToolCall   = entry.type === 'step' && !isUser && RE_TOOL_CALL.test(msg)
+    const isStepText   = entry.type === 'step' && !isUser && !isGenerating && !isToolCall
 
-    const displayText  = isModelResponse
-      ? msg.replace(/^Model response[:\s]*/i, '').trim()
-      : msg
+    const displayText  = msg
 
     if (isApproval) {
       msgs.push({ id: entry.id, role: 'approval', text: displayText })
@@ -244,10 +239,6 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     }
     if (isGenerating) {
       msgs.push({ id: entry.id, role: 'generating', text: displayText })
-      continue
-    }
-    if (isModelResponse) {
-      msgs.push({ id: entry.id, role: 'assistant', text: displayText })
       continue
     }
     if (isToolCall) {
