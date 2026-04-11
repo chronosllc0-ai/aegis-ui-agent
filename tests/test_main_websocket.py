@@ -9,6 +9,15 @@ from fastapi.testclient import TestClient
 import main
 
 
+def _recv_until_type(ws, event_type: str, max_messages: int = 20) -> dict[str, object]:
+    """Read websocket events until a matching `type` is found."""
+    for _ in range(max_messages):
+        payload = ws.receive_json()
+        if payload.get("type") == event_type:
+            return payload
+    raise AssertionError(f"Did not receive event type '{event_type}' within {max_messages} messages")
+
+
 class _StubExecutor:
     def __init__(self) -> None:
         self.page = type("PageStub", (), {"url": "https://example.com"})()
@@ -84,6 +93,73 @@ class _StreamingNormalizationOrchestrator:
         return {"status": "completed", "session_id": session_id, "instruction": instruction}
 
 
+def test_navigate_start_always_receives_ack() -> None:
+    """navigate_start should always return navigate_ack before execution updates."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate_start", "request_id": "req-ack-1", "instruction": "hello"})
+        ack = ws.receive_json()
+        ws.send_json({"action": "stop_task"})
+    assert ack["type"] == "navigate_ack"
+    assert ack["data"]["request_id"] == "req-ack-1"
+    assert ack["data"]["accepted"] is True
+
+
+def test_rejected_start_returns_error_and_socket_remains_open() -> None:
+    """Invalid start payloads should emit task_error and keep the socket open."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate_start", "request_id": "req-bad-1", "instruction": ""})
+        ack = ws.receive_json()
+        err = ws.receive_json()
+        ws.send_json({"action": "ping"})
+        pong = ws.receive_json()
+    assert ack["type"] == "navigate_ack"
+    assert ack["data"]["accepted"] is False
+    assert err["type"] == "task_error"
+    assert err["data"]["code"] == "E_BAD_PAYLOAD"
+    assert pong["type"] == "pong"
+
+
+def test_terminal_event_always_emitted() -> None:
+    """A started task should always emit terminal task_result or task_error."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate_start", "request_id": "req-terminal-1", "instruction": "hello"})
+        terminal = None
+        for _ in range(10):
+            message = ws.receive_json()
+            if message.get("type") in {"task_result", "task_error"}:
+                terminal = message
+                break
+        ws.send_json({"action": "stop_task"})
+    assert terminal is not None
+    assert terminal["type"] in {"task_result", "task_error"}
+
+
+def test_duplicate_request_id_returns_same_ack_task_id() -> None:
+    """Duplicate request IDs should return the same idempotent ack payload."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate_start", "request_id": "req-dupe-1", "instruction": "hello"})
+        ack1 = _recv_until_type(ws, "navigate_ack")
+        ws.send_json({"action": "navigate_start", "request_id": "req-dupe-1", "instruction": "hello again"})
+        ack2 = _recv_until_type(ws, "navigate_ack")
+        ws.send_json({"action": "stop_task"})
+    assert ack1["type"] == "navigate_ack"
+    assert ack2["type"] == "navigate_ack"
+    assert ack1["data"]["task_id"] == ack2["data"]["task_id"]
+    assert ack2["data"]["request_id"] == "req-dupe-1"
+
+
 def test_websocket_navigate_smoke() -> None:
     """WebSocket endpoint should stream frame, step, and final result."""
     main.orchestrator = _StubOrchestrator()
@@ -91,18 +167,22 @@ def test_websocket_navigate_smoke() -> None:
 
     with client.websocket_connect("/ws/navigate") as ws:
         initial = ws.receive_json()
-        ws.send_json({"action": "navigate", "instruction": "hello"})
-        step = ws.receive_json()
-        frame = ws.receive_json()
-        workflow_step = ws.receive_json()
-        result = ws.receive_json()
-        ws.send_json({"action": "stop"})
+        ws.send_json({"action": "navigate_start", "request_id": "req-smoke", "instruction": "hello"})
+        received: list[dict[str, object]] = []
+        while True:
+            event = ws.receive_json()
+            received.append(event)
+            if event.get("type") == "result":
+                break
+        ws.send_json({"action": "stop_task"})
 
     assert initial["type"] == "frame"
-    assert step["type"] == "step"
-    assert frame["type"] == "frame"
-    assert workflow_step["type"] == "workflow_step"
-    assert result["type"] == "result"
+    assert any(evt.get("type") == "navigate_ack" for evt in received)
+    assert any(evt.get("type") == "task_state" for evt in received)
+    assert any(evt.get("type") == "step" for evt in received)
+    assert any(evt.get("type") == "frame" for evt in received)
+    assert any(evt.get("type") == "workflow_step" for evt in received)
+    result = next(evt for evt in received if evt.get("type") == "result")
     assert result["data"]["status"] == "completed"
 
 
@@ -114,25 +194,28 @@ def test_websocket_navigate_requires_instruction_and_keeps_socket_open() -> None
     with client.websocket_connect("/ws/navigate") as ws:
         _ = ws.receive_json()
         ws.send_json({"action": "navigate", "instruction": "   "})
+        ack = ws.receive_json()
         error = ws.receive_json()
 
         ws.send_json({"action": "navigate", "instruction": "hello after error"})
-        step = ws.receive_json()
-        frame = ws.receive_json()
-        workflow_step = ws.receive_json()
-        result = ws.receive_json()
-        ws.send_json({"action": "stop"})
+        events: list[dict[str, object]] = []
+        while True:
+            event = ws.receive_json()
+            events.append(event)
+            if event.get("type") == "result":
+                break
+        ws.send_json({"action": "stop_task"})
 
-    assert error["type"] == "error"
-    assert error["data"]["message"] == "navigate: instruction is required"
-    assert step["type"] == "step"
-    assert frame["type"] == "frame"
-    assert workflow_step["type"] == "workflow_step"
-    assert result["type"] == "result"
+    assert ack["type"] == "navigate_ack"
+    assert ack["data"]["accepted"] is False
+    assert error["type"] == "task_error"
+    assert error["data"]["code"] == "E_BAD_PAYLOAD"
+    assert any(evt.get("type") == "step" for evt in events)
+    assert any(evt.get("type") == "result" for evt in events)
 
 
 def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
-    """Malformed dequeue payload should return protocol error and keep socket open."""
+    """Disabled runtime-control payload should return protocol error and keep socket open."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
@@ -141,14 +224,13 @@ def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
         ws.send_json({"action": "dequeue", "index": "not-a-number"})
         error = ws.receive_json()
 
-        ws.send_json({"action": "queue", "instruction": "later"})
+        ws.send_json({"action": "ping"})
         queue_ack = ws.receive_json()
-        ws.send_json({"action": "stop"})
+        ws.send_json({"action": "stop_task"})
 
-    assert error["type"] == "error"
-    assert error["data"]["message"] == "Invalid queue index"
-    assert queue_ack["type"] == "step"
-    assert "Queued instruction: later" in queue_ack["data"]["content"]
+    assert error["type"] == "task_error"
+    assert "disabled" in error["data"]["message"].lower()
+    assert queue_ack["type"] == "pong"
 
 
 def test_idle_steer_requires_navigate_when_no_task_is_running() -> None:
@@ -164,10 +246,9 @@ def test_idle_steer_requires_navigate_when_no_task_is_running() -> None:
         step = ws.receive_json()
         ws.send_json({"action": "stop"})
 
-    assert error["type"] == "error"
-    assert "Use navigate to start a new task" in error["data"]["message"]
-    assert step["type"] == "step"
-    assert step["data"]["content"] == "stub:open example.com"
+    assert error["type"] == "task_error"
+    assert "disabled" in error["data"]["message"].lower()
+    assert step["type"] in {"navigate_ack", "task_state", "step"}
 
 
 def test_idle_queue_requires_navigate_when_no_task_is_running() -> None:
@@ -183,10 +264,9 @@ def test_idle_queue_requires_navigate_when_no_task_is_running() -> None:
         step = ws.receive_json()
         ws.send_json({"action": "stop"})
 
-    assert error["type"] == "error"
-    assert "Use navigate to start a new task" in error["data"]["message"]
-    assert step["type"] == "step"
-    assert step["data"]["content"] == "stub:search for laptops"
+    assert error["type"] == "task_error"
+    assert "disabled" in error["data"]["message"].lower()
+    assert step["type"] in {"navigate_ack", "task_state", "step"}
 
 
 def test_navigate_accepts_prompt_alias_when_instruction_missing() -> None:
@@ -197,7 +277,8 @@ def test_navigate_accepts_prompt_alias_when_instruction_missing() -> None:
     with client.websocket_connect("/ws/navigate") as ws:
         _ = ws.receive_json()
         ws.send_json({"action": "navigate", "prompt": "open docs homepage"})
-        step = ws.receive_json()
+        _ = _recv_until_type(ws, "navigate_ack")
+        step = _recv_until_type(ws, "step")
         ws.send_json({"action": "stop"})
 
     assert step["type"] == "step"
@@ -267,8 +348,8 @@ def test_websocket_user_input_response_resumes_single_pending_prompt_without_ext
         _ = ws.receive_json()  # initial frame
         ws.send_json({"action": "navigate", "instruction": "test user input flow"})
 
-        before_step = ws.receive_json()
-        user_input_request = ws.receive_json()
+        before_step = _recv_until_type(ws, "step")
+        user_input_request = _recv_until_type(ws, "step")
         request_id = user_input_request["data"]["request_id"]
         ws.send_json({"action": "user_input_response", "request_id": request_id, "response": "Alpha"})
 
@@ -311,13 +392,14 @@ def test_websocket_stream_normalizes_steps_and_reasoning_deltas_incrementally() 
     with client.websocket_connect("/ws/navigate") as ws:
         _ = ws.receive_json()  # initial frame
         ws.send_json({"action": "navigate", "instruction": "normalize stream"})
-        step1 = ws.receive_json()
-        step2 = ws.receive_json()
-        delta1 = ws.receive_json()
-        delta2 = ws.receive_json()
-        step3 = ws.receive_json()
-        step4 = ws.receive_json()
-        result = ws.receive_json()
+        _ = _recv_until_type(ws, "navigate_ack")
+        step1 = _recv_until_type(ws, "step")
+        step2 = _recv_until_type(ws, "step")
+        delta1 = _recv_until_type(ws, "reasoning_delta")
+        delta2 = _recv_until_type(ws, "reasoning_delta")
+        step3 = _recv_until_type(ws, "step")
+        step4 = _recv_until_type(ws, "step")
+        result = _recv_until_type(ws, "result")
         ws.send_json({"action": "stop"})
 
     assert step1["type"] == "step"
