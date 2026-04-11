@@ -48,7 +48,7 @@ from backend.user_memory import (
     write_memory,
     patch_memory,
     add_automation,
-    list_automations as _list_automations,
+    list_automations_for_session as _list_automations,
     remove_automation,
     read_heartbeat,
 )
