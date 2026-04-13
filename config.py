@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     AEGIS_GLOBAL_SYSTEM_INSTRUCTION: str = ""
 
     # ── Default provider / model ─────────────────────────────────────
-    DEFAULT_PROVIDER: str = "google"
-    DEFAULT_MODEL: str = "gemini-2.5-pro"
+    DEFAULT_PROVIDER: str = "chronos"
+    DEFAULT_MODEL: str = "nvidia/nemotron-3-super-120b-a12b:free"
 
     # ── Encryption (for BYOK key storage) ────────────────────────────
     ENCRYPTION_SECRET: str = "change-me-in-production"
