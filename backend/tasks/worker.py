@@ -65,7 +65,8 @@ class BackgroundWorker:
 
     async def _execute_task(self, task_id: str, task_type: str, payload_json: str, user_id: str) -> None:
         async with self._semaphore:
-            payload = json.loads(payload_json) if payload_json else {}
+            try:
+                payload = json.loads(payload_json) if payload_json else {}
             await self._emit(
                 user_id,
                 {
