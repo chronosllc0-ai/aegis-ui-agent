@@ -26,11 +26,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from aegis_logging import setup_logging
 from auth import router as auth_router, _verify_session
 from backend.admin import admin_router
+from backend.admin.runtime import set_runtime_inspector
 from backend import database
 from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
 from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
+from backend.integrations.channel_runtime import ChannelRuntimeRegistry, DiscordChannelAdapter, SlackChannelAdapter, TelegramChannelAdapter
 from backend.integrations.text_normalization import normalize_for_channel
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
@@ -52,6 +54,7 @@ from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
 from backend.session_gateway import SessionEventHub
+from backend.session_lanes import QueuedInstruction, SessionLaneQueue
 from backend.conversation_service import append_message, get_or_create_conversation
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -261,63 +264,6 @@ def _get_current_user(request: Request) -> dict[str, Any]:
 # ── Integration registries ────────────────────────────────────────────
 
 
-class TelegramRegistry:
-    """In-memory telegram integration registry for webhook routing."""
-
-    def __init__(self) -> None:
-        self._integrations: dict[str, TelegramIntegration] = {}
-        self._configs: dict[str, dict[str, Any]] = {}
-
-    def get_telegram(self, integration_id: str) -> TelegramIntegration | None:
-        return self._integrations.get(integration_id)
-
-    def get_config(self, integration_id: str) -> dict[str, Any]:
-        return self._configs.get(integration_id, {})
-
-    def upsert(self, integration_id: str, integration: TelegramIntegration, config: dict[str, Any]) -> None:
-        self._integrations[integration_id] = integration
-        self._configs[integration_id] = config
-
-
-telegram_registry = TelegramRegistry()
-
-
-class SlackRegistry:
-    """In-memory slack integration registry."""
-
-    def __init__(self) -> None:
-        self._integrations: dict[str, SlackIntegration] = {}
-        self._configs: dict[str, dict[str, Any]] = {}
-
-    def get_slack(self, integration_id: str) -> SlackIntegration | None:
-        return self._integrations.get(integration_id)
-
-    def get_config(self, integration_id: str) -> dict[str, Any]:
-        return self._configs.get(integration_id, {})
-
-    def upsert(self, integration_id: str, integration: SlackIntegration, config: dict[str, Any]) -> None:
-        self._integrations[integration_id] = integration
-        self._configs[integration_id] = config
-
-
-class DiscordRegistry:
-    """In-memory discord integration registry."""
-
-    def __init__(self) -> None:
-        self._integrations: dict[str, DiscordIntegration] = {}
-        self._configs: dict[str, dict[str, Any]] = {}
-
-    def get_discord(self, integration_id: str) -> DiscordIntegration | None:
-        return self._integrations.get(integration_id)
-
-    def get_config(self, integration_id: str) -> dict[str, Any]:
-        return self._configs.get(integration_id, {})
-
-    def upsert(self, integration_id: str, integration: DiscordIntegration, config: dict[str, Any]) -> None:
-        self._integrations[integration_id] = integration
-        self._configs[integration_id] = config
-
-
 class GitHubRegistry:
     """In-memory github integration registry."""
 
@@ -336,14 +282,75 @@ class GitHubRegistry:
         self._configs[integration_id] = config
 
 
-slack_registry = SlackRegistry()
-discord_registry = DiscordRegistry()
+channel_registry = ChannelRuntimeRegistry()
 github_registry = GitHubRegistry()
 
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
 _session_runtimes: dict[str, "SessionRuntime"] = {}
+
+
+def _get_channel_adapter(platform: str, integration_id: str) -> Any:
+    return channel_registry.get_adapter(platform, integration_id)
+
+
+def _get_channel_integration(platform: str, integration_id: str) -> Any:
+    return channel_registry.get_integration(platform, integration_id)
+
+
+def _get_channel_config(platform: str, integration_id: str) -> dict[str, Any]:
+    return channel_registry.get_config(platform, integration_id)
+
+
+def _channel_title(platform: str, destination: str) -> str:
+    return f"{platform.title()} {destination}"
+
+
+def _build_channel_command_metadata(platform: str, response: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    if platform == "telegram" and isinstance(response.get("reply_markup"), dict):
+        metadata["reply_markup"] = response["reply_markup"]
+    if platform == "slack" and isinstance(response.get("blocks"), list):
+        metadata["blocks"] = response["blocks"]
+    if platform == "discord" and isinstance(response.get("components"), list):
+        metadata["components"] = response["components"]
+    return metadata
+
+
+async def _send_channel_text(
+    platform: str,
+    integration_id: str,
+    destination: str,
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    log_source: str = "send_message",
+    draft: bool = False,
+) -> dict[str, Any]:
+    adapter = _get_channel_adapter(platform, integration_id)
+    if adapter is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    outgoing_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    parse_mode = str(outgoing_metadata.get("parse_mode", "")).strip() or None
+    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel=platform, parse_mode=parse_mode)
+    if normalized_parse_mode:
+        outgoing_metadata["parse_mode"] = normalized_parse_mode
+    if draft:
+        outgoing_metadata["draft"] = True
+    result = await adapter.send_text(destination, normalized_text, metadata=outgoing_metadata)
+    config = _get_channel_config(platform, integration_id)
+    if bool(result.get("ok")):
+        await _log_platform_message(
+            str(config.get("owner_user_id", "")).strip() or None,
+            platform=platform,
+            platform_chat_id=destination,
+            role="assistant",
+            content=normalized_text,
+            title=_channel_title(platform, destination),
+            metadata={"integration_id": integration_id, "source": log_source, "draft": draft},
+        )
+    return result
 
 
 async def _dispatch_background_task_event(user_id: str, event: dict[str, Any]) -> None:
@@ -489,7 +496,7 @@ class SessionRuntime:
         self.current_task: asyncio.Task[None] | None = None
         self.cancel_event = asyncio.Event()
         self.steering_context: list[str] = []
-        self.queued_instructions: list[str] = []
+        self.queued_instructions = SessionLaneQueue()
         self.settings: dict[str, Any] = {}
         self.conversation_id: str | None = None
         self.user_uid: str | None = None
