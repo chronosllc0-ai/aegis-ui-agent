@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+TaskEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 from backend.database import _session_factory
 from backend.tasks.service import TaskQueueService
@@ -13,12 +19,17 @@ from backend.tasks.service import TaskQueueService
 class BackgroundWorker:
     """Async background worker that processes queued tasks."""
 
-    def __init__(self, max_concurrent: int = 3, poll_interval: float = 5.0) -> None:
+    def __init__(self, max_concurrent: int = 3, poll_interval: float = 5.0, event_sink: TaskEventSink | None = None) -> None:
         self.max_concurrent = max_concurrent
         self.poll_interval = poll_interval
         self._running = False
         self._task: asyncio.Task | None = None
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._event_sink = event_sink
+
+    def set_event_sink(self, event_sink: TaskEventSink | None) -> None:
+        """Attach a runtime event sink for live task updates."""
+        self._event_sink = event_sink
 
     async def start(self) -> None:
         if self._running:
@@ -57,8 +68,22 @@ class BackgroundWorker:
 
     async def _execute_task(self, task_id: str, task_type: str, payload_json: str, user_id: str) -> None:
         async with self._semaphore:
+            payload: dict[str, Any] = {}
             try:
-                payload = json.loads(payload_json) if payload_json else {}
+                payload_candidate = json.loads(payload_json) if payload_json else {}
+                payload = payload_candidate if isinstance(payload_candidate, dict) else {}
+                await self._emit(
+                    user_id,
+                    {
+                        "type": "background_task_update",
+                        "data": {
+                            "task_id": task_id,
+                            "task_type": task_type,
+                            "status": "running",
+                            "payload": payload,
+                        },
+                    },
+                )
                 handler = TASK_HANDLERS.get(task_type)
                 if not handler:
                     raise ValueError(f"Unknown task type: {task_type}")
@@ -66,10 +91,49 @@ class BackgroundWorker:
                 if _session_factory:
                     async with _session_factory() as db:
                         await TaskQueueService.mark_completed(db, task_id, result)
+                await self._emit(
+                    user_id,
+                    {
+                        "type": "background_task_result",
+                        "data": {
+                            "task_id": task_id,
+                            "task_type": task_type,
+                            "status": "completed",
+                            "payload": payload,
+                            "result": result,
+                        },
+                    },
+                )
             except Exception as exc:
                 if _session_factory:
                     async with _session_factory() as db:
                         await TaskQueueService.mark_failed(db, task_id, str(exc))
+                await self._emit(
+                    user_id,
+                    {
+                        "type": "background_task_result",
+                        "data": {
+                            "task_id": task_id,
+                            "task_type": task_type,
+                            "status": "failed",
+                            "payload": payload,
+                            "error": str(exc),
+                        },
+                    },
+                )
+
+    async def _emit(self, user_id: str, event: dict[str, Any]) -> None:
+        if self._event_sink is None:
+            return
+        try:
+            await self._event_sink(user_id, event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Background worker event sink failed user_id=%s event_type=%s error=%s",
+                user_id,
+                event.get("type"),
+                exc,
+            )
 
 
 async def _handle_plan_execution(task_id: str, user_id: str, payload: dict) -> dict:

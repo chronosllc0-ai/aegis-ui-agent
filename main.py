@@ -51,6 +51,7 @@ from backend.skills_hub.router import skills_hub_router
 from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
 from backend.tasks.worker import BackgroundWorker
+from backend.session_gateway import SessionEventHub
 from backend.conversation_service import append_message, get_or_create_conversation
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -112,87 +113,10 @@ app.include_router(skills_hub_router)
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
 key_manager = KeyManager(settings.ENCRYPTION_SECRET)
+session_events = SessionEventHub()
 db_init_task: asyncio.Task[None] | None = None
 db_init_error: str | None = None
 db_ready = False
-
-
-# ─── Ops port (port 8001) ─────────────────────────────────────────────────────
-
-class OpsManager:
-    """Manages multiplexed operations WebSocket connections.
-
-    Each session_id may have *multiple* simultaneous connections (multiple browser
-    tabs). Events are fanned out to all live sockets for that session so no tab
-    misses a background result.
-    """
-
-    def __init__(self) -> None:
-        self._connections: dict[str, list[WebSocket]] = {}  # session_id → [ws, ...]
-
-    async def connect(self, session_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
-        self._connections.setdefault(session_id, []).append(websocket)
-
-    def disconnect(self, session_id: str, websocket: WebSocket) -> None:
-        sockets = self._connections.get(session_id, [])
-        try:
-            sockets.remove(websocket)
-        except ValueError:
-            pass
-        if not sockets:
-            self._connections.pop(session_id, None)
-
-    async def send(self, session_id: str, event: dict[str, Any]) -> None:
-        dead: list[WebSocket] = []
-        for ws in list(self._connections.get(session_id, [])):
-            try:
-                await ws.send_json(event)
-            except Exception:  # noqa: BLE001
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(session_id, ws)
-
-    async def broadcast(self, event: dict[str, Any]) -> None:
-        for session_id in list(self._connections.keys()):
-            await self.send(session_id, event)
-
-
-ops_manager = OpsManager()
-
-ops_app = FastAPI(title="Aegis Ops Port", version="1.0.0")
-ops_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@ops_app.get("/health")
-async def ops_health() -> dict[str, str]:
-    """Health probe for Railway on the ops port."""
-    return {"status": "ok", "port": "ops"}
-
-
-@ops_app.websocket("/ws/ops")
-async def websocket_ops(websocket: WebSocket) -> None:
-    """Operations port — background tasks, sub-agents, heartbeat, cron results."""
-    session_id = websocket.query_params.get("session_id", str(uuid4()))
-    await ops_manager.connect(session_id, websocket)
-    try:
-        # Send initial ready event
-        await websocket.send_json({"type": "ops_ready", "data": {"session_id": session_id}})
-        # Keep connection alive, receiving pings
-        while True:
-            data = await websocket.receive_json()
-            if data.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        ops_manager.disconnect(session_id, websocket)
-    except Exception:  # noqa: BLE001
-        ops_manager.disconnect(session_id, websocket)
 background_worker = BackgroundWorker(max_concurrent=3, poll_interval=5.0)
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -422,20 +346,61 @@ _user_runtimes: dict[str, "SessionRuntime"] = {}
 _session_runtimes: dict[str, "SessionRuntime"] = {}
 
 
-async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
-    """Called by HeartbeatPinger when an automation is due.
+async def _dispatch_background_task_event(user_id: str, event: dict[str, Any]) -> None:
+    """Publish background-task lifecycle events onto active primary websocket sessions."""
+    if not user_id:
+        return
+    await session_events.publish_to_user(user_id, event, lane="background")
 
-    Uses the O(1) _session_runtimes reverse index instead of iterating all runtimes.
-    """
+
+async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
+    """Run or queue scheduled automations on the active primary session websocket."""
     runtime = _session_runtimes.get(session_id)
-    if runtime is not None:
-        logger.info("Heartbeat dispatch matched runtime uid=%s session=%s task=%s", runtime.user_uid, session_id, instruction)
-    else:
+    if runtime is None or runtime.websocket is None:
         logger.info("Heartbeat dispatch (no active runtime): session=%s task=%s", session_id, instruction)
-    # TODO: when dual-port ops is running, send via ops_manager
+        return
+
+    logger.info("Heartbeat dispatch matched runtime uid=%s session=%s task=%s", runtime.user_uid, session_id, instruction)
+    await session_events.publish_to_session(
+        session_id,
+        {
+            "type": "heartbeat_triggered",
+            "data": {
+                "instruction": instruction,
+                "state": "queued" if runtime.task_running else "starting",
+            },
+        },
+        lane="heartbeat",
+    )
+    if runtime.task_running:
+        runtime.queued_instructions.append(instruction)
+        await _send_step(
+            runtime.websocket,
+            {
+                "type": "queue",
+                "content": f"Automation queued: {instruction}",
+            },
+            runtime=runtime,
+            session_id=session_id,
+        )
+        return
+
+    runtime.current_request_id = f"heartbeat:{uuid4()}"
+    runtime.current_task_id = str(uuid4())
+    runtime.current_frontend_task_id = runtime.current_task_id
+    await _log_web_message(
+        runtime,
+        session_id,
+        "user",
+        instruction,
+        title=instruction[:200],
+        metadata={"source": "heartbeat", "action": "automation_dispatch"},
+    )
+    _start_navigation_task(runtime.websocket, runtime, session_id, instruction)
 
 
 _pinger = HeartbeatPinger(dispatch=_heartbeat_dispatch, interval_seconds=60)
+background_worker.set_event_sink(_dispatch_background_task_event)
 
 # Stream subscribers: user_uid -> {platform, integration_id, chat_id, last_sent_at}
 _stream_subscribers: dict[str, dict[str, Any]] = {}
@@ -528,6 +493,9 @@ class SessionRuntime:
         self.settings: dict[str, Any] = {}
         self.conversation_id: str | None = None
         self.user_uid: str | None = None
+        self.session_id: str | None = None
+        self.websocket: WebSocket | None = None
+        self.session_route_key: str | None = None
         # Pending user-input futures keyed by request_id
         self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
         # Tracks the frontend-generated task UUID for the currently active navigate action.
@@ -1384,16 +1352,12 @@ async def _run_navigation_task(
             on_user_input=None,
             parent_task_id=runtime.current_frontend_task_id,
         )
-        # Send updated agent list to frontend (main WS + ops port)
+        # Send updated agent list to frontend on the primary session websocket.
         subagent_list_event = {
             "type": "subagent_list",
             "data": {"agents": runtime.subagent_manager.list_agents()},
         }
         await websocket.send_json(subagent_list_event)
-        await ops_manager.send(session_id, {
-            "type": "subagent_result",
-            "data": {"sub_id": sub_id, "agents": runtime.subagent_manager.list_agents()},
-        })
         return sub_id
 
     async def _on_message_subagent(sub_id: str, message: str) -> bool:
@@ -1548,6 +1512,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     session_id = await live_manager.create_session()
     runtime = SessionRuntime()
     runtime.user_uid = _extract_websocket_user_uid(websocket)
+    runtime.session_id = session_id
+    runtime.websocket = websocket
+    session_route = session_events.register(
+        session_id,
+        user_uid=runtime.user_uid,
+        send=lambda payload: _safe_ws_send(websocket, payload, ws_session_id=session_id, phase="session_event"),
+    )
+    runtime.session_route_key = session_route.session_key
     if runtime.user_uid:
         _user_runtimes[runtime.user_uid] = runtime
     # O(1) reverse index for heartbeat dispatch
@@ -2038,6 +2010,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         if runtime.user_uid:
             _user_runtimes.pop(runtime.user_uid, None)
         _session_runtimes.pop(session_id, None)
+        session_events.unregister(session_id)
         await cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
 
@@ -3120,13 +3093,12 @@ if FRONTEND_DIST_DIR.exists():
 
 
 async def _start_servers() -> None:
-    """Start main app (PORT) and ops app (OPS_PORT) concurrently."""
+    """Start the primary FastAPI app on a single port."""
     import os as _os
+
     config_main = uvicorn.Config(app, host="0.0.0.0", port=int(_os.environ.get("PORT", settings.PORT)))
-    config_ops  = uvicorn.Config(ops_app, host="0.0.0.0", port=int(_os.environ.get("OPS_PORT", 8001)))
     server_main = uvicorn.Server(config_main)
-    server_ops  = uvicorn.Server(config_ops)
-    await asyncio.gather(server_main.serve(), server_ops.serve())
+    await server_main.serve()
 
 
 if __name__ == "__main__":
