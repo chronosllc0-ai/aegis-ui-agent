@@ -115,7 +115,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, opsConnectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -1253,7 +1253,6 @@ function App() {
                 onPrimarySend={dispatchPromptFromUI}
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
-                opsConnectionStatus={opsConnectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
                 onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setAppMode('browser') }}
                 latestFrame={latestFrame}

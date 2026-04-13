@@ -25,10 +25,6 @@ export default defineConfig({
         target: 'http://localhost:8000',
         ws: true,
       },
-      '/ws/ops': {
-        target: `ws://localhost:${process.env.OPS_PORT || 8001}`,
-        ws: true,
-      },
     },
   },
 })
