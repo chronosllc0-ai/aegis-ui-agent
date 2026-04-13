@@ -124,7 +124,8 @@ class BackgroundWorker:
         try:
             await self._event_sink(user_id, event)
         except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Event sink failed for user {user_id}: {e}", exc_info=False)
 
 
 async def _handle_plan_execution(task_id: str, user_id: str, payload: dict) -> dict:
