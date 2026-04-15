@@ -291,6 +291,59 @@ _user_runtimes: dict[str, "SessionRuntime"] = {}
 _session_runtimes: dict[str, "SessionRuntime"] = {}
 
 
+def _runtime_snapshot() -> dict[str, Any]:
+    route_snapshots = {item["session_id"]: item for item in session_events.snapshot()}
+    sessions: list[dict[str, Any]] = []
+    queued_total = 0
+
+    for session_id, runtime in sorted(_session_runtimes.items(), key=lambda item: item[0]):
+        queued_items = runtime.queued_instructions.snapshot()
+        queue_depth = len(queued_items)
+        queued_total += queue_depth
+        route_snapshot = route_snapshots.get(session_id, {})
+        sessions.append(
+            {
+                "session_id": session_id,
+                "session_key": runtime.session_route_key or route_snapshot.get("session_key"),
+                "user_uid": runtime.user_uid,
+                "conversation_id": runtime.conversation_id or route_snapshot.get("conversation_id"),
+                "task_running": runtime.task_running,
+                "current_task_id": runtime.current_task_id,
+                "current_request_id": runtime.current_request_id,
+                "queue_depth": queue_depth,
+                "queue_depth_by_lane": runtime.queued_instructions.depth_by_lane(),
+                "queued_instructions": [
+                    {
+                        "queue_id": item.queue_id,
+                        "instruction": item.instruction,
+                        "lane": item.lane,
+                        "source": item.source,
+                        "metadata": item.metadata,
+                        "enqueued_at": item.enqueued_at,
+                    }
+                    for item in queued_items
+                ],
+                "steering_context_depth": len(runtime.steering_context),
+                "subagent_count": len(runtime.subagent_manager.list_agents()),
+                "route": route_snapshot,
+            }
+        )
+
+    return {
+        "sessions": sessions,
+        "summary": {
+            "active_sessions": len(sessions),
+            "queued_instructions": queued_total,
+            "running_sessions": sum(1 for session in sessions if session["task_running"]),
+            "session_routes": len(route_snapshots),
+        },
+        "routes": list(route_snapshots.values()),
+    }
+
+
+set_runtime_inspector(_runtime_snapshot)
+
+
 def _get_channel_adapter(platform: str, integration_id: str) -> Any:
     return channel_registry.get_adapter(platform, integration_id)
 
@@ -353,6 +406,13 @@ async def _send_channel_text(
     return result
 
 
+def _channel_webhook_response(result: dict[str, Any]) -> dict[str, Any]:
+    response = result.get("response") if isinstance(result, dict) else None
+    if isinstance(response, dict):
+        return response
+    return {"ok": True, "result": result}
+
+
 async def _dispatch_background_task_event(user_id: str, event: dict[str, Any]) -> None:
     """Publish background-task lifecycle events onto active primary websocket sessions."""
     if not user_id:
@@ -380,7 +440,12 @@ async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
         lane="heartbeat",
     )
     if runtime.task_running:
-        runtime.queued_instructions.append(instruction)
+        runtime.queued_instructions.enqueue(
+            instruction,
+            lane="heartbeat",
+            source="heartbeat",
+            metadata={"session_id": session_id},
+        )
         await _send_step(
             runtime.websocket,
             {
@@ -1109,6 +1174,7 @@ async def _log_web_message(
                 title=title,
             )
             runtime.conversation_id = conv.id
+            session_events.bind_conversation(session_id, conv.id)
             await append_message(
                 db,
                 conv.id,
@@ -1138,17 +1204,18 @@ async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str
     integration_id = sub.get("integration_id")
     chat_id = sub.get("chat_id")
     if platform == "telegram":
-        integration = telegram_registry.get_telegram(integration_id)
+        integration = _get_channel_integration("telegram", str(integration_id))
         if integration:
-            asyncio.create_task(
-                integration.send_photo(chat_id, image_b64)
-            )
+            asyncio.create_task(integration.send_photo(chat_id, image_b64))
     elif platform == "discord":
-        integration = discord_registry.get_discord(integration_id)
+        integration = _get_channel_integration("discord", str(integration_id))
         if integration:
-            channel = sub.get("channel_id", chat_id)
+            channel = str(sub.get("channel_id", chat_id) or chat_id)
             asyncio.create_task(
-                integration.send_image(channel, image_b64)
+                integration.execute_tool(
+                    "discord_send_image",
+                    {"channel": channel, "image_b64": image_b64},
+                )
             )
 
 
@@ -1218,12 +1285,14 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
     if runtime.task_running or runtime.cancel_event.is_set() or not runtime.queued_instructions:
         return
 
-    queued_instruction = runtime.queued_instructions.pop(0)
+    queued_instruction = runtime.queued_instructions.pop_next()
+    if queued_instruction is None:
+        return
     await _send_step(
         websocket,
         {
             "type": "queue",
-            "content": f"Starting queued task: {queued_instruction}",
+            "content": f"Starting queued task ({queued_instruction.lane}): {queued_instruction.instruction}",
         },
         runtime=runtime,
         session_id=session_id,
@@ -1232,11 +1301,16 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
         runtime,
         session_id,
         "user",
-        queued_instruction,
-        title=queued_instruction[:200],
-        metadata={"source": "websocket", "action": "queue"},
+        queued_instruction.instruction,
+        title=queued_instruction.instruction[:200],
+        metadata={
+            "source": queued_instruction.source,
+            "action": "queue",
+            "lane": queued_instruction.lane,
+            "queue_metadata": queued_instruction.metadata,
+        },
     )
-    _start_navigation_task(websocket, runtime, session_id, queued_instruction)
+    _start_navigation_task(websocket, runtime, session_id, queued_instruction.instruction)
 
 
 async def _run_navigation_task(
@@ -1819,7 +1893,12 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         client_metadata=client_metadata,
                     )
                     continue
-                runtime.queued_instructions.append(instruction)
+                runtime.queued_instructions.enqueue(
+                    instruction,
+                    lane="interactive",
+                    source="websocket",
+                    metadata={"client": client_metadata, "task_label": task_label},
+                )
                 await _send_step(
                     websocket,
                     {"type": "queue", "content": f"Queued instruction: {instruction}"},
@@ -1842,11 +1921,11 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid queue index"}})
                     continue
 
-                if 0 <= index < len(runtime.queued_instructions):
-                    removed = runtime.queued_instructions.pop(index)
+                removed = runtime.queued_instructions.remove_at(index)
+                if removed is not None:
                     await _send_step(
                         websocket,
-                        {"type": "queue", "content": f"Removed queued instruction: {removed}"},
+                        {"type": "queue", "content": f"Removed queued instruction: {removed.instruction}"},
                         runtime=runtime,
                         session_id=session_id,
                     )
@@ -2063,10 +2142,11 @@ async def _log_platform_message(
 
 @app.post("/api/integrations/telegram/webhook/{integration_id}")
 async def telegram_webhook(integration_id: str, request: Request) -> dict[str, Any]:
-    integration = telegram_registry.get_telegram(integration_id)
-    if not integration:
+    adapter = _get_channel_adapter("telegram", integration_id)
+    integration = _get_channel_integration("telegram", integration_id)
+    if adapter is None or integration is None:
         raise HTTPException(status_code=404, detail="Integration not found")
-    config = telegram_registry.get_config(integration_id)
+    config = _get_channel_config("telegram", integration_id)
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if hasattr(integration, "validate_webhook_secret"):
         if not integration.validate_webhook_secret(secret):
@@ -2075,61 +2155,70 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
         expected_secret = str(config.get("webhook_secret", ""))
         if expected_secret and secret != expected_secret:
             raise HTTPException(status_code=403, detail="Invalid secret token")
+
     update = await request.json()
-    result = await integration.execute_tool("telegram_webhook_update", {"update": update})
+    result = await adapter.handle_event(update, dict(request.headers))
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
-    callback_mode, callback_mode_valid = _parse_telegram_mode_callback(update)
-    if callback_mode is not None:
+
+    callback_mode_raw = adapter.extract_mode_selection(update)
+    if callback_mode_raw is not None:
         callback_message = update.get("callback_query", {}).get("message", {})
         callback_chat_id = (callback_message.get("chat") or {}).get("id")
+        callback_destination = str(callback_chat_id) if callback_chat_id is not None else None
         if not owner_user_id:
-            if callback_chat_id is not None:
-                await integration.execute_tool(
-                    "telegram_send_message",
-                    {
-                        "chat_id": str(callback_chat_id),
-                        "text": "⚠️ Mode switching is only available for the owner session.",
-                    },
+            if callback_destination:
+                await _send_channel_text(
+                    "telegram",
+                    integration_id,
+                    callback_destination,
+                    "⚠️ Mode switching is only available for the owner session.",
+                    log_source="mode_switch",
                 )
-            return {"ok": True}
+            return _channel_webhook_response(result)
         runtime = _user_runtimes.get(owner_user_id)
         if not runtime:
-            if callback_chat_id is not None:
-                await integration.execute_tool(
-                    "telegram_send_message",
-                    {"chat_id": str(callback_chat_id), "text": "⚠️ No active session. Start a session first."},
+            if callback_destination:
+                await _send_channel_text(
+                    "telegram",
+                    integration_id,
+                    callback_destination,
+                    "⚠️ No active session. Start a session first.",
+                    log_source="mode_switch",
                 )
-            return {"ok": True}
-        if not callback_mode_valid:
-            if callback_chat_id is not None:
-                allowed = ", ".join(MODE_LABELS.keys())
-                await integration.execute_tool(
-                    "telegram_send_message",
-                    {
-                        "chat_id": str(callback_chat_id),
-                        "text": f"❌ Invalid mode selection. Allowed modes: {allowed}",
-                    },
+            return _channel_webhook_response(result)
+        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, callback_mode_raw)
+        if not mode_valid:
+            if callback_destination:
+                await _send_channel_text(
+                    "telegram",
+                    integration_id,
+                    callback_destination,
+                    f"❌ {mode_error}",
+                    log_source="mode_switch",
                 )
-            return {"ok": True}
-        runtime.settings["agent_mode"] = callback_mode
-        mode_label = MODE_LABELS.get(callback_mode, callback_mode.title())
-        if callback_chat_id is not None:
-            await integration.execute_tool(
-                "telegram_send_message",
-                {"chat_id": str(callback_chat_id), "text": f"✅ Mode switched to *{mode_label}*"},
+            return _channel_webhook_response(result)
+        if callback_destination:
+            await _send_channel_text(
+                "telegram",
+                integration_id,
+                callback_destination,
+                f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
+                log_source="mode_switch",
             )
-        return {"ok": True}
-    chat_id, text_content, platform_message_id = _extract_telegram_message(update)
+        return _channel_webhook_response(result)
 
-    # Slash command handling
+    inbound = adapter.extract_message(update)
+    chat_id = inbound.destination
+    text_content = inbound.text
+    platform_message_id = inbound.message_id
+
     if chat_id and text_content and text_content.startswith("/"):
         bot_cfg = _bot_configs.get(f"telegram:{integration_id}", {})
-        # Allow-from check
         allow_from = bot_cfg.get("allow_from", [])
         if allow_from:
             sender_id = str(_get_telegram_sender_id(update))
             if sender_id not in allow_from:
-                return {"ok": True}  # silently ignore unauthorized senders
+                return _channel_webhook_response(result)
         ack_reaction = bot_cfg.get("ack_reaction", "")
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -2139,19 +2228,24 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             chat_id=chat_id,
             ack_reaction=ack_reaction,
         )
-        if cmd_response:
-            if isinstance(cmd_response, dict):
-                await integration.execute_tool(
-                    "telegram_send_message",
-                    {
-                        "chat_id": chat_id,
-                        "text": str(cmd_response.get("text", "")),
-                        "reply_markup": cmd_response.get("reply_markup"),
-                    },
-                )
-            else:
-                await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": cmd_response})
-        return {"ok": True}
+        if isinstance(cmd_response, dict):
+            await _send_channel_text(
+                "telegram",
+                integration_id,
+                chat_id,
+                str(cmd_response.get("text", "")),
+                metadata=_build_channel_command_metadata("telegram", cmd_response),
+                log_source="slash_command",
+            )
+        elif cmd_response:
+            await _send_channel_text(
+                "telegram",
+                integration_id,
+                chat_id,
+                cmd_response,
+                log_source="slash_command",
+            )
+        return _channel_webhook_response(result)
 
     if chat_id and text_content:
         await _log_platform_message(
@@ -2164,7 +2258,8 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             metadata={"integration_id": integration_id, "source": "webhook"},
             platform_message_id=platform_message_id,
         )
-    return {"ok": True, "result": result}
+    return _channel_webhook_response(result)
+
 
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
@@ -2188,27 +2283,25 @@ async def register_telegram_integration(integration_id: str, payload: dict[str, 
     }
     integration = TelegramIntegration()
     connection = await integration.connect(config)
-    telegram_registry.upsert(integration_id, integration, config)
-    # Auto-register slash commands
+    channel_registry.upsert("telegram", integration_id, TelegramChannelAdapter(integration), config)
     if connection.get("connected"):
         asyncio.create_task(_register_telegram_commands(integration))
     return {"ok": True, "connection": connection}
 
 
+
 @app.post("/api/integrations/telegram/{integration_id}/test")
 async def test_telegram_integration(integration_id: str) -> dict[str, Any]:
-    integration = telegram_registry.get_telegram(integration_id)
-    if not integration:
+    adapter = _get_channel_adapter("telegram", integration_id)
+    if adapter is None:
         raise HTTPException(status_code=404, detail="Integration not found")
-    result = await integration.execute_tool("telegram_list_chats", {})
+    result = await adapter.test_connection()
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/telegram/{integration_id}/send_message")
 async def telegram_send_message(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    integration = telegram_registry.get_telegram(integration_id)
-    if not integration:
-        raise HTTPException(status_code=404, detail="Integration not found")
     try:
         chat_id = int(payload.get("chat_id"))
     except (TypeError, ValueError):
@@ -2217,30 +2310,25 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
     parse_mode = str(payload.get("parse_mode", "")).strip() or None
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
-    tool_payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text}
-    if normalized_parse_mode:
-        tool_payload["parse_mode"] = normalized_parse_mode
-    result = await integration.execute_tool("telegram_send_message", tool_payload)
-    config = telegram_registry.get_config(integration_id)
-    if bool(result.get("ok")):
-        await _log_platform_message(
-            str(config.get("owner_user_id", "")).strip() or None,
-            platform="telegram",
-            platform_chat_id=str(chat_id),
-            role="assistant",
-            content=normalized_text,
-            title=f"Telegram {chat_id}",
-            metadata={"integration_id": integration_id, "source": "send_message", "draft": False},
-        )
+    metadata: dict[str, Any] = {}
+    if parse_mode:
+        metadata["parse_mode"] = parse_mode
+    if isinstance(payload.get("reply_markup"), dict):
+        metadata["reply_markup"] = payload["reply_markup"]
+    result = await _send_channel_text(
+        "telegram",
+        integration_id,
+        str(chat_id),
+        text,
+        metadata=metadata,
+        log_source="send_message",
+    )
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/telegram/{integration_id}/send_draft")
 async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    integration = telegram_registry.get_telegram(integration_id)
-    if not integration:
-        raise HTTPException(status_code=404, detail="Integration not found")
     try:
         chat_id = int(payload.get("chat_id"))
     except (TypeError, ValueError):
@@ -2249,23 +2337,22 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
     parse_mode = str(payload.get("parse_mode", "")).strip() or None
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    normalized_text, normalized_parse_mode = normalize_for_channel(text, channel="telegram", parse_mode=parse_mode)
-    tool_payload: dict[str, Any] = {"chat_id": chat_id, "text": normalized_text, "draft": True}
-    if normalized_parse_mode:
-        tool_payload["parse_mode"] = normalized_parse_mode
-    result = await integration.execute_tool("telegram_send_message", tool_payload)
-    config = telegram_registry.get_config(integration_id)
-    if bool(result.get("ok")):
-        await _log_platform_message(
-            str(config.get("owner_user_id", "")).strip() or None,
-            platform="telegram",
-            platform_chat_id=str(chat_id),
-            role="assistant",
-            content=normalized_text,
-            title=f"Telegram {chat_id}",
-            metadata={"integration_id": integration_id, "source": "send_message", "draft": True},
-        )
+    metadata: dict[str, Any] = {}
+    if parse_mode:
+        metadata["parse_mode"] = parse_mode
+    if isinstance(payload.get("reply_markup"), dict):
+        metadata["reply_markup"] = payload["reply_markup"]
+    result = await _send_channel_text(
+        "telegram",
+        integration_id,
+        str(chat_id),
+        text,
+        metadata=metadata,
+        log_source="send_message",
+        draft=True,
+    )
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/slack/register/{integration_id}")
@@ -2278,48 +2365,70 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
     }
     integration = SlackIntegration()
     connection = await integration.connect(config)
-    slack_registry.upsert(integration_id, integration, config)
+    channel_registry.upsert("slack", integration_id, SlackChannelAdapter(integration), config)
     return {"ok": True, "connection": connection}
+
 
 
 @app.post("/api/integrations/slack/webhook/{integration_id}")
 async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Handle Slack events/interactions and route shared slash commands."""
-    integration = slack_registry.get_slack(integration_id)
-    if not integration:
+    adapter = _get_channel_adapter("slack", integration_id)
+    if adapter is None:
         raise HTTPException(status_code=404, detail="Integration not found")
     payload = await request.json()
-    result = await integration.execute_tool("slack_handle_event", {"payload": payload, "headers": dict(request.headers)})
-    owner_user_id = str(slack_registry.get_config(integration_id).get("owner_user_id", "")).strip() or None
+    result = await adapter.handle_event(payload, dict(request.headers))
+    owner_user_id = str(_get_channel_config("slack", integration_id).get("owner_user_id", "")).strip() or None
 
-    selected_mode_raw = SlackIntegration.extract_mode_selection(payload if isinstance(payload, dict) else {})
+    selected_mode_raw = adapter.extract_mode_selection(payload if isinstance(payload, dict) else {})
     if selected_mode_raw:
         channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
         if not owner_user_id:
             if channel:
-                await integration.execute_tool(
-                    "slack_send_message",
-                    {"channel": channel, "text": "⚠️ Mode switching is only available for the owner session."},
+                await _send_channel_text(
+                    "slack",
+                    integration_id,
+                    channel,
+                    "⚠️ Mode switching is only available for the owner session.",
+                    log_source="mode_switch",
                 )
-            return {"ok": True}
+            return _channel_webhook_response(result)
         runtime = _user_runtimes.get(owner_user_id)
         if not runtime:
             if channel:
-                await integration.execute_tool("slack_send_message", {"channel": channel, "text": "⚠️ No active session. Start a session first."})
-            return {"ok": True}
+                await _send_channel_text(
+                    "slack",
+                    integration_id,
+                    channel,
+                    "⚠️ No active session. Start a session first.",
+                    log_source="mode_switch",
+                )
+            return _channel_webhook_response(result)
         selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
         if not mode_valid:
             if channel:
-                await integration.execute_tool("slack_send_message", {"channel": channel, "text": f"❌ {mode_error}"})
-            return {"ok": True}
+                await _send_channel_text(
+                    "slack",
+                    integration_id,
+                    channel,
+                    f"❌ {mode_error}",
+                    log_source="mode_switch",
+                )
+            return _channel_webhook_response(result)
         if channel:
-            await integration.execute_tool(
-                "slack_send_message",
-                {"channel": channel, "text": f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*"},
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
+                log_source="mode_switch",
             )
-        return {"ok": True}
+        return _channel_webhook_response(result)
 
-    channel, text_content, platform_message_id = _extract_slack_message(payload if isinstance(payload, dict) else {})
+    inbound = adapter.extract_message(payload if isinstance(payload, dict) else {})
+    channel = inbound.destination
+    text_content = inbound.text
+    platform_message_id = inbound.message_id
     if channel and text_content and text_content.startswith("/"):
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -2329,13 +2438,23 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
             chat_id=channel,
         )
         if isinstance(cmd_response, dict):
-            await integration.execute_tool(
-                "slack_send_message",
-                {"channel": channel, "text": str(cmd_response.get("text", "")), "blocks": cmd_response.get("blocks")},
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                str(cmd_response.get("text", "")),
+                metadata=_build_channel_command_metadata("slack", cmd_response),
+                log_source="slash_command",
             )
         elif cmd_response:
-            await integration.execute_tool("slack_send_message", {"channel": channel, "text": cmd_response})
-        return {"ok": True}
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                cmd_response,
+                log_source="slash_command",
+            )
+        return _channel_webhook_response(result)
 
     if channel and text_content:
         await _log_platform_message(
@@ -2348,43 +2467,43 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
             metadata={"integration_id": integration_id, "source": "webhook"},
             platform_message_id=platform_message_id,
         )
-    return {"ok": True, "result": result}
+    return _channel_webhook_response(result)
+
 
 
 @app.post("/api/integrations/slack/{integration_id}/test")
 async def test_slack_integration(integration_id: str) -> dict[str, Any]:
-    integration = slack_registry.get_slack(integration_id)
-    if not integration:
+    adapter = _get_channel_adapter("slack", integration_id)
+    if adapter is None:
         raise HTTPException(status_code=404, detail="Integration not found")
-    result = await integration.execute_tool("slack_list_channels", {})
+    result = await adapter.test_connection()
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/slack/{integration_id}/send_message")
 async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    integration = slack_registry.get_slack(integration_id)
-    if not integration:
-        raise HTTPException(status_code=404, detail="Integration not found")
     channel = str(payload.get("channel", "")).strip()
     text = str(payload.get("text", "")).strip()
     if not channel:
         raise HTTPException(status_code=400, detail="Channel is required")
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    normalized_text, _ = normalize_for_channel(text, channel="slack")
-    result = await integration.execute_tool("slack_send_message", {"channel": channel, "text": normalized_text})
-    config = slack_registry.get_config(integration_id)
-    if bool(result.get("ok")):
-        await _log_platform_message(
-            str(config.get("owner_user_id", "")).strip() or None,
-            platform="slack",
-            platform_chat_id=channel,
-            role="assistant",
-            content=normalized_text,
-            title=f"Slack {channel}",
-            metadata={"integration_id": integration_id, "source": "send_message"},
-        )
+    metadata: dict[str, Any] = {}
+    if isinstance(payload.get("blocks"), list):
+        metadata["blocks"] = payload["blocks"]
+    if payload.get("thread_ts"):
+        metadata["thread_ts"] = str(payload["thread_ts"])
+    result = await _send_channel_text(
+        "slack",
+        integration_id,
+        channel,
+        text,
+        metadata=metadata,
+        log_source="send_message",
+    )
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/discord/register/{integration_id}")
@@ -2396,48 +2515,70 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
     }
     integration = DiscordIntegration()
     connection = await integration.connect(config)
-    discord_registry.upsert(integration_id, integration, config)
+    channel_registry.upsert("discord", integration_id, DiscordChannelAdapter(integration), config)
     return {"ok": True, "connection": connection}
+
 
 
 @app.post("/api/integrations/discord/webhook/{integration_id}")
 async def discord_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Handle Discord interactions/events and route shared slash commands."""
-    integration = discord_registry.get_discord(integration_id)
-    if not integration:
+    adapter = _get_channel_adapter("discord", integration_id)
+    if adapter is None:
         raise HTTPException(status_code=404, detail="Integration not found")
     payload = await request.json()
-    result = await integration.execute_tool("discord_handle_event", {"payload": payload, "headers": dict(request.headers)})
-    owner_user_id = str(discord_registry.get_config(integration_id).get("owner_user_id", "")).strip() or None
+    result = await adapter.handle_event(payload, dict(request.headers))
+    owner_user_id = str(_get_channel_config("discord", integration_id).get("owner_user_id", "")).strip() or None
 
-    selected_mode_raw = DiscordIntegration.extract_mode_selection(payload if isinstance(payload, dict) else {})
+    selected_mode_raw = adapter.extract_mode_selection(payload if isinstance(payload, dict) else {})
     if selected_mode_raw:
         channel = str(payload.get("channel_id") or "").strip()
         if not owner_user_id:
             if channel:
-                await integration.execute_tool(
-                    "discord_send_message",
-                    {"channel": channel, "text": "⚠️ Mode switching is only available for the owner session."},
+                await _send_channel_text(
+                    "discord",
+                    integration_id,
+                    channel,
+                    "⚠️ Mode switching is only available for the owner session.",
+                    log_source="mode_switch",
                 )
-            return {"ok": True}
+            return _channel_webhook_response(result)
         runtime = _user_runtimes.get(owner_user_id)
         if not runtime:
             if channel:
-                await integration.execute_tool("discord_send_message", {"channel": channel, "text": "⚠️ No active session. Start a session first."})
-            return {"ok": True}
+                await _send_channel_text(
+                    "discord",
+                    integration_id,
+                    channel,
+                    "⚠️ No active session. Start a session first.",
+                    log_source="mode_switch",
+                )
+            return _channel_webhook_response(result)
         selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
         if not mode_valid:
             if channel:
-                await integration.execute_tool("discord_send_message", {"channel": channel, "text": f"❌ {mode_error}"})
-            return {"ok": True}
+                await _send_channel_text(
+                    "discord",
+                    integration_id,
+                    channel,
+                    f"❌ {mode_error}",
+                    log_source="mode_switch",
+                )
+            return _channel_webhook_response(result)
         if channel:
-            await integration.execute_tool(
-                "discord_send_message",
-                {"channel": channel, "text": f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*"},
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
+                log_source="mode_switch",
             )
-        return {"ok": True}
+        return _channel_webhook_response(result)
 
-    channel, text_content, platform_message_id = _extract_discord_message(payload if isinstance(payload, dict) else {})
+    inbound = adapter.extract_message(payload if isinstance(payload, dict) else {})
+    channel = inbound.destination
+    text_content = inbound.text
+    platform_message_id = inbound.message_id
     if channel and text_content and text_content.startswith("/"):
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -2447,13 +2588,23 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
             chat_id=channel,
         )
         if isinstance(cmd_response, dict):
-            await integration.execute_tool(
-                "discord_send_message",
-                {"channel": channel, "text": str(cmd_response.get("text", "")), "components": cmd_response.get("components")},
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                str(cmd_response.get("text", "")),
+                metadata=_build_channel_command_metadata("discord", cmd_response),
+                log_source="slash_command",
             )
         elif cmd_response:
-            await integration.execute_tool("discord_send_message", {"channel": channel, "text": cmd_response})
-        return {"ok": True}
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                cmd_response,
+                log_source="slash_command",
+            )
+        return _channel_webhook_response(result)
 
     if channel and text_content:
         await _log_platform_message(
@@ -2466,43 +2617,41 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
             metadata={"integration_id": integration_id, "source": "webhook"},
             platform_message_id=platform_message_id,
         )
-    return {"ok": True, "result": result}
+    return _channel_webhook_response(result)
+
 
 
 @app.post("/api/integrations/discord/{integration_id}/test")
 async def test_discord_integration(integration_id: str) -> dict[str, Any]:
-    integration = discord_registry.get_discord(integration_id)
-    if not integration:
+    adapter = _get_channel_adapter("discord", integration_id)
+    if adapter is None:
         raise HTTPException(status_code=404, detail="Integration not found")
-    result = await integration.execute_tool("discord_list_channels", {})
+    result = await adapter.test_connection()
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/discord/{integration_id}/send_message")
 async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    integration = discord_registry.get_discord(integration_id)
-    if not integration:
-        raise HTTPException(status_code=404, detail="Integration not found")
     channel = str(payload.get("channel", "")).strip()
     text = str(payload.get("text", "")).strip()
     if not channel:
         raise HTTPException(status_code=400, detail="Channel is required")
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
-    normalized_text, _ = normalize_for_channel(text, channel="discord")
-    result = await integration.execute_tool("discord_send_message", {"channel": channel, "text": normalized_text})
-    config = discord_registry.get_config(integration_id)
-    if bool(result.get("ok")):
-        await _log_platform_message(
-            str(config.get("owner_user_id", "")).strip() or None,
-            platform="discord",
-            platform_chat_id=channel,
-            role="assistant",
-            content=normalized_text,
-            title=f"Discord {channel}",
-            metadata={"integration_id": integration_id, "source": "send_message"},
-        )
+    metadata: dict[str, Any] = {}
+    if isinstance(payload.get("components"), list):
+        metadata["components"] = payload["components"]
+    result = await _send_channel_text(
+        "discord",
+        integration_id,
+        channel,
+        text,
+        metadata=metadata,
+        log_source="send_message",
+    )
     return {"ok": bool(result.get("ok")), "result": result}
+
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
@@ -2717,13 +2866,16 @@ async def _on_frame_for_stream(user_uid: str, image_b64: str) -> None:
     integration_id = sub.get("integration_id")
     chat_id = sub.get("chat_id")
     if platform == "telegram":
-        integration = telegram_registry.get_telegram(integration_id)
+        integration = _get_channel_integration("telegram", str(integration_id))
         if integration:
             await integration.send_photo(chat_id, image_b64)
     elif platform == "discord":
-        integration = discord_registry.get_discord(integration_id)
+        integration = _get_channel_integration("discord", str(integration_id))
         if integration:
-            await integration.send_image(sub.get("channel_id", chat_id), image_b64)
+            await integration.execute_tool(
+                "discord_send_image",
+                {"channel": str(sub.get("channel_id", chat_id) or chat_id), "image_b64": image_b64},
+            )
 
 
 async def _run_navigation_task_from_bot(
@@ -2760,16 +2912,14 @@ async def _run_navigation_task_from_bot(
         runtime.task_running = False
         await cleanup_session_workspace(f"bot_{owner_uid}")
     # Send result back to bot
-    if platform == "telegram":
-        integration = telegram_registry.get_telegram(integration_id)
-        if integration:
-            normalized_reply, _ = normalize_for_channel(reply, channel="telegram")
-            await integration.execute_tool("telegram_send_message", {"chat_id": chat_id, "text": normalized_reply})
-    elif platform == "discord":
-        integration = discord_registry.get_discord(integration_id)
-        if integration:
-            normalized_reply, _ = normalize_for_channel(reply, channel="discord")
-            await integration.execute_tool("discord_send_message", {"channel": str(chat_id), "text": normalized_reply})
+    if platform in {"telegram", "discord"}:
+        await _send_channel_text(
+            platform,
+            integration_id,
+            str(chat_id),
+            reply,
+            log_source="bot_runtime",
+        )
 
 
 def _get_telegram_sender_id(update: dict[str, Any]) -> str:
@@ -2933,7 +3083,7 @@ async def _handle_slash_command(
         if not runtime:
             return "⚪ No active session. Open the Aegis app first."
         if runtime.task_running:
-            runtime.queued_instructions.append(arg)
+            runtime.queued_instructions.enqueue(arg, lane="bot", source="slash_command", metadata={"command": "run"})
             return f"📋 Task queued (agent is busy): {arg[:80]}"
         asyncio.create_task(_run_navigation_task_from_bot(runtime, owner_uid, platform, integration_id, chat_id, arg))
         return f"🚀 Starting task: {arg[:80]}"
@@ -2957,7 +3107,7 @@ async def _handle_slash_command(
             return "Usage: /queue <instruction>"
         if not runtime:
             return "⚪ No active session."
-        runtime.queued_instructions.append(arg)
+        runtime.queued_instructions.enqueue(arg, lane="bot", source="slash_command", metadata={"command": "queue"})
         return f"📋 Queued: {arg[:80]}"
 
     if cmd == "stream":
@@ -3046,7 +3196,7 @@ async def save_bot_config(platform: str, integration_id: str, payload: dict[str,
     _bot_configs[key] = payload
     # Auto-register Telegram slash commands if token available
     if platform == "telegram":
-        integration = telegram_registry.get_telegram(integration_id)
+        integration = _get_channel_integration("telegram", integration_id)
         if integration and payload.get("slash_commands_enabled", True):
             asyncio.create_task(_register_telegram_commands(integration))
     return {"ok": True}

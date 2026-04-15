@@ -61,6 +61,11 @@ class SessionLaneQueue:
             self._lane_order.append(normalized_lane)
         return item
 
+    def append(self, instruction: str) -> QueuedInstruction:
+        """List-style compatibility shim for legacy queue callers."""
+
+        return self.enqueue(instruction)
+
     def pop_next(self) -> QueuedInstruction | None:
         active_lanes = [lane for lane in self._lane_order if self._queues.get(lane)]
         if not active_lanes:
@@ -97,6 +102,18 @@ class SessionLaneQueue:
                 self._queues.pop(target.lane, None)
             return item
         return None
+
+    def pop(self, index: int = -1) -> str:
+        """List-style compatibility shim returning the instruction text."""
+
+        flattened = self.snapshot()
+        if not flattened:
+            raise IndexError("pop from empty SessionLaneQueue")
+        resolved_index = len(flattened) - 1 if index == -1 else index
+        item = self.remove_at(resolved_index)
+        if item is None:
+            raise IndexError("SessionLaneQueue index out of range")
+        return item.instruction
 
     def snapshot(self) -> list[QueuedInstruction]:
         items = [item for queue in self._queues.values() for item in queue]
