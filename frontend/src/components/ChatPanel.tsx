@@ -7,7 +7,6 @@ import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentM
 import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
-import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
 import { SuggestionChips } from './SuggestionChips'
 import { PromptGallery } from './PromptGallery'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
@@ -84,7 +83,7 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan'
 
 interface ChatMessage {
   id: string
@@ -143,15 +142,13 @@ const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
 // Noise entries that are workflow-internal and never belong in the chat thread
 const CHAT_HARD_DENY_PREFIXES = [
+  '(no tool call):',
+  'Model response (no tool call):',
   'Session settings updated',
   'Workflow step update',
   'Starting task:',
   'Processing ',
 ]
-
-function isBrowserOnlyEntry(entry: LogEntry, msg: string): boolean {
-  return isBrowserOnlyEvent({ message: msg, entry })
-}
 
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
   // tool_start / tool_result are typed JSON events — always let them through
@@ -171,10 +168,20 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     const msg = normalizeTextPreservingMarkdown(rawMessage)
     if (isDeniedChatText(msg, entry.rawStepType)) continue
 
-    if (msg.trim() === '[thinking]') continue
+    if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
+      const reasoningText = msg.trim() === '[thinking]' ? '' : msg
+      msgs.push({
+        id: entry.id,
+        role: 'reasoning',
+        text: reasoningText,
+        toolName: 'Reasoning',
+        toolStatus: entry.status === 'failed' ? 'failed' : entry.status === 'completed' || entry.type === 'reasoning' ? 'completed' : 'in_progress',
+        stepId: entry.stepId,
+      })
+      continue
+    }
 
-    // ── Browser-execution steps: ActionLog only, never in chat ──────────────
-    if (isBrowserOnlyEntry(entry, msg)) continue
+    if (msg.trim() === '[thinking]') continue
 
     if (msg.includes('[ask_user_input]')) {
       try {
@@ -568,6 +575,31 @@ function ShellCard({ msg, isRunning, expanded, onExpandedChange }: ShellCardProp
         {result && <span className='text-zinc-400'>{result}</span>}
         {isRunning && <span className='shell-cursor' />}
       </pre>
+    </div>
+  )
+}
+
+function ReasoningCard({ msg, expanded, onExpandedChange }: { msg: ChatMessage; expanded: boolean; onExpandedChange: (expanded: boolean) => void }) {
+  const status = msg.toolStatus ?? 'in_progress'
+  const isRunning = status === 'in_progress'
+  const heading = msg.toolName ?? 'Reasoning'
+  return (
+    <div className='my-1 overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#0d0d0d]'>
+      <button
+        type='button'
+        onClick={() => onExpandedChange(!expanded)}
+        className='flex w-full items-center gap-2.5 border-b border-[#1e1e1e] bg-[#141414] px-3 py-2 text-left hover:bg-[#1a1a1a] transition-colors'
+      >
+        <FaBrain className='h-3.5 w-3.5 flex-shrink-0 text-zinc-400' />
+        <span className='flex-1 truncate text-xs font-medium text-zinc-300'>{heading}</span>
+        {isRunning && <span className='text-[10px] font-mono text-amber-400 animate-pulse'>thinking…</span>}
+        <IcoChevronRight className={`h-3 w-3 text-zinc-500 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+      </button>
+      {expanded && (
+        <div className='px-4 py-3 text-xs leading-relaxed text-zinc-300 whitespace-pre-wrap'>
+          {msg.text || 'Model is reasoning…'}
+        </div>
+      )}
     </div>
   )
 }
@@ -1355,7 +1387,6 @@ export function ChatPanel({
     if (serverMessages.length > 0) {
       const mapped = serverMessages
         .filter((m) => !isDeniedChatText(m.content))
-        .filter((m) => !isBrowserOnlyEvent({ message: m.content }))
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
@@ -1750,6 +1781,18 @@ export function ChatPanel({
                 msg={msg}
                 isRunning={isLive}
                 expanded={isLive || !collapsed}
+                onExpandedChange={(expanded) => setToolCollapsed(msg.id, !expanded)}
+              />
+            )
+          }
+
+          if (msg.role === 'reasoning') {
+            const collapsed = threadUi.collapsedToolIds.includes(msg.id)
+            return (
+              <ReasoningCard
+                key={msg.id}
+                msg={msg}
+                expanded={!collapsed}
                 onExpandedChange={(expanded) => setToolCollapsed(msg.id, !expanded)}
               />
             )

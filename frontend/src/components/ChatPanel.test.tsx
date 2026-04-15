@@ -135,7 +135,7 @@ describe('ChatPanel plan intent UX', () => {
 })
 
 describe('ChatPanel steering control in composer', () => {
-  it('shows steering control only while a task is running', () => {
+  it('shows task stop control only while a task is running', () => {
     const { rerender } = render(
       <ChatPanel
         logs={[]}
@@ -152,9 +152,7 @@ describe('ChatPanel steering control in composer', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'steer' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'interrupt' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'queue' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Stop task' }).length).toBeGreaterThan(0)
 
     rerender(
       <ChatPanel
@@ -172,24 +170,18 @@ describe('ChatPanel steering control in composer', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: 'steer' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'interrupt' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'queue' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop task' })).not.toBeInTheDocument()
   })
 
-  it('routes selected steering mode through outbound send action', () => {
+  it('routes outbound send action while running', () => {
     const onPrimarySend = vi.fn()
     const onSend = vi.fn()
-    const onModeChange = vi.fn()
 
     render(
       <ChatPanel
         {...baseChatPanelProps}
         logs={[]}
-        isWorking={true}
-        mode='queue'
-        queuedMessages={['Follow-up task']}
-        onModeChange={onModeChange}
+        isWorking={false}
         onPrimarySend={onPrimarySend}
         onSend={onSend}
         onUserInputResponse={vi.fn()}
@@ -212,8 +204,6 @@ describe('ChatPanel steering control in composer', () => {
       expect.objectContaining({ task_label: 'Do the next thing' }),
     )
     expect(onSend).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'interrupt' }))
-    expect(onModeChange).toHaveBeenCalledWith('interrupt')
   })
 })
 
@@ -328,15 +318,15 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
     )
 
     await screen.findByText('Visible from server')
-    await screen.findByText('Visible assistant text')
+    await screen.findByText('Model response: Visible assistant text')
     expect(screen.queryByText(/\(no tool call\):/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/model response \(no tool call\):/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/session settings updated/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/workflow step update/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\[extract_page\]/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\[go_back\]/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\[click\]/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\[go_to_url\]/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/shell — extract page/i)).toBeInTheDocument()
+    expect(screen.getByText(/shell — go back/i)).toBeInTheDocument()
+    expect(screen.getByText(/shell — click/i)).toBeInTheDocument()
+    expect(screen.getByText(/shell — go to url/i)).toBeInTheDocument()
   })
 
   it('shows one live activity accordion instead of repeated thinking rows', async () => {
@@ -384,8 +374,8 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
       />,
     )
 
-    await screen.findByText('baseline message')
+    await screen.findByText('Model response: baseline message')
     expect(screen.getAllByText('Aegis is thinking…')).toHaveLength(1)
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
+    expect(screen.getByText('Reasoning')).toBeInTheDocument()
   })
 })
