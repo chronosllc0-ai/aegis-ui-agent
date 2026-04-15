@@ -215,7 +215,7 @@ def test_websocket_navigate_requires_instruction_and_keeps_socket_open() -> None
 
 
 def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
-    """Disabled runtime-control payload should return protocol error and keep socket open."""
+    """Invalid dequeue payload should return protocol error and keep socket open."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
@@ -228,13 +228,13 @@ def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
         queue_ack = ws.receive_json()
         ws.send_json({"action": "stop_task"})
 
-    assert error["type"] == "task_error"
-    assert "disabled" in error["data"]["message"].lower()
+    assert error["type"] == "error"
+    assert "invalid queue index" in error["data"]["message"].lower()
     assert queue_ack["type"] == "pong"
 
 
 def test_idle_steer_requires_navigate_when_no_task_is_running() -> None:
-    """Steer action should be rejected while idle; navigate is the sole start action."""
+    """Steer action should still be rejected while idle with a protocol error."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
@@ -246,13 +246,13 @@ def test_idle_steer_requires_navigate_when_no_task_is_running() -> None:
         step = ws.receive_json()
         ws.send_json({"action": "stop"})
 
-    assert error["type"] == "task_error"
-    assert "disabled" in error["data"]["message"].lower()
+    assert error["type"] == "error"
+    assert "no active task" in error["data"]["message"].lower()
     assert step["type"] in {"navigate_ack", "task_state", "step"}
 
 
 def test_idle_queue_requires_navigate_when_no_task_is_running() -> None:
-    """Queue action should be rejected while idle; navigate is the sole start action."""
+    """Queue action should still be rejected while idle with a protocol error."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
@@ -264,8 +264,8 @@ def test_idle_queue_requires_navigate_when_no_task_is_running() -> None:
         step = ws.receive_json()
         ws.send_json({"action": "stop"})
 
-    assert error["type"] == "task_error"
-    assert "disabled" in error["data"]["message"].lower()
+    assert error["type"] == "error"
+    assert "no active task" in error["data"]["message"].lower()
     assert step["type"] in {"navigate_ack", "task_state", "step"}
 
 

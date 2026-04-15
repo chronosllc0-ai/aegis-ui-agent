@@ -1648,26 +1648,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             task_label = str(client_metadata.get("task_label", "")).strip()
             title_candidate = task_label or instruction
 
-            if action in {"steer", "interrupt", "queue", "dequeue"}:
-                await _safe_ws_send(
-                    websocket,
-                    {
-                        "type": "task_error",
-                        "data": {
-                            "request_id": str(data.get("request_id") or ""),
-                            "task_id": runtime.current_task_id,
-                            "code": "E_BAD_PAYLOAD",
-                            "message": f"{action} is disabled. Use navigate_start as the sole command action.",
-                            "retryable": False,
-                        },
-                    },
-                    request_id=runtime.current_request_id,
-                    task_id=runtime.current_task_id,
-                    ws_session_id=session_id,
-                    phase="disabled_runtime_control",
-                )
-                continue
-
             if action == "navigate_start":
                 request_id = str(data.get("request_id") or "").strip()
                 if not request_id:

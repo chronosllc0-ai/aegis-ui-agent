@@ -117,13 +117,22 @@ interface AttachedFile {
   dataUrl: string
 }
 
-type ComposerSubmissionMode = 'normal' | 'plan'
+type ComposerSubmissionMode = 'normal' | 'plan' | 'steer' | 'interrupt' | 'queue'
 
 export function resolveComposerSubmission(input: string, planIntent: boolean): { mode: ComposerSubmissionMode; text: string } {
   const trimmed = input.trim()
   if (!trimmed) return { mode: 'normal', text: '' }
   if (trimmed.startsWith('/plan')) {
     return { mode: 'plan', text: trimmed.slice('/plan'.length).trim() }
+  }
+  if (trimmed.startsWith('/steer')) {
+    return { mode: 'steer', text: trimmed.slice('/steer'.length).trim() }
+  }
+  if (trimmed.startsWith('/interrupt')) {
+    return { mode: 'interrupt', text: trimmed.slice('/interrupt'.length).trim() }
+  }
+  if (trimmed.startsWith('/queue')) {
+    return { mode: 'queue', text: trimmed.slice('/queue'.length).trim() }
   }
   if (planIntent) return { mode: 'plan', text: trimmed }
   return { mode: 'normal', text: trimmed }
@@ -1524,8 +1533,11 @@ export function ChatPanel({
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
     const parsed = resolveComposerSubmission(trimmed, forcePlan)
-    const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
+    const outgoingText = parsed.mode === 'plan' ? parsed.text : parsed.text || trimmed
     const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
+    const runtimeControlAction = parsed.mode === 'steer' || parsed.mode === 'interrupt' || parsed.mode === 'queue'
+      ? parsed.mode
+      : undefined
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const localMsg: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
@@ -1550,6 +1562,7 @@ export function ChatPanel({
         context_snapshot: contextSnapshot ?? undefined,
         task_label_source: 'chat',
         task_label: withContext || '(attachment)',
+        runtime_control_action: runtimeControlAction,
       })
     }
     setInput('')
@@ -1642,7 +1655,7 @@ export function ChatPanel({
     onUserInputResponse(trimmed, requestId)
   }
 
-  const isDisabled = connectionStatus !== 'connected' || isWorking
+  const isDisabled = connectionStatus !== 'connected'
 
   // Personalised CTA — first name only
   const firstName = userName ? userName.split(' ')[0] : null
@@ -1666,7 +1679,7 @@ export function ChatPanel({
               className='flex items-center gap-2 rounded-full px-1 py-0.5 text-xs font-medium text-blue-300 hover:text-blue-100 transition-colors'
             >
               <IcoGlobe className='h-3.5 w-3.5' />
-              Agent is browsing — Switch to Browser
+              🌐 Agent is browsing → Switch to Browser
             </button>
             <button
               type='button'
@@ -1950,7 +1963,9 @@ export function ChatPanel({
               ? `Ask about ${activeConnector.name}…`
               : isDisabled
               ? 'Connecting…'
-              : 'Ask for a task, research, or code…'
+              : isWorking
+              ? 'Steer the current task, queue the next step, or /interrupt…'
+              : 'Ask Aegis for a task, research, or code…'
           }
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
