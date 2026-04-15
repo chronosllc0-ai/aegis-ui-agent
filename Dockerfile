@@ -4,6 +4,11 @@ COPY frontend/package*.json ./
 RUN npm ci
 COPY shared/ /app/shared/
 COPY frontend/ ./
+# Allow build args to set Vite environment variables for production deployment
+ARG VITE_API_URL=http://localhost:8000
+ARG VITE_WS_URL=ws://localhost:8000/ws/navigate
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_WS_URL=${VITE_WS_URL}
 RUN npm run build
 
 FROM python:3.11-slim
