@@ -4053,3 +4053,26 @@
 1. Add explicit frontend retry CTA component wired to stored pending instruction + fresh request_id.
 2. Add backend unit tests for idempotency prune behavior and metadata normalization allowlist.
 3. Add end-to-end timeout test covering queued-timeout client behavior and `E_TASK_TIMEOUT` server mapping.
+
+## 2026-04-15 — ChatPanel now surfaces all tool calls + reasoning cards
+
+### What changed
+- Removed ChatPanel browser-only filtering so browser primitives/tool calls now render in chat (same shell/tool card surfaces).
+- Added explicit reasoning card support in ChatPanel with a brain-icon header and dropdown body, while preserving plain assistant text rendering for model responses.
+- Wired websocket reasoning lifecycle into logs (`reasoning_start`, `reasoning_delta`, `reasoning`) so reasoning content streams and completes in-chat.
+- Preserved existing shell/tool card behavior: status states, result rendering, and card expansion/collapse flow remain intact.
+- Updated ChatPanel tests to reflect new visibility behavior (browser tool cards visible in chat + reasoning card presence).
+
+### What works / what does not
+- Works: browser tool call rows are now visible in chat as shell cards; typed tool-call cards still show progress/result.
+- Works: reasoning entries now appear in dropdown cards with brain icon and incremental content.
+- Works: assistant/model replies continue to render as bare assistant content blocks.
+- Note: legacy `python -m py_compile main.py backend/pydantic_adk_runner.py` checklist path failed because `backend/pydantic_adk_runner.py` does not exist in this checkout.
+
+### Next steps
+1. Add/adjust any backend or historical-thread message normalization so server-hydrated bracket-tool strings (`[tool] ...`) can optionally be promoted into shell cards too.
+2. Consider adding an explicit user setting toggle for "show reasoning in chat" if product policy changes.
+3. Evaluate whether reasoning cards should auto-collapse after completion like shell cards.
+
+### Blockers / decisions
+- Decision: Keep model response rendering unchanged (bare assistant blocks) while adding reasoning/tool visibility to match requested reference behavior.

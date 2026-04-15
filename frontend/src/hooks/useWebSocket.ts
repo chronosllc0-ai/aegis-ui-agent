@@ -705,6 +705,14 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       if (payload.type === 'reasoning_start') {
         const stepId = String(payload.data?.step_id ?? '')
         if (stepId) {
+          appendLog({
+            message: '[thinking]',
+            taskId,
+            type: 'reasoning_start',
+            status: 'in_progress',
+            stepId,
+            rawStepType: 'reasoning_start',
+          })
           if (!reasoningNormalizersRef.current[stepId]) {
             reasoningNormalizersRef.current[stepId] = new IncrementalTextNormalizer()
           }
@@ -765,6 +773,13 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             nextEntry,
           ]
           persistThinking(taskId, next)
+          setLogs((prev) =>
+            prev.map((entry) => (
+              entry.stepId === stepId && entry.type === 'reasoning_start'
+                ? { ...entry, message: normalizedCumulative }
+                : entry
+            )),
+          )
         }
         return
       }
