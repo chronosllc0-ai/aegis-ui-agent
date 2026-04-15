@@ -13,6 +13,15 @@ from integrations.telegram import TelegramIntegration
 ChannelPlatform = Literal["telegram", "slack", "discord"]
 
 
+def _coerce_optional_text(value: Any) -> str | None:
+    """Return stripped text while preserving None values."""
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 @dataclass(slots=True)
 class InboundChannelMessage:
     """Canonical inbound channel message envelope."""
@@ -43,7 +52,7 @@ class TelegramChannelAdapter:
         if callback_query:
             message = callback_query.get("message") or {}
             chat_id = (message.get("chat") or {}).get("id")
-            text = str(callback_query.get("data", "")).strip() or None
+            text = _coerce_optional_text(callback_query.get("data"))
             message_id = message.get("message_id")
             return InboundChannelMessage(
                 destination=str(chat_id) if chat_id is not None else None,
@@ -54,7 +63,7 @@ class TelegramChannelAdapter:
         message = payload.get("message") or payload.get("edited_message") or {}
         chat = message.get("chat") or {}
         chat_id = chat.get("id")
-        text = str(message.get("text", "")).strip() or None
+        text = _coerce_optional_text(message.get("text"))
         message_id = message.get("message_id")
         return InboundChannelMessage(
             destination=str(chat_id) if chat_id is not None else None,
@@ -128,10 +137,10 @@ class DiscordChannelAdapter:
         message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
         options = data.get("options") if isinstance(data.get("options"), list) else []
-        option_value = ""
+        option_value = None
         if options and isinstance(options[0], dict):
-            option_value = str(options[0].get("value") or "").strip()
-        text = option_value or str(data.get("text") or "").strip() or str(payload.get("content") or "").strip()
+            option_value = _coerce_optional_text(options[0].get("value"))
+        text = option_value or _coerce_optional_text(data.get("text")) or _coerce_optional_text(payload.get("content"))
         message_id = message.get("id") or payload.get("id")
         return InboundChannelMessage(
             destination=str(channel) if channel is not None and str(channel).strip() else None,

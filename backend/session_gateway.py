@@ -243,9 +243,5 @@ class SessionEventHub:
             "conversation_id": route.conversation_id,
             "emitted_at": time.time(),
         }
-        data = payload.get("data")
-        if isinstance(data, dict):
-            payload["data"] = {**data, "_routing": routing}
-        else:
-            payload["routing"] = routing
+        payload["routing"] = routing
         return payload

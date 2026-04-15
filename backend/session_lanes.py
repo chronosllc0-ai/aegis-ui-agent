@@ -103,8 +103,8 @@ class SessionLaneQueue:
             return item
         return None
 
-    def pop(self, index: int = -1) -> str:
-        """List-style compatibility shim returning the instruction text."""
+    def pop(self, index: int = -1) -> QueuedInstruction:
+        """List-style compatibility shim returning the queued instruction object."""
 
         flattened = self.snapshot()
         if not flattened:
@@ -113,7 +113,7 @@ class SessionLaneQueue:
         item = self.remove_at(resolved_index)
         if item is None:
             raise IndexError("SessionLaneQueue index out of range")
-        return item.instruction
+        return item
 
     def snapshot(self) -> list[QueuedInstruction]:
         items = [item for queue in self._queues.values() for item in queue]
