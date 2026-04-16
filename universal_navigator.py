@@ -1937,6 +1937,7 @@ async def run_universal_navigation(
                     "status": "failed",
                     "instruction": instruction,
                     "error": failure_error,
+                    "error_already_emitted": True,
                     "route_trace": route_trace,
                     "child_results": child_results,
                 }
@@ -2173,6 +2174,7 @@ async def run_universal_navigation(
                     "instruction": instruction,
                     "steps": steps,
                     "error": error_message,
+                    "error_already_emitted": True,
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens,
                 }
@@ -2391,6 +2393,7 @@ async def run_universal_navigation(
         "instruction": instruction,
         "steps": steps,
         "error": "Max steps reached",
+        "error_already_emitted": True,
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
     }
