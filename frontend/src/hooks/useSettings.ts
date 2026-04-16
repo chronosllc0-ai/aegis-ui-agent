@@ -50,7 +50,10 @@ export type AppSettings = {
   autoReturnToChat: boolean
   /** Enabled skills selected in settings; mirrored from Skills tab state. */
   enabledSkillIds: string[]
-  agentMode: AgentModeId
+  /** User-selected baseline mode preference. */
+  selectedMode: AgentModeId
+  /** Runtime-active mode (can temporarily diverge during orchestrator delegation). */
+  activeMode: AgentModeId
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -80,7 +83,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   promptToSwitchOnBrowse: true,
   autoReturnToChat: true,
   enabledSkillIds: [],
-  agentMode: DEFAULT_AGENT_MODE,
+  selectedMode: DEFAULT_AGENT_MODE,
+  activeMode: DEFAULT_AGENT_MODE,
 }
 
 // Providers that require a user-supplied BYOK key to work
@@ -90,7 +94,7 @@ function loadInitialSettings(): AppSettings {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return DEFAULT_SETTINGS
   try {
-    const parsed = JSON.parse(raw) as Partial<AppSettings>
+    const parsed = JSON.parse(raw) as Partial<AppSettings> & { agentMode?: AgentModeId }
     const merged = { ...DEFAULT_SETTINGS, ...parsed }
 
     // Migration: if the stored provider is a BYOK provider but no key is stored for it,
@@ -105,7 +109,8 @@ function loadInitialSettings(): AppSettings {
 
     return {
       ...merged,
-      agentMode: normalizeAgentMode(merged.agentMode),
+      selectedMode: normalizeAgentMode(merged.selectedMode ?? merged.agentMode),
+      activeMode: normalizeAgentMode(merged.activeMode ?? merged.selectedMode ?? merged.agentMode),
       enabledSkillIds: Array.isArray(merged.enabledSkillIds) ? merged.enabledSkillIds.filter((id): id is string => typeof id === 'string') : [],
       integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
     }
@@ -160,7 +165,7 @@ export function useSettings() {
       enabled_skill_ids: settings.enabledSkillIds,
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
-      agent_mode: settings.agentMode,
+      agent_mode: settings.selectedMode,
     }),
     [settings],
   )

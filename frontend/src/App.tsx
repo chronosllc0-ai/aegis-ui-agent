@@ -186,6 +186,19 @@ function App() {
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
+  useEffect(() => {
+    const normalizedActiveMode = normalizeAgentMode(activeExecutionMode)
+    if (settings.activeMode === normalizedActiveMode) return
+    patchSettings({ activeMode: normalizedActiveMode })
+  }, [activeExecutionMode, normalizeAgentMode, patchSettings, settings.activeMode])
+
+  useEffect(() => {
+    if (isWorking) return
+    const normalizedSelectedMode = normalizeAgentMode(settings.selectedMode)
+    if (settings.activeMode === normalizedSelectedMode) return
+    patchSettings({ activeMode: normalizedSelectedMode })
+  }, [isWorking, normalizeAgentMode, patchSettings, settings.activeMode, settings.selectedMode])
+
   const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
 
@@ -739,7 +752,7 @@ function App() {
     const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
     const finalInstruction = cleanedInstruction || trimmed
 
-    const selectedAgentMode = normalizeAgentMode(settings.agentMode)
+    const selectedAgentMode = normalizeAgentMode(settings.selectedMode)
     send({ action: 'config', settings: wsConfig })
 
     setSteeringFlashKey((prev) => prev + 1)
@@ -811,7 +824,7 @@ function App() {
     isWorking,
     messageSubAgent,
     send,
-    settings.agentMode,
+    settings.selectedMode,
     toastCtx,
     wsConfig,
   ])
@@ -1270,13 +1283,15 @@ function App() {
                 isActivityVisible={isActivityVisible}
                 provider={settings.provider}
                 model={settings.model}
-                agentMode={settings.agentMode}
+                selectedMode={settings.selectedMode}
+                activeMode={settings.activeMode}
+                modeLocked={settings.activeMode !== settings.selectedMode}
                 onProviderChange={(nextProvider) => {
                   const providerMeta = PROVIDERS.find((item) => item.id === nextProvider) ?? PROVIDERS[0]
                   patchSettings({ provider: nextProvider, model: providerMeta.models[0].id })
                 }}
                 onModelChange={(nextModel) => patchSettings({ model: nextModel })}
-                onAgentModeChange={(nextMode) => patchSettings({ agentMode: nextMode })}
+                onAgentModeChange={(nextMode) => patchSettings({ selectedMode: nextMode, activeMode: nextMode })}
                 contextSnapshot={{
                   tokensUsed: contextMeter.current.tokensUsed,
                   contextLimit: contextMeter.current.contextLimit,
