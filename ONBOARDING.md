@@ -4135,3 +4135,32 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.72 - April 16, 2026 (Follow-up review fixes for internal-event filtering PR)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 quick frontend follow-up pass
+
+### What Was Done
+- Addressed review feedback in `frontend/src/components/ChatPanel.tsx` by explicitly passing the second argument (`undefined`) to `classifyInternalEvent(...)` when filtering hydrated `serverMessages`.
+- Removed `web_search` from `INTERNAL_TOOL_NAMES` to avoid over-broad intent signaling while still suppressing raw bracketed JSON blobs via structured-payload detection.
+- Tightened bracketed JSON regex usage in both `ChatPanel` and `ActionLog` from greedy `*` to non-greedy `*?` to avoid unnecessary over-capture behavior.
+
+### What's Working
+- Historical/server-hydrated transcript filtering now explicitly matches the classifier signature.
+- Raw `[web_search]{...}` payload blobs continue to be filtered from chat without relying on `INTERNAL_TOOL_NAMES` containing `web_search`.
+- Action Log and ChatPanel bracketed blob matching remains functional with safer non-greedy regex behavior.
+
+### What's NOT Working Yet
+- No blockers identified in this follow-up.
+
+### Next Steps
+1. Add parser unit tests that cover greedy/non-greedy bracketed payload edge cases (single-line and multiline JSON).
+2. Consider introducing a typed `internal_event` payload from backend to avoid regex-based inference.
+
+### Decisions Made
+- Kept raw bracketed JSON suppression behavior intact while reducing ambiguity around whether `web_search` should be considered an internal tool name.
+
+### Blockers
+- None.

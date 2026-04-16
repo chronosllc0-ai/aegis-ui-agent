@@ -143,8 +143,8 @@ interface ConnectorMeta {
 // ─── Log parsing ──────────────────────────────────────────────────────────────
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
-const RE_BRACKET_TOOL_JSON = /^\[([\w_]+)\]\s*(\{[\s\S]*\})$/
-const INTERNAL_TOOL_NAMES = new Set(['route_decision', 'worker_reference', 'mode_router', 'web_search'])
+const RE_BRACKET_TOOL_JSON = /^\[([\w_]+)\]\s*(\{[\s\S]*?\})$/
+const INTERNAL_TOOL_NAMES = new Set(['route_decision', 'worker_reference', 'mode_router'])
 // Noise entries that are workflow-internal and never belong in the chat thread
 const CHAT_HARD_DENY_PREFIXES = [
   '(no tool call):',
@@ -1537,7 +1537,7 @@ export function ChatPanel({
   useEffect(() => {
     if (serverMessages.length > 0) {
       const mapped = serverMessages
-        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content))
+        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined))
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
