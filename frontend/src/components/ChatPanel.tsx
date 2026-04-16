@@ -631,7 +631,10 @@ function ToolCallCard({ msg }: { msg: ChatMessage }) {
   const isRunning = msg.toolStatus === 'in_progress'
   const isFailed  = msg.toolStatus === 'failed'
   const isDone    = msg.toolStatus === 'completed'
+  const isSuccessful = isDone && !isFailed
   const [collapsed, setCollapsed] = useState(false)
+  const [requestOpen, setRequestOpen] = useState(false)
+  const [responseOpen, setResponseOpen] = useState(false)
 
   // Auto-collapse 1.5s after completion using CSS transition (no re-render loop).
   // Always return a cleanup so the timer is cancelled on unmount regardless of isDone state.
@@ -687,11 +690,48 @@ function ToolCallCard({ msg }: { msg: ChatMessage }) {
       {/* Body: args + result */}
       {!collapsed && (
         <div className='px-3 pb-2 space-y-1'>
-          {argsDisplay && (
-            <p className='text-xs text-zinc-500 font-mono truncate'>{argsDisplay}</p>
-          )}
-          {resultText && (
-            <p className='text-xs text-zinc-300 line-clamp-3 whitespace-pre-wrap'>{resultText}</p>
+          {isSuccessful ? (
+            <>
+              <div className='space-y-1'>
+                <button
+                  type='button'
+                  onClick={(e) => { e.stopPropagation(); setRequestOpen((prev) => !prev) }}
+                  className='flex w-full items-center justify-between rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2 py-1 text-[11px] text-emerald-300'
+                >
+                  <span>Request</span>
+                  <IcoChevronRight className={`h-3 w-3 transition-transform ${requestOpen ? 'rotate-90' : ''}`} />
+                </button>
+                {requestOpen && (
+                  <pre className='max-h-36 overflow-auto rounded-md border border-emerald-500/15 bg-[#0f221d] px-2 py-1.5 text-[11px] text-zinc-300 whitespace-pre-wrap'>
+                    {argsObj ? JSON.stringify(argsObj, null, 2) : (argsDisplay || 'No request payload')}
+                  </pre>
+                )}
+              </div>
+              <div className='space-y-1'>
+                <button
+                  type='button'
+                  onClick={(e) => { e.stopPropagation(); setResponseOpen((prev) => !prev) }}
+                  className='flex w-full items-center justify-between rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2 py-1 text-[11px] text-emerald-300'
+                >
+                  <span>Response</span>
+                  <IcoChevronRight className={`h-3 w-3 transition-transform ${responseOpen ? 'rotate-90' : ''}`} />
+                </button>
+                {responseOpen && (
+                  <pre className='max-h-36 overflow-auto rounded-md border border-emerald-500/15 bg-[#0f221d] px-2 py-1.5 text-[11px] text-zinc-300 whitespace-pre-wrap'>
+                    {resultText || 'No response payload'}
+                  </pre>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {argsDisplay && (
+                <p className='text-xs text-zinc-500 font-mono truncate'>{argsDisplay}</p>
+              )}
+              {resultText && (
+                <p className='text-xs text-zinc-300 line-clamp-3 whitespace-pre-wrap'>{resultText}</p>
+              )}
+            </>
           )}
         </div>
       )}

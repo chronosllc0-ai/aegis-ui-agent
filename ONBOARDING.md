@@ -4076,3 +4076,24 @@
 
 ### Blockers / decisions
 - Decision: Keep model response rendering unchanged (bare assistant blocks) while adding reasoning/tool visibility to match requested reference behavior.
+
+## 2026-04-16 — Tool call cards: separate Request/Response dropdowns on success
+
+### What changed
+- Updated typed `ToolCallCard` rendering in ChatPanel to add separate **Request** and **Response** dropdown sections.
+- Kept existing card color palette/layout behavior intact and did not apply this change to reasoning cards or legacy browser shell cards.
+- Gated the new dropdown sections to **successful tool calls only** (`completed` and not `failed`).
+- Preserved the existing failure-state card behavior (failed badge + existing compact content path).
+- Added tests to verify successful tool calls show Request/Response controls and failed tool calls do not.
+
+### What works / what does not
+- Works: successful typed tool cards now expose request/response in separate expandable sections.
+- Works: failed tool cards retain failure styling/state and do not show request/response dropdown sections.
+- Works: reasoning card and browser shell cards remain unchanged.
+
+### Next steps
+1. Consider truncation/syntax highlighting for very large JSON request/response payloads.
+2. Add visual telemetry polish for loading request/response during in-progress tool states if needed.
+
+### Blockers / decisions
+- Decision: Keep success-only request/response dropdowns to match requested UX and avoid altering failure-state semantics.

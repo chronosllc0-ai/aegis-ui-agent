@@ -379,3 +379,92 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
     expect(screen.getByText('Reasoning')).toBeInTheDocument()
   })
 })
+
+describe('ChatPanel tool call request/response sections', () => {
+  it('renders Request and Response dropdowns only for successful typed tool calls', async () => {
+    const logs: LogEntry[] = [
+      {
+        id: 'typed-tool-success',
+        taskId: 'task-tools',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: JSON.stringify({
+          tool: 'update_resource',
+          call_id: 'call-1',
+          args: { resourceId: 'abc-123', patch: { enabled: true } },
+        }),
+        elapsedSeconds: 1,
+        rawStepType: 'tool_result',
+        toolCallId: 'call-1',
+        toolResult: '{"success":true}',
+        toolOk: true,
+      },
+    ]
+
+    render(
+      <ChatPanel
+        logs={logs}
+        isWorking={false}
+        onSend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+        {...baseChatPanelProps}
+      />,
+    )
+
+    await screen.findByText(/update resource/i)
+    expect(screen.getByRole('button', { name: 'Request' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Response' })).toBeInTheDocument()
+  })
+
+  it('keeps failure-state card layout without request/response dropdowns', async () => {
+    const logs: LogEntry[] = [
+      {
+        id: 'typed-tool-failed',
+        taskId: 'task-tools',
+        type: 'step',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: JSON.stringify({
+          tool: 'update_resource',
+          call_id: 'call-2',
+          args: { resourceId: 'abc-123' },
+        }),
+        elapsedSeconds: 1,
+        rawStepType: 'tool_result',
+        toolCallId: 'call-2',
+        toolResult: '{"error":"boom"}',
+        toolOk: false,
+      },
+    ]
+
+    render(
+      <ChatPanel
+        logs={logs}
+        isWorking={false}
+        onSend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+        {...baseChatPanelProps}
+      />,
+    )
+
+    await screen.findByText(/update resource/i)
+    expect(screen.queryByRole('button', { name: 'Request' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Response' })).not.toBeInTheDocument()
+    expect(screen.getByText('failed')).toBeInTheDocument()
+  })
+})
