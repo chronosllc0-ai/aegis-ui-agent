@@ -83,7 +83,7 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router'
 
 interface ChatMessage {
   id: string
@@ -103,6 +103,9 @@ interface ChatMessage {
   requestId?: string
   stepId?: string
   planSteps?: string[]
+  routeMode?: string
+  routeReason?: string
+  workerReference?: string
 }
 
 type ThreadUiState = {
@@ -140,6 +143,8 @@ interface ConnectorMeta {
 // ─── Log parsing ──────────────────────────────────────────────────────────────
 const RE_TOOL_CALL       = /^\[[\w_]+\]/
 const RE_GENERATION_TOOL = /^\[(create_image|generate_image|create_video|generate_video|render_image|text_to_image|image_gen)\]/i
+const RE_BRACKET_TOOL_JSON = /^\[([\w_]+)\]\s*(\{[\s\S]*?\})$/
+const INTERNAL_TOOL_NAMES = new Set(['route_decision', 'worker_reference', 'mode_router'])
 // Noise entries that are workflow-internal and never belong in the chat thread
 const CHAT_HARD_DENY_PREFIXES = [
   '(no tool call):',
@@ -149,6 +154,79 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Starting task:',
   'Processing ',
 ]
+
+type InternalEventClassification =
+  | { kind: 'mode_router'; routeMode?: string; routeReason?: string; workerReference?: string }
+  | { kind: 'hidden' }
+
+function tryParseObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+  } catch {
+    // ignore parse errors
+  }
+  return null
+}
+
+function classifyInternalEvent(text: string, rawStepType?: string): InternalEventClassification | null {
+  const trimmed = text.trim()
+  const lowered = trimmed.toLowerCase()
+
+  const parseRouterPayload = (payload: Record<string, unknown>): InternalEventClassification => {
+    const routeMode = typeof payload.mode === 'string'
+      ? payload.mode
+      : typeof payload.route_decision === 'string'
+        ? payload.route_decision
+        : typeof payload.selected_mode === 'string'
+          ? payload.selected_mode
+          : undefined
+    const routeReason = typeof payload.reason === 'string'
+      ? payload.reason
+      : typeof payload.rationale === 'string'
+        ? payload.rationale
+        : undefined
+    const workerReference = typeof payload.worker_reference === 'string'
+      ? payload.worker_reference
+      : typeof payload.worker === 'string'
+        ? payload.worker
+        : undefined
+    return { kind: 'mode_router', routeMode, routeReason, workerReference }
+  }
+
+  if (rawStepType === 'route_decision' || rawStepType === 'worker_reference') {
+    const payload = tryParseObject(trimmed)
+    if (payload) return parseRouterPayload(payload)
+    return { kind: 'mode_router' }
+  }
+
+  const directPayload = tryParseObject(trimmed)
+  if (directPayload) {
+    const hasRoutingSignals = (
+      'route_decision' in directPayload
+      || 'worker_reference' in directPayload
+      || 'selected_mode' in directPayload
+      || 'mode' in directPayload
+    )
+    if (hasRoutingSignals) return parseRouterPayload(directPayload)
+    if ('tool' in directPayload || 'args' in directPayload || 'call_id' in directPayload || 'result' in directPayload) {
+      return { kind: 'hidden' }
+    }
+  }
+
+  const bracketed = trimmed.match(RE_BRACKET_TOOL_JSON)
+  if (bracketed) {
+    const toolName = bracketed[1].toLowerCase()
+    if (toolName === 'route_decision' || toolName === 'worker_reference' || toolName === 'mode_router') {
+      const payload = tryParseObject(bracketed[2])
+      return payload ? parseRouterPayload(payload) : { kind: 'mode_router' }
+    }
+    if (INTERNAL_TOOL_NAMES.has(toolName) || tryParseObject(bracketed[2])) return { kind: 'hidden' }
+  }
+
+  if (lowered.includes('route_decision') || lowered.includes('worker_reference')) return { kind: 'mode_router' }
+  return null
+}
 
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
   // tool_start / tool_result are typed JSON events — always let them through
@@ -166,6 +244,19 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   for (const entry of logs) {
     const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
     const msg = normalizeTextPreservingMarkdown(rawMessage)
+    const internalEvent = classifyInternalEvent(msg, entry.rawStepType)
+    if (internalEvent?.kind === 'hidden') continue
+    if (internalEvent?.kind === 'mode_router') {
+      msgs.push({
+        id: entry.id,
+        role: 'mode_router',
+        text: 'Mode router updated',
+        routeMode: internalEvent.routeMode,
+        routeReason: internalEvent.routeReason,
+        workerReference: internalEvent.workerReference,
+      })
+      continue
+    }
     if (isDeniedChatText(msg, entry.rawStepType)) continue
 
     if (entry.type === 'reasoning_start' || entry.type === 'reasoning') {
@@ -1080,6 +1171,26 @@ function LivePlanCard({ steps, completedTools }: { steps: string[]; completedToo
   )
 }
 
+function ModeRouterCard({ msg }: { msg: ChatMessage }) {
+  return (
+    <div className='my-1 rounded-xl border border-violet-500/20 bg-violet-500/5 px-3 py-2'>
+      <div className='flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-violet-300'>
+        <FaBrain className='h-3.5 w-3.5' />
+        Mode Router
+      </div>
+      <div className='mt-1 text-xs text-zinc-300'>
+        {msg.routeMode ? `Selected: ${msg.routeMode}` : 'Routing decision updated'}
+      </div>
+      {msg.workerReference && (
+        <div className='mt-1 text-[11px] text-zinc-400'>Worker: {msg.workerReference}</div>
+      )}
+      {msg.routeReason && (
+        <div className='mt-1 line-clamp-2 text-[11px] text-zinc-500'>{msg.routeReason}</div>
+      )}
+    </div>
+  )
+}
+
 // ─── PlusMenu ─────────────────────────────────────────────────────────────────
 interface PlusMenuProps {
   onAttach: (accept: string, capture?: string) => void
@@ -1426,7 +1537,7 @@ export function ChatPanel({
   useEffect(() => {
     if (serverMessages.length > 0) {
       const mapped = serverMessages
-        .filter((m) => !isDeniedChatText(m.content))
+        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined))
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
@@ -1887,6 +1998,8 @@ export function ChatPanel({
             )
             return <LivePlanCard key={msg.id} steps={msg.planSteps ?? []} completedTools={subsequentTools} />
           }
+
+          if (msg.role === 'mode_router') return <ModeRouterCard key={msg.id} msg={msg} />
 
           return <AssistantCard key={msg.id} msg={msg} />
           })()
