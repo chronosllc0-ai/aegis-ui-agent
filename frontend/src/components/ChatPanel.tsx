@@ -147,7 +147,6 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Session settings updated',
   'Workflow step update',
   'Starting task:',
-  'Processing ',
 ]
 
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
