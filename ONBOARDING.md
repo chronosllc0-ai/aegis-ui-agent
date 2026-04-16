@@ -4097,3 +4097,41 @@
 
 ### Blockers / decisions
 - Decision: Keep success-only request/response dropdowns to match requested UX and avoid altering failure-state semantics.
+
+---
+## Session 5.71 - April 16, 2026 (Chat internal-event filtering for route/tool JSON noise)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend parsing/rendering pass
+
+### What Was Done
+- Updated `frontend/src/components/ChatPanel.tsx` with an internal-event classifier to detect and handle:
+  - `route_decision` events,
+  - `worker_reference` events,
+  - raw tool payload JSON blobs (including bracket-prefixed forms such as `[web_search]{...}`).
+- Added a compact `ModeRouterCard` renderer for route/worker orchestration updates.
+- Suppressed internal raw JSON/tool payload entries from chat transcript rendering so user-facing narration remains clean.
+- Updated persisted `serverMessages` hydration filter to drop internal orchestration blobs from historical assistant transcript display.
+- Updated `frontend/src/components/ActionLog.tsx` filtering to keep Action Log focused on browser mechanics and skip route/worker/raw-tool orchestration internals.
+
+### What's Working
+- Raw route payload JSON no longer renders as plain assistant text in chat.
+- Legacy raw bracketed tool blobs (e.g., `[web_search]{...}`) are filtered from chat transcript display.
+- Mode-routing internals now render as a compact structured card instead of plain text when applicable.
+- Action Log remains focused on execution mechanics without duplicating orchestration internals.
+
+### What's NOT Working Yet
+- No blockers identified in this pass.
+
+### Next Steps
+1. Add targeted UI tests in ChatPanel coverage for:
+   - `route_decision` → `ModeRouterCard` rendering,
+   - raw JSON payload suppression,
+   - `[web_search]{...}` suppression.
+2. Optionally add a dedicated debug pane/event stream to surface hidden internal events for developer inspection.
+
+### Decisions Made
+- Chose “compact card + hide noisy raw payloads” strategy to keep chat user-facing while preserving structured visibility for router decisions.
+
+### Blockers
+- None.

@@ -38,6 +38,13 @@ export function ActionLog({ entries, taskLabels, showWorkflow, onToggleWorkflow,
       // User chat messages (stepKind 'navigate' at t=0) belong to the ChatPanel,
       // not the ActionLog — skip them so they don't appear in both places.
       if (entry.stepKind === 'navigate' && entry.elapsedSeconds === 0) continue
+      const trimmed = String(entry.message ?? '').trim()
+      const lowered = trimmed.toLowerCase()
+      // Keep ActionLog focused on browser mechanics (click/type/scroll/navigation),
+      // and hide orchestration internals (route_decision / worker_reference / raw tool blobs).
+      if (lowered.includes('route_decision') || lowered.includes('worker_reference')) continue
+      if (/^\[[\w_]+\]\s*\{[\s\S]*\}$/.test(trimmed)) continue
+      if (trimmed.startsWith('{') && (trimmed.includes('"tool"') || trimmed.includes('"route_decision"') || trimmed.includes('"worker_reference"'))) continue
       if (!map.has(entry.taskId)) map.set(entry.taskId, [])
       map.get(entry.taskId)?.push(entry)
     }
