@@ -1506,15 +1506,34 @@ async def _run_navigation_task(
         # If execute_task returned a failure (e.g. unsupported provider), surface it as an error
         if result_status == "failed":
             error_msg = (result.get("error") or "Task failed") if isinstance(result, dict) else "Task failed"
+            error_already_emitted = bool(result.get("error_already_emitted")) if isinstance(result, dict) else False
             await _safe_ws_send(
                 websocket,
-                {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_FAILED", "message": error_msg, "retryable": True}},
+                {
+                    "type": "task_error",
+                    "data": {
+                        "task_id": task_id,
+                        "request_id": request_id,
+                        "code": "E_TASK_FAILED",
+                        "message": error_msg,
+                        "retryable": True,
+                        "error_already_emitted": error_already_emitted,
+                    },
+                },
                 request_id=request_id,
                 task_id=task_id,
                 ws_session_id=session_id,
                 phase="task_error",
             )
-            await _safe_ws_send(websocket, {"type": "error", "data": {"message": error_msg}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_error")
+            if not error_already_emitted:
+                await _safe_ws_send(
+                    websocket,
+                    {"type": "error", "data": {"message": error_msg}},
+                    request_id=request_id,
+                    task_id=task_id,
+                    ws_session_id=session_id,
+                    phase="legacy_error",
+                )
         await _log_web_message(
             runtime,
             session_id,

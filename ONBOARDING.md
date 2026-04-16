@@ -4164,3 +4164,37 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.71 - April 16, 2026 (De-duplicate navigator vs websocket error surfacing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend/frontend error-channel dedup pass
+
+### What Was Done
+- Updated `universal_navigator.py` to include `error_already_emitted: true` in failed result payloads when an error step was already emitted to the user stream:
+  - explicit `tool=error` terminal path
+  - max-step-limit terminal path
+  - orchestrator delegate+fallback dual-failure path that emits an `error` step.
+- Updated `main.py` websocket task-failure handling to:
+  - forward `error_already_emitted` inside `task_error.data` for diagnostics/consumers,
+  - suppress the extra legacy `type: "error"` websocket event when that flag is true.
+- Updated `frontend/src/hooks/useWebSocket.ts` to avoid appending a second error log on `task_error` when `error_already_emitted` is true.
+
+### What's Working
+- Max-step failures now surface as a single user-facing error card from navigator step stream.
+- Task still transitions to failed terminal state via `task_state` / `task_result` events.
+- Failure metadata is preserved in `task_error` payload for diagnostics (`code`, `message`, `retryable`, `error_already_emitted`).
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add a focused websocket integration test asserting no duplicate UI error log for max-step failure (`error_already_emitted=true`).
+2. Optionally extend `error_already_emitted` coverage to any additional navigator paths that emit terminal error steps in future.
+
+### Decisions Made
+- Kept `task_error` emission for diagnostics and protocol consistency, while suppressing only duplicate user-facing error rendering paths.
+
+### Blockers
+- None.

@@ -405,8 +405,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         setExecutionState('failed')
         setIsWorking(false)
         setTaskActivity(createIdleActivityState())
-        const errorMsg = String(payload.data?.message ?? payload.data?.code ?? 'Task failed')
-        appendLog({ message: `⚠️ ${errorMsg}`, taskId, type: 'error', status: 'failed' })
+        const errorAlreadyEmitted = Boolean(payload.data?.error_already_emitted)
+        if (!errorAlreadyEmitted) {
+          const errorMsg = String(payload.data?.message ?? payload.data?.code ?? 'Task failed')
+          appendLog({ message: `⚠️ ${errorMsg}`, taskId, type: 'error', status: 'failed' })
+        }
         return
       }
       if (payload.type === 'step') {
