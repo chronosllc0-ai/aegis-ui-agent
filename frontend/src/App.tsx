@@ -196,7 +196,7 @@ function App() {
     if (isWorking) return
     if (settings.activeMode === settings.selectedMode) return
     patchSettings({ activeMode: settings.selectedMode })
-  }, [isWorking, patchSettings, settings.activeMode, settings.selectedMode])
+  }, [isWorking, normalizeAgentMode, patchSettings, settings.activeMode, settings.selectedMode])
 
   const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
