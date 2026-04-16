@@ -4198,3 +4198,49 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.73 - April 16, 2026 (Real-time delegated mode selector state)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend/frontend state + websocket event pass
+
+### What Was Done
+- Added websocket-level `mode_transition` emissions in `main.py` when workflow mode runtime events contain transition data, including `task_id` and `frontend_task_id` scope metadata.
+- Scoped mode runtime events per thread/task by attaching `task_id` and `frontend_task_id` to forwarded `mode_event` payloads.
+- Updated frontend settings model in `frontend/src/hooks/useSettings.ts` to split mode state into:
+  - `selectedMode` (user preference)
+  - `activeMode` (runtime current mode)
+  with migration from legacy `agentMode`.
+- Updated `frontend/src/App.tsx` to:
+  - send `selectedMode` as websocket `agent_mode`,
+  - sync `activeMode` from websocket runtime mode,
+  - restore `activeMode` to `selectedMode` after task completion,
+  - pass lock/delegation UI state into the composer.
+- Updated `frontend/src/hooks/useWebSocket.ts` to:
+  - accept direct `mode_transition` websocket payloads,
+  - apply mode events only when `frontend_task_id` matches active thread (thread-scoped transitions).
+- Updated `frontend/src/components/ChatPanel.tsx` composer mode selector to:
+  - display `activeMode`,
+  - disable mode changes while delegated,
+  - show a `Delegated · Locked` badge during delegation.
+
+### What's Working
+- Delegated mode transitions are now visible immediately in the selector.
+- Selector returns to the user-selected baseline mode after run completion.
+- Cross-thread mode-transition bleed is prevented via `frontend_task_id` scoping in the websocket hook.
+
+### What's NOT Working Yet
+- Delivery checklist command references `backend/pydantic_adk_runner.py`, which does not exist in this repo snapshot.
+
+### Next Steps
+1. Add frontend tests for delegated lock badge behavior (`selectedMode` vs `activeMode`).
+2. Add websocket tests validating mode transition scope matching by `frontend_task_id`.
+3. Consider extending explicit transition reasons (`delegate_start` / `delegate_end`) if product analytics needs sharper semantics.
+
+### Decisions Made
+- Kept backward compatibility for legacy persisted settings by migrating `agentMode` into `selectedMode`/`activeMode` on load.
+- Used additive websocket payload changes (new `mode_transition` envelope + scoped metadata) to avoid breaking existing `mode_event` consumers.
+
+### Blockers
+- None (besides checklist filename mismatch noted above).

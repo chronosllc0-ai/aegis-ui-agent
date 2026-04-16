@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { IncrementalTextNormalizer, normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { createIdleActivityState, reduceActivityState, selectActivityView, type ActivitySelector, type ActivityState } from '../lib/activityState'
-import { modeLabel, parseModeRuntimeEvent, type AgentModeId } from '../lib/agentModes'
+import { modeLabel, normalizeAgentMode, parseModeRuntimeEvent, type AgentModeId } from '../lib/agentModes'
 
 export type SteeringMode = 'auto' | 'steer' | 'interrupt' | 'queue'
 
@@ -79,7 +79,7 @@ export interface PersistedThinkingMessage {
 }
 
 export type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong'
+  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_transition' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -604,6 +604,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'mode_event') {
+        const scopedFrontendTaskId = String(payload.data?.frontend_task_id ?? '').trim()
+        if (scopedFrontendTaskId && activeThreadId && scopedFrontendTaskId !== activeThreadId) {
+          return
+        }
         const parsed = parseModeRuntimeEvent(payload.data)
         if (!parsed.ok) {
           appendLog({
@@ -670,6 +674,17 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           })
           return
         }
+      }
+      if (payload.type === 'mode_transition') {
+        const scopedFrontendTaskId = String(payload.data?.frontend_task_id ?? '').trim()
+        if (scopedFrontendTaskId && activeThreadId && scopedFrontendTaskId !== activeThreadId) {
+          return
+        }
+        const toMode = String(payload.data?.to_mode ?? '').trim()
+        if (toMode) {
+          setActiveExecutionMode(normalizeAgentMode(toMode))
+        }
+        return
       }
       if (payload.type === 'mode_event_parse_failed') {
         appendLog({

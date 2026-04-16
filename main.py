@@ -1039,12 +1039,30 @@ async def _send_workflow_step(
     *,
     runtime: "SessionRuntime | None" = None,
     session_id: str | None = None,
+    task_id: str | None = None,
+    frontend_task_id: str | None = None,
 ) -> None:
     """Send workflow graph step payload to frontend."""
     await websocket.send_json({"type": "workflow_step", "data": workflow_step})
     parsed_mode_event, parse_error = parse_mode_runtime_event(workflow_step)
     if parsed_mode_event is not None:
-        await websocket.send_json({"type": "mode_event", "data": parsed_mode_event})
+        mode_event_payload = {
+            **parsed_mode_event,
+            "task_id": task_id,
+            "frontend_task_id": frontend_task_id,
+        }
+        await websocket.send_json({"type": "mode_event", "data": mode_event_payload})
+        if parsed_mode_event.get("event_name") == "mode_transition":
+            await websocket.send_json(
+                {
+                    "type": "mode_transition",
+                    "data": {
+                        **parsed_mode_event.get("payload", {}),
+                        "task_id": task_id,
+                        "frontend_task_id": frontend_task_id,
+                    },
+                }
+            )
     elif parse_error and isinstance(workflow_step, dict) and workflow_step.get("event_name"):
         await websocket.send_json(
             {
@@ -1465,6 +1483,8 @@ async def _run_navigation_task(
                 step,
                 runtime=runtime,
                 session_id=session_id,
+                task_id=task_id,
+                frontend_task_id=runtime.current_frontend_task_id,
             ),
             user_uid=runtime.user_uid,
             on_user_input=_on_user_input,
