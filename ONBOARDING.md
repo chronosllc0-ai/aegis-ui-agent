@@ -4272,3 +4272,40 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.71 - April 16, 2026 (Worker summary contract + orchestrator final synthesis hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend contract-enforcement pass
+
+### What Was Done
+- Added structured worker-summary payload validation to mode runtime events in `backend/modes.py`.
+  - `worker_summary` events now require `worker_summary.task_outcome`, non-empty `worker_summary.key_findings`, bounded numeric `worker_summary.confidence` (`0..1`), and list `worker_summary.references`.
+- Implemented worker-summary normalization/composition in `universal_navigator.py`.
+  - Added `_build_worker_summary(...)` to guarantee every worker result contains the required contract fields.
+  - Added `_compose_final_synthesis(...)` so orchestrator now emits a clean user-facing synthesis built from structured worker summary fields.
+  - Ensured all non-orchestrator completion/failure/interruption return paths attach `worker_summary` before return.
+  - Updated orchestrator `worker_summary` mode events to include both legacy text summary and structured summary payload.
+  - Replaced raw internal fallback failure wording with a single safe fallback summary.
+- Updated websocket forwarding in `main.py` so validated `final_synthesis` mode events are also emitted as a first-class `final_synthesis` websocket message.
+
+### What's Working
+- Worker mode results now consistently carry structured summary fields across success/failure/interruption paths.
+- Orchestrator emits a cleaner final synthesis message with outcome/findings/confidence/references shape backing.
+- Existing targeted websocket smoke test and frontend build pass.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add unit tests that validate `worker_summary` payload shape for each terminal worker status.
+2. Add orchestrator-mode regression tests asserting synthesized output never includes debug routing reasons (e.g., `fallback:default_code_mode`).
+3. Consider migrating frontend rendering to consume structured summary fields directly (instead of only synthesis text).
+
+### Decisions Made
+- Kept textual `summary` in worker-summary events for backwards compatibility while enforcing the new structured `worker_summary` object contract.
+- Chose a user-safe fallback error synthesis string in orchestrator failure paths to avoid exposing raw delegate internals in chat.
+
+### Blockers
+- None.
