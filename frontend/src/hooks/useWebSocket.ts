@@ -611,7 +611,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const parsed = parseModeRuntimeEvent(payload.data)
         if (!parsed.ok) {
           appendLog({
-            message: `Mode event parse failed (${parsed.error}); falling back to raw event stream.`,
+            message: `Mode runtime event parse failed (${parsed.error}); using safe fallback.`,
             taskId,
             type: 'error',
             status: 'failed',
@@ -688,7 +688,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'mode_event_parse_failed') {
         appendLog({
-          message: `Mode event parse failed on server (${String(payload.data?.error ?? 'unknown')}); using safe fallback.`,
+          message: `Mode runtime event parse failed (${String(payload.data?.error ?? 'unknown')}); using safe fallback.`,
           taskId,
           type: 'error',
           status: 'failed',
