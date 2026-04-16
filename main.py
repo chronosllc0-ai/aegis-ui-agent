@@ -1063,6 +1063,17 @@ async def _send_workflow_step(
                     },
                 }
             )
+        if parsed_mode_event.get("event_name") == "final_synthesis":
+            await websocket.send_json(
+                {
+                    "type": "final_synthesis",
+                    "data": {
+                        **parsed_mode_event.get("payload", {}),
+                        "task_id": task_id,
+                        "frontend_task_id": frontend_task_id,
+                    },
+                }
+            )
     elif parse_error and isinstance(workflow_step, dict) and workflow_step.get("event_name"):
         await websocket.send_json(
             {

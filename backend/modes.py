@@ -106,6 +106,16 @@ class ModeRuntimeEvent:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class WorkerSummary:
+    """Structured worker completion summary contract."""
+
+    task_outcome: str
+    key_findings: list[str]
+    confidence: float
+    references: list[str]
+
+
 def build_mode_runtime_event(event_name: ModeRuntimeEventName, payload: dict[str, Any]) -> dict[str, Any]:
     """Build an event envelope shared by backend and frontend runtime parsers."""
     return asdict(ModeRuntimeEvent(schema_version=MODE_EVENT_SCHEMA_VERSION, event_name=event_name, payload=payload))
@@ -171,6 +181,26 @@ def _validate_mode_runtime_payload(event_name: ModeRuntimeEventName, payload: di
             return "invalid_payload:worker_summary.status"
         if not isinstance(payload.get("summary"), str):
             return "invalid_payload:worker_summary.summary"
+        worker_summary = payload.get("worker_summary")
+        if not isinstance(worker_summary, dict):
+            return "invalid_payload:worker_summary.worker_summary"
+        if not str(worker_summary.get("task_outcome", "")).strip():
+            return "invalid_payload:worker_summary.worker_summary.task_outcome"
+        key_findings = worker_summary.get("key_findings")
+        if not isinstance(key_findings, list) or not key_findings:
+            return "invalid_payload:worker_summary.worker_summary.key_findings"
+        if any(not str(item).strip() for item in key_findings):
+            return "invalid_payload:worker_summary.worker_summary.key_findings.item"
+        confidence = worker_summary.get("confidence")
+        if not isinstance(confidence, (int, float)):
+            return "invalid_payload:worker_summary.worker_summary.confidence"
+        if float(confidence) < 0 or float(confidence) > 1:
+            return "invalid_payload:worker_summary.worker_summary.confidence_range"
+        references = worker_summary.get("references")
+        if not isinstance(references, list):
+            return "invalid_payload:worker_summary.worker_summary.references"
+        if any(not str(item).strip() for item in references):
+            return "invalid_payload:worker_summary.worker_summary.references.item"
         fallback_value = payload.get("fallback")
         if fallback_value is not None and not isinstance(fallback_value, bool):
             return "invalid_payload:worker_summary.fallback"

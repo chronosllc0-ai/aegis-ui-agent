@@ -33,7 +33,7 @@ from backend.modes import (
     blocked_tools_for_mode,
     normalize_agent_mode,
 )
-from backend.orchestrator_mode import OrchestratorModeRouter, build_synthesis
+from backend.orchestrator_mode import OrchestratorModeRouter
 from backend.providers.base import BaseProvider, ChatMessage
 from backend.skills.parser import extract_runtime_guidance_block
 from backend.skills.runtime_loader import RuntimeSkill, get_active_runtime_skills
@@ -81,6 +81,84 @@ EXEC_ENV_BLOCKED_PREFIXES = (
     "PRIVATE",
     "CREDENTIAL",
 )
+
+
+def _build_worker_summary(
+    *,
+    result: dict[str, Any],
+    worker_mode: str,
+    default_confidence: float = 0.74,
+) -> dict[str, Any]:
+    """Build and normalize a structured worker summary from a worker result payload."""
+    normalized_mode = normalize_agent_mode(worker_mode)
+    status = str(result.get("status", "")).strip().lower()
+    summary_text = str(result.get("summary", "")).strip()
+    error_text = str(result.get("error", "")).strip()
+    raw_summary = result.get("worker_summary")
+
+    if isinstance(raw_summary, dict):
+        key_findings_raw = raw_summary.get("key_findings")
+        references_raw = raw_summary.get("references")
+        confidence_raw = raw_summary.get("confidence", default_confidence)
+        key_findings = [str(item).strip() for item in key_findings_raw] if isinstance(key_findings_raw, list) else []
+        references = [str(item).strip() for item in references_raw] if isinstance(references_raw, list) else []
+        if isinstance(confidence_raw, (int, float)):
+            confidence = min(max(float(confidence_raw), 0.0), 1.0)
+        else:
+            confidence = default_confidence
+        task_outcome = str(raw_summary.get("task_outcome", status or "completed")).strip() or "completed"
+        if key_findings:
+            return {
+                "task_outcome": task_outcome,
+                "key_findings": key_findings,
+                "confidence": confidence,
+                "references": references,
+            }
+
+    if status in {"failed", "error"}:
+        key_finding = error_text or "Worker execution failed before producing a detailed summary."
+        confidence = 0.3
+        task_outcome = "failed"
+    elif status in {"interrupted", "cancelled"}:
+        key_finding = "Worker execution was interrupted before full completion."
+        confidence = 0.4
+        task_outcome = status
+    else:
+        key_finding = summary_text or "Worker completed without a detailed narrative summary."
+        confidence = default_confidence
+        task_outcome = "completed"
+
+    return {
+        "task_outcome": task_outcome,
+        "key_findings": [key_finding],
+        "confidence": confidence,
+        "references": [f"worker:{normalized_mode}"],
+    }
+
+
+def _compose_final_synthesis(
+    *,
+    worker_mode: str,
+    worker_summary: dict[str, Any],
+    child_results: list[dict[str, Any]],
+) -> str:
+    """Compose a clean user-facing synthesis from structured worker summaries."""
+    key_findings = [str(item).strip() for item in list(worker_summary.get("key_findings", [])) if str(item).strip()]
+    references = [str(item).strip() for item in list(worker_summary.get("references", [])) if str(item).strip()]
+    confidence = float(worker_summary.get("confidence", 0.0))
+    outcome = str(worker_summary.get("task_outcome", "completed")).strip()
+
+    findings_line = "; ".join(key_findings) if key_findings else "No key findings were provided."
+    references_line = ", ".join(references) if references else "none"
+    child_refs = ", ".join(str(item.get("ref", "")).strip() for item in child_results if str(item.get("ref", "")).strip())
+    return (
+        f"Outcome: {outcome}. "
+        f"Specialist mode: {worker_mode}. "
+        f"Key findings: {findings_line} "
+        f"Confidence: {confidence:.2f}. "
+        f"References: {references_line}. "
+        f"Worker refs: {child_refs or 'none'}."
+    )
 
 ToolPermission = str
 ToolRisk = str
@@ -1851,13 +1929,20 @@ async def run_universal_navigation(
                 ),
                 timeout=delegate_timeout,
             )
-            worker_summary = str(primary_result.get("summary", "")).strip() or str(primary_result.get("status", "")).strip()
+            structured_worker_summary = _build_worker_summary(
+                result=primary_result,
+                worker_mode=route_decision.selected_mode,
+            )
+            worker_summary = str(primary_result.get("summary", "")).strip() or "; ".join(
+                structured_worker_summary.get("key_findings", [])
+            )
             await _emit_mode_event(
                 "worker_summary",
                 {
                     "worker_mode": route_decision.selected_mode,
                     "status": str(primary_result.get("status", "completed")),
                     "summary": worker_summary,
+                    "worker_summary": structured_worker_summary,
                 },
             )
             child_results.append(
@@ -1908,12 +1993,18 @@ async def run_universal_navigation(
                     str(delegated_fallback_result.get("summary", "")).strip()
                     or str(delegated_fallback_result.get("status", "")).strip()
                 )
+                structured_fallback_summary = _build_worker_summary(
+                    result=delegated_fallback_result,
+                    worker_mode="code",
+                    default_confidence=0.6,
+                )
                 await _emit_mode_event(
                     "worker_summary",
                     {
                         "worker_mode": "code",
                         "status": str(delegated_fallback_result.get("status", "completed")),
                         "summary": fallback_summary,
+                        "worker_summary": structured_fallback_summary,
                         "fallback": True,
                     },
                 )
@@ -1928,15 +2019,18 @@ async def run_universal_navigation(
                 raise
             except Exception as fallback_exc:  # noqa: BLE001
                 logger.exception("Orchestrator fallback mode failed after primary delegation failure.")
-                failure_error = (
-                    f"Delegation failed in mode '{route_decision.selected_mode}' ({delegate_exc}); "
-                    f"fallback 'code' mode also failed ({fallback_exc})."
-                )
+                failure_error = "I could not complete this task because worker execution failed."
                 child_results.append({"ref": "child:fallback", "mode": "code", "status": "failed"})
                 failed_result = {
                     "status": "failed",
                     "instruction": instruction,
                     "error": failure_error,
+                    "worker_summary": {
+                        "task_outcome": "failed",
+                        "key_findings": ["The delegated worker failed and no fallback result was produced."],
+                        "confidence": 0.2,
+                        "references": ["worker:orchestrator"],
+                    },
                     "error_already_emitted": True,
                     "route_trace": route_trace,
                     "child_results": child_results,
@@ -1960,10 +2054,15 @@ async def run_universal_navigation(
                 return failed_result
 
         assert primary_result is not None
-        synthesis = build_synthesis(
-            decision=route_decision,
-            primary_result=primary_result,
-            fallback_result=delegated_fallback_result,
+        structured_primary_summary = _build_worker_summary(
+            result=primary_result,
+            worker_mode=str(primary_result.get("mode", route_decision.selected_mode)),
+            default_confidence=route_decision.confidence,
+        )
+        synthesis = _compose_final_synthesis(
+            worker_mode=str(primary_result.get("mode", route_decision.selected_mode)),
+            worker_summary=structured_primary_summary,
+            child_results=child_results,
         )
         await _emit_mode_event(
             "mode_transition",
@@ -1987,9 +2086,20 @@ async def run_universal_navigation(
             await on_step({"type": "result", "content": synthesis, "steering": []})
         result_payload = dict(primary_result)
         result_payload["summary"] = synthesis
+        result_payload["worker_summary"] = structured_primary_summary
         result_payload["route_trace"] = route_trace
         result_payload["child_results"] = child_results
         return result_payload
+
+    def _with_worker_summary(result: dict[str, Any]) -> dict[str, Any]:
+        """Attach the required worker_summary contract fields to worker results."""
+        payload = dict(result)
+        payload["mode"] = payload.get("mode", active_mode)
+        payload["worker_summary"] = _build_worker_summary(
+            result=payload,
+            worker_mode=str(payload.get("mode", active_mode)),
+        )
+        return payload
 
     tool_executor = UniversalToolExecutor(
         executor,
@@ -2064,7 +2174,7 @@ async def run_universal_navigation(
 
     for step_num in range(MAX_STEPS):
         if cancel_event and cancel_event.is_set():
-            return {"status": "interrupted", "instruction": instruction, "steps": steps}
+            return _with_worker_summary({"status": "interrupted", "instruction": instruction, "steps": steps})
 
         if steering_context:
             notes = steering_context.copy()
@@ -2123,14 +2233,14 @@ async def run_universal_navigation(
                 )
         except Exception as exc:  # noqa: BLE001
             logger.exception("LLM stream failed at step %d", step_num)
-            return {
+            return _with_worker_summary({
                 "status": "failed",
                 "instruction": instruction,
                 "steps": steps,
                 "error": str(exc),
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
-            }
+            })
 
         messages.append(ChatMessage(role="assistant", content=reply))
         tool_calls = _parse_tool_calls(reply)
@@ -2143,14 +2253,14 @@ async def run_universal_navigation(
             # fallback for clients that missed streaming (frontend deduplicates by message_id).
             if reply:
                 await emit_step(reply, step_type="assistant_message")
-            return {
+            return _with_worker_summary({
                 "status": "completed",
                 "instruction": instruction,
                 "steps": steps,
                 "summary": reply,
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
-            }
+            })
         # Fast path: done/error as a single terminal call.
         if len(tool_calls) == 1:
             tool_call = tool_calls[0]
@@ -2158,18 +2268,18 @@ async def run_universal_navigation(
             if tool_name == "done":
                 summary = str(tool_call.get("summary", "Task completed."))
                 await emit_step(summary, step_type="result")
-                return {
+                return _with_worker_summary({
                     "status": "completed",
                     "instruction": instruction,
                     "steps": steps,
                     "summary": summary,
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens,
-                }
+                })
             if tool_name == "error":
                 error_message = str(tool_call.get("message", "Unknown error."))
                 await emit_step(f"Error: {error_message}", step_type="error")
-                return {
+                return _with_worker_summary({
                     "status": "failed",
                     "instruction": instruction,
                     "steps": steps,
@@ -2177,7 +2287,7 @@ async def run_universal_navigation(
                     "error_already_emitted": True,
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens,
-                }
+                })
 
         run_in_parallel = _can_run_tool_calls_in_parallel(tool_calls)
         # "Processing N tool calls" goes to workflow log only, not the chat panel
@@ -2388,7 +2498,7 @@ async def run_universal_navigation(
             messages.append(ChatMessage(role="user", content=follow_up_text))
 
     await emit_step("Reached maximum step limit without completing task.", step_type="error")
-    return {
+    return _with_worker_summary({
         "status": "failed",
         "instruction": instruction,
         "steps": steps,
@@ -2396,7 +2506,7 @@ async def run_universal_navigation(
         "error_already_emitted": True,
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
-    }
+    })
 
 # Public alias — cleaner name for callers that don't need the "navigation" framing
 run_agent_task = run_universal_navigation
