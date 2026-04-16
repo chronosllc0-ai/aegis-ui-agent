@@ -148,6 +148,10 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Workflow step update',
   'Starting task:',
   'Processing ',
+  'route_decision',
+  'worker_reference',
+  '[route_decision]',
+  '[worker_reference]',
 ]
 
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
@@ -158,6 +162,10 @@ function isDeniedChatText(text: string, rawStepType?: string): boolean {
   // Filter raw JSON tool blobs that leaked through (e.g. {"tool":"extract_page",...})
   const t = text.trim()
   if (t.startsWith('{') && t.includes('"tool"') && t.includes('"')) return true
+  // Filter raw [web_search]{...} format blobs and similar tool payloads
+  if (/^\[[\w_]+\]\s*\{/.test(t)) return true
+  // Filter route decision messages with JSON payload
+  if (t.includes('route_decision') && t.includes('{') && t.includes('}')) return true
   return false
 }
 
