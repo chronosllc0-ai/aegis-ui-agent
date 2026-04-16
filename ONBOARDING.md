@@ -4053,3 +4053,47 @@
 1. Add explicit frontend retry CTA component wired to stored pending instruction + fresh request_id.
 2. Add backend unit tests for idempotency prune behavior and metadata normalization allowlist.
 3. Add end-to-end timeout test covering queued-timeout client behavior and `E_TASK_TIMEOUT` server mapping.
+
+## 2026-04-15 — ChatPanel now surfaces all tool calls + reasoning cards
+
+### What changed
+- Removed ChatPanel browser-only filtering so browser primitives/tool calls now render in chat (same shell/tool card surfaces).
+- Added explicit reasoning card support in ChatPanel with a brain-icon header and dropdown body, while preserving plain assistant text rendering for model responses.
+- Wired websocket reasoning lifecycle into logs (`reasoning_start`, `reasoning_delta`, `reasoning`) so reasoning content streams and completes in-chat.
+- Preserved existing shell/tool card behavior: status states, result rendering, and card expansion/collapse flow remain intact.
+- Updated ChatPanel tests to reflect new visibility behavior (browser tool cards visible in chat + reasoning card presence).
+
+### What works / what does not
+- Works: browser tool call rows are now visible in chat as shell cards; typed tool-call cards still show progress/result.
+- Works: reasoning entries now appear in dropdown cards with brain icon and incremental content.
+- Works: assistant/model replies continue to render as bare assistant content blocks.
+- Note: legacy `python -m py_compile main.py backend/pydantic_adk_runner.py` checklist path failed because `backend/pydantic_adk_runner.py` does not exist in this checkout.
+
+### Next steps
+1. Add/adjust any backend or historical-thread message normalization so server-hydrated bracket-tool strings (`[tool] ...`) can optionally be promoted into shell cards too.
+2. Consider adding an explicit user setting toggle for "show reasoning in chat" if product policy changes.
+3. Evaluate whether reasoning cards should auto-collapse after completion like shell cards.
+
+### Blockers / decisions
+- Decision: Keep model response rendering unchanged (bare assistant blocks) while adding reasoning/tool visibility to match requested reference behavior.
+
+## 2026-04-16 — Tool call cards: separate Request/Response dropdowns on success
+
+### What changed
+- Updated typed `ToolCallCard` rendering in ChatPanel to add separate **Request** and **Response** dropdown sections.
+- Kept existing card color palette/layout behavior intact and did not apply this change to reasoning cards or legacy browser shell cards.
+- Gated the new dropdown sections to **successful tool calls only** (`completed` and not `failed`).
+- Preserved the existing failure-state card behavior (failed badge + existing compact content path).
+- Added tests to verify successful tool calls show Request/Response controls and failed tool calls do not.
+
+### What works / what does not
+- Works: successful typed tool cards now expose request/response in separate expandable sections.
+- Works: failed tool cards retain failure styling/state and do not show request/response dropdown sections.
+- Works: reasoning card and browser shell cards remain unchanged.
+
+### Next steps
+1. Consider truncation/syntax highlighting for very large JSON request/response payloads.
+2. Add visual telemetry polish for loading request/response during in-progress tool states if needed.
+
+### Blockers / decisions
+- Decision: Keep success-only request/response dropdowns to match requested UX and avoid altering failure-state semantics.
