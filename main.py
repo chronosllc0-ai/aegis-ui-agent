@@ -2251,14 +2251,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     "type": "subagent_list",
                     "data": {"agents": runtime.subagent_manager.list_agents()},
                 })
-            elif action == "message_subagent":
+            elif action in {"message_subagent", "steer_subagent"}:
                 # ── Steer a running sub-agent ──────────────────────────
                 sub_id = str(data.get("sub_id", "")).strip()
                 sub_message = str(data.get("message", "")).strip()
+                priority = str(data.get("priority", "")).strip()
                 if not sub_id or not sub_message:
-                    await websocket.send_json({"type": "error", "data": {"message": "message_subagent: sub_id and message are required"}})
+                    await websocket.send_json({"type": "error", "data": {"message": f"{action}: sub_id and message are required"}})
                     continue
-                ok = await runtime.subagent_manager.send_message(sub_id, sub_message)
+                steering_payload = _build_subagent_steering_payload(sub_message, priority=priority)
+                ok = await runtime.subagent_manager.send_message(sub_id, steering_payload)
                 if not ok:
                     await websocket.send_json({"type": "error", "data": {"message": f"Sub-agent {sub_id} not found or not running"}})
             elif action == "cancel_subagent":
@@ -3056,6 +3058,7 @@ TELEGRAM_SLASH_COMMANDS = [
     {"command": "backup", "description": "Backup status"},
     {"command": "models", "description": "List models and switch"},
     {"command": "stream", "description": "Live browser screenshots: /stream start|stop"},
+    {"command": "subagent", "description": "Sub-agent controls: /subagent steer <id> <message>"},
     {"command": "help", "description": "Show all commands"},
 ]
 
@@ -3292,6 +3295,15 @@ async def _run_or_queue_from_bot_command(
     return f"🚀 Starting task: {instruction[:80]}"
 
 
+def _build_subagent_steering_payload(message: str, priority: str | None = None) -> str:
+    """Build a normalized sub-agent steering payload, optionally with priority annotation."""
+    normalized_message = message.strip()
+    normalized_priority = (priority or "").strip().lower()
+    if normalized_priority in {"low", "normal", "high", "urgent"}:
+        return f"[priority:{normalized_priority}] {normalized_message}"
+    return normalized_message
+
+
 async def _handle_slash_command(
     text: str,
     owner_uid: str | None,
@@ -3334,6 +3346,7 @@ async def _handle_slash_command(
             "/config — runtime config summary\n"
             "/acp spawn <instruction> — ACP task start\n"
             "/spawn <instruction> — alias for /run\n"
+            "/subagent steer <id> <message> — steer a running sub-agent\n"
             "/pair — pairing status\n"
             "/backup — backup status\n"
             "/help — this message"
@@ -3444,6 +3457,23 @@ async def _handle_slash_command(
             return "⚪ No active session."
         runtime.steering_context.append(arg)
         return f"🎯 Steering note added: {arg[:80]}"
+
+    if cmd == "subagent":
+        if not runtime:
+            return "⚪ No active session."
+        if not arg:
+            return "Usage: /subagent steer <id> <message>"
+        parts3 = arg.split(None, 2)
+        if len(parts3) < 3 or parts3[0].lower() != "steer":
+            return "Usage: /subagent steer <id> <message>"
+        sub_id = parts3[1].strip()
+        sub_message = parts3[2].strip()
+        if not sub_id or not sub_message:
+            return "Usage: /subagent steer <id> <message>"
+        ok = await runtime.subagent_manager.send_message(sub_id, _build_subagent_steering_payload(sub_message))
+        if not ok:
+            return f"⚠️ Sub-agent {sub_id} not found or not running."
+        return f"🎯 Sub-agent {sub_id} steering sent."
 
     if cmd == "interrupt":
         if not runtime or not runtime.task_running:

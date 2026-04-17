@@ -65,7 +65,14 @@ export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread
   const [expanded, setExpanded] = useState(false)
   const [hoveredModel, setHoveredModel] = useState<string | null>(null) // sub_id of hovered name
   void onCancel
-  void onMessage
+
+  const handleSteer = (subId: string): void => {
+    const message = window.prompt('Steer sub-agent message')
+    if (!message) return
+    const trimmed = message.trim()
+    if (!trimmed) return
+    onMessage(subId, trimmed)
+  }
 
   const activeCount = useMemo(
     () => agents.filter((a) => a.status === 'spawning' || a.status === 'running').length,
@@ -127,6 +134,15 @@ export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread
                 >
                   Open
                 </button>
+                {isLive && (
+                  <button
+                    type='button'
+                    onClick={() => handleSteer(agent.sub_id)}
+                    className='flex-shrink-0 text-[11px] font-medium text-blue-300 hover:text-blue-200 transition-colors'
+                  >
+                    Steer
+                  </button>
+                )}
               </div>
             )
           })}

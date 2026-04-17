@@ -502,3 +502,25 @@ def test_integration_subagent_allowlist_enforced_in_batch(monkeypatch: pytest.Mo
         assert "[wait] ok: ok" in follow_up
 
     asyncio.run(_run())
+
+
+def test_steer_subagent_tool_routes_to_message_subagent_with_priority() -> None:
+    """steer_subagent tool should reuse message_subagent callback path with optional priority tag."""
+
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool":"steer_subagent","sub_id":"sub-1","message":"Prioritize risks","priority":"high"}',
+            '{"tool":"done","summary":"ok"}',
+        ])
+        received: list[tuple[str, str]] = []
+
+        async def _on_message_subagent(sub_id: str, message: str) -> bool:
+            received.append((sub_id, message))
+            return True
+
+        result = await _run_navigation(provider, on_message_subagent=_on_message_subagent)
+
+        assert result["status"] == "completed"
+        assert received == [("sub-1", "[priority:high] Prioritize risks")]
+
+    asyncio.run(_run())

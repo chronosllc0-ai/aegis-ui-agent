@@ -413,6 +413,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "default_permission": "auto",
     },
     {
+        "name": "steer_subagent",
+        "description": "Alias of message_subagent with optional priority metadata for routing urgency.",
+        "example": {"tool": "steer_subagent", "sub_id": "uuid", "message": "Summarize blockers first", "priority": "high"},
+        "risk": "low",
+        "default_permission": "auto",
+    },
+    {
         "name": "github_list_repos",
         "description": "List repositories available to the connected GitHub PAT.",
         "example": {"tool": "github_list_repos", "per_page": 20},
@@ -1191,6 +1198,19 @@ class UniversalToolExecutor:
                     ok = await self._on_message_subagent(sub_id, message)
                     return f"Steering message {'sent' if ok else 'failed'} for sub-agent {sub_id}.", None
                 return "message_subagent is not available in this context.", None
+
+            if tool == "steer_subagent":
+                sub_id = str(tool_call.get("sub_id", "")).strip()
+                message = str(tool_call.get("message", "")).strip()
+                priority_raw = str(tool_call.get("priority", "")).strip().lower()
+                if not sub_id or not message:
+                    return "steer_subagent error: sub_id and message are required.", None
+                if priority_raw in {"low", "normal", "high", "urgent"}:
+                    message = f"[priority:{priority_raw}] {message}"
+                if self._on_message_subagent:
+                    ok = await self._on_message_subagent(sub_id, message)
+                    return f"Steering message {'sent' if ok else 'failed'} for sub-agent {sub_id}.", None
+                return "steer_subagent is not available in this context.", None
 
             if tool == "github_list_repos":
                 github = await self._github()

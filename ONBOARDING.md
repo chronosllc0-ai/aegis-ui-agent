@@ -4873,3 +4873,44 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.2 - April 17, 2026 (Sub-agent steer tool + channel alias)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added `steer_subagent` as a first-class tool in `universal_navigator.py` with params `sub_id`, `message`, and optional `priority`.
+- Wired `steer_subagent` to the existing `on_message_subagent` runtime callback path.
+- Added websocket action alias support in `main.py` so both `message_subagent` and `steer_subagent` route through the same sub-agent messaging runtime path.
+- Added helper normalization in `main.py` to support optional priority annotation (`[priority:<level>] ...`) while preserving message behavior.
+- Added channel command alias `/subagent steer <id> <message>` in `_handle_slash_command` and updated help text + Telegram command metadata.
+- Added chat UI action in `frontend/src/components/SubAgentPanel.tsx`: active sub-agents now show a `Steer` button that prompts for a message and forwards via existing `onMessage` path.
+- Updated mode safety policy to also block `steer_subagent` in read-only modes (`backend/modes.py`) for parity with `message_subagent`.
+- Added/updated tests:
+  - `tests/test_parallel_tool_calls.py` verifies tool manifest includes `steer_subagent`.
+  - `tests/test_mode_commands.py` verifies `/subagent steer ...` forwards to `subagent_manager.send_message`.
+  - `tests/test_universal_navigator_parallel_tools.py` verifies `steer_subagent` uses message path and applies priority annotation.
+
+### What's Working
+- Tool path: model-issued `steer_subagent` calls now reach sub-agent messaging via existing runtime route.
+- Channel command path: `/subagent steer <id> <message>` now routes to the same runtime message function.
+- UI path: SubAgent panel can steer active sub-agents through the same backend path.
+- Frontend production build succeeds with the UI updates.
+- Targeted tests covering new behavior pass.
+
+### What's NOT Working Yet
+- One pre-existing unrelated test (`test_rejects_batch_over_three_with_safe_error`) failed when running a larger parallel-tools test subset; this change set did not modify that area.
+
+### Next Steps
+1. Add websocket integration tests that exercise `action: steer_subagent` directly for end-to-end parity checks.
+2. Add a small UI interaction test for the SubAgent panel steer button dispatch.
+3. Investigate and stabilize the existing flaky/changed expectation in the broader parallel-tools suite.
+
+### Decisions Made
+- Implemented `steer_subagent` as an alias route to `message_subagent` (not a separate runtime mechanism) to guarantee identical behavior.
+- Encoded optional `priority` as steering-message prefix for compatibility with existing sub-agent runtime signature.
+
+### Blockers
+- None.
