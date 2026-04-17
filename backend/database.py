@@ -691,6 +691,45 @@ class PlatformSetting(Base):
     updated_by = Column(String(255), nullable=True)  # admin uid who last changed it
 
 
+class WorkspaceFileGlobal(Base):
+    """Admin-managed global workspace-file defaults."""
+
+    __tablename__ = "workspace_files_global"
+
+    name = Column(String(255), primary_key=True)
+    content = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    updated_by = Column(String(255), ForeignKey("users.uid"), nullable=True, index=True)
+
+
+class WorkspaceFileUser(Base):
+    """Per-user workspace-file overrides layered over global defaults."""
+
+    __tablename__ = "workspace_files_user"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_workspace_files_user_user_name"),)
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    name = Column(String(255), nullable=False, index=True)
+    content = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    updated_by = Column(String(255), ForeignKey("users.uid"), nullable=True, index=True)
+
+
+class WorkspaceFileAuditEvent(Base):
+    """Immutable audit event for workspace-file mutations across scopes."""
+
+    __tablename__ = "workspace_file_audit_events"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    actor_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    scope = Column(String(20), nullable=False)  # global | user
+    operation = Column(String(20), nullable=False)  # write | edit | patch | delete
+    file_name = Column(String(255), nullable=False, index=True)
+    diff_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+
 class ScheduledTask(Base):
     """A user-defined cron job that runs an agent prompt on a schedule."""
 

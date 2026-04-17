@@ -63,7 +63,7 @@ from backend.skills.router import skills_router
 from backend.skills_hub.router import skills_hub_router
 from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
-from backend.workspace_files import workspace_files_router
+from backend.workspace_files import legacy_workspace_files_router, workspace_files_router
 from backend.workspace_files_service import materialize_workspace_files_for_session_safe
 from backend.tasks.worker import BackgroundWorker
 from backend.session_gateway import SessionEventHub
@@ -128,6 +128,7 @@ app.include_router(tasks_router)
 app.include_router(skills_router)
 app.include_router(skills_hub_router)
 app.include_router(workspace_files_router)
+app.include_router(legacy_workspace_files_router)
 
 orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
@@ -1752,7 +1753,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     db_session_gen = get_session()
     try:
         db_session = await anext(db_session_gen)
-        await materialize_workspace_files_for_session_safe(db_session, session_id)
+        await materialize_workspace_files_for_session_safe(db_session, session_id, runtime.user_uid)
     except Exception:
         logger.exception("Workspace file sync failed during websocket session bootstrap")
     finally:
