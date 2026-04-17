@@ -18,7 +18,7 @@ export function SteeringControl({ mode, queueCount, onChange }: SteeringControlP
           onClick={() => onChange(option)}
           className={`relative rounded-md px-3 py-1 capitalize transition ${mode === option ? 'bg-blue-500 text-white' : 'text-zinc-300 hover:bg-zinc-800'}`}
         >
-          {option === 'auto' ? 'Navigate' : option}
+          {option}
           {option === 'queue' && queueCount > 0 && (
             <span className='ml-2 rounded-full bg-zinc-900 px-1.5 py-0.5 text-[10px] text-blue-200'>{queueCount}</span>
           )}

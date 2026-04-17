@@ -4592,3 +4592,42 @@
 
 ### Blockers
 - None.
+## Session 5.71 - April 17, 2026 (Runtime controls restore: 4 steering modes + composer-native UX)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend behavior pass
+
+### What Was Done
+- Restored runtime steering controls with four modes (`auto`, `steer`, `interrupt`, `queue`) in the composer flow.
+- Added persistent `steeringMode` to app settings with default `auto`, and included it in the WebSocket config payload (`steering_mode`).
+- Wired App send-routing logic so:
+  - idle sends always start a normal task (`chat`),
+  - running sends use the selected steering mode action,
+  - running + `auto` blocks follow-up sends until mode is changed.
+- Updated ChatPanel UX so steering controls render directly above the composer only while a task is running, and hide when idle.
+- Updated composer action button behavior:
+  - running + `auto`: show Stop only (hide Send),
+  - running + `steer`/`interrupt`/`queue`: show Send.
+- Updated steering control labels to show `auto` explicitly (instead of `Navigate`).
+
+### What's Working
+- Default steering mode persists as `auto`.
+- Runtime mode bar appears above composer during active work and disappears when idle.
+- Auto-mode running behavior now enforces stop-only UX and blocks follow-up text dispatch.
+- Non-auto running modes allow follow-up send as expected.
+
+### What's NOT Working Yet
+- Existing `ChatPanel.test.tsx` suite has unrelated/pre-existing failures in this environment; targeted run still reports 3 failures tied to message rendering expectations.
+
+### Next Steps
+1. Update/repair `ChatPanel.test.tsx` fixtures around thread hydration/message visibility to re-align with current chat rendering behavior.
+2. Add explicit tests for runtime steering mode behavior (auto stop-only + non-auto send visibility).
+
+### Decisions Made
+- Enforced auto follow-up block in both ChatPanel (UI-level no-op) and App send dispatch (source-of-truth guard) for safety.
+- Kept queue badge count static at `0` because queue depth signal is not currently exposed in ChatPanel props.
+
+### Blockers
+- No functional blockers for shipping this UX restore.
+
+---

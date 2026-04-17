@@ -9,8 +9,10 @@ import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { SuggestionChips } from './SuggestionChips'
 import { PromptGallery } from './PromptGallery'
+import { SteeringControl } from './SteeringControl'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
 import { FaBrain } from 'react-icons/fa6'
+import type { SteeringMode } from '../hooks/useWebSocket'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -39,7 +41,9 @@ const IcoSparkle     = (p: SvgProps) => <Svg {...p}><path d='M12 3v1M12 20v1M3 1
 export interface ChatPanelProps {
   logs: LogEntry[]
   isWorking: boolean
+  steeringMode?: SteeringMode
   onPrimarySend: (instruction: string, metadata?: Record<string, unknown>) => void
+  onSteeringModeChange?: (mode: SteeringMode) => void
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
@@ -1366,17 +1370,19 @@ interface InputBarCursorProps {
   activeConnector: ConnectorMeta | null
   onRemoveConnector: () => void
   hasAttachments: boolean
+  steeringMode: SteeringMode
 }
 
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
   provider, model, activeMode, modeLocked, onProviderChange, onModelChange, onAgentModeChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
-  activeConnector, onRemoveConnector, hasAttachments,
+  activeConnector, onRemoveConnector, hasAttachments, steeringMode,
 }: InputBarCursorProps) {
   const canSend = input.trim().length > 0 || hasAttachments
   const [isInputFocused, setIsInputFocused] = useState(false)
   const isExpanded = !isWorking || isInputFocused || canSend
+  const showAutoStopOnly = isWorking && steeringMode === 'auto'
 
   return (
     <div className='space-y-0'>
@@ -1410,16 +1416,6 @@ function InputBarCursor({
             className='w-full resize-none bg-transparent px-4 pt-3 pb-3 text-sm text-zinc-200 placeholder:text-zinc-500 outline-none disabled:opacity-40 leading-6 transition-[padding,min-height]'
             style={{ minHeight: isExpanded ? '58px' : '52px', maxHeight: '140px', overflow: 'hidden' }}
           />
-          {isWorking && !canSend && (
-            <button type='button' onClick={onStop}
-              className='absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
-              aria-label='Stop task' title='Stop current task'>
-              <span className='relative flex h-4 w-4 items-center justify-center'>
-                <span className='absolute inset-0 animate-spin rounded-full border-2 border-red-400/50 border-t-transparent' />
-                <span className='h-1.5 w-1.5 rounded-sm bg-red-300' />
-              </span>
-            </button>
-          )}
         </div>
 
         {isExpanded && (
@@ -1502,7 +1498,7 @@ function InputBarCursor({
             <FiMic className='h-3.5 w-3.5' />
           </button>
 
-          {isWorking && !canSend ? (
+          {showAutoStopOnly ? (
             <button type='button' onClick={onStop}
               className='flex h-7 w-7 items-center justify-center rounded-full bg-[#2a2a2a] text-red-300 hover:bg-[#333] transition-colors'
               aria-label='Stop task' title='Stop current task'>
@@ -1529,7 +1525,9 @@ function InputBarCursor({
 export function ChatPanel({
   logs,
   isWorking,
+  steeringMode = 'auto',
   onPrimarySend,
+  onSteeringModeChange = () => undefined,
   onDecomposePlan,
   connectionStatus,
   onSwitchToBrowser,
@@ -1783,6 +1781,7 @@ export function ChatPanel({
   }
 
   const handleSend = (forcePlan = false) => {
+    if (isWorking && steeringMode === 'auto') return
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
     const parsed = resolveComposerSubmission(trimmed, forcePlan)
@@ -1904,7 +1903,7 @@ export function ChatPanel({
     onUserInputResponse(trimmed, requestId)
   }
 
-  const isDisabled = connectionStatus !== 'connected' || isWorking
+  const isDisabled = connectionStatus !== 'connected' || (isWorking && steeringMode === 'auto')
 
   // Personalised CTA — first name only
   const firstName = userName ? userName.split(' ')[0] : null
@@ -2180,6 +2179,15 @@ export function ChatPanel({
 
       {/* Input area */}
       <div className='relative border-t border-[#1e1e1e] bg-[#111] px-3 py-3'>
+        {isWorking && (
+          <div className='mb-2'>
+            <SteeringControl
+              mode={steeringMode}
+              queueCount={0}
+              onChange={onSteeringModeChange}
+            />
+          </div>
+        )}
         {/* Sub-agent SLA hint: shown when agents are active and no @ query is active */}
         {subAgentNames.length > 0 && mentionQuery === null && (
           <div className='mb-2 flex items-center gap-1.5 rounded-lg bg-[#171717] px-2.5 py-1.5'>
@@ -2245,6 +2253,7 @@ export function ChatPanel({
           activeConnector={activeConnector}
           onRemoveConnector={() => setActiveConnector(null)}
           hasAttachments={attachments.length > 0}
+          steeringMode={steeringMode}
         />
 
         {/* Hidden file input */}
