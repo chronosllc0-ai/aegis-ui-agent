@@ -5265,3 +5265,53 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.12 - April 17, 2026 (two-layer workspace file model)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Introduced a two-layer workspace file storage model in DB:
+  - `workspace_files_global` for admin-managed defaults.
+  - `workspace_files_user` for per-user local overrides.
+  - `workspace_file_audit_events` for immutable write/edit/patch/delete tracking (`actor_id`, `scope`, `file_name`, `diff_hash`).
+- Reworked workspace file service to support:
+  - scope-aware listing (`global` and effective `user` view),
+  - effective-file resolver (`user override` > `global default`),
+  - scoped write APIs with audit emission,
+  - user override deletion (revert-to-global behavior).
+- Added new scoped API routes:
+  - `GET /api/workspace/files?scope=user|global`
+  - `PUT /api/workspace/files/{name}?scope=user|global`
+  - `DELETE /api/workspace/files/{name}?scope=user`
+- Preserved legacy compatibility by keeping `GET /api/workspace-files` as an alias returning user-effective files.
+- Updated websocket workspace materialization to hydrate user-effective files instead of global-only files.
+- Added comprehensive API tests verifying:
+  - RBAC (non-admin blocked from global writes),
+  - admin global uplift propagation behavior,
+  - per-user local isolation,
+  - user delete-revert semantics,
+  - workspace file audit event integrity.
+
+### What's Working
+- User edits now remain local to the editing user.
+- Admin global edits propagate to all users without local overrides.
+- Effective resolver behavior is deterministic and test-covered.
+- All workspace file mutations are audit-logged with actor and diff hash.
+
+### What's NOT Working Yet
+- Delivery checklist compile command still references a missing file (`backend/pydantic_adk_runner.py`) in this repository.
+
+### Next Steps
+1. Add an admin endpoint to inspect `workspace_file_audit_events` in the dashboard if operational visibility is needed.
+2. Consider a DB migration strategy for existing `platform_settings` workspace-file keys if production data backfill is required.
+3. Optionally enforce operation type (`write` vs `edit`) based on preexistence for finer audit semantics.
+
+### Decisions Made
+- Retained legacy endpoint compatibility (`/api/workspace-files`) to avoid breaking existing clients while introducing scoped endpoints.
+- Chose a dedicated workspace-file audit table to satisfy actor-inclusive auditing for both admins and regular users.
+
+### Blockers
+- None.
