@@ -33,6 +33,7 @@ from backend.automation import automation_router
 from backend.agent_spawn import create_agent_task, get_task_actions, get_task_by_id, get_user_tasks, update_task_status
 from backend.artifacts.router import artifact_router
 from backend.connectors.router import connector_router
+from backend.connections.router import router as connections_router
 from backend.integrations.channel_runtime import ChannelRuntimeRegistry, DiscordChannelAdapter, SlackChannelAdapter, TelegramChannelAdapter
 from backend.integrations.text_normalization import normalize_for_channel
 from backend.gallery.router import gallery_router
@@ -115,6 +116,7 @@ app.include_router(admin_router)
 app.include_router(artifact_router)
 app.include_router(automation_router)
 app.include_router(connector_router)
+app.include_router(connections_router)
 app.include_router(gallery_router)
 app.include_router(memory_router)
 app.include_router(payments_router)
