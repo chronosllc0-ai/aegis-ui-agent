@@ -5193,3 +5193,75 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.10 - April 17, 2026 (workspace-file prompt migration pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Migrated Agent settings UX away from editable system-instruction textareas:
+  - Removed user-facing runtime system-instruction textarea/presets from `AgentTab`.
+  - Added Agent Configuration subtabs (`General`, `Workspace Files`) and embedded workspace-file editor directly in Agent Configuration.
+- Deprecated admin editable global/mode instruction textareas in Admin → Agent Config and replaced that surface with workspace-file management + immutable-baseline messaging.
+- Expanded workspace-file model/content to include `MEMORY.md` and aligned defaults/docs/tool table to the workspace-file-first model.
+- Added rollout flag `WORKSPACE_PROMPT_MODE` (`v1` default) in server config + `.env.example`.
+- Updated runtime prompt assembly in `universal_navigator.py`:
+  - Added immutable hidden baseline policy block (always prepended).
+  - `v2` mode now assembles prompts in order: baseline -> global workspace overlay -> user workspace overlay -> runtime context.
+  - `v1` mode keeps legacy global/mode/user-instruction behavior for rollout safety.
+- Added user workspace overlay persistence in frontend settings and forwarded it to runtime config as `user_workspace_overlay_files`.
+- Added regression test coverage for v2 merge ordering in `tests/test_mode_instruction_precedence.py`.
+
+### What's Working
+- No user-visible system-instruction textareas remain in Agent Configuration.
+- Workspace files are editable in UI (admin global editor and user overlay editor in Agent Configuration).
+- Runtime includes immutable hidden baseline policy and supports flag-gated migration to workspace-file prompt assembly.
+- Frontend build succeeds; websocket smoke + prompt precedence tests pass.
+
+### What's NOT Working Yet
+- Delivery-checklist compile command still references missing `backend/pydantic_adk_runner.py` and cannot pass as-written in this repo state.
+
+### Next Steps
+1. Plan eventual removal of legacy v1 global/mode/system-instruction path once rollout confirms v2 behavior in production.
+2. Add API-backed per-user workspace overlay persistence if cross-device sync is required (currently local settings-backed on frontend).
+3. Add/adjust admin API deprecation messaging for legacy platform settings endpoints if they will be retired.
+
+### Decisions Made
+- Kept legacy behavior behind `WORKSPACE_PROMPT_MODE=v1` default to avoid breaking existing sessions during rollout.
+- Preserved existing backend platform-settings endpoints for compatibility, while removing instruction editors from active UI surfaces.
+
+### Blockers
+- None.
+
+---
+## Session 6.11 - April 17, 2026 (post-review fixes for workspace prompt migration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 follow-up patch pass
+
+### What Was Done
+- Fixed prompt assembly ordering in `universal_navigator.py` so runtime skills/context now appears after the core identity/tools/rules block instead of before it.
+- Restored v2 compatibility for existing user custom instructions by appending legacy `system_instruction` content in v2 mode under a migration-compatibility block, instead of dropping it.
+- Wired the non-admin Workspace Files `Write` button to a real handler so it is no longer a no-op UI affordance.
+- Updated `tests/test_mode_instruction_precedence.py` to validate the full effective prompt order (baseline -> global workspace overlay -> user workspace overlay -> core identity -> runtime context -> legacy custom instruction).
+
+### What's Working
+- v2 prompt mode preserves user legacy custom instruction text while still honoring workspace-file overlay ordering.
+- Runtime skills section now lands in runtime-context position (after core prompt body).
+- Workspace Files user `Write` button now executes a state update action.
+- Prompt-order regression suite and websocket smoke test pass.
+
+### What's NOT Working Yet
+- No new blockers identified in this follow-up pass.
+
+### Next Steps
+1. If desired, add a one-time frontend migration that copies legacy `systemInstruction` into `USER.md` automatically and clears the legacy field.
+2. Consider deprecation telemetry to measure remaining v1/v2 legacy custom-instruction usage.
+
+### Decisions Made
+- Kept compatibility by retaining legacy custom instruction content in v2 until a formal migration/removal window is scheduled.
+
+### Blockers
+- None.

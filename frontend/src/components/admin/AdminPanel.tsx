@@ -7,6 +7,7 @@ import { AdminMessaging } from './AdminMessaging'
 import { AdminEmailing } from './AdminEmailing'
 import { PaymentSettingsModal } from './PaymentSettingsModal'
 import { useImpersonation } from './useImpersonation'
+import { WorkspaceFilesTab } from '../settings/WorkspaceFilesTab'
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
@@ -45,9 +46,6 @@ type AuditEntry = {
 
 const ADMIN_TABS = ['Dashboard', 'Users', 'Agent Config', 'Messaging', 'Emailing', 'Audit Log'] as const
 type AdminTab = (typeof ADMIN_TABS)[number]
-const MODE_IDS = ['orchestrator', 'planner', 'architect', 'deep_research', 'code'] as const
-type ModeId = (typeof MODE_IDS)[number]
-
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -589,45 +587,8 @@ function UsersTab() {
 /* ─── Agent Config Tab ───────────────────────────────────────────────── */
 
 function AgentConfigTab() {
-  const [instruction, setInstruction] = useState('')
-  const [modeInstructions, setModeInstructions] = useState<Record<ModeId, string>>({
-    orchestrator: '',
-    planner: '',
-    architect: '',
-    deep_research: '',
-    code: '',
-  })
-  const [instructionSection, setInstructionSection] = useState<'global' | 'mode'>('global')
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [globalStats, setGlobalStats] = useState<{ total: number; running: number; completed: number; failed: number; total_credits_used: number; by_platform: Record<string, number> } | null>(null)
   const [recentFailures, setRecentFailures] = useState<Array<{ id: string; instruction: string; error_message?: string | null; created_at?: string | null }>>([])
-  const toast = useToast()
-
-  useEffect(() => {
-    fetch(apiUrl('/api/admin/platform-settings'), { credentials: 'include' })
-      .then((r) => r.json())
-      .then((data) => {
-        setInstruction(data.global_system_instruction ?? '')
-        const nextModeInstructions: Record<ModeId, string> = {
-          orchestrator: '',
-          planner: '',
-          architect: '',
-          deep_research: '',
-          code: '',
-        }
-        for (const mode of MODE_IDS) {
-          nextModeInstructions[mode] = data.mode_system_instructions?.[mode] ?? ''
-        }
-        setModeInstructions(nextModeInstructions)
-        setLoading(false)
-      })
-      .catch(() => {
-        toast.error('Failed to load platform settings')
-        setLoading(false)
-      })
-  }, [toast])
 
   useEffect(() => {
     void (async () => {
@@ -650,120 +611,23 @@ function AgentConfigTab() {
     })()
   }, [])
 
-  const handleSave = async () => {
-    setSaving(true)
-    setSaved(false)
-    try {
-      const r = await fetch(apiUrl('/api/admin/platform-settings'), {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          global_system_instruction: instruction,
-          mode_system_instructions: modeInstructions,
-        }),
-      })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      setSaved(true)
-      toast.success('Global system instruction saved')
-    } catch {
-      toast.error('Save failed')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center py-16'>
-        <LuLoader className='h-5 w-5 animate-spin text-zinc-400' />
-      </div>
-    )
-  }
-
   return (
     <div className='max-w-2xl space-y-6'>
-      <div className='w-full overflow-x-auto scrollbar-none rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
-        <div className='flex w-max gap-1'>
-          {[
-            { id: 'global', label: 'Global Instruction' },
-            { id: 'mode', label: 'Mode Instructions' },
-          ].map((section) => (
-            <button
-              key={section.id}
-              type='button'
-              onClick={() => setInstructionSection(section.id as 'global' | 'mode')}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition ${
-                instructionSection === section.id ? 'bg-[#1e1e1e] text-zinc-100 shadow' : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              {section.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div>
-        <h2 className='text-base font-semibold text-white'>
-          {instructionSection === 'global' ? 'Aegis Global System Instructions' : 'Aegis Mode System Instructions'}
-        </h2>
+        <h2 className='text-base font-semibold text-white'>Aegis Prompt Policy</h2>
         <p className='mt-1 text-xs text-zinc-400'>
-          {instructionSection === 'global'
-            ? 'This instruction is injected at the top of every agent system prompt on every session, for every user. It is authoritative - users cannot see or override it.'
-            : 'Each mode instruction is injected after the global instruction and before user runtime instructions. Admin-defined mode instructions are authoritative within that mode.'}
+          Runtime prompting is now workspace-file driven. The immutable hidden safety baseline stays server-owned and is not editable in UI.
         </p>
       </div>
 
       <div className='rounded-xl border border-amber-500/20 bg-amber-500/5 p-4'>
         <p className='text-xs font-medium text-amber-300'>Admin-only</p>
         <p className='mt-1 text-xs text-zinc-400'>
-          Only admins can view or edit this. Users see a note in their Agent tab that global
-          operator instructions apply, but they cannot read the content.
+          Update the global workspace overlay files below. These files are materialized into every runtime workspace.
         </p>
       </div>
 
-      {instructionSection === 'global' ? (
-        <div className='space-y-2'>
-          <label htmlFor='global-instruction' className='text-xs font-medium text-zinc-300'>
-            Global instruction
-          </label>
-          <textarea
-            id='global-instruction'
-            value={instruction}
-            onChange={(e) => { setInstruction(e.target.value); setSaved(false) }}
-            rows={10}
-            placeholder='e.g. You are operating as Aegis on the Acme Corp platform. Always respond in formal English. Never discuss competitor products. Route any billing questions to support@acme.com.'
-            className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] p-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none'
-          />
-          <p className='text-xs text-zinc-500'>
-            Leave blank to use only built-in defaults plus mode and per-user runtime instructions.
-          </p>
-        </div>
-      ) : (
-        <div className='space-y-4'>
-          {MODE_IDS.map((modeId) => (
-            <div key={modeId} className='space-y-2'>
-              <label htmlFor={`mode-instruction-${modeId}`} className='text-xs font-medium text-zinc-300'>
-                {modeId.replace('_', ' ')} mode instruction
-              </label>
-              <textarea
-                id={`mode-instruction-${modeId}`}
-                value={modeInstructions[modeId]}
-                onChange={(e) => {
-                  setModeInstructions((prev) => ({ ...prev, [modeId]: e.target.value }))
-                  setSaved(false)
-                }}
-                rows={5}
-                placeholder={`Authoritative instruction block for ${modeId} mode.`}
-                className='w-full rounded-lg border border-[#2a2a2a] bg-[#111] p-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none'
-              />
-            </div>
-          ))}
-          <p className='text-xs text-zinc-500'>
-            Leave blank to use the built-in default behavior for that mode.
-          </p>
-        </div>
-      )}
+      <WorkspaceFilesTab isAdmin />
 
       <div className='space-y-3 rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
         <h3 className='text-sm font-semibold text-zinc-200'>Global Agent Observability Dashboard</h3>
@@ -791,15 +655,6 @@ function AgentConfigTab() {
           </div>
         )}
       </div>
-
-      <button
-        type='button'
-        onClick={handleSave}
-        disabled={saving}
-        className='rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-600 disabled:opacity-50'
-      >
-        {saving ? 'Saving...' : saved ? 'Saved' : 'Save instruction'}
-      </button>
     </div>
   )
 }

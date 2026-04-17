@@ -1,17 +1,8 @@
-import { DEFAULT_SYSTEM_INSTRUCTION, type AppSettings } from '../../hooks/useSettings'
+import { useState } from 'react'
+import type { AppSettings } from '../../hooks/useSettings'
 import { PROVIDERS, providerById, providerForModel, modelInfo, reasoningModesForModel } from '../../lib/models'
 import { ToolsTab } from './ToolsTab'
-
-const PRESETS: Record<string, string> = {
-  Professional: 'Respond clearly and professionally with concise rationale.',
-  Casual: 'Use friendly and conversational language with practical guidance.',
-  Technical: 'Prioritize precise technical details and implementation tradeoffs.',
-  Creative: 'Offer imaginative solutions and exploratory suggestions.',
-}
-
-function presetInstruction(styleInstruction: string): string {
-  return `${DEFAULT_SYSTEM_INSTRUCTION} ${styleInstruction}`
-}
+import { WorkspaceFilesTab } from './WorkspaceFilesTab'
 
 type AgentTabProps = {
   settings: AppSettings
@@ -19,6 +10,7 @@ type AgentTabProps = {
 }
 
 export function AgentTab({ settings, onPatch }: AgentTabProps) {
+  const [activeSubtab, setActiveSubtab] = useState<'general' | 'workspace'>('general')
   const currentProvider = providerById(settings.provider) ?? providerForModel(settings.model) ?? PROVIDERS[0]
   const currentModel = modelInfo(settings.model)
   const supportsReasoning = Boolean(currentModel?.reasoning)
@@ -26,44 +18,52 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
 
   return (
     <div className='space-y-6'>
-      <section className='space-y-3'>
-        <h3 className='text-sm font-semibold'>Personality</h3>
-        <label htmlFor='agent-system-instruction' className='text-xs font-medium text-zinc-400'>
-          Runtime instructions
-        </label>
-        <p className='text-xs text-zinc-500'>
-          These instructions are added to your session and guide how Aegis responds to you. Global
-          operator instructions set by the platform admin always apply and take precedence.
-        </p>
-        <textarea
-          id='agent-system-instruction'
-          value={settings.systemInstruction}
-          onChange={(event) => onPatch({ systemInstruction: event.target.value })}
-          className='h-28 w-full rounded border border-[#2a2a2a] bg-[#111] p-3 text-sm'
-        />
-        <div className='flex gap-2'>
-          {Object.entries(PRESETS).map(([name, prompt]) => (
-            <button key={name} type='button' onClick={() => onPatch({ personalityPreset: name, systemInstruction: presetInstruction(prompt) })} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs'>
-              {name}
-            </button>
-          ))}
-        </div>
-        <label htmlFor='agent-temperature' className='text-xs font-medium text-zinc-400'>
-          Temperature
-        </label>
-        <input
-          id='agent-temperature'
-          type='range'
-          min={0}
-          max={1}
-          step={0.1}
-          value={settings.temperature}
-          onChange={(event) => onPatch({ temperature: Number(event.target.value) })}
-          className='w-full'
-        />
-      </section>
+      <div className='inline-flex rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
+        <button
+          type='button'
+          onClick={() => setActiveSubtab('general')}
+          className={`rounded px-3 py-1.5 text-xs ${activeSubtab === 'general' ? 'bg-zinc-700 text-white' : 'text-zinc-400'}`}
+        >
+          General
+        </button>
+        <button
+          type='button'
+          onClick={() => setActiveSubtab('workspace')}
+          className={`rounded px-3 py-1.5 text-xs ${activeSubtab === 'workspace' ? 'bg-zinc-700 text-white' : 'text-zinc-400'}`}
+        >
+          Workspace Files
+        </button>
+      </div>
 
-      <section className='space-y-3'>
+      {activeSubtab === 'workspace' ? (
+        <WorkspaceFilesTab
+          editableUserFiles
+          userFiles={settings.userWorkspaceFiles}
+          onUserFilesChange={(userWorkspaceFiles) => onPatch({ userWorkspaceFiles })}
+        />
+      ) : (
+        <>
+          <section className='space-y-3'>
+            <h3 className='text-sm font-semibold'>Runtime Prompting</h3>
+            <p className='text-xs text-zinc-500'>
+              System instructions now come from workspace files. Hidden safety baseline policy is always enforced server-side.
+            </p>
+            <label htmlFor='agent-temperature' className='text-xs font-medium text-zinc-400'>
+              Temperature
+            </label>
+            <input
+              id='agent-temperature'
+              type='range'
+              min={0}
+              max={1}
+              step={0.1}
+              value={settings.temperature}
+              onChange={(event) => onPatch({ temperature: Number(event.target.value) })}
+              className='w-full'
+            />
+          </section>
+
+          <section className='space-y-3'>
         <h3 className='text-sm font-semibold'>Provider & Model</h3>
 
         {settings.provider === 'chronos' && (
@@ -155,9 +155,9 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
             )}
           </div>
         )}
-      </section>
+          </section>
 
-      <section className='space-y-2'>
+          <section className='space-y-2'>
         <h3 className='text-sm font-semibold'>Behavior</h3>
         <Toggle label='Auto-screenshot' checked={settings.autoScreenshot} onToggle={(value) => onPatch({ autoScreenshot: value })} />
         <Toggle label='Verbose logging' checked={settings.verboseLogging} onToggle={(value) => onPatch({ verboseLogging: value })} />
@@ -165,15 +165,17 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         <Toggle label='Split chat/browser surfaces (beta)' checked={settings.separateExecutionSurfaces} onToggle={(value) => onPatch({ separateExecutionSurfaces: value })} />
         <Toggle label='Prompt to switch when browsing starts' checked={settings.promptToSwitchOnBrowse} onToggle={(value) => onPatch({ promptToSwitchOnBrowse: value })} />
         <Toggle label='Auto-return to chat on completion' checked={settings.autoReturnToChat} onToggle={(value) => onPatch({ autoReturnToChat: value })} />
-      </section>
+          </section>
 
-      <section className='space-y-3'>
+          <section className='space-y-3'>
         <div>
           <h3 className='text-sm font-semibold'>Tools & Permissions</h3>
           <p className='mt-1 text-xs text-zinc-500'>Control which tools Aegis can use and whether each requires your approval before running.</p>
         </div>
         <ToolsTab settings={settings} onPatch={onPatch} />
-      </section>
+          </section>
+        </>
+      )}
     </div>
   )
 }
