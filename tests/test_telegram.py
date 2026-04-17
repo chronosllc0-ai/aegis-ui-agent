@@ -195,6 +195,153 @@ def test_telegram_send_image_success_and_validation_errors() -> None:
     asyncio.run(run())
 
 
+def test_telegram_core_tools_send_file_edit_delete_react() -> None:
+    """Core Telegram tool handlers should call official client APIs."""
+
+    async def run() -> None:
+        integration = TelegramIntegration(TelegramConfig(bot_token="123:ABC"))
+        integration.connected = True
+        assert integration.client is not None
+
+        with patch.object(integration.client, "send_document", new_callable=AsyncMock) as mock_send_document, patch.object(
+            integration.client,
+            "edit_message_text",
+            new_callable=AsyncMock,
+        ) as mock_edit, patch.object(integration.client, "delete_message", new_callable=AsyncMock) as mock_delete, patch.object(
+            integration.client,
+            "set_message_reaction",
+            new_callable=AsyncMock,
+        ) as mock_react:
+            mock_send_document.return_value = {"message_id": 8}
+            mock_edit.return_value = {"message_id": 8}
+            mock_delete.return_value = True
+            mock_react.return_value = True
+
+            file_result = await integration.execute_tool(
+                "telegram_send_file",
+                {"chat_id": 1, "file_b64": base64.b64encode(b"data").decode("utf-8"), "filename": "a.txt"},
+            )
+            assert file_result["ok"] is True
+
+            edit_result = await integration.execute_tool(
+                "telegram_edit_message",
+                {"chat_id": 1, "message_id": 8, "text": "updated"},
+            )
+            assert edit_result["ok"] is True
+
+            delete_result = await integration.execute_tool(
+                "telegram_delete_message",
+                {"chat_id": 1, "message_id": 8},
+            )
+            assert delete_result["ok"] is True
+
+            react_result = await integration.execute_tool(
+                "telegram_react",
+                {"chat_id": 1, "message_id": 8, "reaction": "👍"},
+            )
+            assert react_result["ok"] is True
+
+            mock_send_document.assert_awaited_once()
+            mock_edit.assert_awaited_once()
+            mock_delete.assert_awaited_once()
+            mock_react.assert_awaited_once()
+
+        await integration.disconnect()
+
+    asyncio.run(run())
+
+
+def test_telegram_poll_topic_and_interactive_tools() -> None:
+    """Poll/topic/interactive handlers should be functional end-to-end."""
+
+    async def run() -> None:
+        integration = TelegramIntegration(TelegramConfig(bot_token="123:ABC"))
+        integration.connected = True
+        assert integration.client is not None
+        with patch.object(integration.client, "send_poll", new_callable=AsyncMock) as mock_poll, patch.object(
+            integration.client,
+            "create_forum_topic",
+            new_callable=AsyncMock,
+        ) as mock_topic_create, patch.object(integration.client, "edit_forum_topic", new_callable=AsyncMock) as mock_topic_edit, patch.object(
+            integration,
+            "_request",
+            new_callable=AsyncMock,
+        ) as mock_request:
+            mock_poll.return_value = {"id": "poll-1"}
+            mock_topic_create.return_value = {"message_thread_id": 99, "name": "Ops"}
+            mock_topic_edit.return_value = True
+            mock_request.return_value = {"ok": True, "result": {"message_id": 17}}
+
+            poll_result = await integration.execute_tool(
+                "telegram_send_poll",
+                {"chat_id": 1, "question": "Ship today?", "options": ["Yes", "No"]},
+            )
+            assert poll_result["ok"] is True
+
+            topic_create_result = await integration.execute_tool(
+                "telegram_topic_create",
+                {"chat_id": -1001, "name": "Ops"},
+            )
+            assert topic_create_result["ok"] is True
+
+            topic_edit_result = await integration.execute_tool(
+                "telegram_topic_edit",
+                {"chat_id": -1001, "message_thread_id": 99, "name": "Ops - Priority"},
+            )
+            assert topic_edit_result["ok"] is True
+
+            interactive_result = await integration.execute_tool(
+                "telegram_send_interactive",
+                {
+                    "chat_id": 1,
+                    "text": "Choose",
+                    "buttons": [[{"text": "Go", "callback_data": "reply:done"}]],
+                },
+            )
+            assert interactive_result["ok"] is True
+            sent_payload = mock_request.await_args.kwargs["json"]
+            assert sent_payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "reply:done"
+
+        await integration.disconnect()
+
+    asyncio.run(run())
+
+
+def test_polling_path_processes_callback_query() -> None:
+    """getUpdates polling should execute callback_query handling path."""
+
+    async def run() -> None:
+        integration = TelegramIntegration(TelegramConfig(bot_token="123:ABC"))
+        integration.connected = True
+        assert integration.client is not None
+        with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request, patch.object(
+            integration.client,
+            "answer_callback_query",
+            new_callable=AsyncMock,
+        ) as mock_answer, patch.object(integration.client, "edit_message_text", new_callable=AsyncMock) as mock_edit:
+            mock_request.return_value = {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 111,
+                        "callback_query": {
+                            "id": "cb-1",
+                            "data": "edit:patched",
+                            "message": {"message_id": 22, "chat": {"id": 5}},
+                        },
+                    }
+                ],
+            }
+            result = await integration.execute_tool("telegram_get_messages", {"limit": 1})
+            assert result["ok"] is True
+            mock_answer.assert_awaited_once_with("cb-1", text="Received")
+            mock_edit.assert_awaited_once_with(chat_id=5, message_id=22, text="patched")
+            assert integration.config.polling_offset == 112
+        await integration.disconnect()
+
+    asyncio.run(run())
+
+
 def test_telegram_send_message_supports_reply_markup() -> None:
     """telegram_send_message should forward inline keyboard reply_markup payloads."""
 

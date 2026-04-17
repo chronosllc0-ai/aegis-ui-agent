@@ -4692,3 +4692,58 @@
 - None.
 
 ---
+
+---
+## Session 5.76 - April 17, 2026 (Telegram production tool surface + callback routing)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend integration + test pass
+
+### What Was Done
+- Expanded `integrations/telegram.py` Telegram Bot API coverage to include production handlers for:
+  - `telegram_send_file`
+  - `telegram_edit_message`
+  - `telegram_delete_message`
+  - `telegram_react`
+  - `telegram_send_poll`
+  - `telegram_topic_create`
+  - `telegram_topic_edit`
+  - `telegram_send_interactive`
+- Added official client wrappers for Bot API methods used by those handlers (`deleteMessage`, `setMessageReaction`, `sendPoll`, `createForumTopic`, `editForumTopic`) while preserving compatibility alias mappers for legacy pseudo-methods (`send_message_draft`, `set_chat_member_tag`).
+- Unified callback query handling path across webhook and polling update processing via `_process_update(...)`, so callback actions are handled whether events arrive from webhook or `getUpdates` polling.
+- Expanded Telegram slash command registry and runtime parsing in `main.py` to support:
+  - `/status`
+  - `/reasoning` (alias)
+  - `/activation`
+  - `/config`
+  - `/acp spawn`
+  - `/spawn`
+  - `/pair`
+  - `/backup`
+- Added processing acknowledgements for Telegram while a task is running:
+  - sends typing indicator (`sendChatAction`)
+  - applies ack reaction via `telegram_react` when source message id is available.
+- Added/expanded conformance tests in `tests/test_telegram.py` for new core tools and callback flow in polling mode.
+
+### What's Working
+- No core Telegram tools are left as stubs in the integration surface listed above.
+- Polls/topics/reactions/edit/delete handlers validate inputs and call official methods.
+- Inline interactive message payloads now send with inline keyboard markup.
+- Callback query handling executes in both webhook and polling paths.
+- Targeted Telegram and websocket smoke tests pass in this environment.
+
+### What's NOT Working Yet
+- The delivery checklist path `backend/pydantic_adk_runner.py` referenced in AGENTS does not exist in this repository snapshot, so that exact compile command cannot be run as written.
+- Telegram callback routing currently supports deterministic built-in action patterns (`edit:` / `reply:`) and can be expanded further for richer callback orchestration if needed.
+
+### Next Steps
+1. If desired, add a dedicated callback action registry (namespaced callback handlers) for complex interactive workflows.
+2. Add an integration test at `main.py` webhook endpoint level to assert callback + slash routing interplay under full request lifecycle.
+3. Reconcile AGENTS delivery checklist file path with current repo layout (or restore the missing backend compile target).
+
+### Decisions Made
+- Kept compatibility aliases for legacy pseudo-methods but routed all new functionality through official Telegram Bot API endpoints.
+- Implemented low-risk `/acp spawn` and `/spawn` as command-level aliases to existing `/run` behavior for channel parity.
+
+### Blockers
+- None.

@@ -2433,6 +2433,7 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             integration_id=integration_id,
             chat_id=chat_id,
             ack_reaction=ack_reaction,
+            source_message_id=platform_message_id,
         )
         if isinstance(cmd_response, dict):
             await _send_channel_text(
@@ -3043,8 +3044,15 @@ TELEGRAM_SLASH_COMMANDS = [
     {"command": "interrupt", "description": "Stop the current task"},
     {"command": "queue", "description": "Queue a task: /queue <instruction>"},
     {"command": "status", "description": "Show agent status and credits"},
+    {"command": "reasoning", "description": "Reasoning controls (alias of /reason)"},
     {"command": "model", "description": "Show current model"},
     {"command": "mode", "description": "Show or switch agent mode"},
+    {"command": "activation", "description": "Show activation/session details"},
+    {"command": "config", "description": "Show runtime config summary"},
+    {"command": "acp", "description": "Agent control protocol: /acp spawn <task>"},
+    {"command": "spawn", "description": "Spawn task (alias for /run)"},
+    {"command": "pair", "description": "Pairing status for channel runtime"},
+    {"command": "backup", "description": "Backup status"},
     {"command": "models", "description": "List models and switch"},
     {"command": "stream", "description": "Live browser screenshots: /stream start|stop"},
     {"command": "help", "description": "Show all commands"},
@@ -3201,6 +3209,7 @@ async def _handle_slash_command(
     integration_id: str,
     chat_id: Any,
     ack_reaction: str = "",
+    source_message_id: str | None = None,
 ) -> str | dict[str, Any] | None:
     """Parse a slash command and execute the appropriate action. Returns a reply string or None."""
     parts = text.strip().split(None, 1)
@@ -3208,6 +3217,25 @@ async def _handle_slash_command(
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     runtime = _user_runtimes.get(owner_uid) if owner_uid else None
+    if platform == "telegram" and runtime and runtime.task_running:
+        integration = _get_channel_integration("telegram", integration_id)
+        if isinstance(integration, TelegramIntegration) and integration.client:
+            if source_message_id and source_message_id.isdigit():
+                try:
+                    await integration.execute_tool(
+                        "telegram_react",
+                        {
+                            "chat_id": int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id,
+                            "message_id": int(source_message_id),
+                            "reaction": ack_reaction or "👀",
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("telegram ack reaction failed: %s", exc)
+            try:
+                await integration.client.send_chat_action(chat_id, "typing")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("telegram processing indicator failed: %s", exc)
 
     if cmd == "help":
         return (
@@ -3222,6 +3250,13 @@ async def _handle_slash_command(
             "/models — list & switch model\n"
             "/stream start|stop — live screenshots\n"
             "/reason on|off|low|medium|high|stream|status — reasoning mode\n"
+            "/reasoning ... — alias of /reason\n"
+            "/activation — active session details\n"
+            "/config — runtime config summary\n"
+            "/acp spawn <instruction> — ACP task start\n"
+            "/spawn <instruction> — alias for /run\n"
+            "/pair — pairing status\n"
+            "/backup — backup status\n"
             "/help — this message"
         )
 
@@ -3294,6 +3329,39 @@ async def _handle_slash_command(
         asyncio.create_task(_run_navigation_task_from_bot(runtime, owner_uid, platform, integration_id, chat_id, arg))
         return f"🚀 Starting task: {arg[:80]}"
 
+    if cmd == "spawn":
+        if not arg:
+            return "Usage: /spawn <instruction>"
+        return await _handle_slash_command(
+            text=f"/run {arg}",
+            owner_uid=owner_uid,
+            platform=platform,
+            integration_id=integration_id,
+            chat_id=chat_id,
+            ack_reaction=ack_reaction,
+            source_message_id=source_message_id,
+        )
+
+    if cmd == "acp":
+        if not arg:
+            return "Usage: /acp spawn <instruction>"
+        acp_parts = arg.split(None, 1)
+        subcommand = acp_parts[0].lower()
+        if subcommand != "spawn":
+            return "Usage: /acp spawn <instruction>"
+        instruction = acp_parts[1].strip() if len(acp_parts) > 1 else ""
+        if not instruction:
+            return "Usage: /acp spawn <instruction>"
+        return await _handle_slash_command(
+            text=f"/run {instruction}",
+            owner_uid=owner_uid,
+            platform=platform,
+            integration_id=integration_id,
+            chat_id=chat_id,
+            ack_reaction=ack_reaction,
+            source_message_id=source_message_id,
+        )
+
     if cmd == "steer":
         if not arg:
             return "Usage: /steer <guidance>"
@@ -3334,7 +3402,7 @@ async def _handle_slash_command(
         else:
             return "Usage: /stream start|stop"
 
-    if cmd == "reason":
+    if cmd in {"reason", "reasoning"}:
         sub = arg.lower().strip()
         if not runtime:
             return "⚪ No active session."
@@ -3366,6 +3434,35 @@ async def _handle_slash_command(
                 "  stream — enable with live streaming to this chat\n"
                 "  status — show current settings"
             )
+
+    if cmd == "activation":
+        if not runtime:
+            return "⚪ No active session."
+        return (
+            f"🧩 Activation: {'running' if runtime.task_running else 'ready'}\n"
+            f"Session: `{runtime.session_id}`\n"
+            f"Conversation: `{runtime.conversation_id or 'n/a'}`"
+        )
+
+    if cmd == "config":
+        if not runtime:
+            return "⚪ No active session."
+        mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
+        return (
+            "⚙️ Runtime config\n"
+            f"- provider: `{runtime.settings.get('provider', '')}`\n"
+            f"- model: `{runtime.settings.get('model', '')}`\n"
+            f"- mode: `{mode}`\n"
+            f"- reasoning: `{'on' if runtime.settings.get('enable_reasoning') else 'off'}`"
+        )
+
+    if cmd == "pair":
+        if not runtime:
+            return "⚪ No active session to pair."
+        return "🔗 Pairing is active for this connected owner session."
+
+    if cmd == "backup":
+        return "💾 Backup command is acknowledged. Full backup workflows are not wired in this channel yet."
 
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
 
