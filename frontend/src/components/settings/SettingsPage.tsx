@@ -16,6 +16,7 @@ import { MemoryTab } from './MemoryTab'
 import { ObservabilityTab } from './ObservabilityTab'
 import { AdminPanel } from '../admin/AdminPanel'
 import { SkillsTab } from './SkillsTab'
+import { WorkspaceFilesTab } from './WorkspaceFilesTab'
 
 type SettingsPageProps = {
   onBack: () => void
@@ -26,7 +27,7 @@ type SettingsPageProps = {
   onTabChange?: (tab: SettingsTab) => void
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Skills', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'Workspace Files', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Skills', 'Support', 'Admin'] as const
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
@@ -126,6 +127,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
       <div className={`${sidebarOpen ? 'hidden md:block' : 'block'} min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4`}>
         {activeTab === 'Profile' && <ProfileTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
+        {activeTab === 'Workspace Files' && <WorkspaceFilesTab isAdmin={isAdmin} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
         {activeTab === 'Usage' && <UsageTab />}
         {activeTab === 'Credits' && <CreditsTab />}
