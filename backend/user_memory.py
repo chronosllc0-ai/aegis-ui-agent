@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-Unix fallback
+    fcntl = None
 
 USER_DATA_ROOT = Path(os.environ.get("USER_DATA_ROOT", "/data/users"))
 LONG_TERM_MEMORY_FILE = "MEMORY.md"
@@ -112,9 +116,23 @@ def append_daily_memory(session_id: str, content: str, *, category: str = "gener
     path = ensure_daily_memory_file(session_id, normalized_day)
     timestamp = datetime.now(timezone.utc).strftime("%H:%M:%SZ")
     entry = f"\n## [{timestamp}] {category}\n{content.strip()}\n"
-    existing = path.read_text()
-    path.write_text(existing.rstrip() + entry + "\n")
+    _append_text_atomic(path, entry + "\n")
     return normalized_day
+
+
+def _append_text_atomic(path: Path, content: str) -> None:
+    """Append text atomically to a file to prevent concurrent write clobbering."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def search_memory_files(
@@ -145,10 +163,15 @@ def search_memory_files(
 
 def read_memory(session_id: str, *, include_long_term: bool = True) -> str:
     """Read short-term memory (today+yesterday) plus optional long-term memory."""
+    days = _recent_short_term_days()
     short_term = read_recent_short_term_memory(session_id)
+    today_day = days[0]
+    yesterday_day = days[1]
+    today_text = short_term.get(today_day, f"# Daily Memory {today_day}\n\n(no entries)")
+    yesterday_text = short_term.get(yesterday_day, f"# Daily Memory {yesterday_day}\n\n(no entries)")
     sections = ["# Memory Context"]
-    sections.append(f"\n## Today ({list(short_term.keys())[0]})\n{short_term[list(short_term.keys())[0]].strip()}")
-    sections.append(f"\n## Yesterday ({list(short_term.keys())[1]})\n{short_term[list(short_term.keys())[1]].strip()}")
+    sections.append(f"\n## Today ({today_day})\n{today_text.strip()}")
+    sections.append(f"\n## Yesterday ({yesterday_day})\n{yesterday_text.strip()}")
     if include_long_term:
         sections.append(f"\n## Long-term (MEMORY.md)\n{read_long_term_memory(session_id).strip()}")
     return "\n".join(sections).strip()
@@ -187,9 +210,9 @@ def compact_daily_memory(
     short_term = read_recent_short_term_memory(session_id)
     suggestion_lines: list[str] = []
     for day, content in short_term.items():
-        meaningful = [line.strip() for line in content.splitlines() if line.strip() and not line.startswith("#")]
-        for line in meaningful[:6]:
-            suggestion_lines.append(f"- [{day}] {line}")
+        entries = _extract_daily_entries(content)
+        for entry in entries[:6]:
+            suggestion_lines.append(f"- [{day}] {entry}")
 
     if not suggestion_lines:
         suggestion_lines = ["- No new short-term notes to compact."]
@@ -213,6 +236,18 @@ def compact_daily_memory(
     if updated_long_term is not None:
         payload["updated_long_term"] = updated_long_term
     return payload
+
+
+def _extract_daily_entries(content: str) -> list[str]:
+    """Extract markdown section bodies from daily memory while preserving multiline entries."""
+    entries: list[str] = []
+    chunks = re.split(r"^##\s+\[.*?\]\s+.*$\n", content, flags=re.MULTILINE)
+    for chunk in chunks[1:]:
+        block = chunk.strip()
+        if block:
+            normalized = re.sub(r"\n{2,}", "\n", block)
+            entries.append(normalized)
+    return entries
 
 
 # ── Heartbeat.md ──────────────────────────────────────────────────────────────

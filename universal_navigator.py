@@ -1716,19 +1716,20 @@ class UniversalToolExecutor:
         query = str(tool_call.get("query", "")).strip()
         if not query:
             return "memory_search error: query is required."
+        if self._memory_mode in {"db", "hybrid"} and not self._user_uid:
+            return "Memory tools require an authenticated user."
         try:
             db_results: list[dict[str, Any]] = []
             file_results: list[dict[str, str]] = []
 
             if self._memory_mode in {"db", "hybrid"}:
-                if not self._user_uid:
-                    return "Memory tools require an authenticated user."
                 from backend.database import _session_factory
                 from backend.memory.service import MemoryService
 
                 if _session_factory is None:
                     if self._memory_mode == "db":
                         return "Database not ready."
+                    logger.warning("memory_search running in hybrid mode without DB session factory (session_id=%s)", self._session_id)
                 else:
                     async with _session_factory() as session:
                         db_results = await MemoryService.recall(session, self._user_uid, query, limit=5)
@@ -1751,25 +1752,26 @@ class UniversalToolExecutor:
         category = str(tool_call.get("category", "general"))
         if not content:
             return "memory_write error: content is required."
+        if self._memory_mode in {"db", "hybrid"} and not self._user_uid:
+            return "Memory tools require an authenticated user."
         try:
             entry: dict[str, Any] | None = None
             written_day: str | None = None
 
-            if self._memory_mode in {"files", "hybrid"}:
-                written_day = append_daily_memory(self._session_id, content, category=category)
-
             if self._memory_mode in {"db", "hybrid"}:
-                if not self._user_uid:
-                    return "Memory tools require an authenticated user."
                 from backend.database import _session_factory
                 from backend.memory.service import MemoryService
 
                 if _session_factory is None:
                     if self._memory_mode == "db":
                         return "Database not ready."
+                    logger.warning("memory_write running in hybrid mode without DB session factory (session_id=%s)", self._session_id)
                 else:
                     async with _session_factory() as session:
                         entry = await MemoryService.store(session, self._user_uid, content, category=category)
+
+            if self._memory_mode in {"files", "hybrid"}:
+                written_day = append_daily_memory(self._session_id, content, category=category)
 
             return _json_result({"ok": True, "mode": self._memory_mode, "entry": entry, "short_term_day": written_day})
         except Exception as exc:  # noqa: BLE001

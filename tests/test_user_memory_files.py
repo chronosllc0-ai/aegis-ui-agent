@@ -54,3 +54,23 @@ def test_read_policy_and_compaction_manual_accept(tmp_path, monkeypatch) -> None
     compact_apply = user_memory.compact_daily_memory(session_id, apply_to_long_term=True)
     assert compact_apply["applied"] is True
     assert "Compaction Suggestions" in user_memory.read_long_term_memory(session_id)
+
+
+def test_compaction_preserves_multiline_entry_blocks(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(user_memory, "USER_DATA_ROOT", tmp_path)
+    session_id = "session-4"
+    day = datetime.now(timezone.utc).date().isoformat()
+    path = user_memory.ensure_daily_memory_file(session_id, day=day)
+    path.write_text(
+        f"# Daily Memory {day}\n\n"
+        "## [12:00:00Z] notes\n"
+        "We need to fix:\n"
+        "1. Memory bugs\n"
+        "2. Other bugs\n\n"
+    )
+
+    preview = user_memory.compact_daily_memory(session_id, apply_to_long_term=False)
+    assert "- [" in preview["suggested_patch"]
+    assert "We need to fix:" in preview["suggested_patch"]
+    assert "1. Memory bugs" in preview["suggested_patch"]
+    assert "2. Other bugs" in preview["suggested_patch"]

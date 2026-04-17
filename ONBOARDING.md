@@ -5356,3 +5356,41 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.14 - April 17, 2026 (review fixes for memory PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Addressed all 5 review findings from the memory PR:
+  1. Removed implicit dict-order indexing in `read_memory` and switched to explicit today/yesterday day selection from `_recent_short_term_days`.
+  2. Reworked compaction extraction to preserve multiline markdown entry blocks rather than splitting by raw lines.
+  3. Hardened daily file writes with atomic append + file locking (`fcntl.flock` on Unix) to prevent concurrent write clobbering.
+  4. Added warning logging in hybrid mode when DB session factory is unavailable (for both search and write).
+  5. Fixed auth ordering bug in hybrid writes: authentication checks now happen before any file writes.
+- Added tests:
+  - `tests/test_universal_memory_mode.py` for hybrid auth-before-write and hybrid DB-unavailable warning behavior.
+  - Expanded `tests/test_user_memory_files.py` with multiline compaction preservation coverage.
+
+### What's Working
+- Hybrid mode no longer writes to file memory before auth checks.
+- Compaction suggestions preserve multiline daily entries as single logical blocks.
+- Concurrent append path is safer and no longer relies on read-modify-write.
+- Hybrid mode emits explicit warning signals when DB half of hybrid is unavailable.
+
+### What's NOT Working Yet
+- Delivery-checklist compile command still references missing `backend/pydantic_adk_runner.py` in this repository.
+
+### Next Steps
+1. Consider emitting structured runtime telemetry counters for hybrid DB-fallback events.
+2. Add stress/concurrency tests for append behavior across parallel writers.
+3. Optionally add a parser for non-standard daily markdown heading variants.
+
+### Decisions Made
+- Kept hybrid behavior non-fatal on DB unavailability but made it observable via warnings.
+- Preserved compaction as suggestion-first/manual-apply workflow.
+
+### Blockers
+- None.
