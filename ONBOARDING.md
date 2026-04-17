@@ -5107,3 +5107,51 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.8 - April 17, 2026 (MCP expansion + admin New Connection wizard)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added new MCP backend domain modules:
+  - `backend/connections/models.py` for connection templates + MCP server persistence and request schemas.
+  - `backend/connections/service.py` for preset seeding, listing, validation, and scan orchestration.
+  - `backend/connections/router.py` with user MCP endpoints and admin wizard endpoints.
+  - `backend/mcp/transport.py` with MCP transport validation + deterministic tool scan logic.
+- Wired new router in `main.py` and extended `mcp_client.py` to represent source scope (`global_preset`, `user_custom`) and owner scope (`global`, `user`).
+- Updated `frontend/src/components/settings/ConnectionsTab.tsx`:
+  - Added new **MCP** section above existing Add Custom MCP block.
+  - Added BrowserMCP + Chrome DevTools MCP preset cards with status badges and one-click Add.
+  - Kept existing Add Custom MCP UI block intact while wiring Save to real backend endpoint.
+  - Added MCP tool scan action calling backend scan endpoint and rendering discovered tools.
+  - Added admin-only **New Connection** CTA in Connections header (top-right) and footer.
+  - Added responsive 5-step New Connection wizard (Basics, Type, Config, Test, Publish) with autosave + real test/publish endpoints.
+  - Omitted domain verification fields in MCP wizard phase.
+- Added tests:
+  - Frontend: `frontend/src/components/settings/ConnectionsTab.test.tsx`
+  - Backend: `tests/test_connections_mcp_admin.py`
+
+### What's Working
+- MCP presets load from backend and appear above custom MCP creation UI.
+- Users can add preset-backed MCP servers and custom MCP servers via real API calls.
+- MCP scan endpoint is functional end-to-end and returns a tool manifest rendered in UI.
+- Admin-only wizard entry points and wizard API flows are functional.
+- Admin publish/test endpoints return concrete actionable messages.
+
+### What's NOT Working Yet
+- Wizard currently persists templates globally but full runtime connector execution for newly created OAuth/Bot templates is not yet wired into the existing OAuth/Bot live connector runtime.
+
+### Next Steps
+1. Bind published OAuth/Bot templates into existing connector runtime registry so they become executable without static code registration.
+2. Add UI surface to list published non-MCP templates in user Connections once runtime binding is complete.
+3. Add delete/update endpoints for user MCP servers and richer tool scan against live remote manifests.
+
+### Decisions Made
+- Kept the existing Add Custom MCP UI untouched structurally while converting it to backend-backed persistence.
+- Introduced deterministic MCP scan output for this phase to avoid placeholder/no-op UI behavior.
+- Implemented wizard in `ConnectionsTab` to satisfy the required CTA placements and responsive flow quickly.
+
+### Blockers
+- None.
