@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 from integrations.idempotency import DeliveryDeduper
@@ -191,8 +192,6 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         return None
 
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
-        from backend.connectors.router import resolve_capability_status, unsupported_action_fallback
-
         if tool_name == "slack_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
             headers = params.get("headers") if isinstance(params.get("headers"), dict) else {}
@@ -238,7 +237,7 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             channel = str(params.get("channel", "")).strip()
             text = str(params.get("text") or "Runtime controls").strip()
             blocks = params.get("blocks") if isinstance(params.get("blocks"), list) else self.runtime_control_blocks()
-            return await self.send_text(channel, text, metadata={"blocks": blocks, **params})
+            return await self.send_text(channel, text, metadata={**params, "blocks": blocks})
 
         status, _ = resolve_capability_status("slack", tool_name)
         if status != "supported":

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.connectors import CONNECTOR_CATALOGUE, get_connector, list_connectors
 from backend.database import OAuthPendingState, UserConnection, get_session
+from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from backend.key_management import KeyManager
 from config import settings
 
@@ -32,81 +33,6 @@ logger = logging.getLogger(__name__)
 connector_router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
 _key_manager = KeyManager(settings.ENCRYPTION_SECRET)
-
-
-CAPABILITY_MATRIX: dict[str, dict[str, str]] = {
-    "telegram": {
-        "send_text": "supported",
-        "edit_message": "supported",
-        "delete_message": "supported",
-        "react": "supported",
-        "send_file": "supported",
-        "interactive_actions": "supported",
-        "command_controls": "supported",
-    },
-    "slack": {
-        "send_text": "supported",
-        "edit_message": "supported",
-        "delete_message": "supported",
-        "react": "supported",
-        "send_file": "supported",
-        "interactive_actions": "supported",
-        "command_controls": "supported",
-    },
-    "discord": {
-        "send_text": "supported",
-        "edit_message": "supported",
-        "delete_message": "supported",
-        "react": "supported",
-        "send_file": "supported",
-        "interactive_actions": "supported",
-        "command_controls": "supported",
-    },
-}
-
-TOOL_CAPABILITY_MAP: dict[str, str] = {
-    "telegram_send_message": "send_text",
-    "slack_send_message": "send_text",
-    "discord_send_message": "send_text",
-    "telegram_edit_message": "edit_message",
-    "slack_edit_message": "edit_message",
-    "discord_edit_message": "edit_message",
-    "telegram_delete_message": "delete_message",
-    "slack_delete_message": "delete_message",
-    "discord_delete_message": "delete_message",
-    "telegram_react": "react",
-    "slack_react": "react",
-    "discord_react": "react",
-    "telegram_send_file": "send_file",
-    "slack_send_file": "send_file",
-    "discord_send_file": "send_file",
-    "telegram_send_interactive": "interactive_actions",
-    "slack_send_interactive": "interactive_actions",
-    "discord_send_interactive": "interactive_actions",
-    "slack_handle_event": "command_controls",
-    "discord_handle_event": "command_controls",
-}
-
-
-def resolve_capability_status(platform: str, tool_name: str) -> tuple[str, str]:
-    """Resolve capability state (`supported|partial|unsupported`) for a tool."""
-    capability = TOOL_CAPABILITY_MAP.get(tool_name, "")
-    platform_caps = CAPABILITY_MATRIX.get(platform, {})
-    if not capability:
-        return ("unsupported", "")
-    return (platform_caps.get(capability, "unsupported"), capability)
-
-
-def unsupported_action_fallback(platform: str, tool_name: str) -> dict[str, Any]:
-    """Build normalized graceful fallback payload for unsupported actions."""
-    status, capability = resolve_capability_status(platform, tool_name)
-    return {
-        "ok": False,
-        "tool": tool_name,
-        "fallback": True,
-        "capability": capability or "unknown",
-        "error": f"{tool_name} is {status} on {platform}; returning graceful fallback.",
-    }
 
 
 def _get_current_user(request: Request) -> dict[str, Any]:
@@ -542,7 +468,7 @@ async def execute_connector_action(
         raise HTTPException(status_code=400, detail="action is required")
 
     capability_status, _ = resolve_capability_status(connector_id, action_id)
-    if connector_id in CAPABILITY_MATRIX and capability_status != "supported":
+    if capability_status != "supported":
         return unsupported_action_fallback(connector_id, action_id)
 
     # Decrypt access token

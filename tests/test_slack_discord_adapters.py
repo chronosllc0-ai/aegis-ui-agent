@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from integrations.discord import DiscordIntegration
 from integrations.idempotency import DeliveryDeduper
 from integrations.slack_connector import SlackIntegration
@@ -108,7 +109,10 @@ def test_slack_send_edit_file_and_rate_limit_backoff() -> None:
 
         with patch.object(integration, "send_text", new_callable=AsyncMock) as mock_send_text:
             mock_send_text.return_value = {"ok": True, "tool": "slack_send_message"}
-            interactive = await integration.execute_tool("slack_send_interactive", {"channel": "C1", "text": "controls"})
+            interactive = await integration.execute_tool(
+                "slack_send_interactive",
+                {"channel": "C1", "text": "controls", "blocks": "not-a-list"},
+            )
             metadata = mock_send_text.await_args.kwargs["metadata"]
             assert isinstance(metadata.get("blocks"), list)
         assert interactive["ok"] is True
@@ -151,6 +155,16 @@ def test_discord_connect_send_edit_file_interaction_event() -> None:
             mock_request.return_value = {}
             reacted = await integration.execute_tool("discord_react", {"channel": "c1", "message_id": "m2", "reaction": "👍"})
         assert reacted["ok"] is True
+
+        with patch.object(integration, "send_text", new_callable=AsyncMock) as mock_send_text:
+            mock_send_text.return_value = {"ok": True, "tool": "discord_send_message"}
+            interactive = await integration.execute_tool(
+                "discord_send_interactive",
+                {"channel": "c1", "text": "controls", "components": "not-a-list"},
+            )
+            metadata = mock_send_text.await_args.kwargs["metadata"]
+            assert isinstance(metadata.get("components"), list)
+        assert interactive["ok"] is True
 
         ping = await integration.handle_event({"type": 1, "id": "evt-1"}, {})
         assert ping["response"] == {"type": 1}
@@ -254,3 +268,12 @@ def test_capability_matrix_fallbacks_for_unknown_tools() -> None:
         assert slash_control["envelope"]["control_action"] == "status"
 
     asyncio.run(_run())
+
+
+def test_capability_matrix_unknown_platform_returns_graceful_fallback() -> None:
+    status, capability = resolve_capability_status("custom-platform", "custom_tool")
+    assert status == "unsupported"
+    assert capability == ""
+
+    payload = unsupported_action_fallback("custom-platform", "custom_tool")
+    assert payload["fallback"] is True

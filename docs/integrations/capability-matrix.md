@@ -20,7 +20,7 @@ Status legend:
 
 ## Fallback behavior
 
-Capability status is evaluated through `backend.connectors.router.CAPABILITY_MATRIX` and `TOOL_CAPABILITY_MAP`.
+Capability status is evaluated through `backend.integrations.capability_matrix.CAPABILITY_MATRIX` and `TOOL_CAPABILITY_MAP`.
 When a Slack/Discord tool call is not mapped as `supported`, adapters return a graceful normalized fallback payload:
 
 ```json

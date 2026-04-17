@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 from integrations.idempotency import DeliveryDeduper
@@ -155,8 +156,6 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         return None
 
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
-        from backend.connectors.router import resolve_capability_status, unsupported_action_fallback
-
         if tool_name == "discord_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
             headers = params.get("headers") if isinstance(params.get("headers"), dict) else {}
@@ -206,7 +205,7 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
                 if isinstance(params.get("components"), list)
                 else self.runtime_control_components()
             )
-            return await self.send_text(channel, text, metadata={"components": components, **params})
+            return await self.send_text(channel, text, metadata={**params, "components": components})
         if tool_name == "discord_send_image":
             channel = str(params.get("channel", "")).strip()
             image_b64 = str(params.get("image_b64", "")).strip()

@@ -4835,3 +4835,41 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.1 - April 17, 2026 (Review fixes for Slack/Discord parity PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Resolved review issue on capability fallback gating:
+  - Updated `backend/connectors/router.py` execute-action precheck from matrix-membership-gated fallback to unconditional capability-status fallback (`if capability_status != "supported"`).
+- Removed function-local imports flagged in review and eliminated circular-import workaround pattern by introducing shared module:
+  - Added `backend/integrations/capability_matrix.py` containing `CAPABILITY_MATRIX`, `TOOL_CAPABILITY_MAP`, `resolve_capability_status(...)`, and `unsupported_action_fallback(...)`.
+  - Updated Slack/Discord integrations and connector router to import from this shared module at module scope.
+- Fixed interactive metadata merge-order bugs flagged in review:
+  - Slack `slack_send_interactive` now uses `{**params, "blocks": blocks}` so validated/generated blocks cannot be overwritten by invalid incoming payload.
+  - Discord `discord_send_interactive` now uses `{**params, "components": components}` for same reason.
+- Updated capability matrix documentation path reference to the new shared module location.
+- Expanded tests to validate:
+  - Slack/Discord interactive metadata sanitization when caller passes non-list `blocks`/`components`.
+  - Unknown-platform capability resolution + fallback payload generation remains graceful.
+
+### What's Working
+- All 5 review comments have been addressed (3 warnings + 2 suggestions).
+- Capability fallback logic now applies consistently without platform-membership bypass behavior.
+- Shared capability helpers are reusable without import-inside-function workarounds.
+- Targeted adapter tests pass after fixes.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add a dedicated router-level unit test for `execute_connector_action` fallback behavior once route-level test harness for connector auth/session is in scope.
+
+### Decisions Made
+- Centralized capability logic in `backend/integrations/capability_matrix.py` to keep transport adapters and connector router aligned while avoiding circular import pressure.
+
+### Blockers
+- None.
