@@ -4309,3 +4309,77 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.71 - April 17, 2026 (Add requested OpenRouter/Chronos free models + context window verification)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend/frontend model-catalog update pass
+
+### What Was Done
+- Added the requested free-tier models to the Chronos Gateway and OpenRouter model catalog in `frontend/src/lib/models.ts`:
+  - `qwen/qwen3-next-80b-a3b-instruct:free`
+  - `qwen/qwen3-coder:free`
+  - `google/gemma-4-26b-a4b-it:free`
+  - `nvidia/nemotron-nano-9b-v2:free`
+  - `google/gemma-4-31b-it:free`
+  - `minimax/minimax-m2.5:free`
+  - `z-ai/glm-4.5-air:free`
+- Verified context lengths from OpenRouter's live models API before adding values to avoid context-meter mismatches.
+- Added the same model IDs to backend OpenRouter provider allowlist in `backend/providers/openrouter_provider.py`.
+- Added corresponding free-tier credit-rate entries (0 input / 0 output) in `backend/credit_rates.py` so Chronos/OpenRouter credit accounting remains consistent for these `:free` models.
+
+### What's Working
+- Requested models are selectable under both Chronos Gateway and OpenRouter in the frontend model picker.
+- Context windows for these models are now explicitly represented in the frontend catalog for context meter calculations.
+- Backend provider model exposure includes these IDs.
+- Credit lookup handles these `:free` models explicitly.
+
+### What's NOT Working Yet
+- No functional blockers identified in this pass.
+
+### Next Steps
+1. Optionally expand UI tests to assert `contextLengthForModel(...)` for these newly added IDs.
+2. If pricing for any of these models changes from free, update `backend/credit_rates.py` values accordingly.
+
+### Decisions Made
+- Used OpenRouter API-reported context lengths as source of truth for catalog entries.
+- Kept free-tier credit rates at `0.0` input/output for consistency with existing free model handling.
+
+### Blockers
+- None.
+
+---
+## Session 5.72 - April 17, 2026 (Review follow-up: preserve :free model IDs + true free credit charging)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted backend bugfix + regression-test pass
+
+### What Was Done
+- Fixed Chronos model resolution in `orchestrator.py` so model IDs are no longer normalized by stripping suffixes.
+  - Chronos now preserves exact model IDs (including `:free`) when constructing the OpenRouter provider and when returning the resolved model.
+- Fixed credit charging in `backend/credit_rates.py` so zero-rate models are truly free.
+  - Added an early return in `calculate_credits(...)` for `exact <= 0` to return `(0.0, 0, 0.0)`.
+  - This bypasses the paid-model minimum-floor rule for free models only.
+- Added regression tests in `tests/test_credit_rates.py`:
+  - asserts free models are charged `0` credits,
+  - asserts paid models still apply the minimum 1-credit floor.
+
+### What's Working
+- Chronos/OpenRouter resolution now keeps free-model suffixes intact, preventing paid/free ID mismatch.
+- Free-tier models now charge 0 credits end-to-end through `calculate_credits(...)`.
+- Paid models remain protected by minimum 1-credit charging.
+- New regression tests pass locally.
+
+### What's NOT Working Yet
+- No blockers identified in this follow-up.
+
+### Next Steps
+1. Add an integration-level test that exercises a Chronos run and verifies execution model ID equals recorded billing model ID.
+2. Consider explicit logging of resolved Chronos model IDs to simplify future audits.
+
+### Decisions Made
+- Kept minimum-floor logic for paid models while adding a targeted free-tier bypass to avoid pricing regressions.
+
+### Blockers
+- None.

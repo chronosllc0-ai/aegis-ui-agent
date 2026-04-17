@@ -53,6 +53,13 @@ CREDIT_RATES: dict[str, dict[str, dict]] = {
         "anthropic/claude-opus-4.6":                    {"input": 7.0,  "output": 35.0,  "tier": "premium"},
         "x-ai/grok-4.20-beta":                          {"input": 2.8,  "output": 8.4,   "tier": "standard"},
         "qwen/qwen3-max-thinking":                      {"input": 1.1,  "output": 5.5,   "tier": "standard"},
+        "qwen/qwen3-next-80b-a3b-instruct:free":        {"input": 0.0,  "output": 0.0,   "tier": "budget"},
+        "qwen/qwen3-coder:free":                        {"input": 0.0,  "output": 0.0,   "tier": "budget"},
+        "google/gemma-4-26b-a4b-it:free":               {"input": 0.0,  "output": 0.0,   "tier": "budget"},
+        "google/gemma-4-31b-it:free":                   {"input": 0.0,  "output": 0.0,   "tier": "budget"},
+        "nvidia/nemotron-nano-9b-v2:free":              {"input": 0.0,  "output": 0.0,   "tier": "budget"},
+        "minimax/minimax-m2.5:free":                    {"input": 0.0,  "output": 0.0,   "tier": "budget"},
+        "z-ai/glm-4.5-air:free":                        {"input": 0.0,  "output": 0.0,   "tier": "budget"},
         "qwen/qwen3-coder-next":                        {"input": 0.2,  "output": 1.1,   "tier": "budget"},
         "qwen/qwen3.5-9b":                              {"input": 0.1,  "output": 0.2,   "tier": "budget"},
         "qwen/qwen3.5-122b-a10b":                       {"input": 0.4,  "output": 2.9,   "tier": "mid"},
@@ -105,7 +112,10 @@ def calculate_credits(
     """
     rate = get_rate(provider, model)
     exact = (input_tokens / 1000 * rate["input"]) + (output_tokens / 1000 * rate["output"])
-    charged = max(1, ceil(exact))  # minimum 1 credit per interaction
+    # Preserve true free-tier behavior for zero-rate models.
+    if exact <= 0:
+        return 0.0, 0, 0.0
+    charged = max(1, ceil(exact))  # minimum 1 credit per paid interaction
     # Back-calculate raw cost (remove the 1.4× margin)
     raw_cost = exact / 1.4 * 0.001
     return exact, charged, raw_cost
