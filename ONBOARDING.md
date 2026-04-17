@@ -5033,3 +5033,77 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.6 - April 17, 2026 (Cross-platform reasoning controls)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added canonical backend reasoning model in `backend/reasoning.py`:
+  - canonical levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`
+  - normalization with legacy aliases (`on/off/true/false/1/0`)
+  - runtime translators for `reasoning_enabled`, `enable_reasoning`, `reasoning_effort`, `stream_reasoning`
+  - canonical label renderer (`None/Minimal/Low/Medium/High/XHigh`).
+- Updated runtime settings merge path in `main.py` to normalize persisted reasoning state through the canonical adapter.
+- Extended slash command behavior in `main.py`:
+  - canonical command `/reasoning`
+  - legacy alias `/reason` retained
+  - supports set/query (`/reasoning`, `/reasoning <level>`, `/reasoning status`, plus legacy aliases)
+  - updated `/help`, `/status`, and `/config` outputs to use canonical reasoning labels.
+- Added cross-platform interactive reasoning selectors:
+  - Telegram inline keyboard (`reasoning:*` callbacks)
+  - Slack static-select blocks (`reasoning:*` values)
+  - Discord select components (`reasoning:*` values)
+- Added webhook callback handling in `main.py` for Telegram/Slack/Discord reasoning selections, updating runtime settings immediately.
+- Added channel integration parsing helpers:
+  - `extract_reasoning_selection` + selector builders in `integrations/telegram.py`, `integrations/slack_connector.py`, `integrations/discord.py`
+  - exposed through channel runtime adapters in `backend/integrations/channel_runtime.py`.
+- Added regression tests for parser + command + callback flows in `tests/test_reasoning_commands.py` and expanded selector-helper tests in `tests/test_slack_discord_adapters.py`.
+
+### What's Working
+- Canonical reasoning normalization now handles legacy aliases and stale/unknown values with safe fallback.
+- `/reason` backward compatibility is preserved while `/reasoning` is the canonical command.
+- Telegram, Slack, and Discord webhook flows can set reasoning effort both by command text and by interactive selectors.
+- Status/config responses now consistently show canonical effort labels.
+
+### What's NOT Working Yet
+- Long-term persistence beyond in-memory runtime/session is still not implemented (intentionally unchanged).
+
+### Next Steps
+1. If needed, register native Discord app-command option metadata (`effort` choices) with deployment scripts so UI choices are enforced at command registration time.
+2. Optionally add Slack signature validation assertions in webhook-level tests for interaction payloads if stricter endpoint testing is desired.
+3. Add frontend settings-surface parity for the two additional levels (`none`, `minimal`, `xhigh`) if a dedicated UI control is introduced there.
+
+### Decisions Made
+- Kept `stream` as a legacy `/reason` behavior for backward compatibility, while canonical effort handling routes through normalized levels.
+- Normalized both `reasoning_enabled` and historical `enable_reasoning` fields to avoid runtime drift across old/new callers.
+
+### Blockers
+- None.
+
+---
+## Session 6.7 - April 17, 2026 (Review follow-up: reasoning error message repr)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick fix pass
+
+### What Was Done
+- Updated `backend/reasoning.py` error messaging in `normalize_reasoning_level(...)` to render invalid values with `repr` formatting (`{value!r}`) instead of plain string interpolation.
+- This ensures `None` appears as `None` (Python repr) rather than a quoted string-like rendering in the exception text.
+
+### What's Working
+- Validation errors now communicate the exact invalid input more precisely for debugging and review clarity.
+
+### What's NOT Working Yet
+- None identified for this targeted follow-up.
+
+### Next Steps
+1. Keep this style for similar validator errors where ambiguous value display could mislead debugging.
+
+### Decisions Made
+- Kept the change minimal and localized to the reviewed nitpick; no behavioral changes to normalization logic.
+
+### Blockers
+- None.

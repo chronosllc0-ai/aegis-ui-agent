@@ -1,0 +1,249 @@
+"""Regression tests for canonical reasoning controls across channel runtimes."""
+
+from __future__ import annotations
+
+import asyncio
+from importlib import import_module
+from typing import Any
+
+from fastapi.testclient import TestClient
+
+from backend.reasoning import apply_reasoning_level, normalize_reasoning_level, runtime_reasoning_level
+from integrations.discord import DiscordIntegration
+from integrations.slack_connector import SlackIntegration
+from integrations.telegram import TelegramIntegration
+
+
+class _StubTelegramIntegration(TelegramIntegration):
+    def __init__(self) -> None:
+        super().__init__()
+        self.edits: list[dict[str, Any]] = []
+
+    def validate_webhook_secret(self, secret: str) -> bool:
+        return secret == "secret-1"
+
+    async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        if tool_name == "telegram_edit_message":
+            self.edits.append(params)
+        return {"ok": True, "tool": tool_name, "result": params}
+
+
+class _StubChannelAdapter:
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+        self.sent: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    async def handle_event(self, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+        _ = payload, headers
+        return {"ok": True, "envelope": {}}
+
+    def extract_mode_selection(self, payload: dict[str, Any]) -> str | None:
+        _ = payload
+        return None
+
+    def extract_reasoning_selection(self, payload: dict[str, Any]) -> str | None:
+        if self.platform == "telegram":
+            callback = payload.get("callback_query") if isinstance(payload, dict) else {}
+            return TelegramIntegration.extract_reasoning_selection((callback or {}).get("data"))
+        if self.platform == "slack":
+            return SlackIntegration.extract_reasoning_selection(payload)
+        if self.platform == "discord":
+            return DiscordIntegration.extract_reasoning_selection(payload)
+        return None
+
+    def extract_message(self, payload: dict[str, Any]) -> Any:
+        class _Inbound:
+            destination: str | None = None
+            text: str | None = None
+            message_id: str | None = None
+
+        return _Inbound()
+
+    async def send_text(self, destination: str, text: str, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.sent.append((destination, text, metadata))
+        return {"ok": True, "channel": destination, "text": text}
+
+    async def test_connection(self) -> dict[str, Any]:
+        return {"ok": True}
+
+
+def test_reasoning_normalization_and_aliases() -> None:
+    assert normalize_reasoning_level("none") == "none"
+    assert normalize_reasoning_level("XHIGH") == "xhigh"
+    assert normalize_reasoning_level("on") == "medium"
+    assert normalize_reasoning_level("off") == "none"
+    assert normalize_reasoning_level("1") == "medium"
+    assert normalize_reasoning_level("0") == "none"
+
+    settings: dict[str, Any] = {}
+    apply_reasoning_level(settings, "none")
+    assert settings["reasoning_enabled"] is False
+    assert settings["reasoning_effort"] == "none"
+
+    apply_reasoning_level(settings, "minimal")
+    assert settings["reasoning_enabled"] is True
+    assert settings["reasoning_effort"] == "minimal"
+
+
+def test_reasoning_slash_command_and_legacy_reason_alias() -> None:
+    main_mod = import_module("main")
+    runtime = main_mod.SessionRuntime()
+    user_id = "reason-user"
+    main_mod._user_runtimes[user_id] = runtime
+    try:
+        response = asyncio.run(
+            main_mod._handle_slash_command(
+                text="/reasoning xhigh",
+                owner_uid=user_id,
+                platform="telegram",
+                integration_id="tg-1",
+                chat_id="101",
+            )
+        )
+        assert response
+        assert "XHigh" in str(response)
+        assert runtime_reasoning_level(runtime.settings) == "xhigh"
+
+        legacy = asyncio.run(
+            main_mod._handle_slash_command(
+                text="/reason off",
+                owner_uid=user_id,
+                platform="telegram",
+                integration_id="tg-1",
+                chat_id="101",
+            )
+        )
+        assert legacy
+        assert "None" in str(legacy)
+        assert runtime_reasoning_level(runtime.settings) == "none"
+    finally:
+        main_mod._user_runtimes.pop(user_id, None)
+
+
+def test_telegram_reasoning_inline_callback_updates_runtime() -> None:
+    main_mod = import_module("main")
+    owner_uid = "tg-owner"
+    runtime = main_mod.SessionRuntime()
+    main_mod._user_runtimes[owner_uid] = runtime
+
+    stub_integration = _StubTelegramIntegration()
+    adapter = _StubChannelAdapter("telegram")
+    adapter.integration = stub_integration
+    main_mod.channel_registry.upsert(
+        "telegram",
+        "tg-test",
+        adapter,
+        {"owner_user_id": owner_uid, "webhook_secret": "secret-1"},
+    )
+
+    try:
+        client = TestClient(main_mod.app)
+        response = client.post(
+            "/api/integrations/telegram/webhook/tg-test",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "secret-1"},
+            json={
+                "callback_query": {
+                    "id": "cb-1",
+                    "data": "reasoning:high",
+                    "message": {"chat": {"id": 111}, "message_id": 222},
+                }
+            },
+        )
+        assert response.status_code == 200
+        assert runtime_reasoning_level(runtime.settings) == "high"
+        assert stub_integration.edits
+        assert "Reasoning set to *High*" in stub_integration.edits[-1]["text"]
+    finally:
+        main_mod._user_runtimes.pop(owner_uid, None)
+
+
+def test_slack_reasoning_slash_and_interactive_flow() -> None:
+    main_mod = import_module("main")
+    owner_uid = "slack-owner"
+    runtime = main_mod.SessionRuntime()
+    main_mod._user_runtimes[owner_uid] = runtime
+
+    adapter = _StubChannelAdapter("slack")
+    adapter.integration = object()
+    main_mod.channel_registry.upsert("slack", "sl-1", adapter, {"owner_user_id": owner_uid})
+    original_log = main_mod._log_platform_message
+    async def _noop_log(*args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
+    main_mod._log_platform_message = _noop_log
+
+    try:
+        client = TestClient(main_mod.app)
+        bare = client.post(
+            "/api/integrations/slack/webhook/sl-1",
+            json={"type": "command", "command": "/reasoning", "text": "", "channel_id": "C1"},
+        )
+        assert bare.status_code == 200
+        assert adapter.sent
+        assert adapter.sent[-1][0] == "C1"
+        assert adapter.sent[-1][2] and "blocks" in (adapter.sent[-1][2] or {})
+
+        updated = client.post(
+            "/api/integrations/slack/webhook/sl-1",
+            json={
+                "type": "block_actions",
+                "channel": {"id": "C1"},
+                "actions": [
+                    {
+                        "action_id": "reasoning_select",
+                        "selected_option": {
+                            "value": "reasoning:xhigh",
+                            "text": {"type": "plain_text", "text": "XHigh"},
+                        },
+                    }
+                ],
+            },
+        )
+        assert updated.status_code == 200
+        assert runtime_reasoning_level(runtime.settings) == "xhigh"
+        assert adapter.sent[-1][1] == "Reasoning set to XHigh"
+    finally:
+        main_mod._log_platform_message = original_log
+        main_mod._user_runtimes.pop(owner_uid, None)
+
+
+def test_discord_reasoning_command_and_component_flow() -> None:
+    main_mod = import_module("main")
+    owner_uid = "discord-owner"
+    runtime = main_mod.SessionRuntime()
+    main_mod._user_runtimes[owner_uid] = runtime
+
+    adapter = _StubChannelAdapter("discord")
+    adapter.integration = object()
+    main_mod.channel_registry.upsert("discord", "dc-1", adapter, {"owner_user_id": owner_uid})
+    original_log = main_mod._log_platform_message
+    async def _noop_log(*args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
+    main_mod._log_platform_message = _noop_log
+
+    try:
+        client = TestClient(main_mod.app)
+        set_minimal = client.post(
+            "/api/integrations/discord/webhook/dc-1",
+            json={
+                "type": 2,
+                "channel_id": "D1",
+                "data": {"name": "reasoning", "options": [{"name": "effort", "value": "minimal"}]},
+            },
+        )
+        assert set_minimal.status_code == 200
+        assert runtime_reasoning_level(runtime.settings) == "minimal"
+
+        set_none = client.post(
+            "/api/integrations/discord/webhook/dc-1",
+            json={
+                "type": 3,
+                "channel_id": "D1",
+                "data": {"custom_id": "reasoning_select", "values": ["reasoning:none"]},
+            },
+        )
+        assert set_none.status_code == 200
+        assert runtime_reasoning_level(runtime.settings) == "none"
+        assert adapter.sent[-1][1] == "Reasoning set to None"
+    finally:
+        main_mod._log_platform_message = original_log
+        main_mod._user_runtimes.pop(owner_uid, None)

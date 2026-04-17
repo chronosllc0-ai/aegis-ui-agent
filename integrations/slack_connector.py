@@ -109,6 +109,34 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         return blocks
 
     @staticmethod
+    def reasoning_selector_blocks(*, current_level_label: str, reasoning_labels: dict[str, str]) -> list[dict[str, Any]]:
+        """Render Slack Block Kit payload for current reasoning + selector actions."""
+        options = [
+            {
+                "text": {"type": "plain_text", "text": label},
+                "value": f"reasoning:{level}",
+            }
+            for level, label in reasoning_labels.items()
+        ]
+        return [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Current reasoning:* {current_level_label}"},
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "static_select",
+                        "placeholder": {"type": "plain_text", "text": "Select reasoning effort"},
+                        "action_id": "reasoning_select",
+                        "options": options[:100],
+                    }
+                ],
+            },
+        ]
+
+    @staticmethod
     def extract_mode_selection(payload: dict[str, Any]) -> str | None:
         """Extract raw mode token from a Slack interaction payload."""
         actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
@@ -119,6 +147,22 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             if action_value.startswith("mode:"):
                 raw_mode = action_value[5:].strip().lower().replace("-", "_").replace(" ", "_")
                 return raw_mode or None
+        return None
+
+    @staticmethod
+    def extract_reasoning_selection(payload: dict[str, Any]) -> str | None:
+        """Extract raw reasoning token from a Slack interaction payload."""
+        actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            selected = action.get("selected_option") if isinstance(action.get("selected_option"), dict) else {}
+            selected_value = str(selected.get("value") or "").strip()
+            action_value = str(action.get("value") or "").strip()
+            value = selected_value or action_value
+            if value.startswith("reasoning:"):
+                raw_level = value[10:].strip().lower().replace("-", "").replace(" ", "")
+                return raw_level or None
         return None
 
     @staticmethod
@@ -403,6 +447,9 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         mode_selection = self.extract_mode_selection(payload)
         if mode_selection:
             envelope["mode_selection"] = mode_selection
+        reasoning_selection = self.extract_reasoning_selection(payload)
+        if reasoning_selection:
+            envelope["reasoning_selection"] = reasoning_selection
         return {"ok": True, "duplicate": False, "envelope": envelope}
 
     async def _list_channels(self, params: dict[str, Any]) -> dict[str, Any]:

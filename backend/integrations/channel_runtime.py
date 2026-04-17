@@ -47,6 +47,10 @@ class TelegramChannelAdapter:
         callback = payload.get("callback_query") or {}
         return TelegramIntegration.extract_mode_selection(callback_data=callback.get("data"))
 
+    def extract_reasoning_selection(self, payload: dict[str, Any]) -> str | None:
+        callback = payload.get("callback_query") or {}
+        return TelegramIntegration.extract_reasoning_selection(callback_data=callback.get("data"))
+
     def extract_message(self, payload: dict[str, Any]) -> InboundChannelMessage:
         callback_query = payload.get("callback_query") or {}
         if callback_query:
@@ -100,6 +104,9 @@ class SlackChannelAdapter:
     def extract_mode_selection(self, payload: dict[str, Any]) -> str | None:
         return SlackIntegration.extract_mode_selection(payload)
 
+    def extract_reasoning_selection(self, payload: dict[str, Any]) -> str | None:
+        return SlackIntegration.extract_reasoning_selection(payload)
+
     def extract_message(self, payload: dict[str, Any]) -> InboundChannelMessage:
         event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
         channel = event.get("channel") or payload.get("channel_id")
@@ -131,6 +138,9 @@ class DiscordChannelAdapter:
 
     def extract_mode_selection(self, payload: dict[str, Any]) -> str | None:
         return DiscordIntegration.extract_mode_selection(payload)
+
+    def extract_reasoning_selection(self, payload: dict[str, Any]) -> str | None:
+        return DiscordIntegration.extract_reasoning_selection(payload)
 
     def extract_message(self, payload: dict[str, Any]) -> InboundChannelMessage:
         channel = payload.get("channel_id")

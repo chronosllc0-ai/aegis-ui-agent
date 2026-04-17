@@ -102,6 +102,28 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         return [{"type": 1, "components": buttons[:5]}]
 
     @staticmethod
+    def reasoning_selector_components(reasoning_labels: dict[str, str]) -> list[dict[str, Any]]:
+        """Build Discord select component for reasoning-effort selection."""
+        options = [
+            {"label": label, "value": f"reasoning:{level}"}
+            for level, label in reasoning_labels.items()
+        ]
+        if not options:
+            return []
+        return [
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 3,
+                        "custom_id": "reasoning_select",
+                        "options": options[:25],
+                    }
+                ],
+            }
+        ]
+
+    @staticmethod
     def extract_mode_selection(payload: dict[str, Any]) -> str | None:
         """Extract raw mode token from Discord interaction payloads."""
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
@@ -109,6 +131,22 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         if custom_id.startswith("mode:"):
             raw_mode = custom_id[5:].strip().lower().replace("-", "_").replace(" ", "_")
             return raw_mode or None
+        return None
+
+    @staticmethod
+    def extract_reasoning_selection(payload: dict[str, Any]) -> str | None:
+        """Extract raw reasoning token from Discord interaction payloads."""
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        custom_id = str(data.get("custom_id") or "").strip().lower()
+        raw_value = ""
+        if custom_id.startswith("reasoning:"):
+            raw_value = custom_id
+        elif custom_id == "reasoning_select":
+            values = data.get("values") if isinstance(data.get("values"), list) else []
+            raw_value = str(values[0] or "").strip().lower() if values else ""
+        if raw_value.startswith("reasoning:"):
+            raw_level = raw_value[10:].strip().lower().replace("-", "").replace(" ", "")
+            return raw_level or None
         return None
 
     @staticmethod
@@ -374,6 +412,9 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         mode_selection = self.extract_mode_selection(payload)
         if mode_selection:
             envelope["mode_selection"] = mode_selection
+        reasoning_selection = self.extract_reasoning_selection(payload)
+        if reasoning_selection:
+            envelope["reasoning_selection"] = reasoning_selection
 
         ack_response = None
         if interaction_type in {2, 3, 5}:

@@ -49,6 +49,14 @@ from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
 from backend.research.router import research_router
+from backend.reasoning import (
+    CANONICAL_REASONING_LEVELS,
+    apply_reasoning_level,
+    normalize_reasoning_level,
+    reasoning_level_label,
+    runtime_reasoning_level,
+    runtime_reasoning_status,
+)
 from backend.skills.router import skills_router
 from backend.skills_hub.router import skills_hub_router
 from backend.skills.runtime import resolve_runtime_skills
@@ -652,6 +660,7 @@ def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -
     model = str(merged.get("model", "")).strip()
     if not model:
         merged["model"] = settings.DEFAULT_MODEL or "nvidia/nemotron-3-super-120b-a12b:free"
+    apply_reasoning_level(merged, runtime_reasoning_level(merged))
     return merged
 
 
@@ -2439,6 +2448,50 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
             )
         return _channel_webhook_response(result)
 
+    callback_reasoning_raw = adapter.extract_reasoning_selection(update)
+    if callback_reasoning_raw is not None:
+        callback_query = update.get("callback_query", {})
+        callback_message = callback_query.get("message", {}) if isinstance(callback_query, dict) else {}
+        callback_chat_id = (callback_message.get("chat") or {}).get("id")
+        callback_message_id = callback_message.get("message_id")
+        callback_destination = str(callback_chat_id) if callback_chat_id is not None else None
+        if not owner_user_id:
+            if callback_destination:
+                await _send_channel_text(
+                    "telegram",
+                    integration_id,
+                    callback_destination,
+                    "⚠️ Reasoning controls are only available for the owner session.",
+                    log_source="reasoning_switch",
+                )
+            return _channel_webhook_response(result)
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if callback_destination:
+                await _send_channel_text(
+                    "telegram",
+                    integration_id,
+                    callback_destination,
+                    "⚠️ No active session. Start a session first.",
+                    log_source="reasoning_switch",
+                )
+            return _channel_webhook_response(result)
+        level = normalize_reasoning_level(callback_reasoning_raw, fallback="medium")
+        apply_reasoning_level(runtime.settings, level)
+        if callback_destination and isinstance(callback_message_id, int):
+            integration_client = _get_channel_integration("telegram", integration_id)
+            if isinstance(integration_client, TelegramIntegration):
+                await integration_client.execute_tool(
+                    "telegram_edit_message",
+                    {
+                        "chat_id": int(callback_chat_id) if isinstance(callback_chat_id, int) else callback_chat_id,
+                        "message_id": callback_message_id,
+                        "text": f"✅ Reasoning set to *{reasoning_level_label(level)}*",
+                        "parse_mode": "Markdown",
+                    },
+                )
+        return _channel_webhook_response(result)
+
     inbound = adapter.extract_message(update)
     chat_id = inbound.destination
     text_content = inbound.text
@@ -2613,6 +2666,36 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
     result = await adapter.handle_event(payload, dict(request.headers))
     owner_user_id = str(_get_channel_config("slack", integration_id).get("owner_user_id", "")).strip() or None
 
+    slack_command = str(payload.get("command") or "").strip().lower()
+    if slack_command in {"/reason", "/reasoning"}:
+        channel = str(payload.get("channel_id") or "").strip()
+        command_text = f"/reasoning {str(payload.get('text') or '').strip()}".strip()
+        cmd_response = await _handle_slash_command(
+            text=command_text,
+            owner_uid=owner_user_id,
+            platform="slack",
+            integration_id=integration_id,
+            chat_id=channel,
+        )
+        if channel and isinstance(cmd_response, dict):
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                str(cmd_response.get("text", "")),
+                metadata=_build_channel_command_metadata("slack", cmd_response),
+                log_source="slash_command",
+            )
+        elif channel and cmd_response:
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                cmd_response,
+                log_source="slash_command",
+            )
+        return _channel_webhook_response(result)
+
     selected_mode_raw = adapter.extract_mode_selection(payload if isinstance(payload, dict) else {})
     if selected_mode_raw:
         channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
@@ -2655,6 +2738,42 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
                 channel,
                 f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
                 log_source="mode_switch",
+            )
+        return _channel_webhook_response(result)
+
+    selected_reasoning_raw = adapter.extract_reasoning_selection(payload if isinstance(payload, dict) else {})
+    if selected_reasoning_raw:
+        channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
+        if not owner_user_id:
+            if channel:
+                await _send_channel_text(
+                    "slack",
+                    integration_id,
+                    channel,
+                    "⚠️ Reasoning controls are only available for the owner session.",
+                    log_source="reasoning_switch",
+                )
+            return _channel_webhook_response(result)
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if channel:
+                await _send_channel_text(
+                    "slack",
+                    integration_id,
+                    channel,
+                    "⚠️ No active session. Start a session first.",
+                    log_source="reasoning_switch",
+                )
+            return _channel_webhook_response(result)
+        level = normalize_reasoning_level(selected_reasoning_raw, fallback="medium")
+        apply_reasoning_level(runtime.settings, level)
+        if channel:
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                f"Reasoning set to {reasoning_level_label(level)}",
+                log_source="reasoning_switch",
             )
         return _channel_webhook_response(result)
 
@@ -2762,6 +2881,44 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
     payload = await request.json()
     result = await adapter.handle_event(payload, dict(request.headers))
     owner_user_id = str(_get_channel_config("discord", integration_id).get("owner_user_id", "")).strip() or None
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    command_name = str(data.get("name") or "").strip().lower()
+    if command_name == "reasoning":
+        channel = str(payload.get("channel_id") or "").strip()
+        options = data.get("options") if isinstance(data.get("options"), list) else []
+        effort = ""
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            if str(option.get("name") or "").strip().lower() == "effort":
+                effort = str(option.get("value") or "").strip()
+                break
+        command_text = f"/reasoning {effort}".strip()
+        cmd_response = await _handle_slash_command(
+            text=command_text,
+            owner_uid=owner_user_id,
+            platform="discord",
+            integration_id=integration_id,
+            chat_id=channel,
+        )
+        if channel and isinstance(cmd_response, dict):
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                str(cmd_response.get("text", "")),
+                metadata=_build_channel_command_metadata("discord", cmd_response),
+                log_source="slash_command",
+            )
+        elif channel and cmd_response:
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                cmd_response,
+                log_source="slash_command",
+            )
+        return _channel_webhook_response(result)
 
     selected_mode_raw = adapter.extract_mode_selection(payload if isinstance(payload, dict) else {})
     if selected_mode_raw:
@@ -2805,6 +2962,42 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
                 channel,
                 f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
                 log_source="mode_switch",
+            )
+        return _channel_webhook_response(result)
+
+    selected_reasoning_raw = adapter.extract_reasoning_selection(payload if isinstance(payload, dict) else {})
+    if selected_reasoning_raw:
+        channel = str(payload.get("channel_id") or "").strip()
+        if not owner_user_id:
+            if channel:
+                await _send_channel_text(
+                    "discord",
+                    integration_id,
+                    channel,
+                    "⚠️ Reasoning controls are only available for the owner session.",
+                    log_source="reasoning_switch",
+                )
+            return _channel_webhook_response(result)
+        runtime = _user_runtimes.get(owner_user_id)
+        if not runtime:
+            if channel:
+                await _send_channel_text(
+                    "discord",
+                    integration_id,
+                    channel,
+                    "⚠️ No active session. Start a session first.",
+                    log_source="reasoning_switch",
+                )
+            return _channel_webhook_response(result)
+        level = normalize_reasoning_level(selected_reasoning_raw, fallback="medium")
+        apply_reasoning_level(runtime.settings, level)
+        if channel:
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                f"Reasoning set to {reasoning_level_label(level)}",
+                log_source="reasoning_switch",
             )
         return _channel_webhook_response(result)
 
@@ -3070,6 +3263,7 @@ TELEGRAM_SLASH_COMMANDS = [
     {"command": "interrupt", "description": "Stop the current task"},
     {"command": "queue", "description": "Queue a task: /queue <instruction>"},
     {"command": "status", "description": "Show agent status and credits"},
+    {"command": "reason", "description": "Legacy reasoning controls"},
     {"command": "reasoning", "description": "Reasoning controls (alias of /reason)"},
     {"command": "model", "description": "Show current model"},
     {"command": "mode", "description": "Show or switch agent mode"},
@@ -3327,6 +3521,35 @@ def _build_subagent_steering_payload(message: str, priority: str | None = None) 
     return normalized_message
 
 
+REASONING_LABELS: dict[str, str] = {
+    level: reasoning_level_label(level) for level in CANONICAL_REASONING_LEVELS
+}
+
+
+def _reasoning_status_text(runtime: "SessionRuntime") -> str:
+    """Render canonical reasoning status text for channel responses."""
+    status = runtime_reasoning_status(runtime.settings)
+    enabled = "enabled" if status["enabled"] else "disabled"
+    stream = "on" if status["stream_reasoning"] else "off"
+    return f"🧠 Reasoning: *{enabled}* | Effort: {status['label']} | Stream: {stream}"
+
+
+def _build_reasoning_selector_response(platform: str, runtime: "SessionRuntime") -> dict[str, Any]:
+    """Build platform-specific reasoning selector UI response payload."""
+    status = runtime_reasoning_status(runtime.settings)
+    response: dict[str, Any] = {"text": _reasoning_status_text(runtime)}
+    if platform == "telegram":
+        response["reply_markup"] = TelegramIntegration.reasoning_selector_reply_markup(REASONING_LABELS)
+    elif platform == "slack":
+        response["blocks"] = SlackIntegration.reasoning_selector_blocks(
+            current_level_label=status["label"],
+            reasoning_labels=REASONING_LABELS,
+        )
+    elif platform == "discord":
+        response["components"] = DiscordIntegration.reasoning_selector_components(REASONING_LABELS)
+    return response
+
+
 async def _handle_slash_command(
     text: str,
     owner_uid: str | None,
@@ -3363,8 +3586,8 @@ async def _handle_slash_command(
             "/mode [name] — show or switch mode\n"
             "/models — list & switch model\n"
             "/stream start|stop — live screenshots\n"
-            "/reason on|off|low|medium|high|stream|status — reasoning mode\n"
-            "/reasoning ... — alias of /reason\n"
+            "/reasoning [none|minimal|low|medium|high|xhigh|status] — reasoning mode\n"
+            "/reason ... — legacy alias of /reasoning\n"
             "/activation — active session details\n"
             "/config — runtime config summary\n"
             "/acp spawn <instruction> — ACP task start\n"
@@ -3393,7 +3616,12 @@ async def _handle_slash_command(
             pass
         mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
         mode_label = MODE_LABELS.get(mode, mode.title())
-        return f"{state}\n🧠 Model: {model} ({provider})\n🧭 Mode: {mode_label}\n📋 Queued: {queued}{credits_info}"
+        reasoning_status = runtime_reasoning_status(runtime.settings)
+        reasoning_enabled = "enabled" if reasoning_status["enabled"] else "disabled"
+        return (
+            f"{state}\n🧠 Model: {model} ({provider})\n🧭 Mode: {mode_label}\n"
+            f"🧠 Reasoning: {reasoning_enabled}\n⚙️ Effort: {reasoning_status['label']}\n📋 Queued: {queued}{credits_info}"
+        )
 
     if cmd == "model":
         if not runtime:
@@ -3534,34 +3762,25 @@ async def _handle_slash_command(
         sub = arg.lower().strip()
         if not runtime:
             return "⚪ No active session."
-        if sub in ("on", "true", "1"):
-            runtime.settings["enable_reasoning"] = True
-            return "🧠 Reasoning enabled (effort: medium). Agent will think before each step."
-        elif sub in ("off", "false", "0"):
-            runtime.settings["enable_reasoning"] = False
-            return "⭕ Reasoning disabled."
-        elif sub in ("low", "medium", "high"):
-            runtime.settings["enable_reasoning"] = True
-            runtime.settings["reasoning_effort"] = sub
-            return f"🧠 Reasoning enabled with effort: *{sub}*."
-        elif sub == "stream":
-            runtime.settings["enable_reasoning"] = True
+        if not sub:
+            return _build_reasoning_selector_response(platform, runtime)
+        if sub == "status":
+            return _reasoning_status_text(runtime)
+        if sub == "stream":
+            apply_reasoning_level(runtime.settings, runtime_reasoning_level(runtime.settings))
+            if runtime_reasoning_level(runtime.settings) == "none":
+                apply_reasoning_level(runtime.settings, "medium")
             runtime.settings["stream_reasoning"] = True
-            return "🧠 Reasoning enabled with live streaming. You'll receive thinking updates in real-time."
-        elif sub == "status":
-            enabled = runtime.settings.get("enable_reasoning", False)
-            effort = runtime.settings.get("reasoning_effort", "medium")
-            streaming = runtime.settings.get("stream_reasoning", False)
-            status = "enabled" if enabled else "disabled"
-            return f"🧠 Reasoning: *{status}* | effort: {effort} | stream: {'on' if streaming else 'off'}"
-        else:
+            return f"🧠 Reasoning stream enabled. Effort: *{reasoning_level_label(runtime_reasoning_level(runtime.settings))}*."
+        try:
+            level = normalize_reasoning_level(sub)
+        except ValueError:
             return (
-                "Usage: /reason <on|off|low|medium|high|stream|status>\n"
-                "  on/off — enable or disable reasoning\n"
-                "  low/medium/high — set effort level\n"
-                "  stream — enable with live streaming to this chat\n"
-                "  status — show current settings"
+                "Usage: /reasoning [none|minimal|low|medium|high|xhigh|status]\n"
+                "Legacy aliases: /reason on|off|true|false|1|0|stream|status"
             )
+        apply_reasoning_level(runtime.settings, level)
+        return f"🧠 Reasoning set to *{reasoning_level_label(level)}*."
 
     if cmd == "activation":
         if not runtime:
@@ -3581,7 +3800,8 @@ async def _handle_slash_command(
             f"- provider: `{runtime.settings.get('provider', '')}`\n"
             f"- model: `{runtime.settings.get('model', '')}`\n"
             f"- mode: `{mode}`\n"
-            f"- reasoning: `{'on' if runtime.settings.get('enable_reasoning') else 'off'}`"
+            f"- reasoning: `{'on' if runtime_reasoning_level(runtime.settings) != 'none' else 'off'}`\n"
+            f"- reasoning_effort: `{runtime_reasoning_status(runtime.settings)['label']}`"
         )
 
     if cmd == "pair":
