@@ -5082,3 +5082,28 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.7 - April 17, 2026 (Review follow-up: reasoning error message repr)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick fix pass
+
+### What Was Done
+- Updated `backend/reasoning.py` error messaging in `normalize_reasoning_level(...)` to render invalid values with `repr` formatting (`{value!r}`) instead of plain string interpolation.
+- This ensures `None` appears as `None` (Python repr) rather than a quoted string-like rendering in the exception text.
+
+### What's Working
+- Validation errors now communicate the exact invalid input more precisely for debugging and review clarity.
+
+### What's NOT Working Yet
+- None identified for this targeted follow-up.
+
+### Next Steps
+1. Keep this style for similar validator errors where ambiguous value display could mislead debugging.
+
+### Decisions Made
+- Kept the change minimal and localized to the reviewed nitpick; no behavioral changes to normalization logic.
+
+### Blockers
+- None.

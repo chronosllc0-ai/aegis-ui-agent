@@ -45,7 +45,7 @@ def normalize_reasoning_level(value: object, *, fallback: ReasoningLevel | None 
     if fallback is not None:
         return fallback
     allowed = ", ".join(CANONICAL_REASONING_LEVELS)
-    raise ValueError(f"Invalid reasoning level '{value}'. Expected one of: {allowed}")
+    raise ValueError(f"Invalid reasoning level {value!r}. Expected one of: {allowed}")
 
 
 def reasoning_level_label(level: object) -> str:
