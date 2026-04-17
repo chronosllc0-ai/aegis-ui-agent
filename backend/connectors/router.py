@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.connectors import CONNECTOR_CATALOGUE, get_connector, list_connectors
 from backend.database import OAuthPendingState, UserConnection, get_session
+from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from backend.key_management import KeyManager
 from config import settings
 
@@ -465,6 +466,10 @@ async def execute_connector_action(
 
     if not action_id:
         raise HTTPException(status_code=400, detail="action is required")
+
+    capability_status, _ = resolve_capability_status(connector_id, action_id)
+    if capability_status != "supported":
+        return unsupported_action_fallback(connector_id, action_id)
 
     # Decrypt access token
     try:

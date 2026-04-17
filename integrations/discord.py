@@ -6,11 +6,13 @@ import asyncio
 import base64
 import json
 import logging
+from urllib.parse import quote
 from typing import Any
 
 import httpx
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 from integrations.idempotency import DeliveryDeduper
@@ -18,6 +20,13 @@ from integrations.idempotency import DeliveryDeduper
 logger = logging.getLogger(__name__)
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_COMMAND_CONTROL_MAP: dict[str, str] = {
+    "aegis-status": "status",
+    "aegis-config": "config",
+    "aegis-runtime-start": "runtime_start",
+    "aegis-runtime-stop": "runtime_stop",
+    "aegis-runtime-reset": "runtime_reset",
+}
 
 
 class DiscordIntegration(BaseIntegration, ChannelAdapter):
@@ -66,9 +75,12 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             {"name": "discord_get_messages", "description": "Fetch recent channel messages"},
             {"name": "discord_send_message", "description": "Send a message to a channel"},
             {"name": "discord_edit_message", "description": "Edit a message in a channel"},
+            {"name": "discord_delete_message", "description": "Delete a message from a channel"},
+            {"name": "discord_react", "description": "Add reaction to a channel message"},
             {"name": "discord_list_channels", "description": "List channels in a guild"},
             {"name": "discord_send_file", "description": "Upload a file to a channel"},
             {"name": "discord_send_image", "description": "Upload an image to a channel"},
+            {"name": "discord_send_interactive", "description": "Send runtime-control components"},
             {"name": "discord_handle_event", "description": "Normalize and process Discord interactions/events"},
         ]
 
@@ -98,6 +110,51 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             return raw_mode or None
         return None
 
+    @staticmethod
+    def runtime_control_components() -> list[dict[str, Any]]:
+        """Build runtime-control buttons/select for Discord interactions."""
+        return [
+            {
+                "type": 1,
+                "components": [
+                    {"type": 2, "style": 2, "label": "Status", "custom_id": "control:status"},
+                    {"type": 2, "style": 3, "label": "Start", "custom_id": "control:runtime_start"},
+                    {"type": 2, "style": 4, "label": "Stop", "custom_id": "control:runtime_stop"},
+                ],
+            },
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 3,
+                        "custom_id": "runtime_config_select",
+                        "options": [
+                            {"label": "Safe", "value": "control:config_safe"},
+                            {"label": "Balanced", "value": "control:config_balanced"},
+                            {"label": "Fast", "value": "control:config_fast"},
+                        ],
+                    }
+                ],
+            },
+        ]
+
+    @staticmethod
+    def extract_control_action(payload: dict[str, Any]) -> str | None:
+        """Extract control action from Discord app commands/component interactions."""
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        command_name = str(data.get("name") or "").strip().lower()
+        if command_name in DISCORD_COMMAND_CONTROL_MAP:
+            return DISCORD_COMMAND_CONTROL_MAP[command_name]
+        custom_id = str(data.get("custom_id") or "").strip().lower()
+        if custom_id.startswith("control:"):
+            return custom_id[8:] or None
+        values = data.get("values") if isinstance(data.get("values"), list) else []
+        if values:
+            raw = str(values[0] or "").strip().lower()
+            if raw.startswith("control:"):
+                return raw[8:] or None
+        return None
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if tool_name == "discord_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
@@ -120,6 +177,15 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             message_id = str(params.get("message_id") or "").strip()
             text = str(params.get("text", "")).strip()
             return await self.edit_text(channel, message_id, text, metadata=params)
+        if tool_name == "discord_delete_message":
+            channel = str(params.get("channel", "")).strip()
+            message_id = str(params.get("message_id") or "").strip()
+            return await self.delete_message(channel, message_id)
+        if tool_name == "discord_react":
+            channel = str(params.get("channel", "")).strip()
+            message_id = str(params.get("message_id") or "").strip()
+            reaction = str(params.get("reaction") or params.get("emoji") or "").strip()
+            return await self.react(channel, message_id, reaction)
         if tool_name == "discord_send_file":
             channel = str(params.get("channel", "")).strip()
             file_bytes = params.get("file_bytes")
@@ -131,6 +197,15 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             mime_type = str(params.get("mime_type") or "application/octet-stream")
             caption = str(params.get("caption") or "").strip() or None
             return await self.send_file(channel, file_bytes, filename=filename, mime_type=mime_type, caption=caption)
+        if tool_name == "discord_send_interactive":
+            channel = str(params.get("channel", "")).strip()
+            text = str(params.get("text") or "Runtime controls").strip()
+            components = (
+                params.get("components")
+                if isinstance(params.get("components"), list)
+                else self.runtime_control_components()
+            )
+            return await self.send_text(channel, text, metadata={**params, "components": components})
         if tool_name == "discord_send_image":
             channel = str(params.get("channel", "")).strip()
             image_b64 = str(params.get("image_b64", "")).strip()
@@ -146,6 +221,9 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             result["tool"] = "discord_send_image"
             return result
 
+        status, _ = resolve_capability_status("discord", tool_name)
+        if status != "supported":
+            return unsupported_action_fallback("discord", tool_name)
         return {"ok": False, "tool": tool_name, "error": "Unsupported tool"}
 
     async def send_text(self, destination: str, text: str, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -191,6 +269,34 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         data = await self._request("PATCH", f"/channels/{channel}/messages/{msg_id}", json_payload=payload)
         ok = bool(data.get("id")) if isinstance(data, dict) else False
         return {"ok": ok, "tool": "discord_edit_message", "result": data}
+
+    async def delete_message(self, destination: str, message_id: str) -> dict[str, Any]:
+        """Delete a message from a Discord channel."""
+        channel = destination.strip()
+        msg_id = message_id.strip()
+        if not channel:
+            return {"ok": False, "tool": "discord_delete_message", "error": "Channel is required"}
+        if not msg_id:
+            return {"ok": False, "tool": "discord_delete_message", "error": "message_id is required"}
+        data = await self._request("DELETE", f"/channels/{channel}/messages/{msg_id}")
+        ok = not (isinstance(data, dict) and data.get("status"))
+        return {"ok": ok, "tool": "discord_delete_message", "result": data}
+
+    async def react(self, destination: str, message_id: str, reaction: str) -> dict[str, Any]:
+        """Add reaction emoji to Discord message."""
+        channel = destination.strip()
+        msg_id = message_id.strip()
+        emoji = reaction.strip()
+        if not channel:
+            return {"ok": False, "tool": "discord_react", "error": "Channel is required"}
+        if not msg_id:
+            return {"ok": False, "tool": "discord_react", "error": "message_id is required"}
+        if not emoji:
+            return {"ok": False, "tool": "discord_react", "error": "reaction is required"}
+        encoded_emoji = quote(emoji, safe="")
+        data = await self._request("PUT", f"/channels/{channel}/messages/{msg_id}/reactions/{encoded_emoji}/@me")
+        ok = not (isinstance(data, dict) and data.get("status"))
+        return {"ok": ok, "tool": "discord_react", "result": data}
 
     async def send_file(
         self,
@@ -254,6 +360,12 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
             "raw": payload,
             "delivery_id": delivery_id,
         }
+        control_action = self.extract_control_action(payload)
+        if control_action:
+            envelope["control_action"] = control_action
+        mode_selection = self.extract_mode_selection(payload)
+        if mode_selection:
+            envelope["mode_selection"] = mode_selection
 
         ack_response = None
         if interaction_type in {2, 3, 5}:
