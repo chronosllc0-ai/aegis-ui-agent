@@ -25,7 +25,10 @@ export type AppSettings = {
   avatarUrl: string
   email: string
   theme: ThemePreference
+  /** @deprecated v1 runtime editable system instruction; replaced by workspace-file overlays in v2 mode. */
   systemInstruction: string
+  /** User-editable workspace overlay files merged in v2 prompt mode. */
+  userWorkspaceFiles: Record<string, string>
   personalityPreset: string
   temperature: number
   provider: string
@@ -69,6 +72,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   email: 'user@example.com',
   theme: 'dark',
   systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
+  userWorkspaceFiles: {},
   personalityPreset: 'Professional',
   temperature: 0.7,
   provider: 'chronos',
@@ -157,6 +161,7 @@ export function useSettings() {
       provider: settings.provider,
       model: settings.model,
       system_instruction: settings.systemInstruction,
+      user_workspace_overlay_files: settings.userWorkspaceFiles,
       temperature: settings.temperature,
       behavior: {
         auto_screenshot: settings.autoScreenshot,

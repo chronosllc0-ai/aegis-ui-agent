@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # (editable live in Admin > Agent Config) — this env var is a
     # deploy-time fallback when the DB row has not been set yet.
     AEGIS_GLOBAL_SYSTEM_INSTRUCTION: str = ""
+    WORKSPACE_PROMPT_MODE: str = "v1"
 
     # ── Default provider / model ─────────────────────────────────────
     DEFAULT_PROVIDER: str = "chronos"

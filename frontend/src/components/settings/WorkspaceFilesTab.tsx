@@ -11,6 +11,9 @@ type WorkspaceFile = {
 
 type WorkspaceFilesTabProps = {
   isAdmin?: boolean
+  editableUserFiles?: boolean
+  userFiles?: Record<string, string>
+  onUserFilesChange?: (files: Record<string, string>) => void
 }
 
 const READ_ONLY_VIEW_MODES = ['preview', 'markdown'] as const
@@ -51,7 +54,9 @@ function renderMarkdownPreview(markdown: string): ReactNode {
   )
 }
 
-export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
+const WORKSPACE_FILES_ORDER = ['AGENTS.md', 'SOUL.md', 'TOOLS.md', 'BOOTSTRAP.md', 'USER.md', 'IDENTITY.md', 'MEMORY.md'] as const
+
+export function WorkspaceFilesTab({ isAdmin = false, editableUserFiles = false, userFiles = {}, onUserFilesChange }: WorkspaceFilesTabProps) {
   const [files, setFiles] = useState<WorkspaceFile[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -78,12 +83,24 @@ export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
     })()
   }, [isAdmin, toast])
 
+  const effectiveFiles = useMemo(() => {
+    const prioritized = WORKSPACE_FILES_ORDER.map((name) => files.find((file) => file.name === name)).filter((file): file is WorkspaceFile => Boolean(file))
+    const remaining = files.filter((file) => !WORKSPACE_FILES_ORDER.includes(file.name as (typeof WORKSPACE_FILES_ORDER)[number]))
+    const merged = [...prioritized, ...remaining]
+    if (!editableUserFiles) return merged
+    return merged.map((file) => ({ ...file, content: userFiles[file.name] ?? file.content }))
+  }, [editableUserFiles, files, userFiles])
+
   const filteredFiles = useMemo(
-    () => files.filter((file) => file.name.toLowerCase().includes(query.trim().toLowerCase())),
-    [files, query],
+    () => effectiveFiles.filter((file) => file.name.toLowerCase().includes(query.trim().toLowerCase())),
+    [effectiveFiles, query],
   )
 
   const updateFileContent = (name: string, content: string) => {
+    if (editableUserFiles && onUserFilesChange) {
+      onUserFilesChange({ ...userFiles, [name]: content })
+      return
+    }
     setFiles((prev) => prev.map((file) => (file.name === name ? { ...file, content } : file)))
   }
 
@@ -162,7 +179,7 @@ export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
 
               {isOpen && (
                 <div className='border-t border-[#2a2a2a] p-3'>
-                  {!isAdmin ? (
+                  {!isAdmin && !editableUserFiles ? (
                     <>
                       <div className='mb-3 inline-flex rounded-lg border border-[#2a2a2a] bg-[#0f0f0f] p-1'>
                         {READ_ONLY_VIEW_MODES.map((mode) => (
@@ -222,16 +239,25 @@ export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
 
                       <div className='mt-3 flex items-center justify-between'>
                         <p className='text-[11px] text-zinc-500'>
-                          Global file • updates apply to all users.
+                          {isAdmin ? 'Global file • updates apply to all users.' : 'User workspace overlay • stored in your local settings.'}
                         </p>
-                        <button
-                          type='button'
-                          onClick={() => void saveFile(file.name)}
-                          disabled={saving}
-                          className='rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-50'
-                        >
-                          {saving ? 'Saving…' : 'Save file'}
-                        </button>
+                        {isAdmin ? (
+                          <button
+                            type='button'
+                            onClick={() => void saveFile(file.name)}
+                            disabled={saving}
+                            className='rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-50'
+                          >
+                            {saving ? 'Saving…' : 'Save file'}
+                          </button>
+                        ) : (
+                          <button
+                            type='button'
+                            className='rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white opacity-90'
+                          >
+                            Write
+                          </button>
+                        )}
                       </div>
                     </>
                   )}
