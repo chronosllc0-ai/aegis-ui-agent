@@ -4914,3 +4914,39 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.3 - April 17, 2026 (Review fixes: DRY steer path + non-blocking UI + flaky test)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 follow-up fix pass
+
+### What Was Done
+- Refactored `universal_navigator.py` sub-agent steering handling to remove duplicated logic:
+  - Added `_apply_subagent_steering_priority(...)` helper.
+  - Merged `message_subagent` and `steer_subagent` handling into one shared branch.
+- Fixed malformed batch behavior in universal navigation loop:
+  - When model output includes `"tool_calls"` but parsing fails validation (e.g., >3 calls), runtime now emits a deterministic malformed payload error step and asks model to retry with valid shape instead of treating response as final plain text.
+  - This resolves the failing `test_rejects_batch_over_three_with_safe_error` expectation.
+- Replaced blocking `window.prompt(...)` steering interaction in `SubAgentPanel` with a non-blocking inline compose UI (textarea + cancel/send actions), keeping steering routed through existing `onMessage` callback.
+
+### What's Working
+- Sub-agent steer logic is now DRY in universal navigator and easier to maintain.
+- Invalid `tool_calls` payloads now produce explicit error feedback and retry behavior.
+- The previously failing parallel-tools test now passes.
+- Sub-agent UI steering now uses a proper non-blocking React interaction.
+- Frontend build succeeds after UI update.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add a focused UI test for inline steer composer open/send/cancel transitions in `SubAgentPanel`.
+2. Consider centralizing steering-priority normalization in one shared backend utility if future call sites expand.
+
+### Decisions Made
+- Preferred shared branching in `UniversalToolExecutor.run(...)` over separate alias handlers to avoid future behavior drift.
+- Implemented malformed `tool_calls` handling at navigation-loop level so parser semantics remain simple while recovery behavior is explicit.
+
+### Blockers
+- None.

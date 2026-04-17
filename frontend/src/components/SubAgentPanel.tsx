@@ -64,14 +64,17 @@ function liveStatusText(agent: SubAgentInfo, steps: SubAgentStep[]): string {
 export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread }: SubAgentPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [hoveredModel, setHoveredModel] = useState<string | null>(null) // sub_id of hovered name
+  const [steerTargetSubId, setSteerTargetSubId] = useState<string | null>(null)
+  const [steerMessage, setSteerMessage] = useState('')
   void onCancel
 
-  const handleSteer = (subId: string): void => {
-    const message = window.prompt('Steer sub-agent message')
-    if (!message) return
-    const trimmed = message.trim()
+  const handleSteerSubmit = (): void => {
+    const trimmed = steerMessage.trim()
     if (!trimmed) return
-    onMessage(subId, trimmed)
+    if (!steerTargetSubId) return
+    onMessage(steerTargetSubId, trimmed)
+    setSteerMessage('')
+    setSteerTargetSubId(null)
   }
 
   const activeCount = useMemo(
@@ -83,6 +86,38 @@ export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread
 
   return (
     <div className='w-full'>
+      {steerTargetSubId && (
+        <div className='mb-2 rounded-xl border border-[#2a2a2a] bg-[#111111] p-3'>
+          <p className='mb-2 text-[11px] text-zinc-400'>Steer sub-agent <span className='text-zinc-200'>{steerTargetSubId}</span></p>
+          <textarea
+            value={steerMessage}
+            onChange={(event) => setSteerMessage(event.target.value)}
+            rows={3}
+            placeholder='Add guidance…'
+            className='w-full resize-y rounded-md border border-[#303030] bg-[#181818] px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/60'
+          />
+          <div className='mt-2 flex items-center justify-end gap-2'>
+            <button
+              type='button'
+              onClick={() => {
+                setSteerMessage('')
+                setSteerTargetSubId(null)
+              }}
+              className='rounded-md border border-[#333] px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200'
+            >
+              Cancel
+            </button>
+            <button
+              type='button'
+              onClick={handleSteerSubmit}
+              className='rounded-md border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] text-blue-200 hover:bg-blue-500/20'
+            >
+              Send steer
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Expanded agent rows ─────────────────────────────────────────── */}
       {expanded && (
         <div className='mb-1 w-full rounded-xl border border-[#2a2a2a] bg-[#141414] overflow-hidden'>
@@ -137,7 +172,7 @@ export function SubAgentPanel({ agents, steps, onCancel, onMessage, onOpenThread
                 {isLive && (
                   <button
                     type='button'
-                    onClick={() => handleSteer(agent.sub_id)}
+                    onClick={() => setSteerTargetSubId(agent.sub_id)}
                     className='flex-shrink-0 text-[11px] font-medium text-blue-300 hover:text-blue-200 transition-colors'
                   >
                     Steer

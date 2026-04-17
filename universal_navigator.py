@@ -81,6 +81,16 @@ EXEC_ENV_BLOCKED_PREFIXES = (
     "PRIVATE",
     "CREDENTIAL",
 )
+VALID_STEERING_PRIORITIES = frozenset({"low", "normal", "high", "urgent"})
+
+
+def _apply_subagent_steering_priority(message: str, priority: Any) -> str:
+    """Return steering message with optional normalized priority annotation."""
+    normalized_message = str(message).strip()
+    normalized_priority = str(priority or "").strip().lower()
+    if normalized_priority in VALID_STEERING_PRIORITIES:
+        return f"[priority:{normalized_priority}] {normalized_message}"
+    return normalized_message
 
 
 def _build_worker_summary(
@@ -1189,28 +1199,18 @@ class UniversalToolExecutor:
                     return f"Sub-agent spawned with id={sub_id}. It is now running independently.", None
                 return "spawn_subagent is not available in this context.", None
 
-            if tool == "message_subagent":
+            if tool in {"message_subagent", "steer_subagent"}:
                 sub_id = str(tool_call.get("sub_id", "")).strip()
-                message = str(tool_call.get("message", "")).strip()
+                message = _apply_subagent_steering_priority(
+                    tool_call.get("message", ""),
+                    tool_call.get("priority", ""),
+                )
                 if not sub_id or not message:
-                    return "message_subagent error: sub_id and message are required.", None
+                    return f"{tool} error: sub_id and message are required.", None
                 if self._on_message_subagent:
                     ok = await self._on_message_subagent(sub_id, message)
                     return f"Steering message {'sent' if ok else 'failed'} for sub-agent {sub_id}.", None
-                return "message_subagent is not available in this context.", None
-
-            if tool == "steer_subagent":
-                sub_id = str(tool_call.get("sub_id", "")).strip()
-                message = str(tool_call.get("message", "")).strip()
-                priority_raw = str(tool_call.get("priority", "")).strip().lower()
-                if not sub_id or not message:
-                    return "steer_subagent error: sub_id and message are required.", None
-                if priority_raw in {"low", "normal", "high", "urgent"}:
-                    message = f"[priority:{priority_raw}] {message}"
-                if self._on_message_subagent:
-                    ok = await self._on_message_subagent(sub_id, message)
-                    return f"Steering message {'sent' if ok else 'failed'} for sub-agent {sub_id}.", None
-                return "steer_subagent is not available in this context.", None
+                return f"{tool} is not available in this context.", None
 
             if tool == "github_list_repos":
                 github = await self._github()
@@ -2310,6 +2310,15 @@ async def run_universal_navigation(
         messages.append(ChatMessage(role="assistant", content=reply))
         tool_calls = _parse_tool_calls(reply)
         if not tool_calls:
+            if "\"tool_calls\"" in reply:
+                await emit_step("Malformed tool_calls payload. Please emit at most 3 valid tool calls.", step_type="error")
+                messages.append(
+                    ChatMessage(
+                        role="user",
+                        content="Malformed tool_calls payload. Return exactly one valid JSON tool call or a valid tool_calls array with at most 3 entries.",
+                    )
+                )
+                continue
             # The model responded with plain text — this is a valid direct answer
             # (conversational reply, clarification, etc.).  Emit it straight to the
             # chat and complete the task.  We never filter or retry plain-text replies;
