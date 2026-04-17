@@ -253,6 +253,7 @@ export function WorkspaceFilesTab({ isAdmin = false, editableUserFiles = false, 
                         ) : (
                           <button
                             type='button'
+                            onClick={() => updateFileContent(file.name, file.content)}
                             className='rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white opacity-90'
                           >
                             Write

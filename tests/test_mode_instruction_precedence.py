@@ -112,7 +112,8 @@ def test_prompt_v2_orders_baseline_global_workspace_user_workspace_then_runtime_
             settings={
                 "user_workspace_overlay_files": {
                     "USER.md": "USER WS RULE",
-                }
+                },
+                "system_instruction": "LEGACY USER INSTRUCTION",
             },
             is_subagent=False,
             runtime_skills_section="\n\nRUNTIME CONTEXT RULE\n",
@@ -121,7 +122,9 @@ def test_prompt_v2_orders_baseline_global_workspace_user_workspace_then_runtime_
         baseline_index = prompt.index("Immutable baseline safety policy")
         global_ws_index = prompt.index("GLOBAL WS RULE")
         user_ws_index = prompt.index("USER WS RULE")
+        identity_index = prompt.index("You are Aegis, an autonomous AI agent built by Chronos AI.")
         runtime_context_index = prompt.index("RUNTIME CONTEXT RULE")
-        assert baseline_index < global_ws_index < user_ws_index < runtime_context_index
+        custom_index = prompt.index("LEGACY USER INSTRUCTION")
+        assert baseline_index < global_ws_index < user_ws_index < identity_index < runtime_context_index < custom_index
 
     asyncio.run(_run())

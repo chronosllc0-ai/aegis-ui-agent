@@ -5234,3 +5234,34 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.11 - April 17, 2026 (post-review fixes for workspace prompt migration)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 follow-up patch pass
+
+### What Was Done
+- Fixed prompt assembly ordering in `universal_navigator.py` so runtime skills/context now appears after the core identity/tools/rules block instead of before it.
+- Restored v2 compatibility for existing user custom instructions by appending legacy `system_instruction` content in v2 mode under a migration-compatibility block, instead of dropping it.
+- Wired the non-admin Workspace Files `Write` button to a real handler so it is no longer a no-op UI affordance.
+- Updated `tests/test_mode_instruction_precedence.py` to validate the full effective prompt order (baseline -> global workspace overlay -> user workspace overlay -> core identity -> runtime context -> legacy custom instruction).
+
+### What's Working
+- v2 prompt mode preserves user legacy custom instruction text while still honoring workspace-file overlay ordering.
+- Runtime skills section now lands in runtime-context position (after core prompt body).
+- Workspace Files user `Write` button now executes a state update action.
+- Prompt-order regression suite and websocket smoke test pass.
+
+### What's NOT Working Yet
+- No new blockers identified in this follow-up pass.
+
+### Next Steps
+1. If desired, add a one-time frontend migration that copies legacy `systemInstruction` into `USER.md` automatically and clears the legacy field.
+2. Consider deprecation telemetry to measure remaining v1/v2 legacy custom-instruction usage.
+
+### Decisions Made
+- Kept compatibility by retaining legacy custom instruction content in v2 until a formal migration/removal window is scheduled.
+
+### Blockers
+- None.
