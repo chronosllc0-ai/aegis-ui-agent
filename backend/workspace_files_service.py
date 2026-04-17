@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import PlatformSetting
@@ -60,10 +59,12 @@ async def list_workspace_files(db: AsyncSession) -> list[dict[str, str | None]]:
 
 async def upsert_workspace_files(db: AsyncSession, files: Mapping[str, str], admin_uid: str) -> list[dict[str, str | None]]:
     """Persist one or more workspace markdown files as platform-global state."""
+    invalid_names: list[str] = []
     for requested_name, content in files.items():
         normalized_name = requested_name.strip().upper()
         canonical_name = WORKSPACE_FILE_CANONICAL_NAME_MAP.get(normalized_name)
         if not canonical_name:
+            invalid_names.append(requested_name)
             continue
         key = _workspace_setting_key(canonical_name)
         row = await db.get(PlatformSetting, key)
@@ -72,6 +73,9 @@ async def upsert_workspace_files(db: AsyncSession, files: Mapping[str, str], adm
             row.updated_by = admin_uid
         else:
             db.add(PlatformSetting(key=key, value=str(content), updated_by=admin_uid))
+    if invalid_names:
+        logger.warning("Unsupported workspace file names were rejected: %s", ", ".join(sorted(invalid_names)))
+        raise ValueError(f"Unsupported workspace files: {', '.join(sorted(invalid_names))}")
     await db.flush()
     return await list_workspace_files(db)
 

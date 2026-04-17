@@ -84,3 +84,18 @@ def test_admin_can_patch_workspace_files(tmp_path: Path) -> None:
     payload = response.json()
     user_file = next(item for item in payload['files'] if item['name'] == 'USER.md')
     assert user_file['content'] == '# Persona'
+
+
+def test_admin_patch_rejects_unknown_workspace_file_name(tmp_path: Path) -> None:
+    _init_test_db(tmp_path)
+    asyncio.run(_seed_users())
+
+    app = FastAPI()
+    app.include_router(admin_workspace_files_router, prefix='/api/admin')
+
+    with TestClient(app) as client, patch('auth._verify_session', side_effect=_mock_verify_session):
+        client.cookies.set('aegis_session', 'admin-1')
+        response = client.patch('/api/admin/workspace-files', json={'files': {'PERSONALITY.md': '# Nope'}})
+
+    assert response.status_code == 400
+    assert 'Unsupported workspace files' in response.json()['detail']

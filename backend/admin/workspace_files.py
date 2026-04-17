@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +36,10 @@ async def patch_admin_workspace_files(
     admin: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
-    files = await upsert_workspace_files(db, body.files, admin.uid)
+    try:
+        files = await upsert_workspace_files(db, body.files, admin.uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await log_admin_action(
         db,
         admin_id=admin.uid,

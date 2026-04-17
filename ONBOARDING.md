@@ -4452,3 +4452,38 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.75 - April 17, 2026 (Workspace-files review fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 review-fix pass
+
+### What Was Done
+- Removed unsafe `dangerouslySetInnerHTML` markdown preview rendering in workspace files UI.
+  - Replaced with a safe React-node renderer (`renderMarkdownPreview`) that does not inject raw HTML.
+- Moved `_verify_session` import in `backend/workspace_files.py` to module scope.
+- Changed workspace-file upsert behavior to reject unknown file names instead of silently ignoring them.
+  - Added warning log + `ValueError` in service.
+  - Added HTTP 400 response conversion in admin API route.
+- Replaced websocket bootstrap DB session consumption pattern from `async for ... break` to explicit generator lifecycle (`anext` + `aclose`).
+- Added regression test for unknown workspace-file rejection.
+
+### What's Working
+- Workspace preview no longer exposes a raw-HTML XSS injection path from markdown content.
+- Admin receives explicit error feedback for unsupported workspace file names.
+- Websocket bootstrap session DB usage follows explicit acquisition/cleanup semantics.
+- Updated workspace-files API test suite passes with new validation behavior.
+
+### What's NOT Working Yet
+- The markdown preview is intentionally lightweight (headings, bullets, bold, inline code), not full CommonMark.
+
+### Next Steps
+1. If rich markdown parity is required, integrate a hardened markdown stack with sanitization (e.g., react-markdown with restricted components + sanitization).
+2. Add frontend unit tests for the new markdown preview renderer behavior.
+
+### Decisions Made
+- Preferred removing raw HTML injection entirely over sanitizing generated HTML to reduce XSS risk surface.
+
+### Blockers
+- None.

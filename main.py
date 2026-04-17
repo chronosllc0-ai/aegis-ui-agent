@@ -1659,12 +1659,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
     # O(1) reverse index for heartbeat dispatch
     _session_runtimes[session_id] = runtime
 
+    db_session_gen = get_session()
     try:
-        async for db_session in get_session():
-            await materialize_workspace_files_for_session_safe(db_session, session_id)
-            break
+        db_session = await anext(db_session_gen)
+        await materialize_workspace_files_for_session_safe(db_session, session_id)
     except Exception:
         logger.exception("Workspace file sync failed during websocket session bootstrap")
+    finally:
+        await db_session_gen.aclose()
 
     try:
         await _get_orchestrator().executor.ensure_browser()

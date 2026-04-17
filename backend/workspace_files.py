@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import auth
 from backend.database import User, get_session
 from backend.workspace_files_service import list_workspace_files
 
@@ -13,10 +14,8 @@ workspace_files_router = APIRouter(prefix="/api/workspace-files", tags=["workspa
 
 
 def _get_current_user(request: Request) -> dict[str, str]:
-    from auth import _verify_session
-
     token = request.cookies.get("aegis_session")
-    payload = _verify_session(token)
+    payload = auth._verify_session(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Not authenticated")
     uid = str(payload.get("uid") or "").strip()

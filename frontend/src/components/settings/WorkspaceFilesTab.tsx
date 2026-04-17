@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
+import { Fragment, type ChangeEvent, type ReactNode, useEffect, useMemo, useState } from 'react'
 import { LuDownload, LuFolder, LuLoader, LuSearch } from 'react-icons/lu'
 import { apiUrl } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
@@ -16,15 +16,39 @@ type WorkspaceFilesTabProps = {
 const READ_ONLY_VIEW_MODES = ['preview', 'markdown'] as const
 const EDITOR_VIEW_MODES = ['write', 'preview'] as const
 
-function simpleMarkdownPreview(markdown: string): string {
-  return markdown
-    .replace(/^###\s(.+)$/gm, '<h3 class="mt-4 text-sm font-semibold text-zinc-100">$1</h3>')
-    .replace(/^##\s(.+)$/gm, '<h2 class="mt-4 text-base font-semibold text-zinc-100">$1</h2>')
-    .replace(/^#\s(.+)$/gm, '<h1 class="mt-4 text-lg font-semibold text-zinc-50">$1</h1>')
-    .replace(/`([^`]+)`/g, '<code class="rounded bg-zinc-800 px-1 py-0.5 text-[11px] text-zinc-100">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n-\s/g, '\n• ')
-    .replace(/\n/g, '<br/>')
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const inlinePattern = /(`[^`]+`|\*\*[^*]+\*\*)/g
+  const matches = text.split(inlinePattern).filter(Boolean)
+  return matches.map((chunk, index) => {
+    if (chunk.startsWith('`') && chunk.endsWith('`')) {
+      return (
+        <code key={`code-${index}`} className='rounded bg-zinc-800 px-1 py-0.5 text-[11px] text-zinc-100'>
+          {chunk.slice(1, -1)}
+        </code>
+      )
+    }
+    if (chunk.startsWith('**') && chunk.endsWith('**')) {
+      return <strong key={`strong-${index}`}>{chunk.slice(2, -2)}</strong>
+    }
+    return <Fragment key={`text-${index}`}>{chunk}</Fragment>
+  })
+}
+
+function renderMarkdownPreview(markdown: string): ReactNode {
+  const lines = markdown.split('\n')
+  return (
+    <div className='space-y-2'>
+      {lines.map((line, index) => {
+        const key = `line-${index}`
+        if (!line.trim()) return <div key={key} className='h-2' />
+        if (line.startsWith('### ')) return <h3 key={key} className='mt-4 text-sm font-semibold text-zinc-100'>{renderInlineMarkdown(line.slice(4))}</h3>
+        if (line.startsWith('## ')) return <h2 key={key} className='mt-4 text-base font-semibold text-zinc-100'>{renderInlineMarkdown(line.slice(3))}</h2>
+        if (line.startsWith('# ')) return <h1 key={key} className='mt-4 text-lg font-semibold text-zinc-50'>{renderInlineMarkdown(line.slice(2))}</h1>
+        if (line.startsWith('- ')) return <p key={key} className='text-sm leading-6 text-zinc-200'>• {renderInlineMarkdown(line.slice(2))}</p>
+        return <p key={key} className='text-sm leading-6 text-zinc-200'>{renderInlineMarkdown(line)}</p>
+      })}
+    </div>
+  )
 }
 
 export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
@@ -153,7 +177,7 @@ export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
                         ))}
                       </div>
                       {viewMode === 'preview' ? (
-                        <div className='prose prose-invert max-w-none text-sm leading-6 text-zinc-200' dangerouslySetInnerHTML={{ __html: simpleMarkdownPreview(file.content) }} />
+                        <div className='max-w-none'>{renderMarkdownPreview(file.content)}</div>
                       ) : (
                         <pre className='max-h-96 overflow-auto rounded border border-[#2a2a2a] bg-[#0c0c0c] p-3 text-xs text-zinc-300'>{file.content}</pre>
                       )}
@@ -193,7 +217,7 @@ export function WorkspaceFilesTab({ isAdmin = false }: WorkspaceFilesTabProps) {
                           className='w-full rounded border border-[#2a2a2a] bg-[#0c0c0c] p-3 font-mono text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none'
                         />
                       ) : (
-                        <div className='prose prose-invert max-w-none text-sm leading-6 text-zinc-200' dangerouslySetInnerHTML={{ __html: simpleMarkdownPreview(file.content) }} />
+                        <div className='max-w-none'>{renderMarkdownPreview(file.content)}</div>
                       )}
 
                       <div className='mt-3 flex items-center justify-between'>
