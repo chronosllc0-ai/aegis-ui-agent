@@ -4747,3 +4747,37 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.77 - April 17, 2026 (Review fixes: Telegram ack recursion + callback handled semantics)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused backend review-fix pass
+
+### What Was Done
+- Fixed recursive slash-command side effects in `main.py`:
+  - introduced `_run_or_queue_from_bot_command(...)` helper for shared run/spawn/acp-spawn execution path,
+  - rewired `/run`, `/spawn`, and `/acp spawn` to use the shared helper directly instead of recursive `_handle_slash_command(...)` calls.
+- Moved Telegram running acknowledgement behavior into dedicated helper `_maybe_send_telegram_running_ack(...)` so ack reaction/typing logic executes once per command dispatch.
+- Added periodic Telegram typing pulse during long-running bot tasks in `_run_navigation_task_from_bot(...)` (every ~4.5s), and clean cancellation on task completion/cancel.
+- Updated callback handling semantics in `integrations/telegram.py` to return `handled: False` for unrecognized callback actions instead of reporting them as handled.
+- Removed unused dead code field `self._interactive_callbacks` from `TelegramIntegration`.
+- Added regression test `test_unknown_callback_action_reports_unhandled` in `tests/test_telegram.py`.
+
+### What's Working
+- `/spawn` and `/acp spawn` no longer duplicate in-flight ack behavior.
+- Telegram typing indicator is now sustained during long-running task execution.
+- Unknown callback payloads are surfaced as unhandled (`handled: False`) while still answering callback query.
+- Telegram test suite and targeted websocket smoke pass.
+
+### What's NOT Working Yet
+- No additional blockers identified in this review-fix pass.
+
+### Next Steps
+1. Consider extending callback handling from hardcoded `edit:`/`reply:` patterns to a pluggable callback action registry if product requirements expand.
+
+### Decisions Made
+- Preferred explicit helper extraction over recursion guards for clearer command flow and lower risk of duplicate side effects.
+
+### Blockers
+- None.

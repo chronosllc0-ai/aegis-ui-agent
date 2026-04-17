@@ -342,6 +342,37 @@ def test_polling_path_processes_callback_query() -> None:
     asyncio.run(run())
 
 
+def test_unknown_callback_action_reports_unhandled() -> None:
+    """Unknown callback payload should not be marked as handled."""
+
+    async def run() -> None:
+        integration = TelegramIntegration(TelegramConfig(bot_token="123:ABC"))
+        integration.connected = True
+        assert integration.client is not None
+        with patch.object(integration.client, "answer_callback_query", new_callable=AsyncMock) as mock_answer:
+            result = await integration.execute_tool(
+                "telegram_webhook_update",
+                {
+                    "update": {
+                        "update_id": 120,
+                        "callback_query": {
+                            "id": "cb-unknown",
+                            "data": "noop:something",
+                            "message": {"message_id": 9, "chat": {"id": 5}},
+                        },
+                    }
+                },
+            )
+            assert result["ok"] is True
+            assert result["result"]["callback"]["handled"] is False
+            assert result["result"]["callback"]["action"] == "none"
+            mock_answer.assert_awaited_once_with("cb-unknown", text="Received")
+            assert integration.config.polling_offset == 121
+        await integration.disconnect()
+
+    asyncio.run(run())
+
+
 def test_telegram_send_message_supports_reply_markup() -> None:
     """telegram_send_message should forward inline keyboard reply_markup payloads."""
 

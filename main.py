@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Awaitable, Callable
+import contextlib
 from http.cookies import SimpleCookie
 import json
 import logging
@@ -3104,6 +3105,19 @@ async def _run_navigation_task_from_bot(
     runtime.task_running = True
     runtime.cancel_event.clear()
     steps: list[Any] = []
+    typing_pulse_task: asyncio.Task[None] | None = None
+    if platform == "telegram":
+        integration = _get_channel_integration("telegram", str(integration_id))
+        if isinstance(integration, TelegramIntegration) and integration.client:
+            async def _typing_pulse() -> None:
+                while runtime.task_running and not runtime.cancel_event.is_set():
+                    try:
+                        await integration.client.send_chat_action(chat_id, "typing")
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("telegram typing pulse failed: %s", exc)
+                    await asyncio.sleep(4.5)
+
+            typing_pulse_task = asyncio.create_task(_typing_pulse())
     try:
         result = await _get_orchestrator().execute_task(
             session_id=f"bot_{owner_uid}",
@@ -3124,6 +3138,10 @@ async def _run_navigation_task_from_bot(
         reply = f"❌ Task failed: {exc}"
     finally:
         runtime.task_running = False
+        if typing_pulse_task:
+            typing_pulse_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await typing_pulse_task
         await cleanup_session_workspace(f"bot_{owner_uid}")
     # Send result back to bot
     if platform in {"telegram", "discord"}:
@@ -3202,6 +3220,78 @@ def _extract_discord_message(payload: dict[str, Any]) -> tuple[str | None, str |
     )
 
 
+async def _maybe_send_telegram_running_ack(
+    *,
+    runtime: "SessionRuntime" | None,
+    platform: str,
+    integration_id: str,
+    chat_id: Any,
+    source_message_id: str | None,
+    ack_reaction: str,
+) -> None:
+    """Send lightweight in-flight acknowledgement for Telegram while task is running."""
+    if platform != "telegram" or not runtime or not runtime.task_running:
+        return
+    integration = _get_channel_integration("telegram", integration_id)
+    if not isinstance(integration, TelegramIntegration) or not integration.client:
+        return
+    if source_message_id and source_message_id.isdigit():
+        try:
+            await integration.execute_tool(
+                "telegram_react",
+                {
+                    "chat_id": int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id,
+                    "message_id": int(source_message_id),
+                    "reaction": ack_reaction or "👀",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("telegram ack reaction failed: %s", exc)
+    try:
+        await integration.client.send_chat_action(chat_id, "typing")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("telegram processing indicator failed: %s", exc)
+
+
+async def _run_or_queue_from_bot_command(
+    *,
+    runtime: "SessionRuntime" | None,
+    owner_uid: str | None,
+    platform: str,
+    integration_id: str,
+    chat_id: Any,
+    instruction: str,
+    source_command: str,
+) -> str:
+    """Run immediately or queue a bot task command depending on runtime state."""
+    if not instruction:
+        usage = "/run <instruction>" if source_command == "run" else f"/{source_command} <instruction>"
+        if source_command == "acp_spawn":
+            usage = "/acp spawn <instruction>"
+        return f"Usage: {usage}"
+    if not runtime:
+        return "⚪ No active session. Open the Aegis app first."
+    if runtime.task_running:
+        runtime.queued_instructions.enqueue(
+            instruction,
+            lane="bot",
+            source="slash_command",
+            metadata={"command": source_command},
+        )
+        return f"📋 Task queued (agent is busy): {instruction[:80]}"
+    asyncio.create_task(
+        _run_navigation_task_from_bot(
+            runtime,
+            str(owner_uid),
+            platform,
+            integration_id,
+            chat_id,
+            instruction,
+        )
+    )
+    return f"🚀 Starting task: {instruction[:80]}"
+
+
 async def _handle_slash_command(
     text: str,
     owner_uid: str | None,
@@ -3217,25 +3307,14 @@ async def _handle_slash_command(
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     runtime = _user_runtimes.get(owner_uid) if owner_uid else None
-    if platform == "telegram" and runtime and runtime.task_running:
-        integration = _get_channel_integration("telegram", integration_id)
-        if isinstance(integration, TelegramIntegration) and integration.client:
-            if source_message_id and source_message_id.isdigit():
-                try:
-                    await integration.execute_tool(
-                        "telegram_react",
-                        {
-                            "chat_id": int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id,
-                            "message_id": int(source_message_id),
-                            "reaction": ack_reaction or "👀",
-                        },
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("telegram ack reaction failed: %s", exc)
-            try:
-                await integration.client.send_chat_action(chat_id, "typing")
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("telegram processing indicator failed: %s", exc)
+    await _maybe_send_telegram_running_ack(
+        runtime=runtime,
+        platform=platform,
+        integration_id=integration_id,
+        chat_id=chat_id,
+        source_message_id=source_message_id,
+        ack_reaction=ack_reaction,
+    )
 
     if cmd == "help":
         return (
@@ -3319,27 +3398,25 @@ async def _handle_slash_command(
         return "⚪ No active session to update."
 
     if cmd == "run":
-        if not arg:
-            return "Usage: /run <instruction>"
-        if not runtime:
-            return "⚪ No active session. Open the Aegis app first."
-        if runtime.task_running:
-            runtime.queued_instructions.enqueue(arg, lane="bot", source="slash_command", metadata={"command": "run"})
-            return f"📋 Task queued (agent is busy): {arg[:80]}"
-        asyncio.create_task(_run_navigation_task_from_bot(runtime, owner_uid, platform, integration_id, chat_id, arg))
-        return f"🚀 Starting task: {arg[:80]}"
-
-    if cmd == "spawn":
-        if not arg:
-            return "Usage: /spawn <instruction>"
-        return await _handle_slash_command(
-            text=f"/run {arg}",
+        return await _run_or_queue_from_bot_command(
+            runtime=runtime,
             owner_uid=owner_uid,
             platform=platform,
             integration_id=integration_id,
             chat_id=chat_id,
-            ack_reaction=ack_reaction,
-            source_message_id=source_message_id,
+            instruction=arg,
+            source_command="run",
+        )
+
+    if cmd == "spawn":
+        return await _run_or_queue_from_bot_command(
+            runtime=runtime,
+            owner_uid=owner_uid,
+            platform=platform,
+            integration_id=integration_id,
+            chat_id=chat_id,
+            instruction=arg,
+            source_command="spawn",
         )
 
     if cmd == "acp":
@@ -3350,16 +3427,14 @@ async def _handle_slash_command(
         if subcommand != "spawn":
             return "Usage: /acp spawn <instruction>"
         instruction = acp_parts[1].strip() if len(acp_parts) > 1 else ""
-        if not instruction:
-            return "Usage: /acp spawn <instruction>"
-        return await _handle_slash_command(
-            text=f"/run {instruction}",
+        return await _run_or_queue_from_bot_command(
+            runtime=runtime,
             owner_uid=owner_uid,
             platform=platform,
             integration_id=integration_id,
             chat_id=chat_id,
-            ack_reaction=ack_reaction,
-            source_message_id=source_message_id,
+            instruction=instruction,
+            source_command="acp_spawn",
         )
 
     if cmd == "steer":

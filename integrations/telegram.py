@@ -264,7 +264,6 @@ class TelegramIntegration(BaseIntegration):
         self._webhook_secret: str | None = self.config.webhook_secret or None
         self.telemetry = TelegramTelemetry()
         self.client: TelegramClient | None = TelegramClient(self._token, telemetry=self.telemetry) if self._token else None
-        self._interactive_callbacks: dict[str, dict[str, Any]] = {}
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
         token = str(config.get("bot_token", "")).strip()
@@ -679,7 +678,7 @@ class TelegramIntegration(BaseIntegration):
         if action.get("type") == "reply" and chat_id is not None:
             await self.client.send_message(chat_id=chat_id, text=action.get("text", "Done"))
             return {"handled": True, "action": "reply"}
-        return {"handled": True, "action": action.get("type", "none")}
+        return {"handled": False, "action": action.get("type", "none")}
 
     async def stream_draft_then_send(
         self,
