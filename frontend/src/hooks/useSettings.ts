@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig } from '../lib/mcp'
 import { DEFAULT_AGENT_MODE, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
+import type { SteeringMode } from './useWebSocket'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
@@ -54,6 +55,8 @@ export type AppSettings = {
   selectedMode: AgentModeId
   /** Runtime-active mode (can temporarily diverge during orchestrator delegation). */
   activeMode: AgentModeId
+  /** Runtime steering behavior for messages sent while a task is already running. */
+  steeringMode: SteeringMode
 }
 
 const STORAGE_KEY = 'aegis.settings.v4'
@@ -85,6 +88,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   enabledSkillIds: [],
   selectedMode: DEFAULT_AGENT_MODE,
   activeMode: DEFAULT_AGENT_MODE,
+  steeringMode: 'auto',
 }
 
 // Providers that require a user-supplied BYOK key to work
@@ -166,6 +170,7 @@ export function useSettings() {
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
       agent_mode: settings.selectedMode,
+      steering_mode: settings.steeringMode,
     }),
     [settings],
   )

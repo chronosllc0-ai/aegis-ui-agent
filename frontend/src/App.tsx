@@ -759,7 +759,12 @@ function App() {
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const action = 'chat'
+    const steeringMode = settings.steeringMode ?? 'auto'
+    if (!isNewTask && steeringMode === 'auto') {
+      toastCtx.info('Auto mode is active', 'Switch to Steer, Interrupt, or Queue to send a follow-up while the task is running.')
+      return
+    }
+    const action = isNewTask ? 'chat' : steeringMode
     console.info('[AegisUI] action=%s', action)
     const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
     if (!sent) {
@@ -825,6 +830,7 @@ function App() {
     isWorking,
     messageSubAgent,
     send,
+    settings.steeringMode,
     settings.selectedMode,
     toastCtx,
     wsConfig,
@@ -1268,7 +1274,9 @@ function App() {
               <ChatPanel
                 logs={enrichedLogs}
                 isWorking={isWorking}
+                steeringMode={settings.steeringMode}
                 onPrimarySend={dispatchPromptFromUI}
+                onSteeringModeChange={(nextMode) => patchSettings({ steeringMode: nextMode })}
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
