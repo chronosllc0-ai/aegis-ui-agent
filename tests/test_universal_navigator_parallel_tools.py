@@ -422,6 +422,31 @@ def test_batch_handoff_to_user_waits_for_resume_and_reports_result() -> None:
     asyncio.run(_run())
 
 
+def test_single_handoff_to_user_emits_handoff_request_step() -> None:
+    async def _run() -> None:
+        provider = _ScriptedProvider([
+            '{"tool":"handoff_to_user","reason":"CAPTCHA","instructions":"Solve challenge"}',
+            '{"tool":"done","summary":"resumed"}',
+        ])
+        seen_steps: list[dict[str, Any]] = []
+
+        async def on_handoff_to_user(reason: str, instructions: str, continue_label: str | None, request_id: str) -> str:
+            return "Human handoff completed. Resuming agent."
+
+        async def capture_step(step: dict[str, Any]) -> None:
+            seen_steps.append(step)
+
+        await _run_navigation(
+            provider,
+            settings={"agent_mode": "code"},
+            on_handoff_to_user=on_handoff_to_user,
+            on_step=capture_step,
+        )
+        assert any(step.get("type") == "handoff_request" for step in seen_steps)
+
+    asyncio.run(_run())
+
+
 def test_integration_batch_emits_events_and_single_followup(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         provider = _ScriptedProvider([

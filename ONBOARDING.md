@@ -4534,3 +4534,35 @@
 
 ### Blockers
 - None.
+
+## Session 5.72 - April 17, 2026 (Review follow-up fixes for HITL handoff)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Fixed critical single-tool handoff visibility gap in `universal_navigator.py`:
+  - added `on_step` callback support to `UniversalToolExecutor`,
+  - for direct `handoff_to_user` calls, now emits a `handoff_request` step before awaiting user resume.
+- Hardened handoff timeout parsing in `main.py`:
+  - runtime `handoff_timeout_seconds` now safely coerces with `try/except` fallback to `NAVIGATION_HANDOFF_TIMEOUT_SECONDS`.
+- Hardened `ScreenView` keyboard handling during handoff:
+  - `onKeyDown` now `preventDefault()` and `stopPropagation()` before forwarding key actions.
+- Added regression test coverage for single-tool handoff emission in `tests/test_universal_navigator_parallel_tools.py`.
+
+### What's Working
+- Both batch and single-tool handoff paths now emit frontend-visible handoff requests.
+- Invalid timeout config values no longer crash task execution.
+- Keyboard shortcuts are suppressed in handoff capture mode to avoid accidental page-level reload/interrupt behavior.
+
+### What's NOT Working Yet
+- No new blockers identified in this follow-up.
+
+### Next Steps
+1. Add one additional websocket integration test that exercises a true single-tool handoff call path end-to-end from orchestrator output.
+
+### Decisions Made
+- Kept the single-tool handoff fix in the tool executor so all direct executor call sites remain safe, not just the batch path.
+
+### Blockers
+- None.

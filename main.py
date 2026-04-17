@@ -1472,7 +1472,11 @@ async def _run_navigation_task(
                     },
                 }
             )
-            timeout_seconds = int(runtime.settings.get("handoff_timeout_seconds") or settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS)
+            timeout_candidate = runtime.settings.get("handoff_timeout_seconds") or settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS
+            try:
+                timeout_seconds = int(timeout_candidate)
+            except (TypeError, ValueError):
+                timeout_seconds = settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS
             return await asyncio.wait_for(fut, timeout=max(1, timeout_seconds))
         except asyncio.TimeoutError:
             runtime.clear_handoff_state()

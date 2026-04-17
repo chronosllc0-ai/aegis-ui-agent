@@ -108,6 +108,8 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
             }}
             onKeyDown={(event) => {
               if (!handoffActive || !onHumanBrowserAction) return
+              event.preventDefault()
+              event.stopPropagation()
               if (event.key.length === 1) {
                 onHumanBrowserAction({ kind: 'type_text', text: event.key })
                 return
