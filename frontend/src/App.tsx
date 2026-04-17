@@ -71,6 +71,7 @@ const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   profile: 'Profile',
   'agent-configuration': 'Agent Configuration',
+  'workspace-files': 'Workspace Files',
   'api-keys': 'API Keys',
   usage: 'Usage',
   credits: 'Credits',
@@ -389,7 +390,7 @@ function App() {
           // Handle ?settings=<Tab> deep-link (e.g. after OAuth callback redirect)
           const params = new URLSearchParams(window.location.search)
           const settingsTab = params.get('settings') as SettingsTab | null
-          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
+          if (settingsTab && ['Profile', 'Agent Configuration', 'Workspace Files', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
             setSettingsInitialTab(settingsTab)
             setShowSettings(true)
             // Strip the ?settings= param from the URL without a page reload

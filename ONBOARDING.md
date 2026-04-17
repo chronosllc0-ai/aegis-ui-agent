@@ -4412,3 +4412,43 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.74 - April 17, 2026 (Global workspace files tab + admin composer)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 full-stack feature pass
+
+### What Was Done
+- Added a new global workspace-files backend service and APIs.
+  - User read endpoint: `GET /api/workspace-files` (authenticated, read-only).
+  - Admin management endpoints: `GET/PATCH /api/admin/workspace-files`.
+  - Persisted file content in `platform_settings` under `aegis_workspace_file:*` keys.
+- Added session bootstrap materialization for workspace files so each websocket session workspace receives:
+  - `AGENTS.md`, `BOOTSTRAP.md`, `IDENTITY.md`, `SOUL.md`, `HEARTBEAT.md`, `TOOLS.md`, `USER.md`.
+- Added new **Workspace Files** settings tab in frontend.
+  - Non-admin: read-only explorer with **Preview** and **Markdown** modes.
+  - Admin: markdown composer with **Write/Preview**, per-file save, and direct markdown upload.
+- Added API tests for workspace files authorization and admin mutation behavior.
+
+### What's Working
+- Global workspace file catalog is available to authenticated users in read-only mode.
+- Admins can update any supported workspace markdown file globally.
+- Updated workspace files are written into per-session runtime workspace on websocket session bootstrap.
+- Workspace files UI tab is visible in Settings and supports search + accordion viewing.
+
+### What's NOT Working Yet
+- Markdown preview currently uses a lightweight renderer (subset of markdown), not full CommonMark parity.
+- “Dimillian” skill was requested but no matching session-available skill entry exists in current skill registry for this repo turn.
+
+### Next Steps
+1. Replace lightweight markdown preview rendering with a full markdown renderer (if dependency policy allows).
+2. Add backend test coverage for runtime workspace materialization in websocket bootstrap path.
+3. Add frontend component tests for non-admin read-only controls and admin save/upload flow.
+
+### Decisions Made
+- Implemented workspace files as platform-global settings in existing `platform_settings` table to avoid schema expansion.
+- Kept admin editing within the same user-visible tab (permission-gated) for minimal navigation friction.
+
+### Blockers
+- None.
