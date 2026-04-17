@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from universal_navigator import _can_run_tool_calls_in_parallel, _parse_tool_calls
+from universal_navigator import TOOL_INDEX, _can_run_tool_calls_in_parallel, _parse_tool_calls
 
 
 def test_parse_tool_calls_single_object() -> None:
@@ -26,3 +26,8 @@ def test_parallel_safety_allows_only_safe_tools() -> None:
 
     unsafe_calls = [{"tool": "web_search", "query": "one"}, {"tool": "exec_shell", "command": "echo hi"}]
     assert not _can_run_tool_calls_in_parallel(unsafe_calls)
+
+
+def test_tool_manifest_includes_steer_subagent() -> None:
+    """steer_subagent should be available as a first-class tool."""
+    assert "steer_subagent" in TOOL_INDEX

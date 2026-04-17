@@ -65,6 +65,7 @@ READ_ONLY_BLOCKED_TOOLS: Final[set[str]] = {
     "cron_delete",
     "spawn_subagent",
     "message_subagent",
+    "steer_subagent",
     "github_create_issue",
     "github_create_comment",
     "github_clone_repo",

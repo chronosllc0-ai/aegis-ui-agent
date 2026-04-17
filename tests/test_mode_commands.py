@@ -40,3 +40,34 @@ def test_mode_command_updates_runtime_mode() -> None:
         assert "Code" in status_reply
     finally:
         main_mod._user_runtimes.pop(user_id, None)
+
+
+def test_subagent_steer_command_alias_routes_to_runtime_message_path() -> None:
+    """/subagent steer should forward to subagent_manager.send_message like message_subagent."""
+    main_mod = import_module("main")
+    runtime = main_mod.SessionRuntime()
+    user_id = "subagent-steer-user"
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_send_message(sub_id: str, message: str) -> bool:
+        calls.append((sub_id, message))
+        return True
+
+    runtime.subagent_manager.send_message = _fake_send_message  # type: ignore[method-assign]
+    main_mod._user_runtimes[user_id] = runtime
+
+    try:
+        reply = asyncio.run(
+            main_mod._handle_slash_command(
+                text="/subagent steer sub-42 focus on blockers first",
+                owner_uid=user_id,
+                platform="telegram",
+                integration_id="tg-1",
+                chat_id=123,
+            )
+        )
+        assert reply
+        assert "steering sent" in reply.lower()
+        assert calls == [("sub-42", "focus on blockers first")]
+    finally:
+        main_mod._user_runtimes.pop(user_id, None)

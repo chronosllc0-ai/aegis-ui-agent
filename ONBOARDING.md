@@ -4873,3 +4873,80 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.2 - April 17, 2026 (Sub-agent steer tool + channel alias)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added `steer_subagent` as a first-class tool in `universal_navigator.py` with params `sub_id`, `message`, and optional `priority`.
+- Wired `steer_subagent` to the existing `on_message_subagent` runtime callback path.
+- Added websocket action alias support in `main.py` so both `message_subagent` and `steer_subagent` route through the same sub-agent messaging runtime path.
+- Added helper normalization in `main.py` to support optional priority annotation (`[priority:<level>] ...`) while preserving message behavior.
+- Added channel command alias `/subagent steer <id> <message>` in `_handle_slash_command` and updated help text + Telegram command metadata.
+- Added chat UI action in `frontend/src/components/SubAgentPanel.tsx`: active sub-agents now show a `Steer` button that prompts for a message and forwards via existing `onMessage` path.
+- Updated mode safety policy to also block `steer_subagent` in read-only modes (`backend/modes.py`) for parity with `message_subagent`.
+- Added/updated tests:
+  - `tests/test_parallel_tool_calls.py` verifies tool manifest includes `steer_subagent`.
+  - `tests/test_mode_commands.py` verifies `/subagent steer ...` forwards to `subagent_manager.send_message`.
+  - `tests/test_universal_navigator_parallel_tools.py` verifies `steer_subagent` uses message path and applies priority annotation.
+
+### What's Working
+- Tool path: model-issued `steer_subagent` calls now reach sub-agent messaging via existing runtime route.
+- Channel command path: `/subagent steer <id> <message>` now routes to the same runtime message function.
+- UI path: SubAgent panel can steer active sub-agents through the same backend path.
+- Frontend production build succeeds with the UI updates.
+- Targeted tests covering new behavior pass.
+
+### What's NOT Working Yet
+- One pre-existing unrelated test (`test_rejects_batch_over_three_with_safe_error`) failed when running a larger parallel-tools test subset; this change set did not modify that area.
+
+### Next Steps
+1. Add websocket integration tests that exercise `action: steer_subagent` directly for end-to-end parity checks.
+2. Add a small UI interaction test for the SubAgent panel steer button dispatch.
+3. Investigate and stabilize the existing flaky/changed expectation in the broader parallel-tools suite.
+
+### Decisions Made
+- Implemented `steer_subagent` as an alias route to `message_subagent` (not a separate runtime mechanism) to guarantee identical behavior.
+- Encoded optional `priority` as steering-message prefix for compatibility with existing sub-agent runtime signature.
+
+### Blockers
+- None.
+
+---
+## Session 6.3 - April 17, 2026 (Review fixes: DRY steer path + non-blocking UI + flaky test)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 follow-up fix pass
+
+### What Was Done
+- Refactored `universal_navigator.py` sub-agent steering handling to remove duplicated logic:
+  - Added `_apply_subagent_steering_priority(...)` helper.
+  - Merged `message_subagent` and `steer_subagent` handling into one shared branch.
+- Fixed malformed batch behavior in universal navigation loop:
+  - When model output includes `"tool_calls"` but parsing fails validation (e.g., >3 calls), runtime now emits a deterministic malformed payload error step and asks model to retry with valid shape instead of treating response as final plain text.
+  - This resolves the failing `test_rejects_batch_over_three_with_safe_error` expectation.
+- Replaced blocking `window.prompt(...)` steering interaction in `SubAgentPanel` with a non-blocking inline compose UI (textarea + cancel/send actions), keeping steering routed through existing `onMessage` callback.
+
+### What's Working
+- Sub-agent steer logic is now DRY in universal navigator and easier to maintain.
+- Invalid `tool_calls` payloads now produce explicit error feedback and retry behavior.
+- The previously failing parallel-tools test now passes.
+- Sub-agent UI steering now uses a proper non-blocking React interaction.
+- Frontend build succeeds after UI update.
+
+### What's NOT Working Yet
+- No new blockers identified in this pass.
+
+### Next Steps
+1. Add a focused UI test for inline steer composer open/send/cancel transitions in `SubAgentPanel`.
+2. Consider centralizing steering-priority normalization in one shared backend utility if future call sites expand.
+
+### Decisions Made
+- Preferred shared branching in `UniversalToolExecutor.run(...)` over separate alias handlers to avoid future behavior drift.
+- Implemented malformed `tool_calls` handling at navigation-loop level so parser semantics remain simple while recovery behavior is explicit.
+
+### Blockers
+- None.
