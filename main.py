@@ -70,6 +70,11 @@ from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
 from backend.runtime_telemetry import RuntimeTelemetry
 from backend.conversation_service import append_message, get_or_create_conversation
+from backend.session_identity import (
+    SESSION_MAIN_ID,
+    normalize_or_bridge_session_id,
+    session_id_to_conversation_id,
+)
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
@@ -983,6 +988,44 @@ async def list_conversations(
     }
 
 
+@app.get("/api/sessions")
+async def list_sessions(
+    request: Request,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return chat sessions, bridged from legacy conversation records."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    from sqlalchemy import select as sa_select, desc as sa_desc
+    from backend.database import Conversation as ConvModel
+    stmt = (
+        sa_select(ConvModel)
+        .where(ConvModel.user_id == uid, ConvModel.platform == "web", ConvModel.status != "archived")
+        .order_by(sa_desc(ConvModel.updated_at))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "ok": True,
+        "sessions": [
+            {
+                "session_id": normalize_or_bridge_session_id(
+                    c.platform_chat_id or "",
+                    fallback_conversation_id=c.id,
+                ),
+                "conversation_id": c.id,
+                "parent_session_id": None,
+                "title": c.title,
+                "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            }
+            for c in rows
+        ],
+    }
+
+
 @app.get("/api/conversations/{conversation_id}/messages")
 async def get_conversation_messages(
     conversation_id: str,
@@ -1024,6 +1067,164 @@ async def get_conversation_messages(
             }
             for m in msgs
         ],
+    }
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str,
+    request: Request,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return messages for a session id, bridged to legacy conversation ids."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    import json as _json
+    from sqlalchemy import select as sa_select
+    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+
+    requested_session_id = normalize_or_bridge_session_id(session_id)
+    bridged_conversation_id = session_id_to_conversation_id(requested_session_id)
+    conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
+    if bridged_conversation_id:
+        conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
+    else:
+        conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == requested_session_id)
+    conv = (await db.execute(conv_stmt)).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    stmt = (
+        sa_select(MsgModel)
+        .where(MsgModel.conversation_id == conv.id)
+        .order_by(MsgModel.created_at)
+        .limit(limit)
+    )
+    msgs = (await db.execute(stmt)).scalars().all()
+    resolved_session_id = normalize_or_bridge_session_id(conv.platform_chat_id or "", fallback_conversation_id=conv.id)
+    return {
+        "ok": True,
+        "session": {
+            "session_id": resolved_session_id,
+            "conversation_id": conv.id,
+            "parent_session_id": None,
+            "title": conv.title,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        },
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "metadata": _json.loads(m.metadata_json) if m.metadata_json else None,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in msgs
+        ],
+    }
+
+
+@app.post("/api/sessions/{session_id}/send")
+async def send_session_message(
+    session_id: str,
+    request: Request,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Append a user message to a session while preserving conversation storage."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    import json as _json
+    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    from sqlalchemy import select as sa_select
+
+    normalized_session_id = normalize_or_bridge_session_id(session_id)
+    bridged_conversation_id = session_id_to_conversation_id(normalized_session_id)
+    conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
+    if bridged_conversation_id:
+        conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
+    else:
+        conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == normalized_session_id)
+    conv = (await db.execute(conv_stmt)).scalar_one_or_none()
+    if not conv:
+        conv = ConvModel(
+            user_id=uid,
+            platform="web",
+            platform_chat_id=normalized_session_id,
+            title=(payload.get("title") or content[:80]).strip(),
+            status="active",
+        )
+        db.add(conv)
+        await db.flush()
+    msg = MsgModel(
+        conversation_id=conv.id,
+        role="user",
+        content=content,
+        metadata_json=_json.dumps({"source": "sessions_api"}),
+    )
+    db.add(msg)
+    from datetime import datetime as _dt
+    conv.updated_at = _dt.utcnow()
+    await db.commit()
+    await db.refresh(msg)
+    return {
+        "ok": True,
+        "session_id": normalize_or_bridge_session_id(conv.platform_chat_id or "", fallback_conversation_id=conv.id),
+        "conversation_id": conv.id,
+        "message": {
+            "id": msg.id,
+            "role": msg.role,
+            "content": msg.content,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        },
+    }
+
+
+@app.post("/api/sessions/spawn")
+async def spawn_session(
+    request: Request,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Spawn a sub-agent session entry (session-first, with legacy conversation bridge)."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    parent_session_id = str(payload.get("parent_session_id") or SESSION_MAIN_ID).strip() or SESSION_MAIN_ID
+    instruction = str(payload.get("instruction") or "").strip()
+    session_id = f"agent:main:subagent:{uid}:task:{uuid4().hex}"
+    title = str(payload.get("title") or instruction[:80] or "Subagent session").strip()
+    from backend.database import Conversation as ConvModel
+
+    conv = ConvModel(
+        user_id=uid,
+        platform="web",
+        platform_chat_id=session_id,
+        title=title,
+        status="active",
+    )
+    db.add(conv)
+    await db.flush()
+    await append_message(
+        db,
+        conversation_id=conv.id,
+        role="assistant",
+        content=f"Spawned subagent session from parent {parent_session_id}",
+        metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
+    )
+    await db.commit()
+    return {
+        "ok": True,
+        "session": {
+            "session_id": session_id,
+            "conversation_id": conv.id,
+            "parent_session_id": parent_session_id,
+            "title": title,
+            "status": "active",
+        },
     }
 
 
