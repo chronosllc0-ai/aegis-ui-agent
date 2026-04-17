@@ -1,15 +1,32 @@
 # Integrations Capability Matrix
 
-| Capability | Slack | Discord | Notes |
-|---|---|---|---|
-| oauth_connect | supported | planned | Slack uses existing OAuth connector scaffolding; Discord remains bot-token based. |
-| webhook_events | supported | supported | Both adapters now expose `handle_event` normalization entrypoint. |
-| slash/app_commands | supported | supported | Slack interaction payloads + Discord application interactions mapped to canonical envelopes. |
-| send_text | supported | supported | `send_text` contract method implemented for both adapters. |
-| edit_text | supported | supported | Slack via `chat.update`; Discord via `PATCH /channels/{channel}/messages/{message_id}`. |
-| send_file | supported | supported | Slack external upload flow + Discord multipart attachments. |
-| send_image | partial | supported | Slack image is supported through generic file upload path; Discord has explicit image helper wrapper. |
-| stream_update_safe | supported | supported | Edit pathways include rate-limit aware retries for progressive updates. |
-| rate_limit_policy | supported | supported | Automatic backoff on HTTP 429 with provider-specific retry hints. |
-| idempotency_handling | supported | supported | In-memory delivery-id dedupe on repeated webhook deliveries. |
-| error_normalization | partial | partial | Both adapters normalize transport errors, but richer shared error taxonomy is still planned. |
+Status legend:
+- **supported**: native wrapper exists and is routed directly.
+- **partial**: available only through equivalent fallback path.
+- **unsupported**: no platform-equivalent; routed to graceful fallback reply.
+
+| Capability | Telegram | Slack | Discord | Notes |
+|---|---|---|---|---|
+| send_text | supported | supported | supported | Canonical send wrapper on all three adapters. |
+| edit_message | supported | supported | supported | Slack `chat.update`; Discord PATCH; Telegram `editMessageText`. |
+| delete_message | supported | supported | supported | Slack `chat.delete`; Discord DELETE message; Telegram `deleteMessage`. |
+| react | supported | supported | supported | Slack `reactions.add`; Discord reaction endpoint; Telegram `setMessageReaction`. |
+| send_file | supported | supported | supported | Slack external-upload flow; Discord multipart upload; Telegram `sendDocument`. |
+| interactive_actions | supported | supported | supported | Telegram inline keyboard; Slack buttons/select blocks; Discord components (buttons/select). |
+| command_controls | supported | supported | supported | Telegram callback payloads + Slack slash-command equivalents + Discord app commands. |
+| runtime_control_components | partial | supported | supported | Telegram uses inline fallback semantics; Slack/Discord provide dedicated component builders. |
+| topic_threads | supported | unsupported | unsupported | Telegram forum topics only; Slack/Discord route to graceful fallback message. |
+| native_poll | supported | unsupported | unsupported | Telegram poll tool exists; Slack/Discord currently fallback. |
+
+## Fallback behavior
+
+Capability status is evaluated through `backend.connectors.router.CAPABILITY_MATRIX` and `TOOL_CAPABILITY_MAP`.
+When a Slack/Discord tool call is not mapped as `supported`, adapters return a graceful normalized fallback payload:
+
+```json
+{
+  "ok": false,
+  "fallback": true,
+  "error": "<tool> is <status> on <platform>; returning graceful fallback."
+}
+```

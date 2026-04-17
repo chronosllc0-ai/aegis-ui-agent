@@ -93,6 +93,26 @@ def test_slack_send_edit_file_and_rate_limit_backoff() -> None:
 
         assert upload["ok"] is True
 
+        with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = {"ok": True}
+            deleted = await integration.execute_tool("slack_delete_message", {"channel": "C1", "message_id": "1.2"})
+        assert deleted["ok"] is True
+
+        with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = {"ok": True}
+            reacted = await integration.execute_tool(
+                "slack_react",
+                {"channel": "C1", "message_id": "1.2", "reaction": ":white_check_mark:"},
+            )
+        assert reacted["ok"] is True
+
+        with patch.object(integration, "send_text", new_callable=AsyncMock) as mock_send_text:
+            mock_send_text.return_value = {"ok": True, "tool": "slack_send_message"}
+            interactive = await integration.execute_tool("slack_send_interactive", {"channel": "C1", "text": "controls"})
+            metadata = mock_send_text.await_args.kwargs["metadata"]
+            assert isinstance(metadata.get("blocks"), list)
+        assert interactive["ok"] is True
+
     asyncio.run(_run())
 
 
@@ -122,6 +142,16 @@ def test_discord_connect_send_edit_file_interaction_event() -> None:
             upload = await integration.send_file("c1", b"img", filename="x.png", mime_type="image/png", caption="frame")
         assert upload["ok"] is True
 
+        with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = {}
+            deleted = await integration.execute_tool("discord_delete_message", {"channel": "c1", "message_id": "m2"})
+        assert deleted["ok"] is True
+
+        with patch.object(integration, "_request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = {}
+            reacted = await integration.execute_tool("discord_react", {"channel": "c1", "message_id": "m2", "reaction": "👍"})
+        assert reacted["ok"] is True
+
         ping = await integration.handle_event({"type": 1, "id": "evt-1"}, {})
         assert ping["response"] == {"type": 1}
 
@@ -135,6 +165,18 @@ def test_discord_connect_send_edit_file_interaction_event() -> None:
         normalized = await integration.handle_event(command_payload, {})
         assert normalized["envelope"]["event_type"] == "summarize"
         assert normalized["response"] == {"type": 5}
+
+        control_command = await integration.handle_event(
+            {"id": "evt-3", "type": 2, "channel_id": "c1", "data": {"name": "aegis-runtime-stop"}},
+            {},
+        )
+        assert control_command["envelope"]["control_action"] == "runtime_stop"
+
+        component_action = await integration.handle_event(
+            {"id": "evt-4", "type": 3, "channel_id": "c1", "data": {"custom_id": "control:status"}},
+            {},
+        )
+        assert component_action["envelope"]["control_action"] == "status"
 
     asyncio.run(_run())
 
@@ -192,3 +234,23 @@ def test_mode_selector_helpers_extract_expected_values() -> None:
     assert isinstance(discord_components, list)
     discord_selection = DiscordIntegration.extract_mode_selection({"data": {"custom_id": "mode:planner"}})
     assert discord_selection == "planner"
+
+
+def test_capability_matrix_fallbacks_for_unknown_tools() -> None:
+    async def _run() -> None:
+        slack = SlackIntegration()
+        slack.connected = True
+        slack._token = "xoxb"
+        slack_fallback = await slack.execute_tool("slack_topic_create", {"channel": "C1"})
+        assert slack_fallback["fallback"] is True
+
+        discord = DiscordIntegration()
+        discord.connected = True
+        discord._token = "bot"
+        discord_fallback = await discord.execute_tool("discord_topic_create", {"channel": "c1"})
+        assert discord_fallback["fallback"] is True
+
+        slash_control = await slack.handle_event({"type": "command", "command": "/aegis-status", "channel_id": "C1"}, {})
+        assert slash_control["envelope"]["control_action"] == "status"
+
+    asyncio.run(_run())
