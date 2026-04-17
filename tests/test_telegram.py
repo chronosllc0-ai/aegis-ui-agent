@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from config import settings
 from integrations.telegram import TelegramAPIError, TelegramClient, TelegramConfig, TelegramIntegration
 
 
@@ -337,6 +338,29 @@ def test_polling_path_processes_callback_query() -> None:
             mock_answer.assert_awaited_once_with("cb-1", text="Received")
             mock_edit.assert_awaited_once_with(chat_id=5, message_id=22, text="patched")
             assert integration.config.polling_offset == 112
+        await integration.disconnect()
+
+    asyncio.run(run())
+
+
+def test_telegram_advanced_tool_flag_blocks_interactive_actions(monkeypatch) -> None:
+    """Staged rollout flag should disable Telegram advanced interactive tool path."""
+
+    async def run() -> None:
+        integration = TelegramIntegration(TelegramConfig(bot_token="123:ABC"))
+        integration.connected = True
+        monkeypatch.setattr(settings, "CHANNEL_TOOLS_TELEGRAM_ADVANCED_ENABLED", False)
+        blocked = await integration.execute_tool(
+            "telegram_send_interactive",
+            {
+                "chat_id": 1,
+                "text": "Choose",
+                "buttons": [[{"text": "Go", "callback_data": "reply:done"}]],
+            },
+        )
+        assert blocked["ok"] is False
+        assert blocked["fallback"] is True
+        assert "feature flag" in str(blocked["error"]).lower()
         await integration.disconnect()
 
     asyncio.run(run())

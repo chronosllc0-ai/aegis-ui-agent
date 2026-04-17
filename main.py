@@ -58,6 +58,7 @@ from backend.workspace_files_service import materialize_workspace_files_for_sess
 from backend.tasks.worker import BackgroundWorker
 from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
+from backend.runtime_telemetry import RuntimeTelemetry
 from backend.conversation_service import append_message, get_or_create_conversation
 from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
 from backend.credit_rates import CREDIT_RATES, get_tier
@@ -293,6 +294,29 @@ github_registry = GitHubRegistry()
 _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
 _session_runtimes: dict[str, "SessionRuntime"] = {}
+runtime_telemetry = RuntimeTelemetry()
+
+_BROWSER_CHAT_POLLUTION_PREFIXES = (
+    "[click",
+    "[type_text",
+    "[scroll",
+    "[wait",
+    "[go_to_url",
+    "[go_back",
+    "[screenshot",
+    "[extract_page",
+)
+
+
+def _is_browser_chat_pollution(step: dict[str, Any]) -> bool:
+    """Return True when a step is execution-noise that should not be persisted to chat."""
+    step_type = str(step.get("type") or "").strip().lower()
+    if step_type in {"workflow_step", "browser_action", "human_browser_action"}:
+        return True
+    content = str(step.get("content") or "").strip().lower()
+    if not content:
+        return False
+    return any(content.startswith(prefix) for prefix in _BROWSER_CHAT_POLLUTION_PREFIXES)
 
 
 def _runtime_snapshot() -> dict[str, Any]:
@@ -341,6 +365,7 @@ def _runtime_snapshot() -> dict[str, Any]:
             "running_sessions": sum(1 for session in sessions if session["task_running"]),
             "session_routes": len(route_snapshots),
         },
+        "telemetry": runtime_telemetry.snapshot(),
         "routes": list(route_snapshots.values()),
     }
 
@@ -396,6 +421,7 @@ async def _send_channel_text(
     if draft:
         outgoing_metadata["draft"] = True
     result = await adapter.send_text(destination, normalized_text, metadata=outgoing_metadata)
+    runtime_telemetry.record_channel_tool_result(platform, ok=bool(result.get("ok")))
     config = _get_channel_config(platform, integration_id)
     if bool(result.get("ok")):
         await _log_platform_message(
@@ -494,7 +520,10 @@ def _apply_runtime_mode_update(
     """Validate/apply requested mode for a runtime and return outcome details."""
     requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
     if mode_valid and apply:
+        previous_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
         runtime.settings["agent_mode"] = requested_mode
+        if previous_mode != requested_mode:
+            runtime_telemetry.record_control_mode_change()
         return requested_mode, True, None
     allowed = ", ".join(MODE_LABELS.keys())
     return (
@@ -1016,7 +1045,7 @@ async def _send_step(
         normalized_content, _ = normalize_for_channel(str(normalized_step["content"] or ""), channel="web")
         normalized_step["content"] = normalized_content
     await websocket.send_json({"type": "step", "data": normalized_step})
-    if runtime and session_id:
+    if runtime and session_id and not _is_browser_chat_pollution(normalized_step):
         await _log_web_message(
             runtime,
             session_id,
@@ -1099,14 +1128,7 @@ async def _send_workflow_step(
                 },
             }
         )
-    if runtime and session_id:
-        await _log_web_message(
-            runtime,
-            session_id,
-            "assistant",
-            str(workflow_step.get("description") or workflow_step.get("action") or "Workflow step update"),
-            metadata={"source": "websocket", "action": "workflow_step", "workflow_step": workflow_step},
-        )
+    # Workflow graph steps belong in action log, not user-facing chat history.
 
 
 async def _send_transcript(websocket: WebSocket, text: str, source: str = "voice") -> None:
@@ -1764,6 +1786,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             title_candidate = task_label or instruction
 
             if action in {"steer", "interrupt", "queue", "dequeue"}:
+                runtime_telemetry.record_auto_mode_blocked_send()
                 await _safe_ws_send(
                     websocket,
                     {

@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from backend.integrations.contracts import ChannelAdapter
+from backend.integrations.feature_flags import advanced_tool_blocked
 from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
 from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
@@ -156,6 +157,13 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         return None
 
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        if advanced_tool_blocked("discord", tool_name):
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "fallback": True,
+                "error": f"{tool_name} is disabled by feature flag for staged rollout.",
+            }
         if tool_name == "discord_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
             headers = params.get("headers") if isinstance(params.get("headers"), dict) else {}

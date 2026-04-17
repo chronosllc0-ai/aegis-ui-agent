@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from backend.integrations.feature_flags import advanced_tool_blocked
 from backend.integrations.text_normalization import normalize_for_channel
 from integrations.base import BaseIntegration
 
@@ -358,6 +359,13 @@ class TelegramIntegration(BaseIntegration):
         return raw_mode or None
 
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        if advanced_tool_blocked("telegram", tool_name):
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "fallback": True,
+                "error": f"{tool_name} is disabled by feature flag for staged rollout.",
+            }
         if tool_name == "telegram_webhook_update":
             return await self._handle_webhook_tool(params)
 

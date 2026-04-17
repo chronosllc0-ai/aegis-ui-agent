@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     NAVIGATION_MAX_TOOL_CALLS: int = 100
     NAVIGATION_ACK_TIMEOUT_SECONDS: int = 5
     NAVIGATION_HANDOFF_TIMEOUT_SECONDS: int = 600
+    CHANNEL_TOOLS_TELEGRAM_ADVANCED_ENABLED: bool = True
+    CHANNEL_TOOLS_SLACK_ADVANCED_ENABLED: bool = True
+    CHANNEL_TOOLS_DISCORD_ADVANCED_ENABLED: bool = True
 
     # ── Gemini-specific (kept for backwards compatibility) ───────────
     GEMINI_MODEL: str = "gemini-2.5-pro"

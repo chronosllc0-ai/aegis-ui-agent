@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from backend.integrations.contracts import ChannelAdapter
 from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
+from config import settings
 from integrations.discord import DiscordIntegration
 from integrations.idempotency import DeliveryDeduper
 from integrations.slack_connector import SlackIntegration
@@ -277,3 +278,41 @@ def test_capability_matrix_unknown_platform_returns_graceful_fallback() -> None:
 
     payload = unsupported_action_fallback("custom-platform", "custom_tool")
     assert payload["fallback"] is True
+
+
+def test_slack_advanced_tool_flag_blocks_interactive_controls(monkeypatch) -> None:
+    """Staged rollout flag should disable Slack advanced interactive tool path."""
+    async def _run() -> None:
+        integration = SlackIntegration()
+        integration.connected = True
+        integration._token = "xoxb-test"
+
+        monkeypatch.setattr(settings, "CHANNEL_TOOLS_SLACK_ADVANCED_ENABLED", False)
+        blocked = await integration.execute_tool(
+            "slack_send_interactive",
+            {"channel": "C1", "text": "controls"},
+        )
+        assert blocked["ok"] is False
+        assert blocked["fallback"] is True
+        assert "feature flag" in str(blocked["error"]).lower()
+
+    asyncio.run(_run())
+
+
+def test_discord_advanced_tool_flag_blocks_interactive_controls(monkeypatch) -> None:
+    """Staged rollout flag should disable Discord advanced interactive tool path."""
+    async def _run() -> None:
+        integration = DiscordIntegration()
+        integration.connected = True
+        integration._token = "discord-token"
+
+        monkeypatch.setattr(settings, "CHANNEL_TOOLS_DISCORD_ADVANCED_ENABLED", False)
+        blocked = await integration.execute_tool(
+            "discord_send_interactive",
+            {"channel": "c1", "text": "controls"},
+        )
+        assert blocked["ok"] is False
+        assert blocked["fallback"] is True
+        assert "feature flag" in str(blocked["error"]).lower()
+
+    asyncio.run(_run())

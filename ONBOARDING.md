@@ -4950,3 +4950,86 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.4 - April 17, 2026 (Runtime-control/channel rollout safety + telemetry)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added runtime telemetry module (`backend/runtime_telemetry.py`) to track:
+  - `control_mode_changes`
+  - `auto_mode_blocked_sends`
+  - channel tool success/failure counters and derived rates.
+- Wired telemetry into `main.py`:
+  - mode changes in `_apply_runtime_mode_update(...)`
+  - blocked runtime-control actions (`steer/interrupt/queue/dequeue`) in websocket handler
+  - channel send outcomes in `_send_channel_text(...)`
+  - runtime inspector snapshot now exposes telemetry under `telemetry`.
+- Added rollout feature flags for advanced channel tools:
+  - `CHANNEL_TOOLS_TELEGRAM_ADVANCED_ENABLED`
+  - `CHANNEL_TOOLS_SLACK_ADVANCED_ENABLED`
+  - `CHANNEL_TOOLS_DISCORD_ADVANCED_ENABLED`
+- Added `backend/integrations/feature_flags.py` and integrated checks into:
+  - `integrations/telegram.py`
+  - `integrations/slack_connector.py`
+  - `integrations/discord.py`
+- Reduced chat pollution from browser action steps:
+  - added browser-noise filter in websocket step persistence path
+  - stopped persisting workflow graph step noise to chat history.
+- Added/updated regression tests:
+  - telemetry counters/rates (`tests/test_runtime_telemetry.py`)
+  - auto-mode blocked send metric (`tests/test_main_websocket.py`)
+  - control mode change metric (`tests/test_main_websocket.py`)
+  - no chat-pollution persistence for browser primitive steps (`tests/test_main_websocket.py`)
+  - feature-flag gating for Telegram/Slack/Discord advanced interactive tools
+  - subagent steering payload priority behavior (`tests/test_mode_commands.py`).
+
+### What's Working
+- Runtime telemetry now exposes control/rollout counters plus channel tool success/failure rates.
+- Advanced interactive channel tools can be rolled out per-platform via feature flags without changing code.
+- Browser primitive execution noise is no longer persisted into user-facing chat history.
+- New targeted regression tests pass.
+
+### What's NOT Working Yet
+- Telemetry remains process-local/in-memory (not persisted across restarts or exported externally).
+
+### Next Steps
+1. Export runtime telemetry to existing admin dashboards/metrics backend if long-term trend analysis is needed.
+2. Consider extending advanced-tool feature flags to additional high-risk tool classes (e.g., file upload/send-image) as rollout matures.
+3. Add a dedicated websocket integration test for `steer_subagent` action path if stronger end-to-end subagent routing coverage is desired.
+
+### Decisions Made
+- Defaulted all new advanced-tool flags to `True` to preserve existing behavior and avoid rollout regressions.
+- Implemented graceful fallback payloads (instead of raising hard errors) when advanced tools are flag-disabled.
+
+### Blockers
+- None.
+
+---
+## Session 6.5 - April 17, 2026 (Follow-up review fix: mode-change telemetry)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 fix pass
+
+### What Was Done
+- Fixed critical review issue in `main.py` mode update telemetry path:
+  - Replaced mutating prior-mode read (`_normalize_runtime_mode(runtime.settings)`) with non-mutating canonical lookup (`normalize_agent_mode(runtime.settings.get("agent_mode", ""))`).
+- Added regression test coverage ensuring telemetry increments when previous mode is non-canonical string casing and mode changes are applied.
+
+### What's Working
+- `control_mode_changes` telemetry now computes diff against prior mode without mutating runtime settings before comparison.
+- New regression test passes.
+
+### What's NOT Working Yet
+- None identified in this follow-up.
+
+### Next Steps
+1. Keep telemetry assertions in targeted websocket/control regression suite.
+
+### Decisions Made
+- Kept behavior minimal and localized to the reviewed bug; no broader runtime-mode refactor in this pass.
+
+### Blockers
+- None.

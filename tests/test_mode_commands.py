@@ -71,3 +71,14 @@ def test_subagent_steer_command_alias_routes_to_runtime_message_path() -> None:
         assert calls == [("sub-42", "focus on blockers first")]
     finally:
         main_mod._user_runtimes.pop(user_id, None)
+
+
+def test_subagent_steering_payload_encodes_priority_annotation() -> None:
+    """Subagent steering helper should preserve message text and prepend valid priorities."""
+    main_mod = import_module("main")
+
+    payload = main_mod._build_subagent_steering_payload("focus blockers first", priority="urgent")
+    assert payload == "[priority:urgent] focus blockers first"
+
+    payload_without_priority = main_mod._build_subagent_steering_payload("focus blockers first", priority="invalid")
+    assert payload_without_priority == "focus blockers first"
