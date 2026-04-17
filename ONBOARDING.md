@@ -4309,3 +4309,42 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.71 - April 17, 2026 (Add requested OpenRouter/Chronos free models + context window verification)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend/frontend model-catalog update pass
+
+### What Was Done
+- Added the requested free-tier models to the Chronos Gateway and OpenRouter model catalog in `frontend/src/lib/models.ts`:
+  - `qwen/qwen3-next-80b-a3b-instruct:free`
+  - `qwen/qwen3-coder:free`
+  - `google/gemma-4-26b-a4b-it:free`
+  - `nvidia/nemotron-nano-9b-v2:free`
+  - `google/gemma-4-31b-it:free`
+  - `minimax/minimax-m2.5:free`
+  - `z-ai/glm-4.5-air:free`
+- Verified context lengths from OpenRouter's live models API before adding values to avoid context-meter mismatches.
+- Added the same model IDs to backend OpenRouter provider allowlist in `backend/providers/openrouter_provider.py`.
+- Added corresponding free-tier credit-rate entries (0 input / 0 output) in `backend/credit_rates.py` so Chronos/OpenRouter credit accounting remains consistent for these `:free` models.
+
+### What's Working
+- Requested models are selectable under both Chronos Gateway and OpenRouter in the frontend model picker.
+- Context windows for these models are now explicitly represented in the frontend catalog for context meter calculations.
+- Backend provider model exposure includes these IDs.
+- Credit lookup handles these `:free` models explicitly.
+
+### What's NOT Working Yet
+- No functional blockers identified in this pass.
+
+### Next Steps
+1. Optionally expand UI tests to assert `contextLengthForModel(...)` for these newly added IDs.
+2. If pricing for any of these models changes from free, update `backend/credit_rates.py` values accordingly.
+
+### Decisions Made
+- Used OpenRouter API-reported context lengths as source of truth for catalog entries.
+- Kept free-tier credit rates at `0.0` input/output for consistency with existing free model handling.
+
+### Blockers
+- None.
