@@ -18,6 +18,13 @@ from integrations.idempotency import DeliveryDeduper
 logger = logging.getLogger(__name__)
 
 SLACK_API_BASE = "https://slack.com/api"
+SLACK_COMMAND_CONTROL_MAP: dict[str, str] = {
+    "/aegis-status": "status",
+    "/aegis-config": "config",
+    "/aegis-runtime-start": "runtime_start",
+    "/aegis-runtime-stop": "runtime_stop",
+    "/aegis-runtime-reset": "runtime_reset",
+}
 
 
 class SlackIntegration(BaseIntegration, ChannelAdapter):
@@ -69,8 +76,11 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             {"name": "slack_get_messages", "description": "Fetch recent channel messages"},
             {"name": "slack_send_message", "description": "Post a message to a channel"},
             {"name": "slack_edit_message", "description": "Edit an existing message"},
+            {"name": "slack_delete_message", "description": "Delete a message"},
+            {"name": "slack_react", "description": "Add a reaction to a message"},
             {"name": "slack_list_channels", "description": "List channels in the workspace"},
             {"name": "slack_send_file", "description": "Upload a file to a channel"},
+            {"name": "slack_send_interactive", "description": "Send interactive blocks with buttons/select controls"},
             {"name": "slack_handle_event", "description": "Normalize and process inbound Slack events"},
         ]
 
@@ -109,7 +119,80 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
                 return raw_mode or None
         return None
 
+    @staticmethod
+    def runtime_control_blocks() -> list[dict[str, Any]]:
+        """Render control buttons + select list for runtime actions."""
+        return [
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Status"},
+                        "value": "control:status",
+                        "action_id": "runtime_control",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Start"},
+                        "value": "control:runtime_start",
+                        "action_id": "runtime_control",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Stop"},
+                        "value": "control:runtime_stop",
+                        "action_id": "runtime_control",
+                    },
+                ],
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "static_select",
+                        "placeholder": {"type": "plain_text", "text": "Runtime config"},
+                        "action_id": "runtime_config_select",
+                        "options": [
+                            {
+                                "text": {"type": "plain_text", "text": "Safe"},
+                                "value": "control:config_safe",
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "Balanced"},
+                                "value": "control:config_balanced",
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "Fast"},
+                                "value": "control:config_fast",
+                            },
+                        ],
+                    }
+                ],
+            },
+        ]
+
+    @staticmethod
+    def extract_control_action(payload: dict[str, Any]) -> str | None:
+        """Extract a control action from Slack slash-command or interactive payload."""
+        command = str(payload.get("command") or "").strip().lower()
+        if command in SLACK_COMMAND_CONTROL_MAP:
+            return SLACK_COMMAND_CONTROL_MAP[command]
+        actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            value = str(action.get("value") or "").strip().lower()
+            selected_option = action.get("selected_option") if isinstance(action.get("selected_option"), dict) else {}
+            selected_value = str(selected_option.get("value") or "").strip().lower()
+            token = value or selected_value
+            if token.startswith("control:"):
+                return token[8:] or None
+        return None
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        from backend.connectors.router import resolve_capability_status, unsupported_action_fallback
+
         if tool_name == "slack_handle_event":
             payload = params.get("payload") if isinstance(params.get("payload"), dict) else params
             headers = params.get("headers") if isinstance(params.get("headers"), dict) else {}
@@ -131,6 +214,15 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             message_id = str(params.get("message_id") or params.get("ts") or "").strip()
             text = str(params.get("text", "")).strip()
             return await self.edit_text(channel, message_id, text, metadata=params)
+        if tool_name == "slack_delete_message":
+            channel = str(params.get("channel", "")).strip()
+            message_id = str(params.get("message_id") or params.get("ts") or "").strip()
+            return await self.delete_message(channel, message_id)
+        if tool_name == "slack_react":
+            channel = str(params.get("channel", "")).strip()
+            message_id = str(params.get("message_id") or params.get("ts") or "").strip()
+            reaction = str(params.get("reaction") or params.get("emoji") or "").strip()
+            return await self.react(channel, message_id, reaction)
         if tool_name == "slack_send_file":
             channel = str(params.get("channel", "")).strip()
             file_bytes = params.get("file_bytes")
@@ -142,7 +234,15 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             mime_type = str(params.get("mime_type") or "application/octet-stream")
             caption = str(params.get("caption") or "").strip() or None
             return await self.send_file(channel, file_bytes, filename=filename, mime_type=mime_type, caption=caption)
+        if tool_name == "slack_send_interactive":
+            channel = str(params.get("channel", "")).strip()
+            text = str(params.get("text") or "Runtime controls").strip()
+            blocks = params.get("blocks") if isinstance(params.get("blocks"), list) else self.runtime_control_blocks()
+            return await self.send_text(channel, text, metadata={"blocks": blocks, **params})
 
+        status, _ = resolve_capability_status("slack", tool_name)
+        if status != "supported":
+            return unsupported_action_fallback("slack", tool_name)
         return {"ok": False, "tool": tool_name, "error": "Unsupported tool"}
 
     async def send_text(self, destination: str, text: str, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -186,6 +286,31 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             payload["blocks"] = metadata["blocks"]
         data = await self._request("POST", "chat.update", json_payload=payload)
         return {"ok": bool(data.get("ok")), "tool": "slack_edit_message", "result": data}
+
+    async def delete_message(self, destination: str, message_id: str) -> dict[str, Any]:
+        """Delete an existing Slack message."""
+        channel = destination.strip()
+        ts = message_id.strip()
+        if not channel:
+            return {"ok": False, "tool": "slack_delete_message", "error": "Channel is required"}
+        if not ts:
+            return {"ok": False, "tool": "slack_delete_message", "error": "message_id/ts is required"}
+        data = await self._request("POST", "chat.delete", json_payload={"channel": channel, "ts": ts})
+        return {"ok": bool(data.get("ok")), "tool": "slack_delete_message", "result": data}
+
+    async def react(self, destination: str, message_id: str, reaction: str) -> dict[str, Any]:
+        """Add reaction to an existing Slack message."""
+        channel = destination.strip()
+        ts = message_id.strip()
+        name = reaction.strip().strip(":")
+        if not channel:
+            return {"ok": False, "tool": "slack_react", "error": "Channel is required"}
+        if not ts:
+            return {"ok": False, "tool": "slack_react", "error": "message_id/ts is required"}
+        if not name:
+            return {"ok": False, "tool": "slack_react", "error": "reaction is required"}
+        data = await self._request("POST", "reactions.add", json_payload={"channel": channel, "timestamp": ts, "name": name})
+        return {"ok": bool(data.get("ok")), "tool": "slack_react", "result": data}
 
     async def send_file(
         self,
@@ -265,6 +390,12 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
             "raw": payload,
             "delivery_id": delivery_id,
         }
+        control_action = self.extract_control_action(payload)
+        if control_action:
+            envelope["control_action"] = control_action
+        mode_selection = self.extract_mode_selection(payload)
+        if mode_selection:
+            envelope["mode_selection"] = mode_selection
         return {"ok": True, "duplicate": False, "envelope": envelope}
 
     async def _list_channels(self, params: dict[str, Any]) -> dict[str, Any]:

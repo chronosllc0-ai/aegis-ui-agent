@@ -4781,3 +4781,57 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6 - April 17, 2026 (Slack/Discord capability parity + platform-aware fallbacks)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend integration parity pass
+
+### What Was Done
+- Expanded Slack integration (`integrations/slack_connector.py`) with Telegram-equivalent capabilities:
+  - `slack_send_file` retained/verified using external upload flow (`files.getUploadURLExternal` -> upload URL POST -> `files.completeUploadExternal`),
+  - added `slack_delete_message` (`chat.delete`),
+  - added `slack_react` (`reactions.add`),
+  - added `slack_send_interactive` plus reusable runtime controls blocks (buttons + static select),
+  - added slash-command + interaction control extraction (`/aegis-status`, `/aegis-config`, runtime controls),
+  - enriched event envelope with `control_action` and `mode_selection` when present.
+- Expanded Discord integration (`integrations/discord.py`) with parity wrappers:
+  - `discord_send_file` multipart path retained/validated,
+  - added `discord_delete_message`,
+  - added `discord_react`,
+  - added `discord_send_interactive` with runtime-control components (buttons + select),
+  - added app-command/control-action extraction and component callback extraction,
+  - enriched normalized interaction envelope with `control_action` and `mode_selection`.
+- Added capability-matrix-driven fallback helpers in `backend/connectors/router.py`:
+  - introduced `CAPABILITY_MATRIX`, `TOOL_CAPABILITY_MAP`, `resolve_capability_status(...)`, and `unsupported_action_fallback(...)`,
+  - integrated fallback check in connector execute route for mapped channel tools,
+  - Slack/Discord adapters now use the matrix resolver and return graceful fallback payloads for unsupported/unknown tool mappings.
+- Updated docs capability matrix (`docs/integrations/capability-matrix.md`) to include Telegram/Slack/Discord support states, partial/unsupported semantics, and fallback behavior contract.
+- Expanded regression tests (`tests/test_slack_discord_adapters.py`) covering:
+  - Slack delete/react/interactive send paths,
+  - Discord delete/react and control-action callback extraction,
+  - capability-matrix fallback behavior for unknown tools,
+  - Slack slash-command control extraction.
+
+### What's Working
+- Slack and Discord now expose file/edit/delete/react wrappers aligned with Telegram capability intent.
+- Slack interactive blocks and Discord components support runtime controls.
+- Command/interaction callbacks now provide control action metadata for runtime/status/config routing.
+- Capability matrix now drives graceful unsupported-action fallbacks.
+- Targeted Slack/Discord adapter and runtime adapter tests pass.
+
+### What's NOT Working Yet
+- Some advanced Telegram-only features (native polls/topics) remain intentionally unsupported on Slack/Discord and are currently handled via fallback responses.
+
+### Next Steps
+1. Wire `control_action` envelopes into higher-level runtime command handlers for end-to-end task control behavior in production routes.
+2. Add integration tests at HTTP webhook route level for Slack and Discord interaction payload lifecycles.
+3. Consider moving capability matrix into a dedicated backend module (currently hosted in connector router for reuse).
+
+### Decisions Made
+- Used a shared capability matrix with tool-to-capability mapping to ensure fallback behavior is deterministic and testable.
+- Implemented Slack/Discord runtime controls as native interactive payload builders to avoid hardcoding UI payloads in calling layers.
+
+### Blockers
+- None.
