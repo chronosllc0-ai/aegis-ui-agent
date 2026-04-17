@@ -84,6 +84,7 @@ from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
 from backend.session_workspace import cleanup_session_workspace
 from backend.heartbeat_pinger import HeartbeatPinger
+from backend.user_memory import ensure_daily_memory_file
 
 setup_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -1749,6 +1750,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         _user_runtimes[runtime.user_uid] = runtime
     # O(1) reverse index for heartbeat dispatch
     _session_runtimes[session_id] = runtime
+    ensure_daily_memory_file(session_id)
 
     db_session_gen = get_session()
     try:
