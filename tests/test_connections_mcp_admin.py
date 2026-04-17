@@ -31,12 +31,14 @@ def _mock_verify_session(token: str | None):
 
 def _seed_users() -> None:
     from backend.database import User
+    from backend.connections.service import ensure_default_mcp_presets
 
     async def _run() -> None:
         async with database._session_factory() as session:  # type: ignore[union-attr]
             session.add(User(uid='admin-1', provider='password', provider_id='admin-1', email='admin@example.com', name='Admin', role='admin', status='active'))
             session.add(User(uid='user-1', provider='password', provider_id='user-1', email='user@example.com', name='User', role='user', status='active'))
             await session.commit()
+            await ensure_default_mcp_presets(session)
 
     asyncio.run(_run())
 
@@ -113,3 +115,10 @@ def test_admin_connection_creation_enforced_and_test_messages(tmp_path: Path) ->
         assert test_fail.status_code == 200
         assert test_fail.json()['ok'] is False
         assert 'valid http(s) URL' in test_fail.json()['message']
+
+        oauth_fail = client.post('/api/admin/connections/test', json={
+            'connection_type': 'oauth',
+            'config': {'auth_url': 'banana', 'token_url': 'javascript:alert(1)'},
+        })
+        assert oauth_fail.status_code == 200
+        assert oauth_fail.json()['ok'] is False

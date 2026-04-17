@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,7 +80,6 @@ async def ensure_default_mcp_presets(session: AsyncSession) -> None:
 
 async def list_published_mcp_presets(session: AsyncSession) -> list[dict[str, Any]]:
     """Return globally published MCP presets available to all users."""
-    await ensure_default_mcp_presets(session)
     rows = (
         await session.execute(
             select(ConnectionTemplate).where(
@@ -137,6 +137,12 @@ async def test_connection(connection_type: str, config: dict[str, Any]) -> tuple
         token_url = str(config.get("token_url", "")).strip()
         if not auth_url or not token_url:
             return False, "OAuth requires both auth URL and token URL."
+        parsed_auth = urlparse(auth_url)
+        parsed_token = urlparse(token_url)
+        if parsed_auth.scheme not in {"http", "https"} or not parsed_auth.netloc:
+            return False, "OAuth auth URL must be a valid http(s) URL."
+        if parsed_token.scheme not in {"http", "https"} or not parsed_token.netloc:
+            return False, "OAuth token URL must be a valid http(s) URL."
         return True, "OAuth configuration looks valid and ready to publish."
 
     if connection_type == "bot":
@@ -160,9 +166,15 @@ async def test_connection(connection_type: str, config: dict[str, Any]) -> tuple
     return False, f"Unsupported connection type '{connection_type}'."
 
 
-def scan_tools_for_server(name: str, transport: str, endpoint: str | None) -> dict[str, Any]:
+def scan_tools_for_server(
+    name: str,
+    transport: str,
+    endpoint: str | None,
+    source_type: str | None = None,
+    preset_id: str | None = None,
+) -> dict[str, Any]:
     """Run MCP tool discovery and return serialized response payload."""
-    result = scan_mcp_tools(name, transport, endpoint)
+    result = scan_mcp_tools(name, transport, endpoint, source_type=source_type, preset_id=preset_id)
     return {
         "ok": result.ok,
         "tools": result.tools,

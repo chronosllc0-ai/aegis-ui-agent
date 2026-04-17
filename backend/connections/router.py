@@ -20,10 +20,13 @@ from backend.connections.models import (
 )
 from backend.connections.service import list_published_mcp_presets, list_user_mcp_servers, scan_tools_for_server, test_connection
 from backend.database import User, get_session
+from backend.key_management import KeyManager
+from config import settings
 from mcp_client import MCPClient
 
 router = APIRouter(prefix="/api", tags=["connections"])
 _mcp_registry = MCPClient()
+_key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 
 
 def _session_user(request: Request) -> dict[str, Any]:
@@ -113,6 +116,7 @@ async def create_custom_mcp_server(
     payload: dict[str, Any] = Depends(_session_user),
 ) -> dict[str, Any]:
     """Create a user-scoped custom MCP server."""
+    encrypted_secret = _key_manager.encrypt(body.api_key) if body.api_key else None
     server = MCPServerConfig(
         user_id=str(payload["uid"]),
         name=body.name.strip(),
@@ -122,7 +126,7 @@ async def create_custom_mcp_server(
         transport="http",
         endpoint=body.server_url.strip(),
         auth_type=body.auth_type,
-        secret_ref=body.api_key,
+        secret_ref=encrypted_secret,
         status="added",
         tools_json=json.dumps([]),
     )
@@ -144,7 +148,13 @@ async def scan_mcp_server_tools(
     if not server or server.user_id != str(payload["uid"]):
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    result = scan_tools_for_server(server.name, server.transport, server.endpoint)
+    result = scan_tools_for_server(
+        server.name,
+        server.transport,
+        server.endpoint,
+        source_type=server.source_type,
+        preset_id=server.preset_id,
+    )
     server.tools_json = json.dumps(result["tools"])
     server.status = "connected"
     server.last_error = None

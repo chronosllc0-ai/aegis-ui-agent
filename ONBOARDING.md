@@ -5155,3 +5155,41 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.9 - April 17, 2026 (PR review hardening pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused follow-up pass
+
+### What Was Done
+- Addressed security review: encrypted MCP custom API keys before persistence using existing `KeyManager` + `ENCRYPTION_SECRET` instead of storing plaintext.
+- Addressed preset seeding review: moved default MCP preset seeding away from request path and into DB initialization startup flow.
+- Addressed validation review:
+  - Added strict HTTP(S) URL validation for OAuth auth/token URLs.
+  - Tightened MCP transport validation so empty/invalid transport is rejected instead of silently defaulting.
+- Addressed MCP scan review: switched tool discovery routing to use preset identity metadata (`preset_id` / `source_type`) instead of mutable display names.
+- Addressed frontend async handler review:
+  - Replaced fire-and-forget `void` click patterns with guarded async wrappers that surface user-facing errors.
+- Expanded/updated regression coverage (`tests/test_connections_mcp_admin.py`) to assert OAuth URL validation behavior remains enforced.
+
+### What's Working
+- MCP custom secret handling now encrypts sensitive tokens at rest.
+- MCP preset seeding no longer executes on each preset list request.
+- OAuth and MCP config test endpoints now reject malformed URL/transport input with actionable errors.
+- MCP scan behavior is stable even if display names are edited.
+- Wizard and custom MCP actions now use guarded async click handlers.
+
+### What's NOT Working Yet
+- `backend/pydantic_adk_runner.py` remains absent, so the legacy compile checklist command including that file still cannot pass as-written.
+
+### Next Steps
+1. If needed, add secret rotation flow for previously stored plaintext MCP secrets (migration plan) in environments that already ingested old records.
+2. Consider adding explicit startup seeding metrics/logging for easier observability in production.
+
+### Decisions Made
+- Reused existing repository-wide secret encryption primitive (`KeyManager`) rather than introducing a new crypto utility.
+- Chose preset-id-first scan mapping to avoid brittle name-coupled behavior.
+
+### Blockers
+- None.

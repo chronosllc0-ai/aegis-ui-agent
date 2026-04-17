@@ -419,6 +419,14 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
     }
   }
 
+  const handleAddCustomClick = async () => {
+    try {
+      await addCustom()
+    } catch {
+      setMcpMessage('Failed to create custom MCP server')
+    }
+  }
+
   const addPresetServer = async (presetId: string) => {
     setMcpBusyId(presetId)
     setMcpMessage(null)
@@ -453,6 +461,14 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
       setMcpMessage(error instanceof Error ? error.message : 'Tool scan failed')
     } finally {
       setMcpBusyId(null)
+    }
+  }
+
+  const handleWizardContinueClick = async (handler: () => Promise<void>, setErrorMessage: (value: string | null) => void) => {
+    try {
+      await handler()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unexpected error')
     }
   }
 
@@ -843,7 +859,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
               <input placeholder="API Key (optional)" value={customForm.apiKey} onChange={(e) => setCustomForm((p) => ({ ...p, apiKey: e.target.value }))} className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none" />
             </div>
             <div className="mt-3 flex gap-2">
-              <button type="button" onClick={() => { void addCustom() }} disabled={!customForm.serverName || !customForm.serverUrl || mcpBusyId === 'custom-create'} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">Save</button>
+              <button type="button" onClick={() => { void handleAddCustomClick() }} disabled={!customForm.serverName || !customForm.serverUrl || mcpBusyId === 'custom-create'} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">Save</button>
               <button type="button" onClick={() => setShowCustom(false)} className="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Cancel</button>
             </div>
           </div>
@@ -862,7 +878,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
         </section>
       )}
 
-      {showNewConnectionWizard && <NewConnectionWizard onClose={() => setShowNewConnectionWizard(false)} onSaved={() => { void fetchMcpData(); setShowNewConnectionWizard(false) }} />}
+      {showNewConnectionWizard && <NewConnectionWizard onClose={() => setShowNewConnectionWizard(false)} onSaved={() => { void fetchMcpData(); setShowNewConnectionWizard(false) }} onAsyncError={handleWizardContinueClick} />}
     </div>
   )
 }
@@ -870,9 +886,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
 type NewConnectionWizardProps = {
   onClose: () => void
   onSaved: () => void
+  onAsyncError: (handler: () => Promise<void>, setErrorMessage: (value: string | null) => void) => Promise<void>
 }
 
-function NewConnectionWizard({ onClose, onSaved }: NewConnectionWizardProps) {
+function NewConnectionWizard({ onClose, onSaved, onAsyncError }: NewConnectionWizardProps) {
   const [step, setStep] = useState(1)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -947,7 +964,7 @@ function NewConnectionWizard({ onClose, onSaved }: NewConnectionWizardProps) {
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300">Close</button>
             {step < 5 ? (
-              <button type="button" onClick={() => { void continueStep() }} disabled={busy} className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-50">Continue</button>
+              <button type="button" onClick={() => { void onAsyncError(continueStep, setError) }} disabled={busy} className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-50">Continue</button>
             ) : null}
           </div>
         </div>
@@ -1030,7 +1047,7 @@ function NewConnectionWizard({ onClose, onSaved }: NewConnectionWizardProps) {
         </div>
         {step < 5 && (
           <div className="sticky bottom-0 border-t border-zinc-800 bg-[#121212] p-3 sm:hidden">
-            <button type="button" onClick={() => { void continueStep() }} disabled={busy} className="w-full rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">Continue</button>
+            <button type="button" onClick={() => { void onAsyncError(continueStep, setError) }} disabled={busy} className="w-full rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">Continue</button>
           </div>
         )}
       </div>
