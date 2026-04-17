@@ -155,7 +155,7 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'x-ai/grok-4.20-beta', label: 'Grok 4.20 Beta (OR)', description: "xAI's flagship model via OpenRouter.", vision: true, contextLength: 2_000_000 },
       { id: 'qwen/qwen3-max-thinking', label: 'Qwen3 Max Thinking', description: 'Flagship reasoning model in the Qwen3 series.', vision: false, reasoning: true, contextLength: 262_144 },
       { id: 'qwen/qwen3-next-80b-a3b-instruct:free', label: 'Qwen3 Next 80B A3B Instruct (Free)', description: 'Free Qwen3 Next instruct model.', vision: false, contextLength: 262_144 },
-      { id: 'qwen/qwen3-coder:free', label: 'Qwen3 Coder (Free)', description: 'Free Qwen3 Coder model optimized for coding.', vision: false, contextLength: 262_000 },
+      { id: 'qwen/qwen3-coder:free', label: 'Qwen3 Coder (Free)', description: 'Free Qwen3 Coder model optimized for coding.', vision: false, contextLength: 262_144 },
       { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (Free)', description: 'Free Gemma 4 26B instruction-tuned model.', vision: false, contextLength: 262_144 },
       { id: 'google/gemma-4-31b-it:free', label: 'Gemma 4 31B (Free)', description: 'Free Gemma 4 31B instruction-tuned model.', vision: false, contextLength: 262_144 },
       { id: 'nvidia/nemotron-nano-9b-v2:free', label: 'Nemotron Nano 9B V2 (Free)', description: 'Free NVIDIA Nemotron Nano v2 model.', vision: false, contextLength: 128_000 },
