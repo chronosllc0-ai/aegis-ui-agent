@@ -34,6 +34,7 @@ function makeAskUserInputLog(): LogEntry {
   }
 }
 
+
 describe('ChatPanel ask_user_input reply flow', () => {
   it('creates one local user bubble and invokes user_input_response callback exactly once', async () => {
     const onUserInputResponse = vi.fn()

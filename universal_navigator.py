@@ -280,6 +280,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "subagent_available": True,
     },
     {
+        "name": "handoff_to_user",
+        "description": "Pause execution and hand browser control to the human for CAPTCHA/auth/manual unblock steps.",
+        "example": {
+            "tool": "handoff_to_user",
+            "reason": "A login challenge requires manual completion.",
+            "instructions": "Complete authentication in the browser, then click Continue.",
+            "continue_label": "Continue after login",
+        },
+        "risk": "low",
+        "default_permission": "auto",
+        "subagent_available": True,
+    },
+    {
         "name": "summarize_task",
         "description": "Condense notes into a short summary when you want a reusable summary artifact.",
         "example": {"tool": "summarize_task", "content": "Long work log here", "max_sentences": 4},
@@ -943,6 +956,8 @@ class UniversalToolExecutor:
         settings: dict[str, Any] | None = None,
         user_uid: str | None = None,
         on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+        on_handoff_to_user: Callable[[str, str, str | None, str], Awaitable[str]] | None = None,
+        on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
         on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
         is_subagent: bool = False,
@@ -954,6 +969,8 @@ class UniversalToolExecutor:
         self._last_screenshot: bytes | None = None
         self._user_uid = user_uid
         self._on_user_input = on_user_input
+        self._on_handoff_to_user = on_handoff_to_user
+        self._on_step = on_step
         self._on_spawn_subagent = on_spawn_subagent
         self._on_message_subagent = on_message_subagent
         self._is_subagent = is_subagent
@@ -1087,6 +1104,31 @@ class UniversalToolExecutor:
                     answer = await self._on_user_input(question, options)
                     return f"User answered: {answer}", None
                 return "No user input handler available.", None
+
+            if tool == "handoff_to_user":
+                reason = str(tool_call.get("reason", "")).strip()
+                instructions = str(tool_call.get("instructions", "")).strip()
+                continue_label_raw = tool_call.get("continue_label")
+                continue_label = str(continue_label_raw).strip() if continue_label_raw is not None else None
+                if not reason or not instructions:
+                    return "handoff_to_user error: reason and instructions are required.", None
+                if not self._on_handoff_to_user:
+                    return "handoff_to_user error: no handoff handler is available.", None
+                request_id = str(uuid4())
+                if self._on_step:
+                    await self._on_step(
+                        {
+                            "type": "handoff_request",
+                            "content": f"[handoff_to_user] {reason}",
+                            "reason": reason,
+                            "instructions": instructions,
+                            "continue_label": continue_label,
+                            "request_id": request_id,
+                            "steering": [],
+                        }
+                    )
+                resume_text = await self._on_handoff_to_user(reason, instructions, continue_label, request_id)
+                return resume_text or "Human handoff completed. Resuming agent.", None
 
             if tool == "summarize_task":
                 content = str(tool_call.get("content") or tool_call.get("notes") or "").strip()
@@ -1856,6 +1898,7 @@ async def run_universal_navigation(
     steering_context: list[str] | None = None,
     on_workflow_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_user_input: Callable[[str, list[str]], Awaitable[str]] | None = None,
+    on_handoff_to_user: Callable[[str, str, str | None, str], Awaitable[str]] | None = None,
     user_uid: str | None = None,
     enable_reasoning: bool = False,
     reasoning_effort: str = "medium",
@@ -2107,6 +2150,8 @@ async def run_universal_navigation(
         settings=resolved_settings,
         user_uid=user_uid,
         on_user_input=on_user_input,
+        on_handoff_to_user=on_handoff_to_user,
+        on_step=on_step,
         on_spawn_subagent=on_spawn_subagent,
         on_message_subagent=on_message_subagent,
         is_subagent=is_subagent,
@@ -2387,6 +2432,53 @@ async def run_universal_navigation(
                             "index": index,
                             "tool": tool_name,
                             "ok": True,
+                            "result": result_text,
+                        }
+                    )
+                return result
+
+            if tool_name == "handoff_to_user":
+                reason = str(tool_call.get("reason", "")).strip()
+                instructions = str(tool_call.get("instructions", "")).strip()
+                continue_label_raw = tool_call.get("continue_label")
+                continue_label = str(continue_label_raw).strip() if continue_label_raw is not None else None
+                request_id = str(uuid4())
+                special_step: dict[str, Any] = {
+                    "type": "handoff_request",
+                    "content": f"[handoff_to_user] {reason}",
+                    "reason": reason,
+                    "instructions": instructions,
+                    "continue_label": continue_label,
+                    "request_id": request_id,
+                    "steering": [],
+                }
+                steps.append(special_step)
+                if on_step:
+                    await on_step(special_step)
+                if reason and instructions and tool_executor._on_handoff_to_user:
+                    resume_text = await tool_executor._on_handoff_to_user(reason, instructions, continue_label, request_id)
+                    result_text = resume_text or "Human handoff completed. Resuming agent."
+                    ok = True
+                else:
+                    result_text = "handoff_to_user error: reason, instructions, or handoff handler missing."
+                    ok = False
+                result = {
+                    "index": index,
+                    "tool": tool_name,
+                    "ok": ok,
+                    "result_text": result_text,
+                    "error": None if ok else result_text,
+                    "screenshot_bytes": None,
+                    "denial_debug": None,
+                }
+                if on_workflow_step:
+                    await on_workflow_step(
+                        {
+                            "type": "batch_tool_result",
+                            "task_id": session_id,
+                            "index": index,
+                            "tool": tool_name,
+                            "ok": ok,
                             "result": result_text,
                         }
                     )

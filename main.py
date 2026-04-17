@@ -573,6 +573,10 @@ class SessionRuntime:
         self.session_route_key: str | None = None
         # Pending user-input futures keyed by request_id
         self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
+        self.handoff_active: bool = False
+        self.handoff_request_id: str | None = None
+        self.handoff_future: asyncio.Future[str] | None = None
+        self.handoff_started_at: float | None = None
         # Tracks the frontend-generated task UUID for the currently active navigate action.
         # Sent by the client in spawn_subagent so sub-agents can be scoped to the right parent task.
         self.current_frontend_task_id: str | None = None
@@ -583,6 +587,13 @@ class SessionRuntime:
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
+
+    def clear_handoff_state(self) -> None:
+        """Reset any active human handoff state."""
+        self.handoff_active = False
+        self.handoff_request_id = None
+        self.handoff_future = None
+        self.handoff_started_at = None
 
     def get_idempotent_ack(self, request_id: str) -> dict[str, Any] | None:
         """Return cached idempotent ack payload for request_id when available."""
@@ -1435,6 +1446,45 @@ async def _run_navigation_task(
         finally:
             runtime.pending_user_inputs.pop(request_id, None)
 
+    async def _on_handoff_to_user(
+        reason: str,
+        instructions: str,
+        continue_label: str | None,
+        request_id: str,
+    ) -> str:
+        """Pause execution and wait for user-triggered handoff_continue."""
+        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        runtime.handoff_active = True
+        runtime.handoff_request_id = request_id
+        runtime.handoff_future = fut
+        runtime.handoff_started_at = _time.time()
+        try:
+            await websocket.send_json(
+                {
+                    "type": "step",
+                    "data": {
+                        "type": "handoff_request",
+                        "content": f"[handoff_to_user] {reason}",
+                        "request_id": request_id,
+                        "reason": reason,
+                        "instructions": instructions,
+                        "continue_label": continue_label,
+                    },
+                }
+            )
+            timeout_candidate = runtime.settings.get("handoff_timeout_seconds") or settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS
+            try:
+                timeout_seconds = int(timeout_candidate)
+            except (TypeError, ValueError):
+                timeout_seconds = settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS
+            return await asyncio.wait_for(fut, timeout=max(1, timeout_seconds))
+        except asyncio.TimeoutError:
+            runtime.clear_handoff_state()
+            raise RuntimeError("Handoff timed out after waiting for manual completion.")
+        finally:
+            if runtime.handoff_future is fut and fut.done():
+                runtime.clear_handoff_state()
+
     async def _on_reasoning_delta(step_id: str, delta_text: str) -> None:
         normalized_delta, _ = normalize_for_channel(delta_text, channel="web")
         await websocket.send_json({
@@ -1502,6 +1552,7 @@ async def _run_navigation_task(
             ),
             user_uid=runtime.user_uid,
             on_user_input=_on_user_input,
+            on_handoff_to_user=_on_handoff_to_user,
             on_reasoning_delta=_on_reasoning_delta,
             on_spawn_subagent=_on_spawn_subagent,
             on_message_subagent=_on_message_subagent,
@@ -1626,6 +1677,7 @@ async def _run_navigation_task(
         await _safe_ws_send(websocket, {"type": "error", "data": {"message": str(exc)}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_error_exception")
         await _safe_ws_send(websocket, {"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result_exception")
     finally:
+        runtime.clear_handoff_state()
         runtime.task_running = False
         runtime.completed_task_ids.add(task_id)
 
@@ -2046,6 +2098,98 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     fut.set_result(response_text)
                 else:
                     logger.debug("user_input_response for unknown/expired request_id=%s", request_id)
+            elif action == "handoff_continue":
+                request_id = str(data.get("request_id") or "").strip()
+                if not runtime.handoff_active:
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "handoff_continue: no active handoff", "retryable": False}},
+                        request_id=runtime.current_request_id,
+                        task_id=runtime.current_task_id,
+                        ws_session_id=session_id,
+                        phase="handoff_continue_idle",
+                    )
+                    continue
+                if not request_id or request_id != runtime.handoff_request_id:
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "handoff_continue: request_id mismatch", "retryable": True}},
+                        request_id=runtime.current_request_id,
+                        task_id=runtime.current_task_id,
+                        ws_session_id=session_id,
+                        phase="handoff_continue_mismatch",
+                    )
+                    continue
+                fut = runtime.handoff_future
+                if fut and not fut.done():
+                    fut.set_result("Human handoff completed. Resuming agent.")
+                runtime.clear_handoff_state()
+                await _send_step(
+                    websocket,
+                    {"type": "handoff_complete", "content": "Human handoff completed. Resuming agent."},
+                    runtime=runtime,
+                    session_id=session_id,
+                )
+            elif action == "human_browser_action":
+                if not runtime.handoff_active:
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "human_browser_action: handoff is not active", "retryable": True}},
+                        request_id=runtime.current_request_id,
+                        task_id=runtime.current_task_id,
+                        ws_session_id=session_id,
+                        phase="human_browser_action_no_handoff",
+                    )
+                    continue
+                action_kind = str(data.get("kind") or "").strip().lower()
+                request_id = runtime.handoff_request_id or ""
+                try:
+                    if action_kind == "click":
+                        x = int(data.get("x"))
+                        y = int(data.get("y"))
+                        if x < 0 or y < 0 or x > settings.VIEWPORT_WIDTH or y > settings.VIEWPORT_HEIGHT:
+                            raise ValueError("click coordinates out of bounds")
+                        await _get_orchestrator().executor.click(x, y)
+                    elif action_kind == "type_text":
+                        text = str(data.get("text") or "")
+                        x_raw = data.get("x")
+                        y_raw = data.get("y")
+                        x = int(x_raw) if x_raw is not None else None
+                        y = int(y_raw) if y_raw is not None else None
+                        if x is not None and (x < 0 or x > settings.VIEWPORT_WIDTH):
+                            raise ValueError("type_text x out of bounds")
+                        if y is not None and (y < 0 or y > settings.VIEWPORT_HEIGHT):
+                            raise ValueError("type_text y out of bounds")
+                        await _get_orchestrator().executor.type_text(text, x, y)
+                    elif action_kind == "scroll":
+                        delta = int(data.get("deltaY"))
+                        direction = "down" if delta > 0 else "up"
+                        amount = min(max(abs(delta), 10), 1200)
+                        await _get_orchestrator().executor.scroll(direction, amount)
+                    elif action_kind == "press_key":
+                        key = str(data.get("key") or "").strip()
+                        if not key:
+                            raise ValueError("press_key requires key")
+                        await _get_orchestrator().executor.press_key(key)
+                    else:
+                        raise ValueError("unknown human browser action")
+                except Exception as exc:  # noqa: BLE001
+                    await _safe_ws_send(
+                        websocket,
+                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": f"human_browser_action rejected: {exc}", "retryable": True}},
+                        request_id=runtime.current_request_id,
+                        task_id=runtime.current_task_id,
+                        ws_session_id=session_id,
+                        phase="human_browser_action_invalid",
+                    )
+                    continue
+                logger.info(
+                    "hitl_action session_id=%s request_id=%s kind=%s payload=%s",
+                    session_id,
+                    request_id,
+                    action_kind,
+                    {k: data.get(k) for k in ("x", "y", "text", "key", "deltaY")},
+                )
             elif action == "ping":
                 await _safe_ws_send(websocket, {"type": "pong"}, ws_session_id=session_id, phase="pong")
             elif action == "spawn_subagent":

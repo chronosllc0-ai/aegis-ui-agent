@@ -4487,3 +4487,108 @@
 
 ### Blockers
 - None.
+
+## Session 5.71 - April 17, 2026 (HITL browser handoff for CAPTCHA/auth unblock)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend+frontend integration pass
+
+### What Was Done
+- Added a new universal tool `handoff_to_user` in `universal_navigator.py` with `reason`, `instructions`, and optional `continue_label` fields.
+- Implemented special handoff step emission (`type: "handoff_request"`) and async pause/resume behavior in the universal execution loop.
+- Extended runtime state in `main.py` with dedicated handoff fields (`handoff_active`, `handoff_request_id`, `handoff_future`, `handoff_started_at`) and safe reset semantics.
+- Added new websocket actions:
+  - `handoff_continue { request_id }` to resume paused execution,
+  - `human_browser_action { kind, x, y, text, key, deltaY }` to relay manual browser interactions during active handoff only.
+- Implemented payload validation + guardrails for human actions and mapped allowed events to executor primitives (`click`, `type_text`, `scroll`, `press_key`).
+- Added handoff timeout support via `NAVIGATION_HANDOFF_TIMEOUT_SECONDS` (default 600s).
+- Wired frontend handoff UX:
+  - `ChatPanel` can parse/render handoff requests and show a continue CTA card,
+  - `ScreenView` supports interactable mode during handoff and forwards normalized 1280x720 coordinates,
+  - `useWebSocket` tracks handoff lifecycle and routes HITL events,
+  - `App` connects chat continue + screen human actions to websocket actions.
+- Added/updated tests:
+  - backend websocket handoff pause/resume + rejection paths,
+  - universal navigator handoff tool flow,
+  - frontend `HandoffRequestCard` behavior,
+  - frontend `ScreenView` handoff-only action forwarding.
+
+### What's Working
+- Agent can explicitly hand browser control to user during CAPTCHA/auth/manual blockers and resume after user confirms.
+- Browser interaction forwarding is restricted to active handoff windows.
+- Manual actions are validated and logged with session/request context.
+- Handoff state is cleaned up on completion/cancel/error.
+
+### What's NOT Working Yet
+- Existing broad `ChatPanel.test.tsx` suite has unrelated baseline failures in this environment when run as a whole; targeted new HITL frontend tests pass in isolated files.
+
+### Next Steps
+1. Add a dedicated frontend integration test around the full `ChatPanel` log-to-card path once existing suite baseline noise is reduced.
+2. Consider adding a frontend indicator for handoff timeout countdown.
+3. Add an explicit backend metric/counter for handoff timeout occurrences.
+
+### Decisions Made
+- Kept `human_browser_action` events out of chat transcript to avoid noisy message spam.
+- Reused websocket step events for handoff lifecycle visibility while preserving chat as control center.
+- Used strict payload validation and bounded scroll/click coordinate checks for safety.
+
+### Blockers
+- None.
+
+## Session 5.72 - April 17, 2026 (Review follow-up fixes for HITL handoff)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Fixed critical single-tool handoff visibility gap in `universal_navigator.py`:
+  - added `on_step` callback support to `UniversalToolExecutor`,
+  - for direct `handoff_to_user` calls, now emits a `handoff_request` step before awaiting user resume.
+- Hardened handoff timeout parsing in `main.py`:
+  - runtime `handoff_timeout_seconds` now safely coerces with `try/except` fallback to `NAVIGATION_HANDOFF_TIMEOUT_SECONDS`.
+- Hardened `ScreenView` keyboard handling during handoff:
+  - `onKeyDown` now `preventDefault()` and `stopPropagation()` before forwarding key actions.
+- Added regression test coverage for single-tool handoff emission in `tests/test_universal_navigator_parallel_tools.py`.
+
+### What's Working
+- Both batch and single-tool handoff paths now emit frontend-visible handoff requests.
+- Invalid timeout config values no longer crash task execution.
+- Keyboard shortcuts are suppressed in handoff capture mode to avoid accidental page-level reload/interrupt behavior.
+
+### What's NOT Working Yet
+- No new blockers identified in this follow-up.
+
+### Next Steps
+1. Add one additional websocket integration test that exercises a true single-tool handoff call path end-to-end from orchestrator output.
+
+### Decisions Made
+- Kept the single-tool handoff fix in the tool executor so all direct executor call sites remain safe, not just the batch path.
+
+### Blockers
+- None.
+
+## Session 5.73 - April 17, 2026 (Final review hardening for HITL handoff)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 regression-hardening pass
+
+### What Was Done
+- Added extra regression coverage to lock in the reviewed fixes:
+  - `ScreenView` test now verifies handoff key events call `preventDefault()` and `stopPropagation()` while still forwarding `press_key` actions.
+  - Added websocket integration test confirming invalid `handoff_timeout_seconds` config values fall back safely and do not crash handoff flow.
+
+### What's Working
+- Handoff keyboard capture explicitly blocks page-level shortcuts/reloads in test coverage.
+- Invalid handoff timeout config inputs are validated/fallback-safe end-to-end in websocket path.
+
+### What's NOT Working Yet
+- No new blockers identified.
+
+### Next Steps
+1. Keep these regressions in CI gate for future handoff refactors.
+
+### Decisions Made
+- Prefer explicit regression tests for each review finding so future diffs cannot silently reintroduce behavior.
+
+### Blockers
+- None.
