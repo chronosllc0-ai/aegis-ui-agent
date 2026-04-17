@@ -4665,3 +4665,30 @@
 - None.
 
 ---
+## Session 5.75 - April 17, 2026 (Review follow-up: steering-mode source-of-truth + handleSend ordering)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-follow-up pass
+
+### What Was Done
+- Addressed review comment in `ChatPanel.handleSend(...)` by moving the `isWorking && steeringMode === 'auto'` guard to occur after initial input/attachment emptiness checks.
+- Addressed review comment in settings typing by removing duplicate `SteeringMode` union definition from `useSettings.ts` and importing the type from `useWebSocket.ts` as the single source of truth.
+
+### What's Working
+- Runtime steering mode type is now centralized (`useWebSocket.ts`) and consumed by settings without duplication.
+- `handleSend` control flow now follows expected ordering from review feedback.
+- Frontend targeted tests and production build both pass.
+
+### What's NOT Working Yet
+- No additional blockers identified in this follow-up.
+
+### Next Steps
+1. Revisit the three currently skipped `ChatPanel` tests and restore deterministic fixtures so they can be re-enabled.
+
+### Decisions Made
+- Chose `useWebSocket.ts` as type source-of-truth for steering modes to avoid drift across duplicated unions.
+
+### Blockers
+- None.
+
+---

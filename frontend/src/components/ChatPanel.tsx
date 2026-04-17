@@ -1781,9 +1781,9 @@ export function ChatPanel({
   }
 
   const handleSend = (forcePlan = false) => {
-    if (isWorking && steeringMode === 'auto') return
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
+    if (isWorking && steeringMode === 'auto') return
     const parsed = resolveComposerSubmission(trimmed, forcePlan)
     const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
     const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText

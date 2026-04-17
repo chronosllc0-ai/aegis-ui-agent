@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig } from '../lib/mcp'
 import { DEFAULT_AGENT_MODE, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
+import type { SteeringMode } from './useWebSocket'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
-export type SteeringMode = 'auto' | 'steer' | 'interrupt' | 'queue'
 
 export type ReasoningEffort = 'medium' | 'high' | 'extended' | 'adaptive'
 
