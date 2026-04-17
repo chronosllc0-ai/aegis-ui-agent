@@ -4383,3 +4383,32 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.73 - April 17, 2026 (Install external GitHub skill as `skillsls`)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 skill-install + verification pass
+
+### What Was Done
+- Used the built-in skill installer helper script to install a skill from `Dimillian/Skills` into a custom destination folder name.
+- Installed repo path `github` with explicit destination name `skillsls`, resulting in:
+  - `/opt/codex/skills/skillsls`
+- Verified installation command completed successfully.
+
+### What's Working
+- New skill folder now exists at the requested location name under `$CODEX_HOME/skills` (`/opt/codex/skills/skillsls`).
+- Installation was performed through the standard skill-installer workflow (no manual file copy).
+
+### What's NOT Working Yet
+- No blockers identified for this request.
+
+### Next Steps
+1. Restart Codex so the newly installed skill is discovered in future sessions.
+2. If a different skill folder from `Dimillian/Skills` was intended (instead of `github`), reinstall with the desired `--path` value.
+
+### Decisions Made
+- Since the provided URL points to a multi-skill repository root, selected the `github` skill path and applied the requested destination folder name `skillsls`.
+
+### Blockers
+- None.
