@@ -4348,3 +4348,38 @@
 
 ### Blockers
 - None.
+
+---
+## Session 5.72 - April 17, 2026 (Review follow-up: preserve :free model IDs + true free credit charging)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted backend bugfix + regression-test pass
+
+### What Was Done
+- Fixed Chronos model resolution in `orchestrator.py` so model IDs are no longer normalized by stripping suffixes.
+  - Chronos now preserves exact model IDs (including `:free`) when constructing the OpenRouter provider and when returning the resolved model.
+- Fixed credit charging in `backend/credit_rates.py` so zero-rate models are truly free.
+  - Added an early return in `calculate_credits(...)` for `exact <= 0` to return `(0.0, 0, 0.0)`.
+  - This bypasses the paid-model minimum-floor rule for free models only.
+- Added regression tests in `tests/test_credit_rates.py`:
+  - asserts free models are charged `0` credits,
+  - asserts paid models still apply the minimum 1-credit floor.
+
+### What's Working
+- Chronos/OpenRouter resolution now keeps free-model suffixes intact, preventing paid/free ID mismatch.
+- Free-tier models now charge 0 credits end-to-end through `calculate_credits(...)`.
+- Paid models remain protected by minimum 1-credit charging.
+- New regression tests pass locally.
+
+### What's NOT Working Yet
+- No blockers identified in this follow-up.
+
+### Next Steps
+1. Add an integration-level test that exercises a Chronos run and verifies execution model ID equals recorded billing model ID.
+2. Consider explicit logging of resolved Chronos model IDs to simplify future audits.
+
+### Decisions Made
+- Kept minimum-floor logic for paid models while adding a targeted free-tier bypass to avoid pricing regressions.
+
+### Blockers
+- None.

@@ -112,7 +112,10 @@ def calculate_credits(
     """
     rate = get_rate(provider, model)
     exact = (input_tokens / 1000 * rate["input"]) + (output_tokens / 1000 * rate["output"])
-    charged = max(1, ceil(exact))  # minimum 1 credit per interaction
+    # Preserve true free-tier behavior for zero-rate models.
+    if exact <= 0:
+        return 0.0, 0, 0.0
+    charged = max(1, ceil(exact))  # minimum 1 credit per paid interaction
     # Back-calculate raw cost (remove the 1.4× margin)
     raw_cost = exact / 1.4 * 0.001
     return exact, charged, raw_cost
