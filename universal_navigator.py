@@ -48,6 +48,10 @@ from backend.user_memory import (
     read_memory,
     write_memory,
     patch_memory,
+    append_daily_memory,
+    compact_daily_memory,
+    ensure_daily_memory_file,
+    search_memory_files,
     add_automation,
     list_automations_for_session as _list_automations,
     remove_automation,
@@ -393,6 +397,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "description": "Update or append a named section in the user's memory.md.",
         "example": {"tool": "patch_memory", "section": "Preferences", "content": "Prefers bullet-point summaries."},
         "risk": "medium",
+        "default_permission": "auto",
+    },
+    {
+        "name": "compact_memory",
+        "description": "Summarize short-term daily memory into suggested MEMORY.md updates (manual apply by default).",
+        "example": {"tool": "compact_memory", "apply_to_long_term": False},
+        "risk": "low",
         "default_permission": "auto",
     },
     {
@@ -1041,6 +1052,13 @@ class UniversalToolExecutor:
         behavior = self._settings.get("behavior", {}) or {}
         self._confirm_destructive_actions = bool(behavior.get("confirm_destructive_actions", False))
         self._connected_integrations = _connected_integrations(self._settings)
+        configured_mode = str(self._settings.get("memory_mode", _app_settings.MEMORY_MODE)).strip().lower()
+        self._memory_mode = configured_mode if configured_mode in {"db", "files", "hybrid"} else "db"
+        self._memory_long_term_main_only = bool(
+            self._settings.get("memory_long_term_main_session_only", _app_settings.MEMORY_LONG_TERM_MAIN_SESSION_ONLY)
+        )
+        self._is_main_session = bool(self._settings.get("is_main_session", not is_subagent))
+        ensure_daily_memory_file(self._session_id)
         ensure_session_workspace(self._session_id)
         self._github_manager: GitHubRepoWorkspaceManager | None = None
 
@@ -1312,7 +1330,7 @@ class UniversalToolExecutor:
                 )), None
 
             if tool == "read_memory":
-                return read_memory(self._session_id), None
+                return read_memory(self._session_id, include_long_term=self._should_include_long_term_memory()), None
 
             if tool == "write_memory":
                 write_memory(self._session_id, str(tool_call.get("content", "")))
@@ -1325,6 +1343,14 @@ class UniversalToolExecutor:
                     str(tool_call.get("content", "")),
                 )
                 return result, None
+
+            if tool == "compact_memory":
+                payload = compact_daily_memory(
+                    self._session_id,
+                    apply_to_long_term=bool(tool_call.get("apply_to_long_term", False)),
+                    include_long_term_context=bool(tool_call.get("include_long_term_context", True)),
+                )
+                return _json_result(payload), None
 
             if tool == "add_automation":
                 auto = add_automation(
@@ -1347,6 +1373,12 @@ class UniversalToolExecutor:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Tool %s failed: %s", tool, exc)
             return f"Tool error ({tool}): {exc}", None
+
+    def _should_include_long_term_memory(self) -> bool:
+        """Determine whether MEMORY.md should be included in reads for this runtime."""
+        if not self._memory_long_term_main_only:
+            return True
+        return self._is_main_session
 
     def _tool_unavailable_reason(self, tool: str) -> str | None:
         """Explain why a tool is not available in the current session."""
@@ -1682,41 +1714,74 @@ class UniversalToolExecutor:
     async def _memory_search(self, tool_call: dict[str, Any]) -> str:
         """Execute memory_search and return a serialized result."""
         query = str(tool_call.get("query", "")).strip()
-        if not self._user_uid:
+        if not query:
+            return "memory_search error: query is required."
+        if self._memory_mode in {"db", "hybrid"} and not self._user_uid:
             return "Memory tools require an authenticated user."
         try:
-            from backend.database import _session_factory
-            from backend.memory.service import MemoryService
+            db_results: list[dict[str, Any]] = []
+            file_results: list[dict[str, str]] = []
 
-            if _session_factory is None:
-                return "Database not ready."
-            async with _session_factory() as session:
-                results = await MemoryService.recall(session, self._user_uid, query, limit=5)
-            return _json_result({"ok": True, "results": results})
+            if self._memory_mode in {"db", "hybrid"}:
+                from backend.database import _session_factory
+                from backend.memory.service import MemoryService
+
+                if _session_factory is None:
+                    if self._memory_mode == "db":
+                        return "Database not ready."
+                    logger.warning("memory_search running in hybrid mode without DB session factory (session_id=%s)", self._session_id)
+                else:
+                    async with _session_factory() as session:
+                        db_results = await MemoryService.recall(session, self._user_uid, query, limit=5)
+
+            if self._memory_mode in {"files", "hybrid"}:
+                file_results = search_memory_files(
+                    self._session_id,
+                    query,
+                    include_long_term=self._should_include_long_term_memory(),
+                    limit=5,
+                )
+
+            return _json_result({"ok": True, "mode": self._memory_mode, "db_results": db_results, "file_results": file_results})
         except Exception as exc:  # noqa: BLE001
             return f"memory_search error: {exc}"
 
     async def _memory_write(self, tool_call: dict[str, Any]) -> str:
         """Execute memory_write and return a serialized result."""
-        content = str(tool_call.get("content", ""))
+        content = str(tool_call.get("content", "")).strip()
         category = str(tool_call.get("category", "general"))
-        if not self._user_uid:
+        if not content:
+            return "memory_write error: content is required."
+        if self._memory_mode in {"db", "hybrid"} and not self._user_uid:
             return "Memory tools require an authenticated user."
         try:
-            from backend.database import _session_factory
-            from backend.memory.service import MemoryService
+            entry: dict[str, Any] | None = None
+            written_day: str | None = None
 
-            if _session_factory is None:
-                return "Database not ready."
-            async with _session_factory() as session:
-                entry = await MemoryService.store(session, self._user_uid, content, category=category)
-            return _json_result({"ok": True, "entry": entry})
+            if self._memory_mode in {"db", "hybrid"}:
+                from backend.database import _session_factory
+                from backend.memory.service import MemoryService
+
+                if _session_factory is None:
+                    if self._memory_mode == "db":
+                        return "Database not ready."
+                    logger.warning("memory_write running in hybrid mode without DB session factory (session_id=%s)", self._session_id)
+                else:
+                    async with _session_factory() as session:
+                        entry = await MemoryService.store(session, self._user_uid, content, category=category)
+
+            if self._memory_mode in {"files", "hybrid"}:
+                written_day = append_daily_memory(self._session_id, content, category=category)
+
+            return _json_result({"ok": True, "mode": self._memory_mode, "entry": entry, "short_term_day": written_day})
         except Exception as exc:  # noqa: BLE001
             return f"memory_write error: {exc}"
 
     async def _memory_read(self, tool_call: dict[str, Any]) -> str:
         """Execute memory_read and return a serialized result."""
         memory_id = str(tool_call.get("memory_id", ""))
+        if self._memory_mode == "files":
+            return "memory_read is DB-only in files mode. Use read_memory for file-based memory context."
         if not self._user_uid:
             return "Memory tools require an authenticated user."
         try:
@@ -1738,6 +1803,8 @@ class UniversalToolExecutor:
         memory_id = str(tool_call.get("memory_id", ""))
         content = tool_call.get("content")
         category = tool_call.get("category")
+        if self._memory_mode == "files":
+            return "memory_patch is DB-only in files mode. Use patch_memory for MEMORY.md updates."
         if not self._user_uid:
             return "Memory tools require an authenticated user."
         try:

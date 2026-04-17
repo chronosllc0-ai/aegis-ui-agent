@@ -5315,3 +5315,82 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.13 - April 17, 2026 (file-based short-term memory + hybrid mode)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Added short-term file memory support in `backend/user_memory.py`:
+  - Daily memory files at `memory/YYYY-MM-DD.md` with auto-create behavior.
+  - `MEMORY.md` as curated long-term memory (with migration fallback from legacy `memory.md`).
+  - Read policy support to always include today + yesterday short-term files and optionally include `MEMORY.md`.
+  - File-search and daily compaction helper that generates manual-accept suggestions for long-term memory updates.
+- Added runtime memory-mode controls in `universal_navigator.py`:
+  - `memory_mode` support with `db|files|hybrid` behavior for memory search/write flows.
+  - `read_memory` now enforces configurable “long-term for main session only” policy.
+  - Added `compact_memory` tool for suggestion-first compaction (`apply_to_long_term` optional).
+  - Ensured daily short-term file creation during tool executor initialization.
+- Bootstrapped short-term daily memory creation for active websocket sessions in `main.py`.
+- Added tests in `tests/test_user_memory_files.py` covering daily file creation/writes, long-term separation, read policy behavior, and compaction apply/manual paths.
+
+### What's Working
+- Active sessions now create writable daily short-term memory files.
+- Long-term memory remains in `MEMORY.md` and is separate from short-term daily files.
+- Memory tooling can operate in DB-only, files-only, or hybrid sync modes.
+- Compaction produces suggestions by default and only writes to long-term memory when explicitly requested.
+
+### What's NOT Working Yet
+- Delivery-checklist compile command still references missing `backend/pydantic_adk_runner.py` in this repository.
+
+### Next Steps
+1. Expose `memory_mode` and long-term read policy toggles in admin/user settings UI.
+2. Add richer compaction scoring/deduplication logic before appending suggestions.
+3. Add API-level tests for runtime memory mode behavior (`db/files/hybrid`) on websocket tool calls.
+
+### Decisions Made
+- Kept DB memory APIs unchanged to preserve compatibility while layering file/hybrid behavior in runtime tooling.
+- Made compaction suggestion-first and manual-apply by default.
+
+### Blockers
+- None.
+
+---
+## Session 6.14 - April 17, 2026 (review fixes for memory PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Addressed all 5 review findings from the memory PR:
+  1. Removed implicit dict-order indexing in `read_memory` and switched to explicit today/yesterday day selection from `_recent_short_term_days`.
+  2. Reworked compaction extraction to preserve multiline markdown entry blocks rather than splitting by raw lines.
+  3. Hardened daily file writes with atomic append + file locking (`fcntl.flock` on Unix) to prevent concurrent write clobbering.
+  4. Added warning logging in hybrid mode when DB session factory is unavailable (for both search and write).
+  5. Fixed auth ordering bug in hybrid writes: authentication checks now happen before any file writes.
+- Added tests:
+  - `tests/test_universal_memory_mode.py` for hybrid auth-before-write and hybrid DB-unavailable warning behavior.
+  - Expanded `tests/test_user_memory_files.py` with multiline compaction preservation coverage.
+
+### What's Working
+- Hybrid mode no longer writes to file memory before auth checks.
+- Compaction suggestions preserve multiline daily entries as single logical blocks.
+- Concurrent append path is safer and no longer relies on read-modify-write.
+- Hybrid mode emits explicit warning signals when DB half of hybrid is unavailable.
+
+### What's NOT Working Yet
+- Delivery-checklist compile command still references missing `backend/pydantic_adk_runner.py` in this repository.
+
+### Next Steps
+1. Consider emitting structured runtime telemetry counters for hybrid DB-fallback events.
+2. Add stress/concurrency tests for append behavior across parallel writers.
+3. Optionally add a parser for non-standard daily markdown heading variants.
+
+### Decisions Made
+- Kept hybrid behavior non-fatal on DB unavailability but made it observable via warnings.
+- Preserved compaction as suggestion-first/manual-apply workflow.
+
+### Blockers
+- None.
