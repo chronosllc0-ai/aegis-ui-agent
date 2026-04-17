@@ -37,6 +37,26 @@ type ActionMeta = {
   category: string
 }
 
+type MCPPreset = {
+  id: string
+  name: string
+  subtitle?: string | null
+  description?: string | null
+  logo_url?: string | null
+  user_status?: 'not_added' | 'added' | 'connected' | 'error'
+}
+
+type MCPServer = {
+  id: string
+  name: string
+  source_type: 'global_preset' | 'user_custom'
+  owner_scope: 'global' | 'user'
+  preset_id?: string | null
+  status: 'added' | 'connected' | 'error'
+  tools: Array<{ name: string; description?: string }>
+  last_error?: string | null
+}
+
 // ── Platform icons (hosted) ──────────────────────────────────────────
 
 // Bot integration icons (token-based)
@@ -83,6 +103,11 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
   // - Custom MCP
   const [showCustom, setShowCustom] = useState(false)
   const [customForm, setCustomForm] = useState<CustomServerForm>({ serverName: '', serverUrl: '', authType: 'none', apiKey: '' })
+  const [mcpPresets, setMcpPresets] = useState<MCPPreset[]>([])
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
+  const [mcpBusyId, setMcpBusyId] = useState<string | null>(null)
+  const [mcpMessage, setMcpMessage] = useState<string | null>(null)
+  const [showNewConnectionWizard, setShowNewConnectionWizard] = useState(false)
 
   // - Global
   const [globalError, setGlobalError] = useState<string | null>(null)
@@ -132,6 +157,25 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
   useEffect(() => {
     fetchConnectors()
   }, [fetchConnectors])
+
+  const fetchMcpData = useCallback(async () => {
+    try {
+      const [presetResp, serverResp] = await Promise.all([
+        fetch(apiUrl('/api/mcp/presets'), { credentials: 'include' }),
+        fetch(apiUrl('/api/mcp/servers'), { credentials: 'include' }),
+      ])
+      const presetData = await presetResp.json()
+      const serverData = await serverResp.json()
+      if (presetData?.ok) setMcpPresets(Array.isArray(presetData.presets) ? presetData.presets : [])
+      if (serverData?.ok) setMcpServers(Array.isArray(serverData.servers) ? serverData.servers : [])
+    } catch {
+      setMcpMessage('Failed to load MCP servers.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchMcpData()
+  }, [fetchMcpData])
 
   // ── OAuth handlers ─────────────────────────────────────────────────
   const handleOAuthConnect = async (connectorId: string) => {
@@ -331,34 +375,123 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
   }
 
   // ── Custom MCP ─────────────────────────────────────────────────────
-  const addCustom = () => {
+  const addCustom = async () => {
     if (!customForm.serverName || !customForm.serverUrl) return
-    const next: IntegrationConfig = {
-      id: crypto.randomUUID(),
-      name: customForm.serverName,
-      icon: 'custom',
-      description: `Custom MCP server at ${customForm.serverUrl}`,
-      enabled: false,
-      status: 'disabled',
-      authType: customForm.authType,
-      serverUrl: customForm.serverUrl,
-      apiKeyMasked: maskSecret(customForm.apiKey),
-      tools: ['custom_tool'],
+    setMcpBusyId('custom-create')
+    setMcpMessage(null)
+    try {
+      const response = await fetch(apiUrl('/api/mcp/servers/custom'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: customForm.serverName,
+          server_url: customForm.serverUrl,
+          auth_type: customForm.authType,
+          api_key: customForm.apiKey || undefined,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.detail || data?.error || 'Failed to create custom MCP server')
+      }
+      const next: IntegrationConfig = {
+        id: data.server?.id ?? crypto.randomUUID(),
+        name: customForm.serverName,
+        icon: 'custom',
+        description: `Custom MCP server at ${customForm.serverUrl}`,
+        enabled: false,
+        status: 'disabled',
+        authType: customForm.authType,
+        serverUrl: customForm.serverUrl,
+        apiKeyMasked: maskSecret(customForm.apiKey),
+        tools: ['custom_tool'],
+      }
+      onChange([...integrations, next])
+      setCustomForm({ serverName: '', serverUrl: '', authType: 'none', apiKey: '' })
+      setShowCustom(false)
+      setMcpMessage('Custom MCP server added.')
+      await fetchMcpData()
+    } catch (error) {
+      setMcpMessage(error instanceof Error ? error.message : 'Failed to create custom MCP server')
+    } finally {
+      setMcpBusyId(null)
     }
-    onChange([...integrations, next])
-    setCustomForm({ serverName: '', serverUrl: '', authType: 'none', apiKey: '' })
-    setShowCustom(false)
+  }
+
+  const handleAddCustomClick = async () => {
+    try {
+      await addCustom()
+    } catch {
+      setMcpMessage('Failed to create custom MCP server')
+    }
+  }
+
+  const addPresetServer = async (presetId: string) => {
+    setMcpBusyId(presetId)
+    setMcpMessage(null)
+    try {
+      const response = await fetch(apiUrl('/api/mcp/servers/from-preset'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset_id: presetId }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data?.ok) throw new Error(data?.detail || data?.error || 'Failed to add preset')
+      setMcpMessage('MCP preset added.')
+      await fetchMcpData()
+    } catch (error) {
+      setMcpMessage(error instanceof Error ? error.message : 'Failed to add preset')
+    } finally {
+      setMcpBusyId(null)
+    }
+  }
+
+  const scanServerTools = async (serverId: string) => {
+    setMcpBusyId(serverId)
+    setMcpMessage(null)
+    try {
+      const response = await fetch(apiUrl(`/api/mcp/servers/${serverId}/scan`), { method: 'POST', credentials: 'include' })
+      const data = await response.json()
+      if (!response.ok || !data?.ok) throw new Error(data?.detail || data?.error || 'Tool scan failed')
+      setMcpMessage(data?.message || 'Tool scan completed.')
+      await fetchMcpData()
+    } catch (error) {
+      setMcpMessage(error instanceof Error ? error.message : 'Tool scan failed')
+    } finally {
+      setMcpBusyId(null)
+    }
+  }
+
+  const handleWizardContinueClick = async (handler: () => Promise<void>, setErrorMessage: (value: string | null) => void) => {
+    try {
+      await handler()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unexpected error')
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h3 className="text-lg font-semibold text-white">Connections</h3>
-        <p className="mt-1 text-sm text-zinc-400">
-          Connect your accounts and platforms. OAuth apps use secure authorization, bot integrations use token entry.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Connections</h3>
+          <p className="mt-1 text-sm text-zinc-400">
+            Connect your accounts and platforms. OAuth apps use secure authorization, bot integrations use token entry.
+          </p>
+        </div>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setShowNewConnectionWizard(true)}
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200"
+          >
+            + New Connection
+          </button>
+        )}
       </div>
 
       {/* Global error */}
@@ -653,6 +786,55 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
         </section>
       )}
 
+      {/* ─── MCP Presets + Instances ───────────────────────────── */}
+      <section>
+        <div className="mb-3 flex items-center gap-2">
+          <h4 className="text-sm font-semibold text-zinc-300">MCP</h4>
+          <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Presets + custom</span>
+        </div>
+        {mcpMessage && <p className="mb-3 text-xs text-zinc-300">{mcpMessage}</p>}
+        <div className="grid gap-3 md:grid-cols-2">
+          {mcpPresets.map((preset) => {
+            const userServer = mcpServers.find((server) => server.preset_id === preset.id)
+            const state = userServer?.status ?? preset.user_status ?? 'not_added'
+            const canAdd = state === 'not_added'
+            return (
+              <div key={preset.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-800">
+                    {preset.logo_url ? <img src={preset.logo_url} alt={preset.name} className="h-6 w-6 object-contain" /> : <span className="text-sm text-zinc-300">{preset.name.slice(0, 1)}</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-white">{preset.name}</p>
+                      <StatusDot color={state === 'connected' ? 'emerald' : state === 'error' ? 'red' : 'amber'} label={state === 'not_added' ? 'Not added' : state === 'connected' ? 'Connected' : state === 'error' ? 'Error' : 'Added'} />
+                    </div>
+                    <p className="text-xs text-zinc-400">{preset.description}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => addPresetServer(preset.id)} disabled={!canAdd || mcpBusyId === preset.id} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">
+                    {mcpBusyId === preset.id ? 'Adding…' : canAdd ? 'Add' : 'Added'}
+                  </button>
+                  {userServer && (
+                    <button type="button" onClick={() => scanServerTools(userServer.id)} disabled={mcpBusyId === userServer.id} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+                      {mcpBusyId === userServer.id ? 'Scanning…' : 'Scan tools'}
+                    </button>
+                  )}
+                </div>
+                {userServer?.tools?.length ? (
+                  <ul className="mt-3 space-y-1 text-[11px] text-zinc-400">
+                    {userServer.tools.map((tool) => (
+                      <li key={`${preset.id}-${tool.name}`} className="rounded bg-zinc-800/60 px-2 py-1">{tool.name}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
       {/* ─── Custom MCP Server ──────────────────────────────────── */}
       <section>
         <button
@@ -677,12 +859,198 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
               <input placeholder="API Key (optional)" value={customForm.apiKey} onChange={(e) => setCustomForm((p) => ({ ...p, apiKey: e.target.value }))} className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none" />
             </div>
             <div className="mt-3 flex gap-2">
-              <button type="button" onClick={addCustom} disabled={!customForm.serverName || !customForm.serverUrl} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">Save</button>
+              <button type="button" onClick={() => { void handleAddCustomClick() }} disabled={!customForm.serverName || !customForm.serverUrl || mcpBusyId === 'custom-create'} className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50">Save</button>
               <button type="button" onClick={() => setShowCustom(false)} className="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Cancel</button>
             </div>
           </div>
         )}
       </section>
+
+      {isAdmin && (
+        <section className="border-t border-zinc-800 pt-6">
+          <button
+            type="button"
+            onClick={() => setShowNewConnectionWizard(true)}
+            className="w-full rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800 md:w-auto"
+          >
+            + New Connection
+          </button>
+        </section>
+      )}
+
+      {showNewConnectionWizard && <NewConnectionWizard onClose={() => setShowNewConnectionWizard(false)} onSaved={() => { void fetchMcpData(); setShowNewConnectionWizard(false) }} onAsyncError={handleWizardContinueClick} />}
+    </div>
+  )
+}
+
+type NewConnectionWizardProps = {
+  onClose: () => void
+  onSaved: () => void
+  onAsyncError: (handler: () => Promise<void>, setErrorMessage: (value: string | null) => void) => Promise<void>
+}
+
+function NewConnectionWizard({ onClose, onSaved, onAsyncError }: NewConnectionWizardProps) {
+  const [step, setStep] = useState(1)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [testMessage, setTestMessage] = useState<string | null>(null)
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    name: '',
+    subtitle: '',
+    description: '',
+    logo_url: '',
+    connection_type: 'mcp',
+    config: {} as Record<string, unknown>,
+  })
+
+  const saveDraft = async (publish = false) => {
+    setBusy(true)
+    setError(null)
+    const payload = { ...form, status: publish ? 'published' : 'draft', id: draftId }
+    try {
+      const response = await fetch(apiUrl(draftId ? `/api/admin/connections/${draftId}` : '/api/admin/connections'), {
+        method: draftId ? 'PUT' : 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await response.json()
+      if (!response.ok || !data?.ok) throw new Error(data?.detail || data?.error || 'Failed to save draft')
+      if (!draftId && data?.connection_id) setDraftId(data.connection_id)
+      if (publish) onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save draft')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const testConnection = async () => {
+    setBusy(true)
+    setError(null)
+    setTestMessage(null)
+    try {
+      const response = await fetch(apiUrl('/api/admin/connections/test'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connection_type: form.connection_type, config: form.config }),
+      })
+      const data = await response.json()
+      setTestMessage(data?.message || (data?.ok ? 'Test succeeded.' : 'Test failed.'))
+      if (!data?.ok) setError(data?.error || data?.message || 'Test failed')
+    } catch {
+      setError('Connection test failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const updateConfig = (key: string, value: string) => {
+    setForm((prev) => ({ ...prev, config: { ...prev.config, [key]: value } }))
+  }
+
+  const continueStep = async () => {
+    await saveDraft(false)
+    setStep((prev) => Math.min(prev + 1, 5))
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 p-2 sm:p-4">
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-700 bg-[#121212]">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-[#121212] px-4 py-3">
+          <h4 className="text-base font-semibold text-white">New Connection</h4>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300">Close</button>
+            {step < 5 ? (
+              <button type="button" onClick={() => { void onAsyncError(continueStep, setError) }} disabled={busy} className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-50">Continue</button>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <p className="text-xs text-zinc-400">Step {step} of 5</p>
+          {step === 1 && (
+            <div className="grid gap-3">
+              <input className={inputCls} placeholder="Name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              <input className={inputCls} placeholder="Subtitle" value={form.subtitle} onChange={(e) => setForm((prev) => ({ ...prev, subtitle: e.target.value }))} />
+              <textarea className={`${inputCls} min-h-[110px]`} placeholder="Description" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+              <input className={inputCls} placeholder="Logo URL" value={form.logo_url} onChange={(e) => setForm((prev) => ({ ...prev, logo_url: e.target.value }))} />
+            </div>
+          )}
+          {step === 2 && (
+            <div className="grid gap-2 sm:grid-cols-3">
+              {['oauth', 'bot', 'mcp'].map((type) => (
+                <button key={type} type="button" onClick={() => setForm((prev) => ({ ...prev, connection_type: type }))} className={`rounded-xl border px-3 py-4 text-sm capitalize ${form.connection_type === type ? 'border-blue-500 bg-blue-500/10 text-blue-300' : 'border-zinc-700 text-zinc-300'}`}>
+                  {type}
+                </button>
+              ))}
+            </div>
+          )}
+          {step === 3 && (
+            <div className="grid gap-3">
+              {form.connection_type === 'oauth' && (
+                <>
+                  <input className={inputCls} placeholder="Auth URL" value={String(form.config.auth_url ?? '')} onChange={(e) => updateConfig('auth_url', e.target.value)} />
+                  <input className={inputCls} placeholder="Token URL" value={String(form.config.token_url ?? '')} onChange={(e) => updateConfig('token_url', e.target.value)} />
+                  <input className={inputCls} placeholder="Client ID placeholder" value={String(form.config.client_id ?? '')} onChange={(e) => updateConfig('client_id', e.target.value)} />
+                  <input className={inputCls} placeholder="Scopes" value={String(form.config.scopes ?? '')} onChange={(e) => updateConfig('scopes', e.target.value)} />
+                  <input className={inputCls} placeholder="Callback URL" value={String(form.config.callback ?? '')} onChange={(e) => updateConfig('callback', e.target.value)} />
+                </>
+              )}
+              {form.connection_type === 'bot' && (
+                <>
+                  <input className={inputCls} placeholder="Provider" value={String(form.config.provider ?? '')} onChange={(e) => updateConfig('provider', e.target.value)} />
+                  <input className={inputCls} placeholder="Token" value={String(form.config.token ?? '')} onChange={(e) => updateConfig('token', e.target.value)} />
+                  <input className={inputCls} placeholder="Webhook URL" value={String(form.config.webhook_url ?? '')} onChange={(e) => updateConfig('webhook_url', e.target.value)} />
+                  <input className={inputCls} placeholder="Polling config" value={String(form.config.polling ?? '')} onChange={(e) => updateConfig('polling', e.target.value)} />
+                </>
+              )}
+              {form.connection_type === 'mcp' && (
+                <>
+                  <select className={inputCls} value={String(form.config.transport ?? 'http')} onChange={(e) => updateConfig('transport', e.target.value)}>
+                    <option value="stdio">stdio</option>
+                    <option value="http">http</option>
+                    <option value="sse">sse</option>
+                  </select>
+                  <input className={inputCls} placeholder="MCP URL" value={String(form.config.url ?? '')} onChange={(e) => updateConfig('url', e.target.value)} />
+                  <input className={inputCls} placeholder="Command (for stdio)" value={String(form.config.command ?? '')} onChange={(e) => updateConfig('command', e.target.value)} />
+                  <input className={inputCls} placeholder="Args (comma-separated)" value={String(form.config.args ?? '')} onChange={(e) => updateConfig('args', e.target.value)} />
+                  <select className={inputCls} value={String(form.config.auth_type ?? 'none')} onChange={(e) => updateConfig('auth_type', e.target.value)}>
+                    <option value="none">No Auth</option>
+                    <option value="api_key">API Key</option>
+                    <option value="oauth">OAuth</option>
+                  </select>
+                  <input className={inputCls} placeholder="Optional token/key" value={String(form.config.secret ?? '')} onChange={(e) => updateConfig('secret', e.target.value)} />
+                </>
+              )}
+            </div>
+          )}
+          {step === 4 && (
+            <div className="space-y-3">
+              <button type="button" onClick={() => { void testConnection() }} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                {busy ? 'Testing…' : 'Run Connection Test'}
+              </button>
+              {testMessage && <p className="text-sm text-zinc-200">{testMessage}</p>}
+            </div>
+          )}
+          {step === 5 && (
+            <div className="space-y-3">
+              <p className="text-sm text-zinc-300">Publish globally to show in user Connections, or keep as draft.</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => { void saveDraft(false) }} disabled={busy} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-100">Save Draft</button>
+                <button type="button" onClick={() => { void saveDraft(true) }} disabled={busy} className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black">Publish Globally</button>
+              </div>
+            </div>
+          )}
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+        {step < 5 && (
+          <div className="sticky bottom-0 border-t border-zinc-800 bg-[#121212] p-3 sm:hidden">
+            <button type="button" onClick={() => { void onAsyncError(continueStep, setError) }} disabled={busy} className="w-full rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">Continue</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

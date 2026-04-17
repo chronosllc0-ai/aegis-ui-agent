@@ -20,6 +20,8 @@ class MCPServer:
     server_id: str
     name: str
     enabled: bool = True
+    source_type: str = "user_custom"
+    owner_scope: str = "user"
     tool_manifest: list[dict[str, Any]] = field(default_factory=list)
     connector: BaseIntegration | None = None
 
@@ -49,7 +51,12 @@ class MCPClient:
         return server
 
     async def register_custom_server(self, user_id: str, server_id: str, name: str, tools: list[dict[str, Any]]) -> MCPServer:
-        server = MCPServer(server_id=server_id, name=name, tool_manifest=tools)
+        server = MCPServer(server_id=server_id, name=name, source_type="user_custom", owner_scope="user", tool_manifest=tools)
+        self.user_servers.setdefault(user_id, {})[server_id] = server
+        return server
+
+    async def register_preset_server(self, user_id: str, server_id: str, name: str, tools: list[dict[str, Any]]) -> MCPServer:
+        server = MCPServer(server_id=server_id, name=name, source_type="global_preset", owner_scope="global", tool_manifest=tools)
         self.user_servers.setdefault(user_id, {})[server_id] = server
         return server
 
