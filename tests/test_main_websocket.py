@@ -517,6 +517,21 @@ def test_runtime_mode_change_increments_control_mode_change_metric() -> None:
     assert main.runtime_telemetry.control_mode_changes == initial + 1
 
 
+def test_runtime_mode_change_metric_handles_noncanonical_previous_mode_without_mutation_side_effects() -> None:
+    """Mode-change telemetry should compare against canonicalized prior mode without mutating first."""
+    runtime = main.SessionRuntime()
+    initial = main.runtime_telemetry.control_mode_changes
+
+    runtime.settings["agent_mode"] = "Code"
+    selected_mode, mode_valid, mode_error = main._apply_runtime_mode_update(runtime, "planner")
+
+    assert selected_mode == "planner"
+    assert mode_valid is True
+    assert mode_error is None
+    assert runtime.settings["agent_mode"] == "planner"
+    assert main.runtime_telemetry.control_mode_changes == initial + 1
+
+
 def test_workflow_steps_do_not_persist_into_chat_history() -> None:
     """Workflow graph updates should stay in workflow/action views, not user chat history."""
     main.orchestrator = _StubOrchestrator()

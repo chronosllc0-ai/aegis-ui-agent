@@ -520,7 +520,7 @@ def _apply_runtime_mode_update(
     """Validate/apply requested mode for a runtime and return outcome details."""
     requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
     if mode_valid and apply:
-        previous_mode = _normalize_runtime_mode(runtime.settings)
+        previous_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
         runtime.settings["agent_mode"] = requested_mode
         if previous_mode != requested_mode:
             runtime_telemetry.record_control_mode_change()

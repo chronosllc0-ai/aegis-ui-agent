@@ -5006,3 +5006,30 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.5 - April 17, 2026 (Follow-up review fix: mode-change telemetry)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 fix pass
+
+### What Was Done
+- Fixed critical review issue in `main.py` mode update telemetry path:
+  - Replaced mutating prior-mode read (`_normalize_runtime_mode(runtime.settings)`) with non-mutating canonical lookup (`normalize_agent_mode(runtime.settings.get("agent_mode", ""))`).
+- Added regression test coverage ensuring telemetry increments when previous mode is non-canonical string casing and mode changes are applied.
+
+### What's Working
+- `control_mode_changes` telemetry now computes diff against prior mode without mutating runtime settings before comparison.
+- New regression test passes.
+
+### What's NOT Working Yet
+- None identified in this follow-up.
+
+### Next Steps
+1. Keep telemetry assertions in targeted websocket/control regression suite.
+
+### Decisions Made
+- Kept behavior minimal and localized to the reviewed bug; no broader runtime-mode refactor in this pass.
+
+### Blockers
+- None.
