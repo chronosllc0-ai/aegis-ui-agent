@@ -4566,3 +4566,29 @@
 
 ### Blockers
 - None.
+
+## Session 5.73 - April 17, 2026 (Final review hardening for HITL handoff)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 regression-hardening pass
+
+### What Was Done
+- Added extra regression coverage to lock in the reviewed fixes:
+  - `ScreenView` test now verifies handoff key events call `preventDefault()` and `stopPropagation()` while still forwarding `press_key` actions.
+  - Added websocket integration test confirming invalid `handoff_timeout_seconds` config values fall back safely and do not crash handoff flow.
+
+### What's Working
+- Handoff keyboard capture explicitly blocks page-level shortcuts/reloads in test coverage.
+- Invalid handoff timeout config inputs are validated/fallback-safe end-to-end in websocket path.
+
+### What's NOT Working Yet
+- No new blockers identified.
+
+### Next Steps
+1. Keep these regressions in CI gate for future handoff refactors.
+
+### Decisions Made
+- Prefer explicit regression tests for each review finding so future diffs cannot silently reintroduce behavior.
+
+### Blockers
+- None.

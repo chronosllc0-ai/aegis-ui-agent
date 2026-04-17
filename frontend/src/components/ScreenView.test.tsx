@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ScreenView } from './ScreenView'
@@ -44,10 +44,15 @@ describe('ScreenView HITL browser actions', () => {
 
     fireEvent.click(activeOverlay, { clientX: 100, clientY: 120 })
     fireEvent.wheel(activeOverlay, { deltaY: 90 })
-    fireEvent.keyDown(activeOverlay, { key: 'Enter' })
+    const keyEvent = createEvent.keyDown(activeOverlay, { key: 'Enter' })
+    const preventDefaultSpy = vi.spyOn(keyEvent, 'preventDefault')
+    const stopPropagationSpy = vi.spyOn(keyEvent, 'stopPropagation')
+    fireEvent(activeOverlay, keyEvent)
 
     expect(onHumanBrowserAction).toHaveBeenNthCalledWith(1, { kind: 'click', x: 100, y: 120 })
     expect(onHumanBrowserAction).toHaveBeenNthCalledWith(2, { kind: 'scroll', deltaY: 90 })
     expect(onHumanBrowserAction).toHaveBeenNthCalledWith(3, { kind: 'press_key', key: 'Enter' })
+    expect(preventDefaultSpy).toHaveBeenCalled()
+    expect(stopPropagationSpy).toHaveBeenCalled()
   })
 })

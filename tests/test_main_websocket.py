@@ -465,6 +465,28 @@ def test_human_browser_action_rejects_malformed_payload_during_handoff() -> None
     assert "rejected" in error["data"]["message"]
 
 
+def test_handoff_timeout_setting_with_invalid_type_falls_back_without_crashing() -> None:
+    """Invalid handoff_timeout_seconds values should fall back safely instead of raising ValueError."""
+    orchestrator = _HandoffOrchestrator()
+    main.orchestrator = orchestrator
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "config", "settings": {"handoff_timeout_seconds": "not-an-int"}})
+        _ = _recv_until_type(ws, "step")  # config ack step
+        ws.send_json({"action": "navigate_start", "request_id": "req-handoff-timeout-fallback", "instruction": "login"})
+        _ = _recv_until_type(ws, "navigate_ack")
+        _ = _recv_until_type(ws, "step")  # before-handoff
+        handoff_step = _recv_until_type(ws, "step")
+        ws.send_json({"action": "handoff_continue", "request_id": handoff_step["data"]["request_id"]})
+        result = _recv_until_type(ws, "result")
+        ws.send_json({"action": "stop_task"})
+
+    assert result["type"] == "result"
+    assert result["data"]["status"] == "completed"
+
+
 def test_websocket_stream_normalizes_steps_and_reasoning_deltas_incrementally() -> None:
     """Step and reasoning stream payloads should normalize escaped newlines during streaming."""
     main.orchestrator = _StreamingNormalizationOrchestrator()
