@@ -350,6 +350,16 @@ class TelegramIntegration(BaseIntegration):
         }
 
     @staticmethod
+    def reasoning_selector_reply_markup(reasoning_labels: dict[str, str]) -> dict[str, Any]:
+        """Build Telegram inline keyboard payload for reasoning selection."""
+        return {
+            "inline_keyboard": [
+                [{"text": label, "callback_data": f"reasoning:{level}"}]
+                for level, label in reasoning_labels.items()
+            ]
+        }
+
+    @staticmethod
     def extract_mode_selection(callback_data: object) -> str | None:
         """Extract raw mode token from Telegram callback data."""
         data = str(callback_data or "").strip()
@@ -357,6 +367,15 @@ class TelegramIntegration(BaseIntegration):
             return None
         raw_mode = data[5:].strip().lower().replace("-", "_").replace(" ", "_")
         return raw_mode or None
+
+    @staticmethod
+    def extract_reasoning_selection(callback_data: object) -> str | None:
+        """Extract raw reasoning token from Telegram callback data."""
+        data = str(callback_data or "").strip()
+        if not data.startswith("reasoning:"):
+            return None
+        raw_level = data[10:].strip().lower().replace("-", "").replace(" ", "")
+        return raw_level or None
 
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if advanced_tool_blocked("telegram", tool_name):

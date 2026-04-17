@@ -244,11 +244,19 @@ def test_mode_selector_helpers_extract_expected_values() -> None:
         {"actions": [{"action_id": "mode_select", "value": "mode:code"}]}
     )
     assert slack_selection == "code"
+    slack_reasoning = SlackIntegration.extract_reasoning_selection(
+        {"actions": [{"action_id": "reasoning_select", "selected_option": {"value": "reasoning:xhigh"}}]}
+    )
+    assert slack_reasoning == "xhigh"
 
     discord_components = DiscordIntegration.mode_selector_components({"planner": "Planner", "code": "Code"})
     assert isinstance(discord_components, list)
     discord_selection = DiscordIntegration.extract_mode_selection({"data": {"custom_id": "mode:planner"}})
     assert discord_selection == "planner"
+    discord_reasoning = DiscordIntegration.extract_reasoning_selection(
+        {"data": {"custom_id": "reasoning_select", "values": ["reasoning:minimal"]}}
+    )
+    assert discord_reasoning == "minimal"
 
 
 def test_capability_matrix_fallbacks_for_unknown_tools() -> None:
