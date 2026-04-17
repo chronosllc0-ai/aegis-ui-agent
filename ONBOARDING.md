@@ -4487,3 +4487,50 @@
 
 ### Blockers
 - None.
+
+## Session 5.71 - April 17, 2026 (HITL browser handoff for CAPTCHA/auth unblock)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend+frontend integration pass
+
+### What Was Done
+- Added a new universal tool `handoff_to_user` in `universal_navigator.py` with `reason`, `instructions`, and optional `continue_label` fields.
+- Implemented special handoff step emission (`type: "handoff_request"`) and async pause/resume behavior in the universal execution loop.
+- Extended runtime state in `main.py` with dedicated handoff fields (`handoff_active`, `handoff_request_id`, `handoff_future`, `handoff_started_at`) and safe reset semantics.
+- Added new websocket actions:
+  - `handoff_continue { request_id }` to resume paused execution,
+  - `human_browser_action { kind, x, y, text, key, deltaY }` to relay manual browser interactions during active handoff only.
+- Implemented payload validation + guardrails for human actions and mapped allowed events to executor primitives (`click`, `type_text`, `scroll`, `press_key`).
+- Added handoff timeout support via `NAVIGATION_HANDOFF_TIMEOUT_SECONDS` (default 600s).
+- Wired frontend handoff UX:
+  - `ChatPanel` can parse/render handoff requests and show a continue CTA card,
+  - `ScreenView` supports interactable mode during handoff and forwards normalized 1280x720 coordinates,
+  - `useWebSocket` tracks handoff lifecycle and routes HITL events,
+  - `App` connects chat continue + screen human actions to websocket actions.
+- Added/updated tests:
+  - backend websocket handoff pause/resume + rejection paths,
+  - universal navigator handoff tool flow,
+  - frontend `HandoffRequestCard` behavior,
+  - frontend `ScreenView` handoff-only action forwarding.
+
+### What's Working
+- Agent can explicitly hand browser control to user during CAPTCHA/auth/manual blockers and resume after user confirms.
+- Browser interaction forwarding is restricted to active handoff windows.
+- Manual actions are validated and logged with session/request context.
+- Handoff state is cleaned up on completion/cancel/error.
+
+### What's NOT Working Yet
+- Existing broad `ChatPanel.test.tsx` suite has unrelated baseline failures in this environment when run as a whole; targeted new HITL frontend tests pass in isolated files.
+
+### Next Steps
+1. Add a dedicated frontend integration test around the full `ChatPanel` log-to-card path once existing suite baseline noise is reduced.
+2. Consider adding a frontend indicator for handoff timeout countdown.
+3. Add an explicit backend metric/counter for handoff timeout occurrences.
+
+### Decisions Made
+- Kept `human_browser_action` events out of chat transcript to avoid noisy message spam.
+- Reused websocket step events for handoff lifecycle visibility while preserving chat as control center.
+- Used strict payload validation and bounded scroll/click coordinate checks for safety.
+
+### Blockers
+- None.

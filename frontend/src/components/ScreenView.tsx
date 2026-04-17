@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type ScreenViewProps = {
   dataTour?: string
@@ -7,6 +7,8 @@ type ScreenViewProps = {
   steeringFlashKey: number
   onExampleClick: (prompt: string) => void
   lastClickCoords?: { x: number; y: number } | null
+  handoffActive?: boolean
+  onHumanBrowserAction?: (action: { kind: 'click' | 'type_text' | 'scroll' | 'press_key'; x?: number; y?: number; text?: string; key?: string; deltaY?: number }) => void
 }
 
 const EXAMPLES = [
@@ -16,9 +18,21 @@ const EXAMPLES = [
   'Go to Wikipedia and summarize the article on quantum computing',
 ]
 
-export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour, lastClickCoords }: ScreenViewProps) {
+export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour, lastClickCoords, handoffActive = false, onHumanBrowserAction }: ScreenViewProps) {
   const [displayFrame, setDisplayFrame] = useState('')
   const [clickAnim, setClickAnim] = useState<{ x: number; y: number; key: number } | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  const mapClientToViewport = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null
+    const relX = Math.min(Math.max(clientX - rect.left, 0), rect.width)
+    const relY = Math.min(Math.max(clientY - rect.top, 0), rect.height)
+    return {
+      x: Math.round((relX / rect.width) * 1280),
+      y: Math.round((relY / rect.height) * 720),
+    }
+  }
 
   useEffect(() => {
     if (!lastClickCoords) return
@@ -78,7 +92,36 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
       )}
       {hasFrame ? (
         <>
-          <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-cover' />
+          <div
+            ref={containerRef}
+            className={`absolute inset-0 ${handoffActive ? 'cursor-crosshair' : ''}`}
+            tabIndex={handoffActive ? 0 : -1}
+            onClick={(event) => {
+              if (!handoffActive || !onHumanBrowserAction) return
+              const mapped = mapClientToViewport(event.clientX, event.clientY)
+              if (!mapped) return
+              onHumanBrowserAction({ kind: 'click', x: mapped.x, y: mapped.y })
+            }}
+            onWheel={(event) => {
+              if (!handoffActive || !onHumanBrowserAction) return
+              onHumanBrowserAction({ kind: 'scroll', deltaY: Math.round(event.deltaY) })
+            }}
+            onKeyDown={(event) => {
+              if (!handoffActive || !onHumanBrowserAction) return
+              if (event.key.length === 1) {
+                onHumanBrowserAction({ kind: 'type_text', text: event.key })
+                return
+              }
+              onHumanBrowserAction({ kind: 'press_key', key: event.key })
+            }}
+          >
+            <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-cover' />
+          </div>
+          {handoffActive && (
+            <div className='absolute inset-x-3 top-3 z-20 rounded-lg border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200'>
+              Manual handoff active: you can click, type, scroll, and press keys in the browser pane.
+            </div>
+          )}
           {clickAnim && (
             <div
               key={clickAnim.key}

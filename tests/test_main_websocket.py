@@ -93,6 +93,29 @@ class _StreamingNormalizationOrchestrator:
         return {"status": "completed", "session_id": session_id, "instruction": instruction}
 
 
+class _HandoffOrchestrator:
+    """Stub orchestrator that blocks on handoff_to_user then resumes once."""
+
+    def __init__(self) -> None:
+        self.executor = _StubExecutor()
+        self.resume_count = 0
+
+    async def execute_task(self, session_id: str, instruction: str, on_step=None, on_handoff_to_user=None, **kwargs):
+        if on_step:
+            await on_step({"type": "message", "content": "before-handoff"})
+        if on_handoff_to_user:
+            result = await on_handoff_to_user(
+                "CAPTCHA detected",
+                "Solve the CAPTCHA, then click Continue.",
+                "Continue after CAPTCHA",
+                "handoff-req-1",
+            )
+            self.resume_count += 1
+            if on_step:
+                await on_step({"type": "message", "content": f"after-handoff:{result}"})
+        return {"status": "completed", "session_id": session_id, "instruction": instruction}
+
+
 def test_navigate_start_always_receives_ack() -> None:
     """navigate_start should always return navigate_ack before execution updates."""
     main.orchestrator = _StubOrchestrator()
@@ -382,6 +405,64 @@ def test_websocket_user_input_response_logs_unknown_request_id(caplog) -> None:
             ws.send_json({"action": "stop"})
 
     assert "unknown/expired request_id=missing-request" in caplog.text
+
+
+def test_handoff_request_pauses_and_continues_once() -> None:
+    """handoff_continue should resume exactly once after handoff_request."""
+    orchestrator = _HandoffOrchestrator()
+    main.orchestrator = orchestrator
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate_start", "request_id": "req-handoff-1", "instruction": "login"})
+        _ = _recv_until_type(ws, "navigate_ack")
+        _ = _recv_until_type(ws, "step")  # before-handoff
+        handoff_step = _recv_until_type(ws, "step")
+        assert handoff_step["data"]["type"] == "handoff_request"
+        assert handoff_step["data"]["request_id"] == "handoff-req-1"
+        ws.send_json({"action": "handoff_continue", "request_id": "handoff-req-1"})
+        completion_step = _recv_until_type(ws, "step")
+        resumed_step = _recv_until_type(ws, "step")
+        result = _recv_until_type(ws, "result")
+        ws.send_json({"action": "stop_task"})
+
+    assert completion_step["data"]["content"] == "Human handoff completed. Resuming agent."
+    assert resumed_step["data"]["content"].startswith("after-handoff:")
+    assert result["data"]["status"] == "completed"
+    assert orchestrator.resume_count == 1
+
+
+def test_human_browser_action_rejected_without_active_handoff() -> None:
+    """human_browser_action should fail with E_BAD_PAYLOAD when no handoff is active."""
+    main.orchestrator = _StubOrchestrator()
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "human_browser_action", "kind": "click", "x": 100, "y": 100})
+        error = _recv_until_type(ws, "task_error")
+        ws.send_json({"action": "stop_task"})
+    assert error["data"]["code"] == "E_BAD_PAYLOAD"
+    assert "handoff is not active" in error["data"]["message"]
+
+
+def test_human_browser_action_rejects_malformed_payload_during_handoff() -> None:
+    """Malformed action payloads should be rejected even when handoff is active."""
+    main.orchestrator = _HandoffOrchestrator()
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "navigate_start", "request_id": "req-handoff-2", "instruction": "login"})
+        _ = _recv_until_type(ws, "navigate_ack")
+        _ = _recv_until_type(ws, "step")
+        _ = _recv_until_type(ws, "step")  # handoff_request
+        ws.send_json({"action": "human_browser_action", "kind": "click", "x": "bad", "y": 100})
+        error = _recv_until_type(ws, "task_error")
+        ws.send_json({"action": "handoff_continue", "request_id": "handoff-req-1"})
+        _ = _recv_until_type(ws, "result")
+        ws.send_json({"action": "stop_task"})
+    assert error["data"]["code"] == "E_BAD_PAYLOAD"
+    assert "rejected" in error["data"]["message"]
 
 
 def test_websocket_stream_normalizes_steps_and_reasoning_deltas_incrementally() -> None:

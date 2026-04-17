@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     NAVIGATION_TASK_TIMEOUT_SECONDS: int = 180
     NAVIGATION_MAX_TOOL_CALLS: int = 100
     NAVIGATION_ACK_TIMEOUT_SECONDS: int = 5
+    NAVIGATION_HANDOFF_TIMEOUT_SECONDS: int = 600
 
     # ── Gemini-specific (kept for backwards compatibility) ───────────
     GEMINI_MODEL: str = "gemini-2.5-pro"

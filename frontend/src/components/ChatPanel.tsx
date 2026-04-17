@@ -54,6 +54,7 @@ export interface ChatPanelProps {
   onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
+  onHandoffContinue?: (requestId: string) => void
   provider: string
   model: string
   /** @deprecated use selectedMode */
@@ -87,7 +88,7 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'handoff_request' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router'
 
 interface ChatMessage {
   id: string
@@ -103,6 +104,8 @@ interface ChatMessage {
   subagentStatus?: string
   attachments?: AttachedFile[]
   question?: string
+  instructions?: string
+  continueLabel?: string
   options?: string[]
   requestId?: string
   stepId?: string
@@ -292,6 +295,29 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
         })
       } catch {
         msgs.push({ id: entry.id, role: 'user_input', text: normalizeTextPreservingMarkdown(msg.replace('[ask_user_input]', '').trim()), options: [] })
+      }
+      continue
+    }
+
+    if (entry.rawStepType === 'handoff_request' || msg.includes('[handoff_to_user]')) {
+      try {
+        const jsonStr = msg.replace('[handoff_to_user]', '').trim()
+        const parsed = JSON.parse(jsonStr)
+        msgs.push({
+          id: entry.id,
+          role: 'handoff_request',
+          text: parsed.reason ?? jsonStr,
+          instructions: parsed.instructions,
+          continueLabel: parsed.continue_label,
+          requestId: parsed.request_id,
+        })
+      } catch {
+        msgs.push({
+          id: entry.id,
+          role: 'handoff_request',
+          text: normalizeTextPreservingMarkdown(msg.replace('[handoff_to_user]', '').trim()),
+          requestId: entry.id,
+        })
       }
       continue
     }
@@ -1139,6 +1165,42 @@ function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
   )
 }
 
+export function HandoffRequestCard({
+  reason,
+  instructions,
+  continueLabel,
+  requestId,
+  onContinue,
+}: {
+  reason: string
+  instructions?: string
+  continueLabel?: string
+  requestId: string
+  onContinue: (requestId: string) => void
+}) {
+  return (
+    <div className='my-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 overflow-hidden'>
+      <div className='flex items-center gap-2 border-b border-amber-400/20 px-4 py-3'>
+        <IcoGlobe className='h-4 w-4 text-amber-300' />
+        <p className='text-xs font-semibold text-amber-200'>Manual browser handoff required</p>
+      </div>
+      <div className='space-y-2 px-4 py-3'>
+        <p className='text-sm text-zinc-100'>{reason}</p>
+        {instructions && <p className='text-xs text-zinc-300 whitespace-pre-wrap'>{instructions}</p>}
+      </div>
+      <div className='border-t border-amber-400/20 px-4 py-3'>
+        <button
+          type='button'
+          onClick={() => onContinue(requestId)}
+          className='rounded-lg bg-amber-300 px-3 py-2 text-xs font-semibold text-zinc-900 hover:bg-amber-200'
+        >
+          {continueLabel || 'Continue'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── LivePlanCard — animated step checklist for announce_plan ────────────────
 function LivePlanCard({ steps, completedTools }: { steps: string[]; completedTools: Set<string> }) {
   if (!steps.length) return null
@@ -1482,6 +1544,7 @@ export function ChatPanel({
   onUserInputResponse,
   onPlanConfirm,
   onPlanReject,
+  onHandoffContinue,
   provider,
   model,
   agentMode,
@@ -2002,6 +2065,19 @@ export function ChatPanel({
               <PlanConfirmCard key={msg.id} plan={msg.text} requestId={msg.requestId ?? msg.id}
                 onConfirm={(reqId) => { onPlanConfirm?.(reqId) }}
                 onReject={(reqId) => { onPlanReject?.(reqId) }}
+              />
+            )
+          }
+
+          if (msg.role === 'handoff_request') {
+            return (
+              <HandoffRequestCard
+                key={msg.id}
+                reason={msg.text}
+                instructions={msg.instructions}
+                continueLabel={msg.continueLabel}
+                requestId={msg.requestId ?? msg.id}
+                onContinue={(reqId) => onHandoffContinue?.(reqId)}
               />
             )
           }

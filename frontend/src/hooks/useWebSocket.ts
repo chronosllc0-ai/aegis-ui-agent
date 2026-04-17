@@ -207,6 +207,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([])
   const [subAgentSteps, setSubAgentSteps] = useState<Record<string, SubAgentStep[]>>({})
   const [activeExecutionMode, setActiveExecutionMode] = useState<AgentModeId>('orchestrator')
+  const [handoffActive, setHandoffActive] = useState(false)
+  const [handoffRequestId, setHandoffRequestId] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
@@ -452,6 +454,27 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           return
         }
 
+        if (stepType === 'handoff_request') {
+          setHandoffActive(true)
+          setHandoffRequestId(String(payload.data?.request_id ?? ''))
+          appendLog({
+            message: `[handoff_to_user] ${JSON.stringify({
+              request_id: String(payload.data?.request_id ?? ''),
+              reason: String(payload.data?.reason ?? payload.data?.content ?? 'Manual browser handoff required'),
+              instructions: String(payload.data?.instructions ?? ''),
+              continue_label: String(payload.data?.continue_label ?? ''),
+            })}`,
+            taskId,
+            type: 'step',
+            status: 'in_progress',
+            rawStepType: 'handoff_request',
+          })
+          return
+        } else if (stepType === 'handoff_complete') {
+          setHandoffActive(false)
+          setHandoffRequestId(null)
+        }
+
         // ── stream_done: mark bubble as complete ───────────────────────────
         if (stepType === 'stream_done') {
           const msgId = String(payload.data?.message_id ?? '')
@@ -557,6 +580,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'result') {
         setIsWorking(false)
+        setHandoffActive(false)
+        setHandoffRequestId(null)
         setExecutionState('completed')
         const persisted = readPersistedThinking(taskId)
         if (persisted.length > 0) {
@@ -888,6 +913,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'error') {
         setIsWorking(false)
+        setHandoffActive(false)
+        setHandoffRequestId(null)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
         return
       }
@@ -996,6 +1023,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setSubAgents([])
     setSubAgentSteps({})
     setActiveExecutionMode('orchestrator')
+    setHandoffActive(false)
+    setHandoffRequestId(null)
     reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
   }, [])
@@ -1054,5 +1083,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   }, [isWorking, taskActivity])
 
 
-  return { connectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, handoffActive, handoffRequestId, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }
