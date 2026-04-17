@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
@@ -485,6 +486,61 @@ def test_handoff_timeout_setting_with_invalid_type_falls_back_without_crashing()
 
     assert result["type"] == "result"
     assert result["data"]["status"] == "completed"
+
+
+def test_disabled_runtime_control_increments_auto_mode_blocked_send_metric() -> None:
+    """Blocked runtime control actions should increment auto-mode blocked-send telemetry."""
+    main.orchestrator = _StubOrchestrator()
+    initial = main.runtime_telemetry.auto_mode_blocked_sends
+    client = TestClient(main.app)
+
+    with client.websocket_connect("/ws/navigate") as ws:
+        _ = ws.receive_json()
+        ws.send_json({"action": "queue", "instruction": "should be blocked"})
+        _ = _recv_until_type(ws, "task_error")
+        ws.send_json({"action": "stop_task"})
+
+    assert main.runtime_telemetry.auto_mode_blocked_sends == initial + 1
+
+
+def test_runtime_mode_change_increments_control_mode_change_metric() -> None:
+    """Mode changes should increment control_mode_changes telemetry."""
+    runtime = main.SessionRuntime()
+    initial = main.runtime_telemetry.control_mode_changes
+
+    runtime.settings["agent_mode"] = "orchestrator"
+    selected_mode, mode_valid, mode_error = main._apply_runtime_mode_update(runtime, "code")
+
+    assert selected_mode == "code"
+    assert mode_valid is True
+    assert mode_error is None
+    assert main.runtime_telemetry.control_mode_changes == initial + 1
+
+
+def test_workflow_steps_do_not_persist_into_chat_history() -> None:
+    """Workflow graph updates should stay in workflow/action views, not user chat history."""
+    main.orchestrator = _StubOrchestrator()
+    original_log_web_message = main._log_web_message
+    main._log_web_message = AsyncMock()  # type: ignore[method-assign]
+    client = TestClient(main.app)
+
+    try:
+        with client.websocket_connect("/ws/navigate") as ws:
+            _ = ws.receive_json()
+            ws.send_json({"action": "navigate_start", "request_id": "req-noise", "instruction": "hello"})
+            _ = _recv_until_type(ws, "navigate_ack")
+            _ = _recv_until_type(ws, "step")
+            _ = _recv_until_type(ws, "result")
+            ws.send_json({"action": "stop_task"})
+
+        workflow_log_calls = [
+            call
+            for call in main._log_web_message.await_args_list  # type: ignore[attr-defined]
+            if call.kwargs.get("metadata", {}).get("action") == "workflow_step"
+        ]
+        assert workflow_log_calls == []
+    finally:
+        main._log_web_message = original_log_web_message  # type: ignore[assignment]
 
 
 def test_websocket_stream_normalizes_steps_and_reasoning_deltas_incrementally() -> None:
