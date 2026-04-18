@@ -5972,3 +5972,43 @@
 ### Blockers / decisions
 - Decision: retained `get_session()` dependency generator and added explicit `aclose()` lifecycle handling for this non-DI call site.
 - Blocker: none.
+
+## Session 6.29 - April 18, 2026 (Route pairing/policy internals to Observability Event Log)
+
+### What changed
+- Extended runtime observability filters in `backend/runtime_telemetry.py`:
+  - `RuntimeEventStore.list_events(...)` now supports `platform`, `integration`, `user`, and `status` filters in addition to session/subsystem/level.
+  - Added user matching across common detail keys (`user_id`, `external_user_id`, `owner_uid`, `actor_user_id`).
+- Updated ingress/pairing/policy event emission in `main.py`:
+  - added `ingress.blocked` runtime events for ingress denials,
+  - added `pairing.requested`, `pairing.approved`, `pairing.denied`, and `pairing.revoked` category events,
+  - added `policy.updated` event when integration ingress policy is changed,
+  - changed legacy `pairing_approved` event category to `pairing.approved`.
+- Updated observability API route in `main.py` (`/api/observability/events`) to accept and forward the new filters: `platform`, `integration`, `user`, `status`.
+- Updated frontend Observability Event Log UI (`frontend/src/components/settings/ObservabilityTab.tsx`):
+  - added filter inputs for platform/integration/user/status,
+  - wired these query params to Event Log requests,
+  - reset now clears all filter fields.
+- Kept chat transcript clean for pairing/policy internals in `frontend/src/components/ChatPanel.tsx`:
+  - `isSystemInternalMessage(...)` now hides messages with internal `metadata.source` values related to pairing/policy internals.
+- Added/updated tests:
+  - updated `tests/test_pairing_bootstrap_runtime.py` to assert new `pairing.approved` category,
+  - added `tests/test_runtime_event_store_filters.py` to cover platform/integration/user/status filters.
+
+### What works / what does not
+- Works:
+  - Pairing/policy ingress internals are now emitted as explicit observability categories for Event Log usage.
+  - Event Log can be filtered by platform, integration, user, and status end-to-end (backend + frontend).
+  - Chat message hydration now suppresses pairing/policy internal source messages to keep transcript focused.
+- Does not / caveats:
+  - Existing AGENTS delivery checklist caveat remains: `backend/pydantic_adk_runner.py` is still missing, so the compile command referencing it fails.
+
+### Next steps
+1. Add integration endpoint tests to assert specific `ingress.blocked` statuses across Telegram/Slack/Discord ingress branches.
+2. Consider normalizing all pairing status values to a fixed enum in event details for stricter observability dashboards.
+3. Add frontend tests for ObservabilityTab filter query construction and reset behavior.
+
+### Blockers / decisions
+- Decision: adopted dot-notation event categories for pairing/policy/ingress (`pairing.*`, `policy.updated`, `ingress.blocked`) to match requested taxonomy.
+- Decision: chat suppression of internals is source-metadata based (`pairing_policy`, `pairing_approval`, `integration_policy`, `policy_update`) to avoid hiding user-visible content.
+- Blocker: `backend/pydantic_adk_runner.py` absent in repo (known existing checklist limitation).
