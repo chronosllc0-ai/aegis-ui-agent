@@ -5637,3 +5637,51 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.21 - April 18, 2026 (channel pairing + ingress policy enforcement)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added new integration access-control database models in `backend/database.py`:
+  - `PairedChannelIdentity`
+  - `IntegrationAccessPolicy`
+  - `PairingRequestAudit`
+- Implemented policy + pairing APIs in `main.py`:
+  - `GET /api/integrations/{platform}/{integration_id}/pairing/pending`
+  - `POST /api/integrations/{platform}/{integration_id}/pairing/{request_id}/approve`
+  - `POST /api/integrations/{platform}/{integration_id}/pairing/{request_id}/deny`
+  - `GET /api/integrations/{platform}/{integration_id}/policy`
+  - `PUT /api/integrations/{platform}/{integration_id}/policy`
+- Added message ingress enforcement in Telegram/Slack/Discord webhook paths:
+  - resolves external sender identity
+  - enforces DM/group policy
+  - enforces pairing-required access
+  - rejects unapproved users with clear channel response
+- Added short-lived pairing code flow with TTL + one-time verification (`/pair <code>`), including automatic request creation and code consumption semantics.
+- Added audit event writes for request/create/approve/deny/revoke transitions.
+- Added sender-identity resolver helpers in `integrations/telegram.py`, `integrations/slack_connector.py`, and `integrations/discord.py`.
+
+### What's Working
+- Unpaired external users are blocked by ingress policy when pairing is required and receive explicit guidance.
+- Paired/approved users are allowed through ingress policy checks.
+- Denied users remain blocked via stored pair status + pending request flow.
+- Owners can review pending requests and approve/deny them via authenticated API routes.
+
+### What's NOT Working Yet
+- Pairing code delivery is currently message-based and stored in audit notes for operational visibility; no dedicated out-of-band owner notification channel was added in this pass.
+
+### Next Steps
+1. Add targeted tests for policy endpoints and webhook ingress gating across Telegram/Slack/Discord payload variants.
+2. Consider a dedicated admin UX for pairing requests and code lifecycle state.
+3. Add optional webhook signature hardening for Slack/Discord ingress paths if not already covered elsewhere.
+
+### Decisions Made
+- Chose DB-backed policy defaults to make behavior deterministic across process restarts.
+- Used one-time pairing code hashing with TTL checks to minimize leakage risk.
+- Kept enforcement centralized in `main.py` ingress path for consistent cross-platform behavior.
+
+### Blockers
+- None.

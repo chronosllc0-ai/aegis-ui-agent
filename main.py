@@ -6,10 +6,13 @@ import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 import contextlib
+from datetime import datetime, timedelta, timezone
+import hashlib
 from http.cookies import SimpleCookie
 import json
 import logging
 from pathlib import Path
+import secrets
 import time as _time
 from typing import Any
 from urllib.parse import urlparse
@@ -20,7 +23,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Request, WebSocket, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -82,7 +85,17 @@ from backend.session_identity import (
     normalize_or_bridge_session_id,
     session_id_to_conversation_id,
 )
-from backend.database import get_session, init_db, create_tables, SupportThread, SupportMessage, UserConnection
+from backend.database import (
+    IntegrationAccessPolicy,
+    PairedChannelIdentity,
+    PairingRequestAudit,
+    SupportMessage,
+    SupportThread,
+    UserConnection,
+    create_tables,
+    get_session,
+    init_db,
+)
 from backend.credit_rates import CREDIT_RATES, get_tier
 from backend.credit_service import check_credits, get_or_create_balance, get_usage_history, get_usage_summary, record_usage
 from backend.key_management import KeyManager
@@ -614,6 +627,255 @@ _stream_subscribers: dict[str, dict[str, Any]] = {}
 
 # Bot config: integration_id -> config dict
 _bot_configs: dict[str, dict[str, Any]] = {}
+PAIRING_CODE_TTL_SECONDS = 600
+
+
+def _hash_pairing_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _generate_pairing_code() -> str:
+    return secrets.token_urlsafe(6).replace("-", "").replace("_", "").upper()[:8]
+
+
+async def _get_or_create_integration_policy(
+    db: AsyncSession,
+    *,
+    platform: str,
+    integration_id: str,
+) -> IntegrationAccessPolicy:
+    result = await db.execute(
+        select(IntegrationAccessPolicy).where(
+            and_(
+                IntegrationAccessPolicy.platform == platform,
+                IntegrationAccessPolicy.integration_id == integration_id,
+            )
+        )
+    )
+    policy = result.scalar_one_or_none()
+    if policy is not None:
+        return policy
+    policy = IntegrationAccessPolicy(platform=platform, integration_id=integration_id)
+    db.add(policy)
+    await db.commit()
+    await db.refresh(policy)
+    return policy
+
+
+async def _record_pairing_audit(
+    db: AsyncSession,
+    *,
+    platform: str,
+    integration_id: str,
+    external_user_id: str,
+    external_username: str | None,
+    external_channel_id: str | None,
+    chat_type: str | None,
+    event_type: str,
+    status: str,
+    actor_user_id: str | None = None,
+    pairing_code_hash: str | None = None,
+    code_expires_at: datetime | None = None,
+    code_used_at: datetime | None = None,
+    notes: str | None = None,
+) -> PairingRequestAudit:
+    event = PairingRequestAudit(
+        platform=platform,
+        integration_id=integration_id,
+        external_user_id=external_user_id,
+        external_username=external_username,
+        external_channel_id=external_channel_id,
+        chat_type=chat_type,
+        event_type=event_type,
+        status=status,
+        actor_user_id=actor_user_id,
+        pairing_code_hash=pairing_code_hash,
+        code_expires_at=code_expires_at,
+        code_used_at=code_used_at,
+        notes=notes,
+    )
+    db.add(event)
+    await db.flush()
+    return event
+
+
+def _resolve_external_sender_identity(platform: str, payload: dict[str, Any]) -> dict[str, str | None]:
+    if platform == "telegram":
+        return TelegramIntegration.extract_sender_identity(payload)
+    if platform == "slack":
+        return SlackIntegration.extract_sender_identity(payload)
+    if platform == "discord":
+        return DiscordIntegration.extract_sender_identity(payload)
+    return {"external_user_id": None, "external_username": None, "chat_type": None, "chat_id": None}
+
+
+async def _try_consume_pairing_code(
+    db: AsyncSession,
+    *,
+    platform: str,
+    integration_id: str,
+    external_user_id: str,
+    external_username: str | None,
+    external_channel_id: str | None,
+    chat_type: str | None,
+    pairing_code: str,
+) -> bool:
+    now = datetime.now(timezone.utc)
+    code_hash = _hash_pairing_code(pairing_code.strip().upper())
+    pending_result = await db.execute(
+        select(PairingRequestAudit).where(
+            and_(
+                PairingRequestAudit.platform == platform,
+                PairingRequestAudit.integration_id == integration_id,
+                PairingRequestAudit.external_user_id == external_user_id,
+                PairingRequestAudit.status == "pending",
+                PairingRequestAudit.pairing_code_hash == code_hash,
+            )
+        )
+    )
+    pending = pending_result.scalar_one_or_none()
+    if pending is None or pending.code_expires_at is None:
+        return False
+    if pending.code_expires_at.replace(tzinfo=timezone.utc) < now:
+        pending.status = "expired"
+        await db.commit()
+        return False
+
+    pending.status = "approved"
+    pending.code_used_at = now
+    pair_result = await db.execute(
+        select(PairedChannelIdentity).where(
+            and_(
+                PairedChannelIdentity.platform == platform,
+                PairedChannelIdentity.integration_id == integration_id,
+                PairedChannelIdentity.external_user_id == external_user_id,
+            )
+        )
+    )
+    pair = pair_result.scalar_one_or_none()
+    if pair is None:
+        pair = PairedChannelIdentity(
+            platform=platform,
+            integration_id=integration_id,
+            external_user_id=external_user_id,
+            external_username=external_username,
+            status="approved",
+            metadata_json=json.dumps({"chat_id": external_channel_id, "chat_type": chat_type}),
+        )
+        db.add(pair)
+    else:
+        pair.status = "approved"
+        pair.external_username = external_username or pair.external_username
+        pair.last_seen_at = now
+    await _record_pairing_audit(
+        db,
+        platform=platform,
+        integration_id=integration_id,
+        external_user_id=external_user_id,
+        external_username=external_username,
+        external_channel_id=external_channel_id,
+        chat_type=chat_type,
+        event_type="create",
+        status="approved",
+        actor_user_id=None,
+        code_used_at=now,
+        notes="Pairing code verified",
+    )
+    await db.commit()
+    return True
+
+
+async def _enforce_ingress_policy(
+    *,
+    platform: str,
+    integration_id: str,
+    payload: dict[str, Any],
+    text_content: str | None,
+) -> tuple[bool, str | None]:
+    external = _resolve_external_sender_identity(platform, payload)
+    external_user_id = str(external.get("external_user_id") or "").strip()
+    if not external_user_id:
+        return False, None
+    external_username = str(external.get("external_username") or "").strip() or None
+    chat_type = str(external.get("chat_type") or "").strip().lower() or "group"
+    external_channel_id = str(external.get("chat_id") or "").strip() or None
+
+    session_iter = get_session()
+    db = await anext(session_iter)
+    try:
+        policy = await _get_or_create_integration_policy(db, platform=platform, integration_id=integration_id)
+        if chat_type == "dm" and not policy.allow_direct_messages:
+            return False, "Direct messages are disabled for this integration."
+        if chat_type != "dm" and not policy.allow_group_messages:
+            return False, "Group messages are disabled for this integration."
+        if not policy.pairing_required:
+            return True, None
+
+        pair_result = await db.execute(
+            select(PairedChannelIdentity).where(
+                and_(
+                    PairedChannelIdentity.platform == platform,
+                    PairedChannelIdentity.integration_id == integration_id,
+                    PairedChannelIdentity.external_user_id == external_user_id,
+                )
+            )
+        )
+        pair = pair_result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if pair and pair.status == "approved":
+            pair.last_seen_at = now
+            await db.commit()
+            return True, None
+
+        if text_content and text_content.lower().startswith("/pair "):
+            pairing_code = text_content.split(" ", 1)[1].strip()
+            if pairing_code and await _try_consume_pairing_code(
+                db,
+                platform=platform,
+                integration_id=integration_id,
+                external_user_id=external_user_id,
+                external_username=external_username,
+                external_channel_id=external_channel_id,
+                chat_type=chat_type,
+                pairing_code=pairing_code,
+            ):
+                return False, "✅ Pairing complete. You can now run commands."
+            return False, "❌ Invalid or expired pairing code."
+
+        existing_pending = await db.execute(
+            select(PairingRequestAudit).where(
+                and_(
+                    PairingRequestAudit.platform == platform,
+                    PairingRequestAudit.integration_id == integration_id,
+                    PairingRequestAudit.external_user_id == external_user_id,
+                    PairingRequestAudit.status == "pending",
+                )
+            )
+        )
+        pending = existing_pending.scalar_one_or_none()
+        if pending is None:
+            pairing_code = _generate_pairing_code()
+            await _record_pairing_audit(
+                db,
+                platform=platform,
+                integration_id=integration_id,
+                external_user_id=external_user_id,
+                external_username=external_username,
+                external_channel_id=external_channel_id,
+                chat_type=chat_type,
+                event_type="request",
+                status="pending",
+                pairing_code_hash=_hash_pairing_code(pairing_code),
+                code_expires_at=now + timedelta(seconds=PAIRING_CODE_TTL_SECONDS),
+                notes=f"Pairing requested by external identity. code={pairing_code}",
+            )
+            await db.commit()
+            return False, (
+                f"{policy.reject_message} Pairing code: `{pairing_code}` (expires in {PAIRING_CODE_TTL_SECONDS // 60}m)."
+            )
+        return False, policy.reject_message
+    finally:
+        await session_iter.aclose()
 
 
 def _apply_runtime_mode_update(
@@ -3027,6 +3289,16 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     chat_id = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
+    allowed, reject_message = await _enforce_ingress_policy(
+        platform="telegram",
+        integration_id=integration_id,
+        payload=update if isinstance(update, dict) else {},
+        text_content=text_content,
+    )
+    if not allowed:
+        if chat_id and reject_message:
+            await _send_channel_text("telegram", integration_id, chat_id, reject_message, log_source="pairing_policy")
+        return _channel_webhook_response(result)
 
     if chat_id and text_content and text_content.startswith("/"):
         bot_cfg = _bot_configs.get(f"telegram:{integration_id}", {})
@@ -3312,6 +3584,16 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
     channel = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
+    allowed, reject_message = await _enforce_ingress_policy(
+        platform="slack",
+        integration_id=integration_id,
+        payload=payload if isinstance(payload, dict) else {},
+        text_content=text_content,
+    )
+    if not allowed:
+        if channel and reject_message:
+            await _send_channel_text("slack", integration_id, channel, reject_message, log_source="pairing_policy")
+        return _channel_webhook_response(result)
     if channel and text_content and text_content.startswith("/"):
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -3536,6 +3818,16 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
     channel = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
+    allowed, reject_message = await _enforce_ingress_policy(
+        platform="discord",
+        integration_id=integration_id,
+        payload=payload if isinstance(payload, dict) else {},
+        text_content=text_content,
+    )
+    if not allowed:
+        if channel and reject_message:
+            await _send_channel_text("discord", integration_id, channel, reject_message, log_source="pairing_policy")
+        return _channel_webhook_response(result)
     if channel and text_content and text_content.startswith("/"):
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -4432,6 +4724,256 @@ def _parse_telegram_mode_callback(update: dict[str, Any]) -> tuple[str | None, b
         return None, False
     resolved_mode, is_valid = validate_requested_mode(mode_data)
     return resolved_mode, is_valid
+
+
+def _assert_integration_owner(request: Request, platform: str, integration_id: str) -> str:
+    user = _get_current_user(request)
+    owner_uid = str(_get_channel_config(platform, integration_id).get("owner_user_id", "")).strip()
+    if not owner_uid:
+        raise HTTPException(status_code=404, detail="Integration owner not configured")
+    if owner_uid != user["uid"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return owner_uid
+
+
+@app.get("/api/integrations/{platform}/{integration_id}/pairing/pending")
+async def get_pending_pairing_requests(
+    platform: str,
+    integration_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    _assert_integration_owner(request, platform, integration_id)
+    now = datetime.now(timezone.utc)
+    rows = await session.execute(
+        select(PairingRequestAudit).where(
+            and_(
+                PairingRequestAudit.platform == platform,
+                PairingRequestAudit.integration_id == integration_id,
+                PairingRequestAudit.status == "pending",
+                PairingRequestAudit.event_type == "request",
+            )
+        )
+    )
+    pending: list[dict[str, Any]] = []
+    for row in rows.scalars().all():
+        if row.code_expires_at and row.code_expires_at.replace(tzinfo=timezone.utc) < now:
+            row.status = "expired"
+            continue
+        pending.append(
+            {
+                "request_id": row.id,
+                "external_user_id": row.external_user_id,
+                "external_username": row.external_username,
+                "chat_type": row.chat_type,
+                "external_channel_id": row.external_channel_id,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "code_expires_at": row.code_expires_at.isoformat() if row.code_expires_at else None,
+            }
+        )
+    await session.commit()
+    return {"ok": True, "pending": pending}
+
+
+@app.post("/api/integrations/{platform}/{integration_id}/pairing/{request_id}/approve")
+async def approve_pairing_request(
+    platform: str,
+    integration_id: str,
+    request_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    actor_user_id = _assert_integration_owner(request, platform, integration_id)
+    result = await session.execute(
+        select(PairingRequestAudit).where(
+            and_(
+                PairingRequestAudit.id == request_id,
+                PairingRequestAudit.platform == platform,
+                PairingRequestAudit.integration_id == integration_id,
+            )
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pairing request not found")
+    row.status = "approved"
+    row.actor_user_id = actor_user_id
+    row.code_used_at = datetime.now(timezone.utc)
+    identity_result = await session.execute(
+        select(PairedChannelIdentity).where(
+            and_(
+                PairedChannelIdentity.platform == platform,
+                PairedChannelIdentity.integration_id == integration_id,
+                PairedChannelIdentity.external_user_id == row.external_user_id,
+            )
+        )
+    )
+    identity = identity_result.scalar_one_or_none()
+    if identity is None:
+        identity = PairedChannelIdentity(
+            platform=platform,
+            integration_id=integration_id,
+            external_user_id=row.external_user_id,
+            external_username=row.external_username,
+            status="approved",
+            paired_by_user_id=actor_user_id,
+            metadata_json=json.dumps({"chat_type": row.chat_type, "chat_id": row.external_channel_id}),
+        )
+        session.add(identity)
+        await _record_pairing_audit(
+            session,
+            platform=platform,
+            integration_id=integration_id,
+            external_user_id=row.external_user_id,
+            external_username=row.external_username,
+            external_channel_id=row.external_channel_id,
+            chat_type=row.chat_type,
+            event_type="create",
+            status="approved",
+            actor_user_id=actor_user_id,
+            notes="Created approved pair during admin approval",
+        )
+    else:
+        identity.status = "approved"
+        identity.external_username = row.external_username or identity.external_username
+        identity.paired_by_user_id = actor_user_id
+    await _record_pairing_audit(
+        session,
+        platform=platform,
+        integration_id=integration_id,
+        external_user_id=row.external_user_id,
+        external_username=row.external_username,
+        external_channel_id=row.external_channel_id,
+        chat_type=row.chat_type,
+        event_type="approve",
+        status="approved",
+        actor_user_id=actor_user_id,
+        notes=f"Approved request {request_id}",
+    )
+    await session.commit()
+    return {"ok": True, "request_id": request_id, "status": "approved"}
+
+
+@app.post("/api/integrations/{platform}/{integration_id}/pairing/{request_id}/deny")
+async def deny_pairing_request(
+    platform: str,
+    integration_id: str,
+    request_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    actor_user_id = _assert_integration_owner(request, platform, integration_id)
+    result = await session.execute(
+        select(PairingRequestAudit).where(
+            and_(
+                PairingRequestAudit.id == request_id,
+                PairingRequestAudit.platform == platform,
+                PairingRequestAudit.integration_id == integration_id,
+            )
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pairing request not found")
+    row.status = "denied"
+    row.actor_user_id = actor_user_id
+    identity_result = await session.execute(
+        select(PairedChannelIdentity).where(
+            and_(
+                PairedChannelIdentity.platform == platform,
+                PairedChannelIdentity.integration_id == integration_id,
+                PairedChannelIdentity.external_user_id == row.external_user_id,
+            )
+        )
+    )
+    identity = identity_result.scalar_one_or_none()
+    if identity is not None and identity.status == "approved":
+        identity.status = "revoked"
+        await _record_pairing_audit(
+            session,
+            platform=platform,
+            integration_id=integration_id,
+            external_user_id=row.external_user_id,
+            external_username=row.external_username,
+            external_channel_id=row.external_channel_id,
+            chat_type=row.chat_type,
+            event_type="revoke",
+            status="revoked",
+            actor_user_id=actor_user_id,
+            notes=f"Revoked previously approved identity while denying {request_id}",
+        )
+    elif identity is None:
+        session.add(
+            PairedChannelIdentity(
+                platform=platform,
+                integration_id=integration_id,
+                external_user_id=row.external_user_id,
+                external_username=row.external_username,
+                status="denied",
+                paired_by_user_id=actor_user_id,
+            )
+        )
+    else:
+        identity.status = "denied"
+    await _record_pairing_audit(
+        session,
+        platform=platform,
+        integration_id=integration_id,
+        external_user_id=row.external_user_id,
+        external_username=row.external_username,
+        external_channel_id=row.external_channel_id,
+        chat_type=row.chat_type,
+        event_type="deny",
+        status="denied",
+        actor_user_id=actor_user_id,
+        notes=f"Denied request {request_id}",
+    )
+    await session.commit()
+    return {"ok": True, "request_id": request_id, "status": "denied"}
+
+
+@app.get("/api/integrations/{platform}/{integration_id}/policy")
+async def get_integration_policy(
+    platform: str,
+    integration_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    _assert_integration_owner(request, platform, integration_id)
+    policy = await _get_or_create_integration_policy(session, platform=platform, integration_id=integration_id)
+    return {
+        "ok": True,
+        "policy": {
+            "pairing_required": bool(policy.pairing_required),
+            "allow_direct_messages": bool(policy.allow_direct_messages),
+            "allow_group_messages": bool(policy.allow_group_messages),
+            "reject_message": policy.reject_message,
+            "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+        },
+    }
+
+
+@app.put("/api/integrations/{platform}/{integration_id}/policy")
+async def update_integration_policy(
+    platform: str,
+    integration_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    actor_user_id = _assert_integration_owner(request, platform, integration_id)
+    policy = await _get_or_create_integration_policy(session, platform=platform, integration_id=integration_id)
+    if "pairing_required" in payload:
+        policy.pairing_required = bool(payload.get("pairing_required"))
+    if "allow_direct_messages" in payload:
+        policy.allow_direct_messages = bool(payload.get("allow_direct_messages"))
+    if "allow_group_messages" in payload:
+        policy.allow_group_messages = bool(payload.get("allow_group_messages"))
+    if "reject_message" in payload:
+        policy.reject_message = str(payload.get("reject_message") or policy.reject_message).strip() or policy.reject_message
+    policy.updated_by_user_id = actor_user_id
+    await session.commit()
+    return {"ok": True}
 
 
 # ── Bot config endpoints ─────────────────────────────────────────────

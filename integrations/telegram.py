@@ -377,6 +377,26 @@ class TelegramIntegration(BaseIntegration):
         raw_level = data[10:].strip().lower().replace("-", "").replace(" ", "")
         return raw_level or None
 
+    @staticmethod
+    def extract_sender_identity(update: dict[str, Any]) -> dict[str, str | None]:
+        """Resolve canonical external sender identity and chat context."""
+        callback_query = update.get("callback_query") if isinstance(update.get("callback_query"), dict) else {}
+        callback_sender = callback_query.get("from") if isinstance(callback_query.get("from"), dict) else {}
+        message = update.get("message") if isinstance(update.get("message"), dict) else {}
+        edited_message = update.get("edited_message") if isinstance(update.get("edited_message"), dict) else {}
+        envelope = message or edited_message
+        sender = callback_sender or (envelope.get("from") if isinstance(envelope.get("from"), dict) else {})
+        chat = callback_query.get("message", {}).get("chat", {}) if callback_query else envelope.get("chat", {})
+        chat_type = str(chat.get("type") or "").strip().lower()
+        normalized_type = "dm" if chat_type == "private" else ("group" if chat_type else None)
+        username = sender.get("username") or sender.get("first_name") or sender.get("last_name")
+        return {
+            "external_user_id": str(sender.get("id")) if sender.get("id") is not None else None,
+            "external_username": str(username).strip() if username else None,
+            "chat_type": normalized_type,
+            "chat_id": str(chat.get("id")) if chat.get("id") is not None else None,
+        }
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if advanced_tool_blocked("telegram", tool_name):
             return {

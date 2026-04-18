@@ -194,6 +194,24 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
                 return raw[8:] or None
         return None
 
+    @staticmethod
+    def extract_sender_identity(payload: dict[str, Any]) -> dict[str, str | None]:
+        """Resolve canonical external sender identity and chat context."""
+        member = payload.get("member") if isinstance(payload.get("member"), dict) else {}
+        member_user = member.get("user") if isinstance(member.get("user"), dict) else {}
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        author = payload.get("author") if isinstance(payload.get("author"), dict) else {}
+        sender = member_user or user or author
+        channel_type = payload.get("channel_type")
+        normalized_type = "dm" if channel_type == 1 else ("group" if channel_type is not None else None)
+        username = sender.get("username") or sender.get("global_name")
+        return {
+            "external_user_id": str(sender.get("id")).strip() if sender.get("id") else None,
+            "external_username": str(username).strip() if username else None,
+            "chat_type": normalized_type,
+            "chat_id": str(payload.get("channel_id")).strip() if payload.get("channel_id") else None,
+        }
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if advanced_tool_blocked("discord", tool_name):
             return {
