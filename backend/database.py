@@ -155,6 +155,38 @@ class ConversationMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ChatSession(Base):
+    """Session-v2 record for chat threads with optional parent session."""
+
+    __tablename__ = "chat_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "session_id", name="uq_chat_sessions_user_platform_session"),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    platform = Column(String(50), nullable=False, index=True)
+    session_id = Column(String(255), nullable=False, index=True)
+    parent_session_id = Column(String(255), nullable=True, index=True)
+    title = Column(String(500))
+    status = Column(String(20), default="active", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ChatSessionMessage(Base):
+    """Session-v2 message row associated with a chat session."""
+
+    __tablename__ = "chat_session_messages"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    session_ref_id = Column(String(255), ForeignKey("chat_sessions.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    metadata_json = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PaymentMethod(Base):
     """Stored payment method for a user."""
 

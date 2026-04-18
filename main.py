@@ -70,6 +70,13 @@ from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
 from backend.runtime_telemetry import RuntimeEventStore, RuntimeTelemetry
 from backend.conversation_service import append_message, get_or_create_conversation
+from backend.migration_rollout import (
+    feature_flags_snapshot,
+    legacy_conversation_mode_enabled,
+    sessions_dual_write_enabled,
+    sessions_v2_enabled,
+)
+from backend.session_store import append_session_message, get_or_create_session
 from backend.session_identity import (
     SESSION_MAIN_ID,
     normalize_or_bridge_session_id,
@@ -311,12 +318,54 @@ class GitHubRegistry:
 channel_registry = ChannelRuntimeRegistry()
 github_registry = GitHubRegistry()
 
+
+class _LegacyRegistryView:
+    """Backward-compatible platform registry view for older test scaffolding."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+
+    class _StoreProxy:
+        def __init__(self, platform: str) -> None:
+            self.platform = platform
+
+        def clear(self) -> None:
+            prefix = f"{self.platform}:"
+            stale_keys = [key for key in list(channel_registry._entries.keys()) if key.startswith(prefix)]
+            for key in stale_keys:
+                channel_registry._entries.pop(key, None)
+
+    @property
+    def _integrations(self) -> "_LegacyRegistryView._StoreProxy":
+        return self._StoreProxy(self.platform)
+
+    @property
+    def _configs(self) -> "_LegacyRegistryView._StoreProxy":
+        return self._StoreProxy(self.platform)
+
+    def upsert(self, integration_id: str, integration: Any, config: dict[str, Any]) -> None:
+        channel_registry.upsert(self.platform, integration_id, integration, config)
+
+    def get_config(self, integration_id: str) -> dict[str, Any]:
+        return channel_registry.get_config(self.platform, integration_id)
+
+
+telegram_registry = _LegacyRegistryView("telegram")
+slack_registry = _LegacyRegistryView("slack")
+discord_registry = _LegacyRegistryView("discord")
+
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
 _session_runtimes: dict[str, "SessionRuntime"] = {}
 runtime_telemetry = RuntimeTelemetry()
 runtime_events = RuntimeEventStore(ttl_seconds=6 * 60 * 60, max_events=10000)
+session_migration_counters: dict[str, int] = {
+    "send_total": 0,
+    "send_mismatch": 0,
+    "spawn_total": 0,
+    "spawn_mismatch": 0,
+}
 
 _BROWSER_CHAT_POLLUTION_PREFIXES = (
     "[click",
@@ -1029,11 +1078,35 @@ async def list_sessions(
     limit: int = 50,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return chat sessions, bridged from legacy conversation records."""
+    """Return chat sessions from v2 storage with legacy bridge fallback."""
     user = _get_current_user(request)
     uid = user["uid"]
     from sqlalchemy import select as sa_select, desc as sa_desc
-    from backend.database import Conversation as ConvModel
+    from backend.database import ChatSession as SessionModel, Conversation as ConvModel
+    rows: list[Any]
+    if sessions_v2_enabled():
+        stmt = (
+            sa_select(SessionModel)
+            .where(SessionModel.user_id == uid, SessionModel.platform == "web", SessionModel.status != "archived")
+            .order_by(sa_desc(SessionModel.updated_at))
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+        return {
+            "ok": True,
+            "sessions": [
+                {
+                    "session_id": row.session_id,
+                    "conversation_id": None,
+                    "parent_session_id": row.parent_session_id,
+                    "title": row.title,
+                    "status": row.status,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                }
+                for row in rows
+            ],
+        }
     stmt = (
         sa_select(ConvModel)
         .where(ConvModel.user_id == uid, ConvModel.platform == "web", ConvModel.status != "archived")
@@ -1112,14 +1185,60 @@ async def get_session_messages(
     limit: int = 500,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return messages for a session id, bridged to legacy conversation ids."""
+    """Return session messages while excluding system events from chat transcript."""
     user = _get_current_user(request)
     uid = user["uid"]
     import json as _json
     from sqlalchemy import select as sa_select
-    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    from backend.database import (
+        ChatSession as SessionModel,
+        ChatSessionMessage as SessionMsgModel,
+        Conversation as ConvModel,
+        ConversationMessage as MsgModel,
+    )
 
     requested_session_id = normalize_or_bridge_session_id(session_id)
+    if sessions_v2_enabled():
+        session_row = (
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == requested_session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        messages = (
+            await db.execute(
+                sa_select(SessionMsgModel)
+                .where(SessionMsgModel.session_ref_id == session_row.id, SessionMsgModel.role != "system")
+                .order_by(SessionMsgModel.created_at)
+                .limit(limit)
+            )
+        ).scalars().all()
+        return {
+            "ok": True,
+            "session": {
+                "session_id": session_row.session_id,
+                "conversation_id": None,
+                "parent_session_id": session_row.parent_session_id,
+                "title": session_row.title,
+                "created_at": session_row.created_at.isoformat() if session_row.created_at else None,
+            },
+            "messages": [
+                {
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "metadata": _json.loads(m.metadata_json) if m.metadata_json else None,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in messages
+            ],
+        }
+
     bridged_conversation_id = session_id_to_conversation_id(requested_session_id)
     conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
     if bridged_conversation_id:
@@ -1156,6 +1275,7 @@ async def get_session_messages(
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in msgs
+            if m.role != "system"
         ],
     }
 
@@ -1167,49 +1287,87 @@ async def send_session_message(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Append a user message to a session while preserving conversation storage."""
+    """Append a user message with sessions-v2 + dual-write migration safety."""
     user = _get_current_user(request)
     uid = user["uid"]
     content = str(payload.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
     import json as _json
-    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    from backend.database import ChatSession as SessionModel, Conversation as ConvModel, ConversationMessage as MsgModel
     from sqlalchemy import select as sa_select
 
     normalized_session_id = normalize_or_bridge_session_id(session_id)
-    bridged_conversation_id = session_id_to_conversation_id(normalized_session_id)
-    conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
-    if bridged_conversation_id:
-        conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
-    else:
-        conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == normalized_session_id)
-    conv = (await db.execute(conv_stmt)).scalar_one_or_none()
-    if not conv:
-        conv = ConvModel(
-            user_id=uid,
-            platform="web",
-            platform_chat_id=normalized_session_id,
-            title=(payload.get("title") or content[:80]).strip(),
-            status="active",
+    resolved_conversation_id: str | None = None
+    if sessions_v2_enabled():
+        session_row = (
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == normalized_session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if session_row is None:
+            session_row = await get_or_create_session(
+                db,
+                user_id=uid,
+                platform="web",
+                session_id=normalized_session_id,
+                title=(payload.get("title") or content[:80]).strip(),
+            )
+        await append_session_message(
+            db,
+            session_ref_id=session_row.id,
+            role="user",
+            content=content,
+            metadata={"source": "sessions_api"},
         )
-        db.add(conv)
-        await db.flush()
-    msg = MsgModel(
-        conversation_id=conv.id,
-        role="user",
-        content=content,
-        metadata_json=_json.dumps({"source": "sessions_api"}),
-    )
-    db.add(msg)
+
+    if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+        bridged_conversation_id = session_id_to_conversation_id(normalized_session_id)
+        conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
+        if bridged_conversation_id:
+            conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
+        else:
+            conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == normalized_session_id)
+        conv = (await db.execute(conv_stmt)).scalar_one_or_none()
+        if not conv:
+            conv = ConvModel(
+                user_id=uid,
+                platform="web",
+                platform_chat_id=normalized_session_id,
+                title=(payload.get("title") or content[:80]).strip(),
+                status="active",
+            )
+            db.add(conv)
+            await db.flush()
+        msg = MsgModel(
+            conversation_id=conv.id,
+            role="user",
+            content=content,
+            metadata_json=_json.dumps({"source": "sessions_api"}),
+        )
+        db.add(msg)
+        resolved_conversation_id = conv.id
+    else:
+        msg = type("TmpMsg", (), {"id": None, "role": "user", "content": content, "created_at": None})()
+
+    session_migration_counters["send_total"] = int(session_migration_counters["send_total"]) + 1
+    if sessions_dual_write_enabled() and resolved_conversation_id is None:
+        session_migration_counters["send_mismatch"] = int(session_migration_counters["send_mismatch"]) + 1
+
     from datetime import datetime as _dt
-    conv.updated_at = _dt.utcnow()
+    if resolved_conversation_id:
+        conv.updated_at = _dt.utcnow()
     await db.commit()
-    await db.refresh(msg)
+    if hasattr(msg, "__table__"):
+        await db.refresh(msg)
     return {
         "ok": True,
-        "session_id": normalize_or_bridge_session_id(conv.platform_chat_id or "", fallback_conversation_id=conv.id),
-        "conversation_id": conv.id,
+        "session_id": normalized_session_id,
+        "conversation_id": resolved_conversation_id,
         "message": {
             "id": msg.id,
             "role": msg.role,
@@ -1225,7 +1383,7 @@ async def spawn_session(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Spawn a sub-agent session entry (session-first, with legacy conversation bridge)."""
+    """Spawn a sub-agent session entry with dual-write safeguards."""
     user = _get_current_user(request)
     uid = user["uid"]
     parent_session_id = str(payload.get("parent_session_id") or SESSION_MAIN_ID).strip() or SESSION_MAIN_ID
@@ -1234,28 +1392,53 @@ async def spawn_session(
     title = str(payload.get("title") or instruction[:80] or "Subagent session").strip()
     from backend.database import Conversation as ConvModel
 
-    conv = ConvModel(
-        user_id=uid,
-        platform="web",
-        platform_chat_id=session_id,
-        title=title,
-        status="active",
-    )
-    db.add(conv)
-    await db.flush()
-    await append_message(
-        db,
-        conversation_id=conv.id,
-        role="assistant",
-        content=f"Spawned subagent session from parent {parent_session_id}",
-        metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
-    )
+    if sessions_v2_enabled():
+        session_row = await get_or_create_session(
+            db,
+            user_id=uid,
+            platform="web",
+            session_id=session_id,
+            title=title,
+            parent_session_id=parent_session_id,
+        )
+        await append_session_message(
+            db,
+            session_ref_id=session_row.id,
+            role="assistant",
+            content=f"Spawned subagent session from parent {parent_session_id}",
+            metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
+        )
+
+    conversation_id: str | None = None
+    if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+        conv = ConvModel(
+            user_id=uid,
+            platform="web",
+            platform_chat_id=session_id,
+            title=title,
+            status="active",
+        )
+        db.add(conv)
+        await db.flush()
+        await append_message(
+            db,
+            conversation_id=conv.id,
+            role="assistant",
+            content=f"Spawned subagent session from parent {parent_session_id}",
+            metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
+        )
+        conversation_id = conv.id
+
+    session_migration_counters["spawn_total"] = int(session_migration_counters["spawn_total"]) + 1
+    if sessions_dual_write_enabled() and conversation_id is None:
+        session_migration_counters["spawn_mismatch"] = int(session_migration_counters["spawn_mismatch"]) + 1
+
     await db.commit()
     return {
         "ok": True,
         "session": {
             "session_id": session_id,
-            "conversation_id": conv.id,
+            "conversation_id": conversation_id,
             "parent_session_id": parent_session_id,
             "title": title,
             "status": "active",
@@ -1321,7 +1504,8 @@ async def _send_initial_frame(websocket: WebSocket) -> None:
     """
     try:
         executor = _get_orchestrator().executor
-        current_url = executor.page.url if executor.page else "about:blank"
+        page = getattr(executor, "page", None)
+        current_url = getattr(page, "url", None) if page is not None else None
         if current_url in ("about:blank", ""):
             return  # Don't replace the welcome screen with a white blank frame
         screenshot_bytes = await executor.screenshot()
@@ -1499,28 +1683,49 @@ async def _log_web_message(
     metadata: dict[str, Any] | None = None,
     title_candidate: str | None = None,
 ) -> None:
-    """Persist a websocket message to the conversations DB and emit conversation_id to client."""
+    """Persist websocket messages with session-v2 dual-write and fallback support."""
     if not runtime.user_uid:
         return
     try:
         async for db in get_session():
-            conv = await get_or_create_conversation(
-                db,
-                user_id=runtime.user_uid,
-                platform="web",
-                platform_chat_id=session_id,
-                title=title,
-            )
-            runtime.conversation_id = conv.id
-            session_events.bind_conversation(session_id, conv.id)
-            await append_message(
-                db,
-                conv.id,
-                role,
-                content,
-                metadata=metadata,
-                title_candidate=title_candidate,
-            )
+            wrote_session = False
+            if sessions_v2_enabled():
+                session_row = await get_or_create_session(
+                    db,
+                    user_id=runtime.user_uid,
+                    platform="web",
+                    session_id=session_id,
+                    title=title or title_candidate,
+                )
+                await append_session_message(
+                    db,
+                    session_ref_id=session_row.id,
+                    role=role,
+                    content=content,
+                    metadata=metadata,
+                )
+                wrote_session = True
+
+            if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+                conv = await get_or_create_conversation(
+                    db,
+                    user_id=runtime.user_uid,
+                    platform="web",
+                    platform_chat_id=session_id,
+                    title=title,
+                )
+                runtime.conversation_id = conv.id
+                session_events.bind_conversation(session_id, conv.id)
+                await append_message(
+                    db,
+                    conv.id,
+                    role,
+                    content,
+                    metadata=metadata,
+                    title_candidate=title_candidate,
+                )
+            elif wrote_session:
+                runtime.conversation_id = None
             break
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to persist web message to DB for session %s: %s", session_id, exc)
@@ -2662,27 +2867,44 @@ async def _log_platform_message(
     metadata: dict[str, Any] | None = None,
     platform_message_id: str | None = None,
 ) -> None:
-    """Persist a platform message to conversation storage when an owner is available."""
+    """Persist a platform message with session-v2 dual-write compatibility."""
     if not user_id:
         return
     session_iter = get_session()
     db = await anext(session_iter)
     try:
-        conversation = await get_or_create_conversation(
-            db,
-            user_id=user_id,
-            platform=platform,
-            platform_chat_id=str(platform_chat_id),
-            title=title,
-        )
-        await append_message(
-            db,
-            conversation_id=conversation.id,
-            role=role,
-            content=content,
-            metadata=metadata or {},
-            platform_message_id=platform_message_id,
-        )
+        normalized_session_id = normalize_or_bridge_session_id(str(platform_chat_id))
+        if sessions_v2_enabled():
+            session_row = await get_or_create_session(
+                db,
+                user_id=user_id,
+                platform=platform,
+                session_id=normalized_session_id,
+                title=title,
+            )
+            await append_session_message(
+                db,
+                session_ref_id=session_row.id,
+                role=role,
+                content=content,
+                metadata=metadata or {},
+            )
+        if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+            conversation = await get_or_create_conversation(
+                db,
+                user_id=user_id,
+                platform=platform,
+                platform_chat_id=str(platform_chat_id),
+                title=title,
+            )
+            await append_message(
+                db,
+                conversation_id=conversation.id,
+                role=role,
+                content=content,
+                metadata=metadata or {},
+                platform_message_id=platform_message_id,
+            )
     finally:
         await session_iter.aclose()
 
@@ -3485,6 +3707,8 @@ async def list_observability_events(
 ) -> dict[str, Any]:
     """List internal observability events with retention and pagination metadata."""
     _get_current_user(request)
+    if not feature_flags_snapshot()["observability_event_log"]:
+        raise HTTPException(status_code=503, detail="observability_event_log flag disabled")
     return runtime_events.list_events(
         session_id=session_id,
         subsystem=subsystem,
@@ -3492,6 +3716,57 @@ async def list_observability_events(
         limit=limit,
         cursor=cursor,
     )
+
+
+@app.get("/api/migration/validation")
+async def migration_validation_dashboard(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return migration mismatch counters for conversation-vs-session dual-write validation."""
+    _get_current_user(request)
+    from sqlalchemy import func
+    from backend.database import ChatSession, ChatSessionMessage, Conversation, ConversationMessage
+
+    conv_count = (
+        await db.execute(select(func.count()).select_from(Conversation).where(Conversation.platform == "web", Conversation.status != "archived"))
+    ).scalar_one()
+    session_count = (
+        await db.execute(
+            select(func.count()).select_from(ChatSession).where(ChatSession.platform == "web", ChatSession.status != "archived")
+        )
+    ).scalar_one()
+    conv_msg_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ConversationMessage)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(Conversation.platform == "web", Conversation.status != "archived")
+        )
+    ).scalar_one()
+    session_msg_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ChatSessionMessage)
+            .join(ChatSession, ChatSession.id == ChatSessionMessage.session_ref_id)
+            .where(ChatSession.platform == "web", ChatSession.status != "archived")
+        )
+    ).scalar_one()
+    store_mismatch_count = abs(int(conv_count) - int(session_count)) + abs(int(conv_msg_count) - int(session_msg_count))
+    return {
+        "ok": True,
+        "feature_flags": feature_flags_snapshot(),
+        "rollback_enabled": legacy_conversation_mode_enabled(),
+        "mismatch_counters": {
+            "api_send_mismatch": int(session_migration_counters["send_mismatch"]),
+            "api_spawn_mismatch": int(session_migration_counters["spawn_mismatch"]),
+            "store_mismatch_count": store_mismatch_count,
+            "conversation_count": int(conv_count),
+            "session_count": int(session_count),
+            "conversation_message_count": int(conv_msg_count),
+            "session_message_count": int(session_msg_count),
+        },
+    }
 
 
 @app.get("/api/agents/tasks")

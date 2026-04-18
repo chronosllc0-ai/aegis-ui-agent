@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # deploy-time fallback when the DB row has not been set yet.
     AEGIS_GLOBAL_SYSTEM_INSTRUCTION: str = ""
     WORKSPACE_PROMPT_MODE: str = "v1"
+    FEATURE_FLAG_WORKSPACE_PROMPT_MODE: bool = False
+    FEATURE_FLAG_SESSIONS_V2: bool = False
+    FEATURE_FLAG_OBSERVABILITY_EVENT_LOG: bool = True
+    SESSIONS_V2_DUAL_WRITE: bool = True
+    SESSIONS_V2_LEGACY_FALLBACK: bool = False
     MEMORY_MODE: str = "hybrid"
     MEMORY_LONG_TERM_MAIN_SESSION_ONLY: bool = True
 
