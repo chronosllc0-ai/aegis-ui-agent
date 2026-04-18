@@ -236,6 +236,27 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
                 return token[8:] or None
         return None
 
+    @staticmethod
+    def extract_sender_identity(payload: dict[str, Any]) -> dict[str, str | None]:
+        """Resolve canonical external sender identity and chat context."""
+        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+        user_obj = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        user_id = event.get("user") or payload.get("user_id") or user_obj.get("id")
+        username = (
+            event.get("username")
+            or payload.get("user_name")
+            or user_obj.get("username")
+        )
+        channel = event.get("channel") or payload.get("channel_id")
+        channel_type = str(event.get("channel_type") or payload.get("channel_type") or "").strip().lower()
+        normalized_type = "dm" if channel_type in {"im", "mpim"} else ("group" if channel_type else None)
+        return {
+            "external_user_id": str(user_id).strip() if user_id else None,
+            "external_username": str(username).strip() if username else None,
+            "chat_type": normalized_type,
+            "chat_id": str(channel).strip() if channel else None,
+        }
+
     async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if advanced_tool_blocked("slack", tool_name):
             return {
