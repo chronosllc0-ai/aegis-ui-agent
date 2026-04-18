@@ -5721,3 +5721,40 @@
 
 ### Blockers
 - None.
+
+## Session 6.23 - April 18, 2026 (Connections Access & Pairing UI + policy wiring)
+
+### What changed
+- Added frontend Access & Pairing API service in `frontend/src/lib/botAccessPairing.ts` for:
+  - pending pairing list fetch
+  - approve/deny pairing requests
+  - integration policy get/update
+  - bot access config get/save (DM/group policy mode + allowlists)
+- Added `frontend/src/hooks/useBotAccessPairing.ts` to manage loading/saving/error state for Access & Pairing UX and immediate persistence actions.
+- Updated `frontend/src/components/settings/ConnectionsTab.tsx`:
+  - Added status chips on Telegram/Slack/Discord cards for pairing required, pending count, and policy mode.
+  - Added Access & Pairing section with:
+    - pending requests + Approve/Deny actions
+    - pairing required toggle
+    - DM policy selector + allowlist editor
+    - Group policy selector + allowlist editor
+  - Kept existing custom MCP UI unchanged.
+- Updated ingress enforcement in `main.py` to apply DM/group policy modes + allowlists from bot config immediately at runtime.
+
+### What works / what does not
+- Works:
+  - Frontend build passes.
+  - Existing ConnectionsTab unit tests pass.
+  - Pairing/policy UI uses real backend endpoints (no local placeholders).
+  - Backend smoke websocket test passes.
+- Does not / caveats:
+  - Delivery checklist command `python -m py_compile main.py backend/pydantic_adk_runner.py` cannot fully run because `backend/pydantic_adk_runner.py` is not present in this repo path.
+
+### Next steps
+1. Add targeted unit tests for `useBotAccessPairing` and new Access & Pairing UI interactions (mode changes, allowlist add/remove, approve/deny).
+2. Add backend tests for DM/group allowlist enforcement in `_enforce_ingress_policy`.
+3. Consider consolidating `allow_from` (legacy) and per-chat allowlists in one canonical schema.
+
+### Blockers / decisions
+- Decision: persisted DM/group policy modes + allowlists in existing bot config endpoint (`/api/integrations/{platform}/config/{integration_id}`) to avoid introducing new backend tables/routes.
+- Blocker: no `backend/pydantic_adk_runner.py` file found, so that exact checklist compile command is partially blocked.

@@ -806,6 +806,26 @@ async def _enforce_ingress_policy(
             return False, "Direct messages are disabled for this integration."
         if chat_type != "dm" and not policy.allow_group_messages:
             return False, "Group messages are disabled for this integration."
+
+        bot_cfg = _bot_configs.get(f"{platform}:{integration_id}", {})
+        dm_mode = str(bot_cfg.get("dm_policy_mode") or "allow_all").strip().lower()
+        group_mode = str(bot_cfg.get("group_policy_mode") or "allow_all").strip().lower()
+        dm_allow_from = {str(x).strip() for x in (bot_cfg.get("dm_allow_from") or []) if str(x).strip()}
+        group_allow_from = {str(x).strip() for x in (bot_cfg.get("group_allow_from") or []) if str(x).strip()}
+
+        if chat_type == "dm":
+            if dm_mode == "deny_all":
+                return False, "Direct messages are blocked by policy."
+            if dm_mode == "allowlist" and external_user_id not in dm_allow_from:
+                return False, "You are not in the DM allowlist for this integration."
+        else:
+            if group_mode == "deny_all":
+                return False, "Group messages are blocked by policy."
+            if group_mode == "allowlist":
+                allowlisted = external_user_id in group_allow_from or (external_channel_id is not None and external_channel_id in group_allow_from)
+                if not allowlisted:
+                    return False, "This group is not allowlisted for this integration."
+
         if not policy.pairing_required:
             return True, None
 

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiUrl } from '../../lib/api'
+import { type ChatPolicyMode } from '../../lib/botAccessPairing'
+import { useBotAccessPairing } from '../../hooks/useBotAccessPairing'
 import { GITHUB_PAT_INTEGRATION_ID, maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
 
 // ── Props ────────────────────────────────────────────────────────────
@@ -687,6 +689,9 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                       )}
                       {isConn && <StatusDot color="emerald" label="Connected" />}
                       {integration.status === 'error' && <StatusDot color="red" label="Error" />}
+                      {(integration.id === 'telegram' || integration.id === 'slack' || integration.id === 'discord') && (
+                        <AccessPairingStatusChips platform={integration.id} integrationId={integration.id} />
+                      )}
                     </div>
                     <p className="mt-0.5 text-xs text-zinc-400">{integration.description}</p>
                     <p className="mt-0.5 text-[11px] text-zinc-500">Tools: {integration.tools.join(', ')}</p>
@@ -728,6 +733,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
                       <GitHubForm integration={integration} busy={isBusy} onUpdate={(p) => updateIntegration(integration.id, p)} onConnect={() => connectBot(integration)} onTest={() => testBot(integration)} />
                     )}
                   </div>
+                )}
+
+                {expanded && (integration.id === 'telegram' || integration.id === 'slack' || integration.id === 'discord') && (
+                  <AccessPairingSection platform={integration.id} integrationId={integration.id} />
                 )}
 
                 {/* Error */}
@@ -1053,6 +1062,184 @@ function NewConnectionWizard({ onClose, onSaved, onAsyncError }: NewConnectionWi
       </div>
     </div>
   )
+}
+
+
+function AccessPairingStatusChips({ platform, integrationId }: { platform: string; integrationId: string }) {
+  const { loading, pending, policy, accessConfig } = useBotAccessPairing(platform, integrationId)
+  if (loading || !policy || !accessConfig) return null
+  const dmMode = accessConfig.dm_policy_mode
+  const groupMode = accessConfig.group_policy_mode
+  const modeLabel = dmMode === groupMode ? modeToLabel(dmMode) : `DM ${modeToLabel(dmMode)} · Group ${modeToLabel(groupMode)}`
+
+  return (
+    <>
+      {policy.pairing_required && (
+        <span className="rounded-full bg-indigo-900/30 px-2 py-0.5 text-[10px] font-medium text-indigo-300">Pairing required</span>
+      )}
+      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-300">Pending {pending.length}</span>
+      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-300">{modeLabel}</span>
+    </>
+  )
+}
+
+function AccessPairingSection({ platform, integrationId }: { platform: string; integrationId: string }) {
+  const { loading, saving, error, pending, policy, accessConfig, decide, updatePairingRequired, updateChatPolicy } = useBotAccessPairing(platform, integrationId)
+  const [dmDraft, setDmDraft] = useState('')
+  const [groupDraft, setGroupDraft] = useState('')
+
+  const dmList = accessConfig?.dm_allow_from ?? []
+  const groupList = accessConfig?.group_allow_from ?? []
+
+  const addToken = (current: string[], value: string, setter: (value: string) => void): string[] => {
+    const token = value.trim()
+    setter('')
+    if (!token || current.includes(token)) return current
+    return [...current, token]
+  }
+
+  const removeToken = (current: string[], token: string): string[] => current.filter((entry) => entry !== token)
+
+  return (
+    <div className="border-t border-zinc-800 px-4 py-3">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h5 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Access & Pairing</h5>
+        {policy && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => { void updatePairingRequired(!policy.pairing_required) }}
+            className={`rounded-lg border px-3 py-1 text-xs ${policy.pairing_required ? 'border-indigo-700 bg-indigo-900/30 text-indigo-300' : 'border-zinc-700 text-zinc-300'} disabled:opacity-50`}
+          >
+            Pairing {policy.pairing_required ? 'required' : 'optional'}
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-zinc-500">Loading access settings…</p>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-xs font-medium text-zinc-300">Pending requests ({pending.length})</p>
+            {pending.length === 0 ? (
+              <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-500">No pending pairing requests.</p>
+            ) : (
+              <div className="space-y-2">
+                {pending.map((row) => (
+                  <div key={row.request_id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs text-zinc-200">{row.external_username || row.external_user_id}</p>
+                        <p className="text-[11px] text-zinc-500">{row.chat_type || 'unknown'} · {row.external_channel_id || row.external_user_id}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" disabled={saving} onClick={() => { void decide(row.request_id, 'approve') }} className="rounded-md border border-emerald-700/60 bg-emerald-900/20 px-2.5 py-1 text-[11px] text-emerald-300 disabled:opacity-50">Approve</button>
+                        <button type="button" disabled={saving} onClick={() => { void decide(row.request_id, 'deny') }} className="rounded-md border border-red-700/60 bg-red-900/20 px-2.5 py-1 text-[11px] text-red-300 disabled:opacity-50">Deny</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <PolicyControl
+            label="DM policy"
+            mode={accessConfig?.dm_policy_mode ?? 'allow_all'}
+            allowlist={dmList}
+            draft={dmDraft}
+            onDraftChange={setDmDraft}
+            onModeChange={(mode) => { void updateChatPolicy('dm', mode, dmList) }}
+            onAdd={() => {
+              const next = addToken(dmList, dmDraft, setDmDraft)
+              if (next !== dmList) void updateChatPolicy('dm', accessConfig?.dm_policy_mode ?? 'allow_all', next)
+            }}
+            onRemove={(token) => {
+              const next = removeToken(dmList, token)
+              void updateChatPolicy('dm', accessConfig?.dm_policy_mode ?? 'allow_all', next)
+            }}
+            saving={saving}
+          />
+
+          <PolicyControl
+            label="Group policy"
+            mode={accessConfig?.group_policy_mode ?? 'allow_all'}
+            allowlist={groupList}
+            draft={groupDraft}
+            onDraftChange={setGroupDraft}
+            onModeChange={(mode) => { void updateChatPolicy('group', mode, groupList) }}
+            onAdd={() => {
+              const next = addToken(groupList, groupDraft, setGroupDraft)
+              if (next !== groupList) void updateChatPolicy('group', accessConfig?.group_policy_mode ?? 'allow_all', next)
+            }}
+            onRemove={(token) => {
+              const next = removeToken(groupList, token)
+              void updateChatPolicy('group', accessConfig?.group_policy_mode ?? 'allow_all', next)
+            }}
+            saving={saving}
+          />
+        </div>
+      )}
+
+      {error && <p className="mt-3 text-xs text-red-300">{error}</p>}
+    </div>
+  )
+}
+
+type PolicyControlProps = {
+  label: string
+  mode: ChatPolicyMode
+  allowlist: string[]
+  draft: string
+  saving: boolean
+  onDraftChange: (value: string) => void
+  onModeChange: (mode: ChatPolicyMode) => void
+  onAdd: () => void
+  onRemove: (token: string) => void
+}
+
+function PolicyControl({ label, mode, allowlist, draft, saving, onDraftChange, onModeChange, onAdd, onRemove }: PolicyControlProps) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-medium text-zinc-300">{label}</p>
+        <label htmlFor={`${label}-mode`} className="sr-only">{label} mode</label>
+        <select id={`${label}-mode`} value={mode} onChange={(e) => onModeChange(e.target.value as ChatPolicyMode)} disabled={saving} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 sm:w-auto disabled:opacity-50">
+          <option value="allow_all">Allow all</option>
+          <option value="allowlist">Allow listed only</option>
+          <option value="deny_all">Deny all</option>
+        </select>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          disabled={saving || mode !== 'allowlist'}
+          placeholder="User ID or channel ID"
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white placeholder-zinc-500 disabled:opacity-50"
+        />
+        <button type="button" onClick={onAdd} disabled={saving || mode !== 'allowlist'} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 disabled:opacity-50">Add</button>
+      </div>
+      {allowlist.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {allowlist.map((token) => (
+            <button key={token} type="button" onClick={() => onRemove(token)} disabled={saving || mode !== 'allowlist'} className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 disabled:opacity-50">
+              {token} ✕
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-[11px] text-zinc-500">No allowlisted IDs.</p>
+      )}
+    </div>
+  )
+}
+
+function modeToLabel(mode: ChatPolicyMode): string {
+  if (mode === 'allowlist') return 'allowlist'
+  if (mode === 'deny_all') return 'deny all'
+  return 'allow all'
 }
 
 // ── Status Dot ───────────────────────────────────────────────────────
