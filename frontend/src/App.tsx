@@ -18,6 +18,7 @@ import { WorkflowView } from './components/WorkflowView'
 import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
 import { ChatPanel } from './components/ChatPanel'
+import type { SessionSwitcherItem } from './components/SessionSwitcher'
 import { SubAgentPanel } from './components/SubAgentPanel'
 import { UseCasePage } from './components/UseCasePage'
 import { SettingsPage } from './components/settings/SettingsPage'
@@ -600,6 +601,30 @@ function App() {
     }
     return scoped
   }, [scopedSubAgents, subAgentSteps])
+
+
+  const sessionSwitcherItems = useMemo<SessionSwitcherItem[]>(() => {
+    const historyItems: SessionSwitcherItem[] = taskHistory.map((item) => ({
+      id: item.id,
+      label: item.title || item.instruction.slice(0, 40) || 'Untitled session',
+      channel: item.labelSource === 'browser' ? 'browser' : item.labelSource === 'system' ? 'system' : 'chat',
+      status: selectedTaskId === item.id && isWorking ? 'active' : 'idle',
+    }))
+
+    const subAgentItems: SessionSwitcherItem[] = subAgents.map((agent) => ({
+      id: agent.sub_id,
+      label: `${subAgentDisplayName(agent)} · ${agent.instruction.slice(0, 28)}`,
+      channel: 'system',
+      status: (agent.status === 'running' || agent.status === 'spawning') ? 'active' : 'idle',
+    }))
+
+    const merged = [...subAgentItems, ...historyItems]
+    const deduped = new Map<string, SessionSwitcherItem>()
+    for (const item of merged) {
+      if (!deduped.has(item.id)) deduped.set(item.id, item)
+    }
+    return Array.from(deduped.values())
+  }, [isWorking, selectedTaskId, subAgents, taskHistory])
 
   const mergedChatMessages = useMemo(() => {
     if (!selectedTaskId) return serverMessages
@@ -1317,6 +1342,12 @@ function App() {
                 onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
                 pendingPrompt={pendingPrompt}
                 onPendingPromptConsumed={() => setPendingPrompt(null)}
+                sessions={sessionSwitcherItems}
+                selectedSessionId={selectedTaskId}
+                onSessionSwitch={(sessionId) => {
+                  setSelectedTaskId(sessionId)
+                  setSidebarOpen(false)
+                }}
               />
             ) : (
               /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
