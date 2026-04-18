@@ -534,19 +534,22 @@ export function AutomationsPage() {
           timezone: data.timezone,
         }),
       })
+      const body = await response.json().catch(() => ({}))
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
         throw new Error(body?.detail ?? `Error ${response.status}`)
       }
-      const body = await response.json().catch(() => ({}))
       const createdTaskId = body?.task?.id as string | undefined
       if (createdTaskId && !data.enabled) {
-        await fetch(apiUrl(`/api/automation/tasks/${createdTaskId}`), {
+        const toggleResponse = await fetch(apiUrl(`/api/automation/tasks/${createdTaskId}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ enabled: false }),
         })
+        if (!toggleResponse.ok) {
+          const toggleBody = await toggleResponse.json().catch(() => ({}))
+          throw new Error(toggleBody?.detail ?? `Error ${toggleResponse.status}`)
+        }
       }
       await fetchTasks()
     } finally {

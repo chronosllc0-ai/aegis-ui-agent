@@ -5715,3 +5715,31 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.23 - April 18, 2026 (automations create-flow review fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Fixed create-flow response parsing bug in `AutomationsPage` by parsing `response.json()` exactly once and reusing the parsed object.
+- Added explicit error handling for the follow-up `PATCH` call used to apply `enabled: false` after task creation.
+- Preserved backend-compatible create behavior while preventing silent failure paths.
+
+### What's Working
+- Creating jobs no longer risks double-read body stream errors.
+- If post-create enable/disable patch fails, users now receive a surfaced error instead of silent success.
+
+### What's NOT Working Yet
+- No additional UI messaging differentiation was added for create success + disable patch failure beyond thrown error handling.
+
+### Next Steps
+1. Add automated tests that assert single response body read and patch-failure propagation in create flow.
+2. Optionally display a targeted toast message if disable patch fails after successful create.
+
+### Decisions Made
+- Kept post-create patch pattern (required by current backend create schema) and hardened it with explicit response validation.
+
+### Blockers
+- None.
