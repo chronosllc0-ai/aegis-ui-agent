@@ -5817,3 +5817,54 @@
 - Decision: preserve OR semantics for group allowlist to support both user-based and channel-based allowlisting with one list, and make this explicit in UI copy.
 - Decision: server-side partial merge for bot config updates to reduce lost updates without introducing schema migrations in this pass.
 - Blocker: missing `backend/pydantic_adk_runner.py` for checklist compile command.
+
+## Session 6.25 - April 18, 2026 (Telegram pairing handshake UX + anti-spam)
+
+### What changed
+- Enhanced Telegram pairing ingress in `main.py` with first-contact challenge UX:
+  - unknown users now receive a structured challenge message containing code + `/pair <code>` instructions.
+  - challenge message now includes Telegram inline callback buttons (`Pairing help`, `Check status`) when platform is Telegram.
+- Added callback-query validation and request binding for pairing callbacks:
+  - introduced callback parsing (`pair:<action>:<request_id>:<nonce>`),
+  - validated callback request ownership (`external_user_id`, integration/platform, pending status),
+  - validated callback nonce against request-derived token,
+  - added clear feedback for invalid/stale callbacks.
+- Added anti-spam controls for challenge issuance:
+  - rate-limit challenge generation per `(platform, integration, user, chat)` key,
+  - explicit wait feedback when rate limited,
+  - explicit TTL feedback for pending or expired challenges,
+  - pending request expiry marking when TTL has elapsed.
+- Improved `/pair` flow:
+  - `/pair <code>` remains the verification path,
+  - `/pair` without code now returns guidance and status-aware feedback,
+  - existing pending request reports remaining TTL instead of issuing duplicate challenge.
+- Added approval side effects:
+  - when owner approves a pending pairing request, paired user now receives success confirmation,
+  - owner session event stream receives a `pairing_approved` wake event.
+- Added Telegram integration helpers in `integrations/telegram.py`:
+  - pairing callback parser,
+  - pairing challenge inline keyboard builder.
+
+### What works / what does not
+- Works:
+  - Python compiles for updated `main.py` and `integrations/telegram.py`.
+  - Pairing UX now supports first-contact challenge + inline callback responses + `/pair` path.
+  - Approval flow now emits both external confirmation and owner wake event.
+- Does not / caveats:
+  - Existing repository checklist caveat still applies: `backend/pydantic_adk_runner.py` is absent, so the exact AGENTS compile command referencing that file is partially blocked.
+
+### Next steps
+1. Add focused tests for `_enforce_ingress_policy` covering:
+   - first-contact challenge issuance,
+   - rate-limit hit path,
+   - callback token validation,
+   - TTL-expired pending requests.
+2. Add API tests for `/pairing/{request_id}/approve` to assert:
+   - channel confirmation is attempted,
+   - `pairing_approved` wake event is published.
+3. Consider replacing request-id-derived nonce with signed HMAC callback token for stronger tamper resistance.
+
+### Blockers / decisions
+- Decision: callback nonce currently derived from request id suffix and validated against request/user/integration binding for lightweight stateless verification.
+- Decision: rate-limit implemented in-process (memory) to minimize schema impact in this pass.
+- Blocker: no `backend/pydantic_adk_runner.py` present for exact checklist command.
