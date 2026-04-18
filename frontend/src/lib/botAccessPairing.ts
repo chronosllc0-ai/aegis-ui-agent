@@ -84,10 +84,9 @@ export async function getBotAccessConfig(platform: string, integrationId: string
 }
 
 export async function saveBotAccessConfig(platform: string, integrationId: string, patch: Partial<BotAccessConfig>): Promise<void> {
-  const current = await getBotAccessConfig(platform, integrationId)
   await requestJson(`/api/integrations/${platform}/config/${integrationId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...current, ...patch }),
+    body: JSON.stringify(patch),
   })
 }

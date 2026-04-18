@@ -1177,6 +1177,7 @@ function AccessPairingSection({ platform, integrationId }: { platform: string; i
               const next = removeToken(groupList, token)
               void updateChatPolicy('group', accessConfig?.group_policy_mode ?? 'allow_all', next)
             }}
+            helpText="Allowlist matches if either the sender user ID or the group/channel ID is listed."
             saving={saving}
           />
         </div>
@@ -1193,13 +1194,14 @@ type PolicyControlProps = {
   allowlist: string[]
   draft: string
   saving: boolean
+  helpText?: string
   onDraftChange: (value: string) => void
   onModeChange: (mode: ChatPolicyMode) => void
   onAdd: () => void
   onRemove: (token: string) => void
 }
 
-function PolicyControl({ label, mode, allowlist, draft, saving, onDraftChange, onModeChange, onAdd, onRemove }: PolicyControlProps) {
+function PolicyControl({ label, mode, allowlist, draft, saving, helpText, onDraftChange, onModeChange, onAdd, onRemove }: PolicyControlProps) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1221,6 +1223,7 @@ function PolicyControl({ label, mode, allowlist, draft, saving, onDraftChange, o
         />
         <button type="button" onClick={onAdd} disabled={saving || mode !== 'allowlist'} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 disabled:opacity-50">Add</button>
       </div>
+      {helpText && <p className="mt-2 text-[11px] text-zinc-500">{helpText}</p>}
       {allowlist.length > 0 ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {allowlist.map((token) => (

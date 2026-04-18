@@ -630,6 +630,33 @@ _bot_configs: dict[str, dict[str, Any]] = {}
 PAIRING_CODE_TTL_SECONDS = 600
 
 
+def _get_effective_bot_config(platform: str, integration_id: str) -> dict[str, Any]:
+    """Resolve runtime bot config from channel config + in-memory overrides."""
+    channel_cfg = _get_channel_config(platform, integration_id)
+    stored_bot_cfg = channel_cfg.get("bot_config") if isinstance(channel_cfg, dict) else None
+    in_memory_cfg = _bot_configs.get(f"{platform}:{integration_id}", {})
+    if isinstance(stored_bot_cfg, dict):
+        return {**stored_bot_cfg, **in_memory_cfg}
+    return dict(in_memory_cfg)
+
+
+def _update_runtime_bot_config(platform: str, integration_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Merge a partial bot-config patch into process state and channel runtime config."""
+    key = f"{platform}:{integration_id}"
+    current = _bot_configs.get(key, {})
+    merged = {**current, **patch}
+    _bot_configs[key] = merged
+
+    entry = channel_registry.get_entry(platform, integration_id)
+    if entry is not None:
+        runtime_cfg = dict(entry.config)
+        existing_runtime_bot_cfg = runtime_cfg.get("bot_config") if isinstance(runtime_cfg.get("bot_config"), dict) else {}
+        runtime_cfg["bot_config"] = {**existing_runtime_bot_cfg, **patch}
+        channel_registry.upsert(entry.platform, integration_id, entry.adapter, runtime_cfg)
+
+    return merged
+
+
 def _hash_pairing_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
@@ -807,7 +834,7 @@ async def _enforce_ingress_policy(
         if chat_type != "dm" and not policy.allow_group_messages:
             return False, "Group messages are disabled for this integration."
 
-        bot_cfg = _bot_configs.get(f"{platform}:{integration_id}", {})
+        bot_cfg = _get_effective_bot_config(platform, integration_id)
         dm_mode = str(bot_cfg.get("dm_policy_mode") or "allow_all").strip().lower()
         group_mode = str(bot_cfg.get("group_policy_mode") or "allow_all").strip().lower()
         dm_allow_from = {str(x).strip() for x in (bot_cfg.get("dm_allow_from") or []) if str(x).strip()}
@@ -822,6 +849,7 @@ async def _enforce_ingress_policy(
             if group_mode == "deny_all":
                 return False, "Group messages are blocked by policy."
             if group_mode == "allowlist":
+                # OR semantics are intentional: entries may be either approved user IDs or approved channel IDs.
                 allowlisted = external_user_id in group_allow_from or (external_channel_id is not None and external_channel_id in group_allow_from)
                 if not allowlisted:
                     return False, "This group is not allowlisted for this integration."
@@ -3322,7 +3350,7 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
         return _channel_webhook_response(result)
 
     if chat_id and text_content and text_content.startswith("/"):
-        bot_cfg = _bot_configs.get(f"telegram:{integration_id}", {})
+        bot_cfg = _get_effective_bot_config('telegram', integration_id)
         allow_from = bot_cfg.get("allow_from", [])
         if allow_from:
             sender_id = str(_get_telegram_sender_id(update))
@@ -5003,19 +5031,18 @@ async def update_integration_policy(
 @app.get("/api/integrations/{platform}/config/{integration_id}")
 async def get_bot_config(platform: str, integration_id: str, request: Request) -> dict[str, Any]:
     _get_current_user(request)  # auth check
-    cfg = _bot_configs.get(f"{platform}:{integration_id}", {})
+    cfg = _get_effective_bot_config(platform, integration_id)
     return {"ok": True, "config": cfg}
 
 
 @app.post("/api/integrations/{platform}/config/{integration_id}")
 async def save_bot_config(platform: str, integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     _get_current_user(request)
-    key = f"{platform}:{integration_id}"
-    _bot_configs[key] = payload
+    merged = _update_runtime_bot_config(platform, integration_id, payload)
     # Auto-register Telegram slash commands if token available
     if platform == "telegram":
         integration = _get_channel_integration("telegram", integration_id)
-        if integration and payload.get("slash_commands_enabled", True):
+        if integration and merged.get("slash_commands_enabled", True):
             asyncio.create_task(_register_telegram_commands(integration))
     return {"ok": True}
 

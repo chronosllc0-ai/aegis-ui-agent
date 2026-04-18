@@ -95,34 +95,37 @@ export function useBotAccessPairing(platform: string, integrationId: string) {
       ? { dm_policy_mode: mode, dm_allow_from: trimmedAllowlist }
       : { group_policy_mode: mode, group_allow_from: trimmedAllowlist }
 
+    const previousPolicy = state.policy
+    const previousConfig = state.accessConfig
+
+    if (!previousPolicy || !previousConfig) {
+      setState((prev) => ({ ...prev, error: 'Access policy is not loaded yet.' }))
+      return
+    }
+
     setState((prev) => ({ ...prev, saving: true, error: null }))
     try {
-      await Promise.all([
-        updateIntegrationPolicy(platform, integrationId, policyPatch),
-        saveBotAccessConfig(platform, integrationId, configPatch),
-      ])
+      await updateIntegrationPolicy(platform, integrationId, policyPatch)
+      await saveBotAccessConfig(platform, integrationId, configPatch)
       setState((prev) => ({
         ...prev,
         saving: false,
-        policy: prev.policy
-          ? {
-            ...prev.policy,
-            ...(chatType === 'dm' ? { allow_direct_messages: allowMessages } : { allow_group_messages: allowMessages }),
-          }
-          : prev.policy,
-        accessConfig: prev.accessConfig
-          ? {
-            ...prev.accessConfig,
-            ...(chatType === 'dm'
-              ? { dm_policy_mode: mode, dm_allow_from: trimmedAllowlist }
-              : { group_policy_mode: mode, group_allow_from: trimmedAllowlist }),
-          }
-          : prev.accessConfig,
+        policy: {
+          ...previousPolicy,
+          ...(chatType === 'dm' ? { allow_direct_messages: allowMessages } : { allow_group_messages: allowMessages }),
+        },
+        accessConfig: {
+          ...previousConfig,
+          ...(chatType === 'dm'
+            ? { dm_policy_mode: mode, dm_allow_from: trimmedAllowlist }
+            : { group_policy_mode: mode, group_allow_from: trimmedAllowlist }),
+        },
       }))
     } catch (error) {
       setState((prev) => ({ ...prev, saving: false, error: error instanceof Error ? error.message : 'Failed to save chat policy.' }))
+      await refresh()
     }
-  }, [platform, integrationId])
+  }, [platform, integrationId, refresh, state.accessConfig, state.policy])
 
   return {
     ...state,
