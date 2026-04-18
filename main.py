@@ -15,7 +15,7 @@ from pathlib import Path
 import secrets
 import time as _time
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import uvicorn
@@ -3633,6 +3633,7 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "oauth_token": str(payload.get("oauth_token", "")).strip(),
         "workspace": str(payload.get("workspace", "")).strip(),
+        "signing_secret": str(payload.get("signing_secret", "")).strip(),
         "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
     }
     integration = SlackIntegration()
@@ -3646,9 +3647,25 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
 async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Handle Slack events/interactions and route shared slash commands."""
     adapter = _get_channel_adapter("slack", integration_id)
-    if adapter is None:
+    integration = _get_channel_integration("slack", integration_id)
+    if adapter is None or not isinstance(integration, SlackIntegration):
         raise HTTPException(status_code=404, detail="Integration not found")
-    payload = await request.json()
+    raw_body = await request.body()
+    if not integration.verify_request_signature(raw_body, dict(request.headers)):
+        raise HTTPException(status_code=403, detail="Invalid Slack signature")
+    content_type = str(request.headers.get("content-type") or "").lower()
+    try:
+        if "application/x-www-form-urlencoded" in content_type:
+            form_data = parse_qs(raw_body.decode("utf-8"), keep_blank_values=True)
+            interaction_payload = form_data.get("payload", [None])[0]
+            if interaction_payload:
+                payload = json.loads(interaction_payload)
+            else:
+                payload = {key: values[0] if values else "" for key, values in form_data.items()}
+        else:
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack payload") from exc
     result = await adapter.handle_event(payload, dict(request.headers))
     owner_user_id = str(_get_channel_config("slack", integration_id).get("owner_user_id", "")).strip() or None
 
@@ -3859,6 +3876,7 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "guild_id": str(payload.get("guild_id", "")).strip(),
+        "public_key": str(payload.get("public_key", "")).strip(),
         "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
     }
     integration = DiscordIntegration()
@@ -3872,10 +3890,19 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
 async def discord_webhook(integration_id: str, request: Request) -> dict[str, Any]:
     """Handle Discord interactions/events and route shared slash commands."""
     adapter = _get_channel_adapter("discord", integration_id)
-    if adapter is None:
+    integration = _get_channel_integration("discord", integration_id)
+    if adapter is None or not isinstance(integration, DiscordIntegration):
         raise HTTPException(status_code=404, detail="Integration not found")
-    payload = await request.json()
+    raw_body = await request.body()
+    if not integration.verify_interaction_signature(raw_body, dict(request.headers)):
+        raise HTTPException(status_code=403, detail="Invalid Discord signature")
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid Discord payload") from exc
     result = await adapter.handle_event(payload, dict(request.headers))
+    if isinstance(result.get("response"), dict) and int(result["response"].get("type", 0) or 0) == 1:
+        return _channel_webhook_response(result)
     owner_user_id = str(_get_channel_config("discord", integration_id).get("owner_user_id", "")).strip() or None
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     command_name = str(data.get("name") or "").strip().lower()

@@ -10,6 +10,8 @@ from urllib.parse import quote
 from typing import Any
 
 import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from backend.integrations.contracts import ChannelAdapter
 from backend.integrations.feature_flags import advanced_tool_blocked
@@ -39,12 +41,14 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token: str | None = None
         self._guild_id: str | None = None
+        self._public_key_hex: str | None = None
         self._delivery_deduper = DeliveryDeduper(max_entries=10_000)
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate the bot token and cache guild metadata."""
         token = str(config.get("bot_token", "")).strip()
         guild_id = str(config.get("guild_id", "")).strip()
+        self._public_key_hex = str(config.get("public_key") or "").strip() or None
         self._token = token or None
         self._guild_id = guild_id or None
         if not self._token:
@@ -69,7 +73,22 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token = None
         self._guild_id = None
+        self._public_key_hex = None
         self._delivery_deduper.clear()
+
+    def verify_interaction_signature(self, body: bytes, headers: dict[str, str]) -> bool:
+        """Validate Discord interaction signature using Ed25519 public key."""
+        normalized_headers = {str(k).lower(): str(v) for k, v in headers.items()}
+        signature_hex = normalized_headers.get("x-signature-ed25519", "").strip().lower()
+        timestamp = normalized_headers.get("x-signature-timestamp", "").strip()
+        if not self._public_key_hex or not signature_hex or not timestamp:
+            return False
+        try:
+            verify_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(self._public_key_hex))
+            verify_key.verify(bytes.fromhex(signature_hex), timestamp.encode("utf-8") + body)
+            return True
+        except (ValueError, InvalidSignature):
+            return False
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
@@ -203,7 +222,8 @@ class DiscordIntegration(BaseIntegration, ChannelAdapter):
         author = payload.get("author") if isinstance(payload.get("author"), dict) else {}
         sender = member_user or user or author
         channel_type = payload.get("channel_type")
-        normalized_type = "dm" if channel_type == 1 else ("group" if channel_type is not None else None)
+        guild_id = payload.get("guild_id")
+        normalized_type = "dm" if channel_type == 1 or (guild_id is None and channel_type is None) else "group"
         username = sender.get("username") or sender.get("global_name")
         return {
             "external_user_id": str(sender.get("id")).strip() if sender.get("id") else None,

@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
+import time
 from importlib import import_module
 from typing import Any
 
 from fastapi.testclient import TestClient
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from backend.reasoning import apply_reasoning_level, normalize_reasoning_level, runtime_reasoning_level
 from integrations.discord import DiscordIntegration
@@ -164,8 +170,10 @@ def test_slack_reasoning_slash_and_interactive_flow() -> None:
     main_mod._user_runtimes[owner_uid] = runtime
 
     adapter = _StubChannelAdapter("slack")
-    adapter.integration = object()
-    main_mod.channel_registry.upsert("slack", "sl-1", adapter, {"owner_user_id": owner_uid})
+    integration = SlackIntegration()
+    integration._signing_secret = "slack-secret"
+    adapter.integration = integration
+    main_mod.channel_registry.upsert("slack", "sl-1", adapter, {"owner_user_id": owner_uid, "signing_secret": "slack-secret"})
     original_log = main_mod._log_platform_message
     async def _noop_log(*args: Any, **kwargs: Any) -> None:
         _ = args, kwargs
@@ -173,18 +181,29 @@ def test_slack_reasoning_slash_and_interactive_flow() -> None:
 
     try:
         client = TestClient(main_mod.app)
+        ts = str(int(time.time()))
+        body_one = json.dumps({"type": "command", "command": "/reasoning", "text": "", "channel_id": "C1"}).encode("utf-8")
+        sig_one = "v0=" + hmac.new(
+            b"slack-secret",
+            f"v0:{ts}:{body_one.decode('utf-8')}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
         bare = client.post(
             "/api/integrations/slack/webhook/sl-1",
-            json={"type": "command", "command": "/reasoning", "text": "", "channel_id": "C1"},
+            content=body_one,
+            headers={
+                "content-type": "application/json",
+                "x-slack-request-timestamp": ts,
+                "x-slack-signature": sig_one,
+            },
         )
         assert bare.status_code == 200
         assert adapter.sent
         assert adapter.sent[-1][0] == "C1"
         assert adapter.sent[-1][2] and "blocks" in (adapter.sent[-1][2] or {})
 
-        updated = client.post(
-            "/api/integrations/slack/webhook/sl-1",
-            json={
+        body_two = json.dumps(
+            {
                 "type": "block_actions",
                 "channel": {"id": "C1"},
                 "actions": [
@@ -196,6 +215,20 @@ def test_slack_reasoning_slash_and_interactive_flow() -> None:
                         },
                     }
                 ],
+            }
+        ).encode("utf-8")
+        sig_two = "v0=" + hmac.new(
+            b"slack-secret",
+            f"v0:{ts}:{body_two.decode('utf-8')}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        updated = client.post(
+            "/api/integrations/slack/webhook/sl-1",
+            content=body_two,
+            headers={
+                "content-type": "application/json",
+                "x-slack-request-timestamp": ts,
+                "x-slack-signature": sig_two,
             },
         )
         assert updated.status_code == 200
@@ -213,8 +246,15 @@ def test_discord_reasoning_command_and_component_flow() -> None:
     main_mod._user_runtimes[owner_uid] = runtime
 
     adapter = _StubChannelAdapter("discord")
-    adapter.integration = object()
-    main_mod.channel_registry.upsert("discord", "dc-1", adapter, {"owner_user_id": owner_uid})
+    private_key = Ed25519PrivateKey.generate()
+    public_key_hex = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    integration = DiscordIntegration()
+    integration._public_key_hex = public_key_hex
+    adapter.integration = integration
+    main_mod.channel_registry.upsert("discord", "dc-1", adapter, {"owner_user_id": owner_uid, "public_key": public_key_hex})
     original_log = main_mod._log_platform_message
     async def _noop_log(*args: Any, **kwargs: Any) -> None:
         _ = args, kwargs
@@ -222,23 +262,42 @@ def test_discord_reasoning_command_and_component_flow() -> None:
 
     try:
         client = TestClient(main_mod.app)
-        set_minimal = client.post(
-            "/api/integrations/discord/webhook/dc-1",
-            json={
+        timestamp = str(int(time.time()))
+        body_one = json.dumps(
+            {
                 "type": 2,
                 "channel_id": "D1",
                 "data": {"name": "reasoning", "options": [{"name": "effort", "value": "minimal"}]},
+            }
+        ).encode("utf-8")
+        sig_one = private_key.sign(timestamp.encode("utf-8") + body_one).hex()
+        set_minimal = client.post(
+            "/api/integrations/discord/webhook/dc-1",
+            content=body_one,
+            headers={
+                "content-type": "application/json",
+                "x-signature-timestamp": timestamp,
+                "x-signature-ed25519": sig_one,
             },
         )
         assert set_minimal.status_code == 200
         assert runtime_reasoning_level(runtime.settings) == "minimal"
 
-        set_none = client.post(
-            "/api/integrations/discord/webhook/dc-1",
-            json={
+        body_two = json.dumps(
+            {
                 "type": 3,
                 "channel_id": "D1",
                 "data": {"custom_id": "reasoning_select", "values": ["reasoning:none"]},
+            }
+        ).encode("utf-8")
+        sig_two = private_key.sign(timestamp.encode("utf-8") + body_two).hex()
+        set_none = client.post(
+            "/api/integrations/discord/webhook/dc-1",
+            content=body_two,
+            headers={
+                "content-type": "application/json",
+                "x-signature-timestamp": timestamp,
+                "x-signature-ed25519": sig_two,
             },
         )
         assert set_none.status_code == 200
