@@ -5639,85 +5639,107 @@
 - None.
 
 ---
-## Session 6.21 - April 18, 2026 (channel pairing + ingress policy enforcement)
+## Session 6.21 - April 18, 2026 (automations UI layout refactor)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Added new integration access-control database models in `backend/database.py`:
-  - `PairedChannelIdentity`
-  - `IntegrationAccessPolicy`
-  - `PairingRequestAudit`
-- Implemented policy + pairing APIs in `main.py`:
-  - `GET /api/integrations/{platform}/{integration_id}/pairing/pending`
-  - `POST /api/integrations/{platform}/{integration_id}/pairing/{request_id}/approve`
-  - `POST /api/integrations/{platform}/{integration_id}/pairing/{request_id}/deny`
-  - `GET /api/integrations/{platform}/{integration_id}/policy`
-  - `PUT /api/integrations/{platform}/{integration_id}/policy`
-- Added message ingress enforcement in Telegram/Slack/Discord webhook paths:
-  - resolves external sender identity
-  - enforces DM/group policy
-  - enforces pairing-required access
-  - rejects unapproved users with clear channel response
-- Added short-lived pairing code flow with TTL + one-time verification (`/pair <code>`), including automatic request creation and code consumption semantics.
-- Added audit event writes for request/create/approve/deny/revoke transitions.
-- Added sender-identity resolver helpers in `integrations/telegram.py`, `integrations/slack_connector.py`, and `integrations/discord.py`.
+- Refactored `frontend/src/components/AutomationsPage.tsx` to a stacked card layout aligned with the requested dark mobile-first structure:
+  - top status cards (Enabled, Jobs count, Next wake, Refresh action)
+  - single scrollable New Job wizard card with grouped sections (Basics, Schedule, Execution, Delivery, Advanced collapsible)
+  - jobs panel with filters and row actions
+  - run history panel with scoped filters and pagination
+- Removed modal-only authoring flow and replaced it with inline wizard editing/creation while preserving all backend-wired task fields used by API operations (`name`, `description`, `prompt`, `cron_expr`, `timezone`, `enabled`).
+- Added responsive/mobile behavior improvements:
+  - full-width controls on narrow screens
+  - `min-h-11` touch-target sizing for interactive elements
+  - sticky primary wizard CTA container at mobile viewport bottom.
+- Added run history loading by calling existing backend endpoint (`GET /api/automation/tasks/{task_id}/runs`) per task and merged into a filtered/paginated history view.
 
 ### What's Working
-- Unpaired external users are blocked by ingress policy when pairing is required and receive explicit guidance.
-- Paired/approved users are allowed through ingress policy checks.
-- Denied users remain blocked via stored pair status + pending request flow.
-- Owners can review pending requests and approve/deny them via authenticated API routes.
+- Automations page now renders as stacked panels with consistent card shell spacing and section subtitles in dark theme.
+- Job creation/editing stays in a single form (no modal stepper) and required indicators are visible.
+- Existing task CRUD and run actions remain connected to backend endpoints.
+- Jobs and run history filtering/pagination behavior is functional.
 
 ### What's NOT Working Yet
-- Pairing code delivery is currently message-based and stored in audit notes for operational visibility; no dedicated out-of-band owner notification channel was added in this pass.
+- AGENTS checklist command `python -m py_compile main.py backend/pydantic_adk_runner.py` cannot run exactly as written because `backend/pydantic_adk_runner.py` does not exist in this repository.
+- No automated visual screenshot artifact was captured in this environment for this pass.
 
 ### Next Steps
-1. Add targeted tests for policy endpoints and webhook ingress gating across Telegram/Slack/Discord payload variants.
-2. Consider a dedicated admin UX for pairing requests and code lifecycle state.
-3. Add optional webhook signature hardening for Slack/Discord ingress paths if not already covered elsewhere.
+1. Align/confirm whether the missing compile target file in AGENTS checklist should be updated to a valid path.
+2. Add targeted frontend tests for automations wizard validation and jobs/history filter interactions.
+3. If desired, add server-side run-history pagination endpoint to avoid loading per-task history on large task sets.
 
 ### Decisions Made
-- Chose DB-backed policy defaults to make behavior deterministic across process restarts.
-- Used one-time pairing code hashing with TTL checks to minimize leakage risk.
-- Kept enforcement centralized in `main.py` ingress path for consistent cross-platform behavior.
+- Kept wizard as a single in-page form to satisfy the "no modal steps" requirement.
+- Used only backend-supported fields in save payloads; avoided introducing UI-only submission fields.
+- Kept run history scope + pagination client-side using currently available backend endpoints.
+
+### Blockers
+- Browser screenshot tooling was not available from this execution environment.
+
+---
+## Session 6.22 - April 18, 2026 (automation review follow-up fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed review feedback that the New Job `enabled` checkbox had no effect during creation.
+- Updated create flow to respect `enabled` selection by creating the task and immediately patching `enabled: false` when unchecked (backend create schema does not accept `enabled` directly).
+- Removed automatic per-task run-history fanout during every task fetch (eliminates N+1 request pattern).
+- Added scoped lazy run-history loading:
+  - history is fetched on demand when a specific job scope is selected
+  - loaded history is cached per task id
+  - forced refresh is triggered for the run's task after manual `Run now`.
+- Updated run-history panel empty/loading states to reflect scoped loading behavior.
+
+### What's Working
+- Enabled toggle now affects newly created jobs.
+- Task list refresh no longer issues one `/runs` request per task.
+- Run history still supports scoped filters/pagination with lower baseline request volume.
+
+### What's NOT Working Yet
+- "All jobs" run history view now depends on previously loaded per-task history and can be empty until at least one scoped task history is loaded.
+
+### Next Steps
+1. Add a backend aggregated run-history endpoint to support global history without per-task fetches.
+2. Add unit tests for create flow when `enabled=false` and for lazy run-history fetch behavior.
+3. Consider explicit "Load all history" action with batching/backpressure if backend endpoint is unavailable.
+
+### Decisions Made
+- Kept behavior backend-compatible instead of sending unsupported `enabled` in create payload.
+- Prioritized avoiding N+1 calls on initial page load by switching to scoped lazy fetch.
 
 ### Blockers
 - None.
 
 ---
-## Session 6.22 - April 18, 2026 (review fixups for pairing/policy PR)
+## Session 6.23 - April 18, 2026 (automations create-flow review fixes)
 
 **Agent:** GPT-5.3-Codex  
 **Duration:** ~1 pass
 
 ### What Was Done
-- Addressed review comments in `main.py` for pairing ingress handling:
-  - hardened `/pair` parsing to avoid indexing errors on malformed/empty code input
-  - removed transaction commits from `_try_consume_pairing_code` helper and shifted commit control to caller path
-  - ensured pairing-code verification path now commits state transitions from caller side
-  - removed plaintext pairing code leakage from `PairingRequestAudit.notes`
-  - changed pending-pairing GET query to filter out expired rows in SQL instead of mutating/committing in a GET route
-- Added `or_` SQL expression import to support expiry filtering logic.
+- Fixed create-flow response parsing bug in `AutomationsPage` by parsing `response.json()` exactly once and reusing the parsed object.
+- Added explicit error handling for the follow-up `PATCH` call used to apply `enabled: false` after task creation.
+- Preserved backend-compatible create behavior while preventing silent failure paths.
 
 ### What's Working
-- Pairing code processing no longer risks `IndexError` on malformed command payloads.
-- Helper no longer commits inside nested policy logic, reducing transaction-boundary surprises.
-- Pending pairing list endpoint remains read-only and excludes expired entries without side effects.
-- Audit logs no longer store plaintext pairing codes.
+- Creating jobs no longer risks double-read body stream errors.
+- If post-create enable/disable patch fails, users now receive a surfaced error instead of silent success.
 
 ### What's NOT Working Yet
-- Expired pending rows are now filtered from GET responses but are not eagerly backfilled to `expired` in this pass.
+- No additional UI messaging differentiation was added for create success + disable patch failure beyond thrown error handling.
 
 ### Next Steps
-1. Add a background cleanup job for pending pairing rows whose `code_expires_at` has passed.
-2. Add unit tests for malformed `/pair` payloads and helper transaction semantics.
-3. Add API tests validating that pending endpoint excludes expired requests via SQL filter.
+1. Add automated tests that assert single response body read and patch-failure propagation in create flow.
+2. Optionally display a targeted toast message if disable patch fails after successful create.
 
 ### Decisions Made
-- Prioritized read-only GET semantics by filtering expired rows in query rather than mutating status in handler.
-- Kept helper functions side-effect-light by avoiding commits inside subordinate functions.
+- Kept post-create patch pattern (required by current backend create schema) and hardened it with explicit response validation.
 
 ### Blockers
 - None.
