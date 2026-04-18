@@ -16,8 +16,8 @@ base = "/opt/build/repo"
 [build.environment]
 NODE_VERSION = "22"
 VITE_APP_VERSION = "1.2.0"
-VITE_API_URL = "https://web-production-89bf4.up.railway.app"
-VITE_WS_URL = "wss://web-production-89bf4.up.railway.app/ws/navigate"
+VITE_API_URL = "https://web-production-5b3f.up.railway.app"
+VITE_WS_URL = "wss://web-production-5b3f.up.railway.app/ws/navigate"
 
 [build.processing]
 
