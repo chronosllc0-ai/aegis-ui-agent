@@ -4982,9 +4982,12 @@ async def _post_pairing_approval_effects(
         },
     )
     try:
-        async for db_session in get_session():
+        session_iter = get_session()
+        db_session = await anext(session_iter)
+        try:
             await materialize_workspace_files_for_session_safe(db_session, session_id, owner_uid)
-            break
+        finally:
+            await session_iter.aclose()
     except Exception:  # noqa: BLE001
         logger.exception("Pairing approval workspace materialize failed for owner=%s session=%s", owner_uid, session_id)
     agents_content = load_session_workspace_file(session_id, "AGENTS.md")

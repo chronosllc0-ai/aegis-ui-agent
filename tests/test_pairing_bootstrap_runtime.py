@@ -41,8 +41,14 @@ def test_pairing_approval_wakes_runtime_and_emits_bootstrap_events(monkeypatch) 
     async def _fake_materialize(*args, **kwargs):  # noqa: ANN002, ANN003
         return None
 
+    session_closed = False
+
     async def _fake_get_session():
-        yield object()
+        nonlocal session_closed
+        try:
+            yield object()
+        finally:
+            session_closed = True
 
     file_store: dict[str, str] = {
         "AGENTS.md": "# agents",
@@ -88,6 +94,7 @@ def test_pairing_approval_wakes_runtime_and_emits_bootstrap_events(monkeypatch) 
         assert first_runtime is second_runtime
 
     asyncio.run(_run())
+    assert session_closed is True
 
     events = main.runtime_events.list_events(session_id="bot_owner-1", limit=30)["events"]
     categories = [str(event["category"]) for event in events]

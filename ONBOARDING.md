@@ -5949,3 +5949,26 @@
 - Decision: bootstrap consumption uses rename archival (`BOOTSTRAP.consumed.<UTC>.md`) instead of delete, to keep explicit audit trail at filesystem level.
 - Decision: pairing approval emits internal runtime events (`pairing_approved`, `bootstrap_loaded`, `bootstrap_consumed`) through existing `RuntimeEventStore`.
 - Blocker: none.
+
+## Session 6.28 - April 18, 2026 (Pairing approval DB-session leak fix)
+
+### What changed
+- Fixed critical DB session lifecycle bug in `main.py` pairing-approval wake path:
+  - replaced `async for ... break` usage over `get_session()` with explicit async-generator handling,
+  - now acquires one session via `await anext(session_iter)` and always executes `await session_iter.aclose()` in `finally`.
+- Updated `tests/test_pairing_bootstrap_runtime.py` to verify the mocked `get_session()` generator cleanup path runs (session closes after approval effects execution).
+
+### What works / what does not
+- Works:
+  - Pairing approval workspace materialization now closes DB session deterministically.
+  - Regression test asserts generator finalizer executes, guarding against future leaks.
+- Does not / caveats:
+  - Runtime state is still in-memory and not persisted across process restarts.
+
+### Next steps
+1. Consider adding a reusable helper for one-shot DB session acquisition outside FastAPI dependency flow to avoid repeating manual generator handling.
+2. Add broader tests around error-path cleanup when workspace materialization raises.
+
+### Blockers / decisions
+- Decision: retained `get_session()` dependency generator and added explicit `aclose()` lifecycle handling for this non-DI call site.
+- Blocker: none.
