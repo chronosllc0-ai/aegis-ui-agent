@@ -605,6 +605,77 @@ class UserConnection(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class PairedChannelIdentity(Base):
+    """Approved/denied external identity mapping for a channel integration."""
+
+    __tablename__ = "paired_channel_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "integration_id",
+            "external_user_id",
+            name="uq_paired_channel_identity_platform_integration_external_user",
+        ),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    platform = Column(String(20), nullable=False, index=True)
+    integration_id = Column(String(255), nullable=False, index=True)
+    external_user_id = Column(String(255), nullable=False, index=True)
+    external_username = Column(String(255), nullable=True)
+    status = Column(String(20), nullable=False, default="approved", index=True)  # approved|denied|revoked
+    paired_by_user_id = Column(String(255), nullable=True, index=True)
+    paired_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column(Text, nullable=True)
+
+
+class IntegrationAccessPolicy(Base):
+    """Inbound access policy for channel integrations."""
+
+    __tablename__ = "integration_access_policies"
+    __table_args__ = (
+        UniqueConstraint("platform", "integration_id", name="uq_integration_policy_platform_integration"),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    platform = Column(String(20), nullable=False, index=True)
+    integration_id = Column(String(255), nullable=False, index=True)
+    pairing_required = Column(Boolean, nullable=False, default=True)
+    allow_direct_messages = Column(Boolean, nullable=False, default=True)
+    allow_group_messages = Column(Boolean, nullable=False, default=False)
+    reject_message = Column(
+        Text,
+        nullable=False,
+        default="Access denied. Pair your account first using /pair <code>.",
+    )
+    updated_by_user_id = Column(String(255), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class PairingRequestAudit(Base):
+    """Audit and pending queue record for channel identity pairing requests."""
+
+    __tablename__ = "pairing_request_audit"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    platform = Column(String(20), nullable=False, index=True)
+    integration_id = Column(String(255), nullable=False, index=True)
+    external_user_id = Column(String(255), nullable=False, index=True)
+    external_username = Column(String(255), nullable=True)
+    external_channel_id = Column(String(255), nullable=True, index=True)
+    chat_type = Column(String(20), nullable=True)  # dm|group|channel
+    event_type = Column(String(20), nullable=False, index=True)  # request|create|approve|deny|revoke
+    status = Column(String(20), nullable=False, default="pending", index=True)  # pending|approved|denied|revoked|expired
+    pairing_code_hash = Column(String(128), nullable=True, index=True)
+    code_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    code_used_at = Column(DateTime(timezone=True), nullable=True)
+    actor_user_id = Column(String(255), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class SupportThread(Base):
     """A support / 'Talk to us' conversation between a customer and admin team."""
 
