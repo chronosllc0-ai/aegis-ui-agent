@@ -5679,3 +5679,39 @@
 
 ### Blockers
 - Browser screenshot tooling was not available from this execution environment.
+
+---
+## Session 6.22 - April 18, 2026 (automation review follow-up fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed review feedback that the New Job `enabled` checkbox had no effect during creation.
+- Updated create flow to respect `enabled` selection by creating the task and immediately patching `enabled: false` when unchecked (backend create schema does not accept `enabled` directly).
+- Removed automatic per-task run-history fanout during every task fetch (eliminates N+1 request pattern).
+- Added scoped lazy run-history loading:
+  - history is fetched on demand when a specific job scope is selected
+  - loaded history is cached per task id
+  - forced refresh is triggered for the run's task after manual `Run now`.
+- Updated run-history panel empty/loading states to reflect scoped loading behavior.
+
+### What's Working
+- Enabled toggle now affects newly created jobs.
+- Task list refresh no longer issues one `/runs` request per task.
+- Run history still supports scoped filters/pagination with lower baseline request volume.
+
+### What's NOT Working Yet
+- "All jobs" run history view now depends on previously loaded per-task history and can be empty until at least one scoped task history is loaded.
+
+### Next Steps
+1. Add a backend aggregated run-history endpoint to support global history without per-task fetches.
+2. Add unit tests for create flow when `enabled=false` and for lazy run-history fetch behavior.
+3. Consider explicit "Load all history" action with batching/backpressure if backend endpoint is unavailable.
+
+### Decisions Made
+- Kept behavior backend-compatible instead of sending unsupported `enabled` in create payload.
+- Prioritized avoiding N+1 calls on initial page load by switching to scoped lazy fetch.
+
+### Blockers
+- None.

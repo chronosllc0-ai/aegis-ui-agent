@@ -459,10 +459,11 @@ function AutomationWizard({
 
 export function AutomationsPage() {
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
-  const [runHistory, setRunHistory] = useState<TaskRun[]>([])
+  const [runHistoryByTask, setRunHistoryByTask] = useState<Record<string, TaskRun[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [runHistoryLoading, setRunHistoryLoading] = useState(false)
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
   const [editingTask, setEditingTask] = useState<ScheduledTask | undefined>(undefined)
 
@@ -476,18 +477,24 @@ export function AutomationsPage() {
   const [runPage, setRunPage] = useState(1)
   const runPageSize = 5
 
-  const loadRunHistory = useCallback(async (nextTasks: ScheduledTask[]) => {
-    const runs = await Promise.all(
-      nextTasks.map(async (task) => {
-        const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/runs`), { credentials: 'include' })
-        if (!response.ok) return [] as TaskRun[]
-        const body = await response.json()
-        const items = Array.isArray(body.runs) ? body.runs : []
-        return items.map((entry: Omit<TaskRun, 'taskId' | 'taskName'>) => ({ ...entry, taskId: task.id, taskName: task.name }))
-      }),
-    )
-    setRunHistory(runs.flat())
-  }, [])
+  const loadRunHistoryForTask = useCallback(async (task: ScheduledTask, force = false) => {
+    if (!force && runHistoryByTask[task.id]) return
+    setRunHistoryLoading(true)
+    try {
+      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/runs`), { credentials: 'include' })
+      if (!response.ok) return
+      const body = await response.json()
+      const items = Array.isArray(body.runs) ? body.runs : []
+      const runs = items.map((entry: Omit<TaskRun, 'taskId' | 'taskName'>) => ({
+        ...entry,
+        taskId: task.id,
+        taskName: task.name,
+      }))
+      setRunHistoryByTask((previous) => ({ ...previous, [task.id]: runs }))
+    } finally {
+      setRunHistoryLoading(false)
+    }
+  }, [runHistoryByTask])
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -497,13 +504,16 @@ export function AutomationsPage() {
       const body = await response.json()
       const nextTasks: ScheduledTask[] = body.tasks ?? []
       setTasks(nextTasks)
-      await loadRunHistory(nextTasks)
+      setRunHistoryByTask((previous) => {
+        const validTaskIds = new Set(nextTasks.map((task) => task.id))
+        return Object.fromEntries(Object.entries(previous).filter(([taskId]) => validTaskIds.has(taskId)))
+      })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load automations')
     } finally {
       setLoading(false)
     }
-  }, [loadRunHistory])
+  }, [])
 
   useEffect(() => {
     void fetchTasks()
@@ -527,6 +537,16 @@ export function AutomationsPage() {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}))
         throw new Error(body?.detail ?? `Error ${response.status}`)
+      }
+      const body = await response.json().catch(() => ({}))
+      const createdTaskId = body?.task?.id as string | undefined
+      if (createdTaskId && !data.enabled) {
+        await fetch(apiUrl(`/api/automation/tasks/${createdTaskId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ enabled: false }),
+        })
       }
       await fetchTasks()
     } finally {
@@ -582,6 +602,8 @@ export function AutomationsPage() {
         credentials: 'include',
       })
       setTimeout(() => {
+        const ranTask = tasks.find((task) => task.id === taskId)
+        if (ranTask) void loadRunHistoryForTask(ranTask, true)
         void fetchTasks()
       }, 1200)
     } finally {
@@ -615,8 +637,10 @@ export function AutomationsPage() {
     })
   }, [tasks, jobSearch, enabledFilter, statusFilter, runningIds])
 
+  const flattenedRuns = useMemo(() => Object.values(runHistoryByTask).flat(), [runHistoryByTask])
+
   const scopedRuns = useMemo(() => {
-    const sorted = [...runHistory].sort(
+    const sorted = [...flattenedRuns].sort(
       (a, b) => new Date(b.started_at ?? b.finished_at ?? 0).getTime() - new Date(a.started_at ?? a.finished_at ?? 0).getTime(),
     )
     return sorted.filter((run) => {
@@ -626,7 +650,7 @@ export function AutomationsPage() {
       const matchesSearch = !runSearch.trim() || haystack.includes(runSearch.toLowerCase())
       return matchesScope && matchesStatus && matchesSearch
     })
-  }, [runHistory, runScope, runStatus, runSearch])
+  }, [flattenedRuns, runScope, runStatus, runSearch])
 
   const totalPages = Math.max(1, Math.ceil(scopedRuns.length / runPageSize))
   const pagedRuns = scopedRuns.slice((runPage - 1) * runPageSize, runPage * runPageSize)
@@ -634,6 +658,13 @@ export function AutomationsPage() {
   useEffect(() => {
     setRunPage(1)
   }, [runScope, runStatus, runSearch])
+
+  useEffect(() => {
+    if (runScope === 'all') return
+    const task = tasks.find((row) => row.id === runScope)
+    if (!task) return
+    void loadRunHistoryForTask(task)
+  }, [runScope, tasks, loadRunHistoryForTask])
 
   if (loading) {
     return <div className='flex h-full items-center justify-center text-sm text-zinc-400'>Loading automations…</div>
@@ -834,7 +865,13 @@ export function AutomationsPage() {
           </div>
 
           <div className='mt-4 space-y-2'>
-            {pagedRuns.length === 0 && <p className='text-sm text-zinc-500'>No matching runs.</p>}
+            {runHistoryLoading && <p className='text-sm text-zinc-500'>Loading run history…</p>}
+            {!runHistoryLoading && runScope === 'all' && flattenedRuns.length === 0 && (
+              <p className='text-sm text-zinc-500'>Select a job scope to load detailed run history.</p>
+            )}
+            {!runHistoryLoading && !(runScope === 'all' && flattenedRuns.length === 0) && pagedRuns.length === 0 && (
+              <p className='text-sm text-zinc-500'>No matching runs.</p>
+            )}
             {pagedRuns.map((run, index) => (
               <article key={`${run.taskId}-${run.started_at ?? run.finished_at}-${index}`} className='rounded-lg border border-[#2a334a] bg-[#0b1220] p-3'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
