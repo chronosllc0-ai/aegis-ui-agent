@@ -122,19 +122,6 @@ export function useConversations(userUid: string | null) {
     return cached ?? []
   }, [cacheUid, userUid])
 
-  // Delete a conversation (soft-delete on server + remove from local list)
-  const deleteConversation = useCallback(async (conversationId: string) => {
-    setConversations(prev => prev.filter(c => c.id !== conversationId))
-    if (!userUid) return
-    try {
-      await fetch(`${API}/api/conversations/${conversationId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-    } catch { /* best effort */ }
-    try { localStorage.removeItem(MSG_CACHE_KEY(cacheUid, conversationId)) } catch { /* ok */ }
-  }, [cacheUid, userUid])
-
   // Called when the WS emits a conversation_id - adds/refreshes that conversation in our list
   const onNewConversationId = useCallback((conversationId: string, title?: string) => {
     setConversations(prev => {
@@ -155,5 +142,5 @@ export function useConversations(userUid: string | null) {
     window.setTimeout(() => { void fetchConversations() }, 2000)
   }, [cacheUid, fetchConversations])
 
-  return { conversations, fetchMessages, deleteConversation, onNewConversationId, refreshConversations: fetchConversations, loadingMessages }
+  return { conversations, fetchMessages, onNewConversationId, refreshConversations: fetchConversations, loadingMessages }
 }

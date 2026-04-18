@@ -98,14 +98,14 @@ const dayDiffFromNow = (createdAt: Date, now: Date): number => {
   return Math.floor(diffMs / (1000 * 60 * 60 * 24))
 }
 
-const resolveTaskGroup = (task: TaskHistoryItem, now: Date): 'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Tasks' => {
+const resolveTaskGroup = (task: TaskHistoryItem, now: Date): 'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Sessions' => {
   const createdAt = task.createdAt ? new Date(task.createdAt) : new Date()
   if (Number.isNaN(createdAt.getTime())) return 'Today'
   const dayDiff = dayDiffFromNow(createdAt, now)
   if (dayDiff <= 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
   if (dayDiff <= 7) return 'Past 7 Days'
-  return 'Older Tasks'
+  return 'Older Sessions'
 }
 
 function App() {
@@ -137,7 +137,7 @@ function App() {
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [historySearch, setHistorySearch] = useState('')
-  const { conversations, fetchMessages, deleteConversation, onNewConversationId } = useConversations(authUser?.uid ?? null)
+  const { conversations, fetchMessages, onNewConversationId } = useConversations(authUser?.uid ?? null)
   // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
   const taskToConvRef = useRef<Map<string, string>>(new Map())
   // Server messages loaded for the selected conversation
@@ -570,11 +570,11 @@ function App() {
 
   const groupedHistory = useMemo(() => {
     const now = new Date()
-    const groups: Record<'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Tasks', TaskHistoryItem[]> = {
+    const groups: Record<'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Sessions', TaskHistoryItem[]> = {
       Today: [],
       Yesterday: [],
       'Past 7 Days': [],
-      'Older Tasks': [],
+      'Older Sessions': [],
     }
     for (const item of filteredHistory) {
       groups[resolveTaskGroup(item, now)].push(item)
@@ -888,16 +888,16 @@ function App() {
     send({ action: 'handoff_continue', request_id: requestId })
   }
 
-  const onDeleteTask = (id: string) => {
+  const onClearSession = (id: string) => {
     removeFrameForThread(id)
     setTaskHistory((prev) => {
       const next = prev.filter((t) => t.id !== id)
       try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* ok */ }
       return next
     })
-    // Also delete server-side conversation if we have a mapping
+    // Keep server history intact by default during migration (no hard delete).
     const convId = taskToConvRef.current.get(id)
-    if (convId) { void deleteConversation(convId); taskToConvRef.current.delete(id) }
+    if (convId) { taskToConvRef.current.delete(id) }
     if (selectedTaskId === id) setSelectedTaskId(null)
     setOptimisticMessagesByTask((prev) => {
       if (!(id in prev)) return prev
@@ -1067,13 +1067,13 @@ function App() {
         )}
         <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-gradient-to-b from-[#1a1f2d] via-[#191b26] to-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
           <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
-            ⌁ New Tasks
+            ⌁ New Session
           </button>
-          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search task' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
+          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search sessions' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
-          {/* ── Task list — Codex-style text-only threads ── */}
+          {/* ── Sessions list — Codex-style text-only rows ── */}
           <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
-            {(['Today', 'Yesterday', 'Past 7 Days', 'Older Tasks'] as const).map((group) => {
+            {(['Today', 'Yesterday', 'Past 7 Days', 'Older Sessions'] as const).map((group) => {
               const items = groupedHistory[group]
               if (!items.length) return null
               return (
@@ -1085,7 +1085,7 @@ function App() {
                       const isActive = selectedTaskId === item.id
                       return (
                         <div key={item.id}>
-                          {/* Parent thread row */}
+                          {/* Parent session row */}
                           <div className='group relative flex items-center'>
                             <button
                               type='button'
@@ -1098,22 +1098,22 @@ function App() {
                             </button>
                             <button
                               type='button'
-                              onClick={(e) => { e.stopPropagation(); onDeleteTask(item.id) }}
+                              onClick={(e) => { e.stopPropagation(); onClearSession(item.id) }}
                               className='mr-1 hidden rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300 group-hover:flex flex-shrink-0'
-                              aria-label='Delete task'
-                              title='Delete task'
+                              aria-label='Clear session'
+                              title='Clear session'
                             >
                               {Icons.trash({ className: 'h-3 w-3' })}
                             </button>
                           </div>
 
-                          {/* Sub-agent child threads — nested under parent */}
+                          {/* Sub-agent child sessions — nested under parent */}
                           {agentsForTask.length > 0 && (
                             <div className='ml-3 border-l border-[#252525] pl-2'>
                               {agentsForTask.map((agent, aIdx) => {
                                 const nameColors = ['text-orange-400','text-green-400','text-sky-400','text-violet-400','text-rose-400']
                                 const nc = nameColors[aIdx % nameColors.length]
-                                const taskTitle = agent.instruction.split(' ').slice(0, 6).join(' ').slice(0, 36) || 'Sub-task'
+                                const taskTitle = agent.instruction.split(' ').slice(0, 6).join(' ').slice(0, 36) || 'Sub-session'
                                 const isLive = agent.status === 'spawning' || agent.status === 'running'
                                 const shortName = subAgentDisplayName(agent).slice(0, 12) || `Agent ${aIdx + 1}`
                                 return (

@@ -5394,3 +5394,79 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.15 - April 17, 2026 (sessions-first migration bridge)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added canonical session identity helpers in `backend/session_identity.py`:
+  - `agent:main:main`
+  - `agent:main:<channel>:<account>:<chatType>:<peerId>`
+  - legacy bridge functions for `conversation_id <-> session_id`.
+- Added new session APIs in `main.py`:
+  - `GET /api/sessions`
+  - `GET /api/sessions/{session_id}/messages`
+  - `POST /api/sessions/{session_id}/send`
+  - `POST /api/sessions/spawn`
+- Kept legacy conversation APIs alive and bridged data using deterministic conversion.
+- Implemented subagent spawn as a session entry (`agent:main:subagent:<uid>:task:<uuid>`) with `parent_session_id` persisted into metadata on spawn event message.
+- Updated sidebar UI language in `frontend/src/App.tsx` from task/thread semantics toward sessions:
+  - “New Session”, “Search sessions”, “Older Sessions”, “Clear session”.
+- Changed default clear behavior to avoid server-side deletion during migration (history preserved by default).
+- Added tests for session identity bridge in `tests/test_session_identity.py`.
+
+### What's Working
+- New session-first API surface is available while legacy `/api/conversations` remains functional.
+- Existing conversation history remains readable via bridged session endpoints.
+- Subagent session spawn now returns unique session IDs and tracks parent session linkage in metadata.
+- Frontend terminology is aligned toward “sessions” and no-hard-delete default behavior.
+
+### What's NOT Working Yet
+- `parent_session_id` is currently stored in spawn message metadata, not yet normalized into a dedicated DB session relation table.
+- Frontend still uses the existing conversation hook internally; full API cutover to `/api/sessions` is not complete in this pass.
+
+### Next Steps
+1. Add a first-class `conversation_sessions` persistence model for explicit `parent_session_id` and one-to-one mapping.
+2. Migrate frontend data layer from `useConversations` to `useSessions` with legacy fallback.
+3. Add API tests for `/api/sessions/*` ownership, message send, and spawn behavior.
+
+### Decisions Made
+- Used deterministic bridging for legacy records to avoid history loss and avoid blocking migration on schema changes.
+- Preserved server-side conversation records by default when users clear local session rows.
+
+### Blockers
+- None.
+
+---
+## Session 6.16 - April 18, 2026 (review fixes for sessions bridge)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 fix pass
+
+### What Was Done
+- Fixed legacy session parsing in `backend/session_identity.py` so bridged session IDs round-trip correctly even when `conversation_id` contains colons.
+- Removed UID leakage from spawned subagent session IDs in `main.py`; IDs now use `agent:main:subagent:spawn:task:<uuid>` rather than embedding user identifiers.
+- Cleaned up stale frontend usage by removing `deleteConversation` from `useConversations` return payload and updated test mocks accordingly.
+- Extended `tests/test_session_identity.py` with explicit coverage for colon-containing legacy conversation IDs.
+
+### What's Working
+- `conversation_id <-> session_id` bridge now safely supports IDs with `:` characters.
+- Subagent session IDs no longer expose user UID in API responses/logged identifiers.
+- Frontend compiles cleanly with updated hook return shape.
+
+### What's NOT Working Yet
+- Parent-child session relation is still metadata-backed; dedicated persistent session relation table remains pending.
+
+### Next Steps
+1. Add first-class session persistence model for `parent_session_id` relations.
+2. Move frontend history data path from conversation-first hook to session-first hook.
+3. Add API tests for `/api/sessions/spawn` payload/response contracts.
+
+### Decisions Made
+- Prioritized non-breaking fixes to address review warnings without introducing schema migration risk in this pass.
+
+### Blockers
+- None.

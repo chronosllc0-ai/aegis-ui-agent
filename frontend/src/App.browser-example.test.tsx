@@ -67,7 +67,6 @@ vi.mock('./hooks/useConversations', () => ({
   useConversations: () => ({
     conversations: [],
     fetchMessages: vi.fn(async () => []),
-    deleteConversation: vi.fn(),
     onNewConversationId: vi.fn(),
   }),
 }))
