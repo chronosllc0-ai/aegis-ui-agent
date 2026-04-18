@@ -68,7 +68,7 @@ from backend.workspace_files_service import materialize_workspace_files_for_sess
 from backend.tasks.worker import BackgroundWorker
 from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
-from backend.runtime_telemetry import RuntimeTelemetry
+from backend.runtime_telemetry import RuntimeEventStore, RuntimeTelemetry
 from backend.conversation_service import append_message, get_or_create_conversation
 from backend.session_identity import (
     SESSION_MAIN_ID,
@@ -316,6 +316,7 @@ _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
 _session_runtimes: dict[str, "SessionRuntime"] = {}
 runtime_telemetry = RuntimeTelemetry()
+runtime_events = RuntimeEventStore(ttl_seconds=6 * 60 * 60, max_events=10000)
 
 _BROWSER_CHAT_POLLUTION_PREFIXES = (
     "[click",
@@ -392,6 +393,32 @@ def _runtime_snapshot() -> dict[str, Any]:
 
 
 set_runtime_inspector(_runtime_snapshot)
+
+def _record_runtime_event(
+    *,
+    category: str,
+    subsystem: str,
+    level: str,
+    message: str,
+    session_id: str | None = None,
+    request_id: str | None = None,
+    task_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    """Record an internal observability event without failing runtime flows."""
+    try:
+        runtime_events.append(
+            category=category,
+            subsystem=subsystem,
+            level=level,
+            message=message,
+            session_id=session_id,
+            request_id=request_id,
+            task_id=task_id,
+            details=details,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("runtime event capture failed: %s", exc)
 
 
 def _get_channel_adapter(platform: str, integration_id: str) -> Any:
@@ -474,6 +501,14 @@ async def _dispatch_background_task_event(user_id: str, event: dict[str, Any]) -
 async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
     """Run or queue scheduled automations on the active primary session websocket."""
     runtime = _session_runtimes.get(session_id)
+    _record_runtime_event(
+        category="heartbeat",
+        subsystem="heartbeat",
+        level="info",
+        message="heartbeat trigger received",
+        session_id=session_id,
+        details={"instruction": instruction},
+    )
     if runtime is None or runtime.websocket is None:
         logger.info("Heartbeat dispatch (no active runtime): session=%s task=%s", session_id, instruction)
         return
@@ -1315,6 +1350,15 @@ async def _send_workflow_step(
         }
         await websocket.send_json({"type": "mode_event", "data": mode_event_payload})
         if parsed_mode_event.get("event_name") == "mode_transition":
+            _record_runtime_event(
+                category="mode_orchestration",
+                subsystem="mode_router",
+                level="info",
+                message="mode transition",
+                session_id=session_id,
+                task_id=task_id,
+                details=parsed_mode_event.get("payload", {}),
+            )
             await websocket.send_json(
                 {
                     "type": "mode_transition",
@@ -1407,6 +1451,16 @@ async def _safe_ws_send(
             ws_session_id or "",
             phase,
             exc,
+        )
+        _record_runtime_event(
+            category="ws_ping_pong",
+            subsystem="websocket",
+            level="error",
+            message="websocket send failed",
+            session_id=ws_session_id,
+            request_id=request_id,
+            task_id=task_id,
+            details={"phase": phase, "error": str(exc)},
         )
         return False
 
@@ -1634,6 +1688,17 @@ async def _run_navigation_task(
     async def callback(step: dict[str, Any]) -> None:
         await _send_step(websocket, step, runtime=runtime, session_id=session_id)
         step_type = str(step.get("type") or "").lower()
+        if step_type in {"tool_start", "tool_result", "tool-call", "tool_call"}:
+            _record_runtime_event(
+                category="tool_lifecycle",
+                subsystem="tools",
+                level="info",
+                message=f"internal tool lifecycle: {step_type}",
+                session_id=session_id,
+                request_id=request_id,
+                task_id=task_id,
+                details={"step": step},
+            )
         task_state = "tool_call" if step_type in {"tool-call", "tool_call"} else "running"
         await _safe_ws_send(
             websocket,
@@ -2182,6 +2247,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     )
                     continue
                 runtime.steering_context.append(instruction)
+                _record_runtime_event(
+                    category="queue_steer_runtime",
+                    subsystem="runtime",
+                    level="info",
+                    message="steer instruction accepted",
+                    session_id=session_id,
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    details={"instruction": instruction, "source": "websocket"},
+                )
                 await _send_step(
                     websocket,
                     {"type": "steer", "content": f"Steering note added: {instruction}"},
@@ -2255,6 +2330,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     lane="interactive",
                     source="websocket",
                     metadata={"client": client_metadata, "task_label": task_label},
+                )
+                _record_runtime_event(
+                    category="queue_steer_runtime",
+                    subsystem="runtime",
+                    level="info",
+                    message="instruction queued",
+                    session_id=session_id,
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    details={"instruction": instruction, "lane": "interactive"},
                 )
                 await _send_step(
                     websocket,
@@ -2434,7 +2519,21 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     {k: data.get(k) for k in ("x", "y", "text", "key", "deltaY")},
                 )
             elif action == "ping":
+                _record_runtime_event(
+                    category="ws_ping_pong",
+                    subsystem="websocket",
+                    level="debug",
+                    message="ws ping received",
+                    session_id=session_id,
+                )
                 await _safe_ws_send(websocket, {"type": "pong"}, ws_session_id=session_id, phase="pong")
+                _record_runtime_event(
+                    category="ws_ping_pong",
+                    subsystem="websocket",
+                    level="debug",
+                    message="ws pong sent",
+                    session_id=session_id,
+                )
             elif action == "spawn_subagent":
                 # ── Spawn a sub-agent ──────────────────────────────────
                 active_mode = _normalize_runtime_mode(runtime.settings)
@@ -3373,6 +3472,26 @@ async def spawn_agent_task(
         "status": task.status,
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }
+
+
+@app.get("/api/observability/events")
+async def list_observability_events(
+    request: Request,
+    session_id: str | None = Query(default=None),
+    subsystem: str | None = Query(default=None),
+    level: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """List internal observability events with retention and pagination metadata."""
+    _get_current_user(request)
+    return runtime_events.list_events(
+        session_id=session_id,
+        subsystem=subsystem,
+        level=level,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @app.get("/api/agents/tasks")

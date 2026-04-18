@@ -243,6 +243,14 @@ function classifyInternalEvent(text: string, rawStepType?: string): InternalEven
   return null
 }
 
+
+
+function isSystemInternalMessage(metadata: Record<string, unknown> | null | undefined): boolean {
+  if (!metadata || typeof metadata !== 'object') return false
+  if (metadata.user_visible === false || metadata.observability_only === true) return true
+  const action = String(metadata.action ?? '').trim().toLowerCase()
+  return action === 'step' || action === 'workflow_step' || action === 'context_update'
+}
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
   // tool_start / tool_result are typed JSON events — always let them through
   if (rawStepType === 'tool_start' || rawStepType === 'tool_result') return false
@@ -257,6 +265,11 @@ function isDeniedChatText(text: string, rawStepType?: string): boolean {
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
+    if (entry.type === 'step') {
+      const rawType = String(entry.rawStepType ?? '').trim().toLowerCase()
+      const allowedStepTypes = new Set(['assistant_message', 'result', 'handoff_request', 'handoff_complete', 'user_input_request'])
+      if (!allowedStepTypes.has(rawType)) continue
+    }
     const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
     const msg = normalizeTextPreservingMarkdown(rawMessage)
     const internalEvent = classifyInternalEvent(msg, entry.rawStepType)
@@ -1622,7 +1635,7 @@ export function ChatPanel({
   useEffect(() => {
     if (serverMessages.length > 0) {
       const mapped = serverMessages
-        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined))
+        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined) && !isSystemInternalMessage(m.metadata as Record<string, unknown> | null))
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,

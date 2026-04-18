@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+import time
+from typing import Any, Deque
+from uuid import uuid4
 
 
 @dataclass(slots=True)
@@ -50,5 +53,124 @@ class RuntimeTelemetry:
             "channel_tool_by_platform": {
                 key: {"success": int(value.get("success", 0)), "failure": int(value.get("failure", 0))}
                 for key, value in sorted(self.channel_tool_by_platform.items())
+            },
+        }
+
+
+@dataclass(slots=True)
+class RuntimeEvent:
+    """Single in-memory observability event row."""
+
+    id: str
+    ts: float
+    category: str
+    subsystem: str
+    level: str
+    message: str
+    session_id: str | None = None
+    request_id: str | None = None
+    task_id: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+class RuntimeEventStore:
+    """In-memory event log store with TTL retention and offset pagination."""
+
+    def __init__(self, *, ttl_seconds: int = 3600, max_events: int = 5000) -> None:
+        self.ttl_seconds = max(60, int(ttl_seconds))
+        self.max_events = max(100, int(max_events))
+        self._events: Deque[RuntimeEvent] = deque()
+
+    def _prune(self, now: float | None = None) -> None:
+        threshold = (now if now is not None else time.time()) - self.ttl_seconds
+        while self._events and self._events[0].ts < threshold:
+            self._events.popleft()
+        while len(self._events) > self.max_events:
+            self._events.popleft()
+
+    def append(
+        self,
+        *,
+        category: str,
+        subsystem: str,
+        level: str,
+        message: str,
+        session_id: str | None = None,
+        request_id: str | None = None,
+        task_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        """Append a new event and enforce retention constraints."""
+        now = time.time()
+        event = RuntimeEvent(
+            id=str(uuid4()),
+            ts=now,
+            category=str(category or "runtime").strip().lower() or "runtime",
+            subsystem=str(subsystem or "system").strip().lower() or "system",
+            level=str(level or "info").strip().lower() or "info",
+            message=str(message or "event").strip() or "event",
+            session_id=str(session_id).strip() if session_id else None,
+            request_id=str(request_id).strip() if request_id else None,
+            task_id=str(task_id).strip() if task_id else None,
+            details=dict(details or {}),
+        )
+        self._events.append(event)
+        self._prune(now)
+        return event
+
+    def list_events(
+        self,
+        *,
+        session_id: str | None = None,
+        subsystem: str | None = None,
+        level: str | None = None,
+        limit: int = 50,
+        cursor: int = 0,
+    ) -> dict[str, Any]:
+        """List events with optional filters and offset cursor pagination."""
+        self._prune()
+        normalized_session = str(session_id or "").strip() or None
+        normalized_subsystem = str(subsystem or "").strip().lower() or None
+        normalized_level = str(level or "").strip().lower() or None
+        page_limit = min(max(1, int(limit)), 200)
+        page_cursor = max(0, int(cursor))
+
+        filtered = [
+            event
+            for event in reversed(self._events)
+            if (not normalized_session or event.session_id == normalized_session)
+            and (not normalized_subsystem or event.subsystem == normalized_subsystem)
+            and (not normalized_level or event.level == normalized_level)
+        ]
+        total = len(filtered)
+        page = filtered[page_cursor : page_cursor + page_limit]
+        next_cursor = page_cursor + len(page)
+        return {
+            "events": [
+                {
+                    "id": event.id,
+                    "ts": event.ts,
+                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(event.ts)),
+                    "category": event.category,
+                    "subsystem": event.subsystem,
+                    "level": event.level,
+                    "message": event.message,
+                    "session_id": event.session_id,
+                    "request_id": event.request_id,
+                    "task_id": event.task_id,
+                    "details": event.details,
+                }
+                for event in page
+            ],
+            "pagination": {
+                "cursor": page_cursor,
+                "next_cursor": next_cursor if next_cursor < total else None,
+                "limit": page_limit,
+                "total": total,
+                "has_more": next_cursor < total,
+            },
+            "retention": {
+                "ttl_seconds": self.ttl_seconds,
+                "max_events": self.max_events,
             },
         }

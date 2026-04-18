@@ -5507,3 +5507,42 @@
 
 ### Blockers
 - Browser screenshot tool unavailable in this run.
+
+---
+## Session 6.18 - April 18, 2026 (observability event log + internal chat filtering)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added a process-local observability event store in `backend/runtime_telemetry.py` with TTL retention and bounded capacity.
+- Added API endpoint `GET /api/observability/events` in `main.py` with filtering (`session_id`, `subsystem`, `level`) and cursor-based pagination.
+- Routed internal/system runtime events to the event store for:
+  - heartbeat dispatch lifecycle
+  - mode orchestration transitions
+  - websocket ping/pong and ws send failures
+  - queue/steer runtime controls
+  - internal tool lifecycle (`tool_start`/`tool_result`/`tool_call`)
+- Upgraded `frontend/src/components/settings/ObservabilityTab.tsx` to include an Event Log panel under Observability with filter controls, severity/subsystem/session visibility, retention display, and next/prev pagination.
+- Tightened chat rendering in `frontend/src/components/ChatPanel.tsx` to avoid rendering system/internal events from both live logs and persisted server messages.
+
+### What's Working
+- Internal runtime events are queryable via `/api/observability/events` with requested filters and pagination metadata.
+- Observability tab now shows an Event Log panel where internal events are visible and filterable.
+- Chat transcript now excludes internal/system event classes and remains focused on user messages + assistant-facing output.
+
+### What's NOT Working Yet
+- Event log storage is in-memory only (per process); it resets on restart and is not cross-instance.
+- No dedicated automated tests were added yet for the new observability endpoint and UI filters.
+
+### Next Steps
+1. Add backend tests for `/api/observability/events` filters, cursor pagination, and TTL pruning.
+2. Add frontend tests for the Observability Event Log filter controls and pagination actions.
+3. Consider persistent storage (DB-backed) for observability events if cross-restart/history requirements increase.
+
+### Decisions Made
+- Chose in-memory event retention with TTL + max cap for low-latency rollout and simple safety bounds.
+- Kept chat filtering strict by default for internal metadata/actions to meet the “no system/internal chat transcript entries” acceptance criteria.
+
+### Blockers
+- Browser screenshot capture tool remains unavailable in this environment.
