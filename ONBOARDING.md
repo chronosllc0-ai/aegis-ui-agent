@@ -5743,3 +5743,77 @@
 
 ### Blockers
 - None.
+
+## Session 6.23 - April 18, 2026 (Connections Access & Pairing UI + policy wiring)
+
+### What changed
+- Added frontend Access & Pairing API service in `frontend/src/lib/botAccessPairing.ts` for:
+  - pending pairing list fetch
+  - approve/deny pairing requests
+  - integration policy get/update
+  - bot access config get/save (DM/group policy mode + allowlists)
+- Added `frontend/src/hooks/useBotAccessPairing.ts` to manage loading/saving/error state for Access & Pairing UX and immediate persistence actions.
+- Updated `frontend/src/components/settings/ConnectionsTab.tsx`:
+  - Added status chips on Telegram/Slack/Discord cards for pairing required, pending count, and policy mode.
+  - Added Access & Pairing section with:
+    - pending requests + Approve/Deny actions
+    - pairing required toggle
+    - DM policy selector + allowlist editor
+    - Group policy selector + allowlist editor
+  - Kept existing custom MCP UI unchanged.
+- Updated ingress enforcement in `main.py` to apply DM/group policy modes + allowlists from bot config immediately at runtime.
+
+### What works / what does not
+- Works:
+  - Frontend build passes.
+  - Existing ConnectionsTab unit tests pass.
+  - Pairing/policy UI uses real backend endpoints (no local placeholders).
+  - Backend smoke websocket test passes.
+- Does not / caveats:
+  - Delivery checklist command `python -m py_compile main.py backend/pydantic_adk_runner.py` cannot fully run because `backend/pydantic_adk_runner.py` is not present in this repo path.
+
+### Next steps
+1. Add targeted unit tests for `useBotAccessPairing` and new Access & Pairing UI interactions (mode changes, allowlist add/remove, approve/deny).
+2. Add backend tests for DM/group allowlist enforcement in `_enforce_ingress_policy`.
+3. Consider consolidating `allow_from` (legacy) and per-chat allowlists in one canonical schema.
+
+### Blockers / decisions
+- Decision: persisted DM/group policy modes + allowlists in existing bot config endpoint (`/api/integrations/{platform}/config/{integration_id}`) to avoid introducing new backend tables/routes.
+- Blocker: no `backend/pydantic_adk_runner.py` file found, so that exact checklist compile command is partially blocked.
+
+## Session 6.24 - April 18, 2026 (review fixes for Access & Pairing PR)
+
+### What changed
+- Addressed critical split-brain risk in `frontend/src/hooks/useBotAccessPairing.ts` by changing chat policy persistence from parallel writes to sequential writes:
+  1) update integration policy
+  2) update bot access config
+- Added error recovery behavior in `updateChatPolicy(...)`: on failure, trigger `refresh()` to re-sync UI from backend and avoid stale optimistic state.
+- Removed frontend read-modify-write in `frontend/src/lib/botAccessPairing.ts::saveBotAccessConfig(...)`; it now sends patch payloads directly.
+- Updated backend `POST /api/integrations/{platform}/config/{integration_id}` in `main.py` to merge partial patches server-side, reducing lost updates from concurrent edits.
+- Added runtime helpers in `main.py`:
+  - `_get_effective_bot_config(...)` to combine channel runtime `bot_config` + in-memory overrides
+  - `_update_runtime_bot_config(...)` to merge updates and mirror into `channel_registry` runtime config
+- Switched ingress checks and telegram slash-command allow-from checks to use `_get_effective_bot_config(...)` for fresher runtime reads.
+- Clarified group allowlist semantics:
+  - kept OR behavior intentionally (user ID OR channel/group ID)
+  - documented in backend comment and in frontend Group policy helper text.
+
+### What works / what does not
+- Works:
+  - Frontend build succeeds.
+  - ConnectionsTab tests pass.
+  - Websocket smoke test passes.
+  - Review-reported critical race (parallel policy/config writes in hook) is removed.
+  - Frontend bot config save no longer performs client-side read-modify-write.
+- Does not / caveats:
+  - `python -m py_compile main.py backend/pydantic_adk_runner.py` still cannot fully run because `backend/pydantic_adk_runner.py` is absent in this repository path.
+
+### Next steps
+1. Add targeted tests for sequential-failure rollback path (`updateChatPolicy`) and backend config merge semantics.
+2. Add explicit API contract docs for group allowlist OR semantics and examples for user-vs-channel allowlisting.
+3. Consider durable storage for bot access config if multi-instance consistency is required.
+
+### Blockers / decisions
+- Decision: preserve OR semantics for group allowlist to support both user-based and channel-based allowlisting with one list, and make this explicit in UI copy.
+- Decision: server-side partial merge for bot config updates to reduce lost updates without introducing schema migrations in this pass.
+- Blocker: missing `backend/pydantic_adk_runner.py` for checklist compile command.
