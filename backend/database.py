@@ -155,6 +155,38 @@ class ConversationMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ChatSession(Base):
+    """Session-v2 record for chat threads with optional parent session."""
+
+    __tablename__ = "chat_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "session_id", name="uq_chat_sessions_user_platform_session"),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    platform = Column(String(50), nullable=False, index=True)
+    session_id = Column(String(255), nullable=False, index=True)
+    parent_session_id = Column(String(255), nullable=True, index=True)
+    title = Column(String(500))
+    status = Column(String(20), default="active", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ChatSessionMessage(Base):
+    """Session-v2 message row associated with a chat session."""
+
+    __tablename__ = "chat_session_messages"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    session_ref_id = Column(String(255), ForeignKey("chat_sessions.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    metadata_json = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PaymentMethod(Base):
     """Stored payment method for a user."""
 
@@ -422,6 +454,75 @@ class AgentAction(Base):
     output_data = Column(Text, nullable=True)
     duration_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PairedChannelIdentity(Base):
+    """External channel identity pairing status for one integration runtime."""
+
+    __tablename__ = "paired_channel_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "integration_id",
+            "external_user_id",
+            name="uq_paired_channel_identity_external_user",
+        ),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    platform = Column(String(50), nullable=False, index=True)
+    integration_id = Column(String(255), nullable=False, index=True)
+    external_user_id = Column(String(255), nullable=False, index=True)
+    external_username = Column(String(255), nullable=True)
+    external_chat_id = Column(String(255), nullable=True)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    paired_user_id = Column(String(255), nullable=True, index=True)
+    pairing_code_hash = Column(String(128), nullable=True)
+    pairing_code_expires_at = Column(DateTime(timezone=True), nullable=True)
+    pairing_code_used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    denied_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class IntegrationAccessPolicy(Base):
+    """Per-integration ingress policy for channel command and message access."""
+
+    __tablename__ = "integration_access_policies"
+    __table_args__ = (
+        UniqueConstraint("platform", "integration_id", name="uq_integration_access_policy"),
+    )
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    platform = Column(String(50), nullable=False, index=True)
+    integration_id = Column(String(255), nullable=False, index=True)
+    owner_user_id = Column(String(255), nullable=True, index=True)
+    require_pairing = Column(Boolean, nullable=False, default=True)
+    allow_dm = Column(Boolean, nullable=False, default=True)
+    allow_group = Column(Boolean, nullable=False, default=False)
+    allow_unpaired_commands = Column(Boolean, nullable=False, default=False)
+    updated_by = Column(String(255), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PairingRequestAudit(Base):
+    """Audit trail for channel pairing lifecycle events."""
+
+    __tablename__ = "pairing_request_audit"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    platform = Column(String(50), nullable=False, index=True)
+    integration_id = Column(String(255), nullable=False, index=True)
+    request_id = Column(String(255), nullable=True, index=True)
+    event_type = Column(String(40), nullable=False, index=True)
+    actor_user_id = Column(String(255), nullable=True, index=True)
+    external_user_id = Column(String(255), nullable=True, index=True)
+    details_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
 # ── engine management ─────────────────────────────────────────────────

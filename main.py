@@ -6,10 +6,13 @@ import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 import contextlib
+from datetime import datetime, timedelta, timezone
+import hashlib
 from http.cookies import SimpleCookie
 import json
 import logging
 from pathlib import Path
+import secrets
 import time as _time
 from typing import Any
 from urllib.parse import urlparse
@@ -70,6 +73,13 @@ from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
 from backend.runtime_telemetry import RuntimeEventStore, RuntimeTelemetry
 from backend.conversation_service import append_message, get_or_create_conversation
+from backend.migration_rollout import (
+    feature_flags_snapshot,
+    legacy_conversation_mode_enabled,
+    sessions_dual_write_enabled,
+    sessions_v2_enabled,
+)
+from backend.session_store import append_session_message, get_or_create_session
 from backend.session_identity import (
     SESSION_MAIN_ID,
     normalize_or_bridge_session_id,
@@ -311,12 +321,54 @@ class GitHubRegistry:
 channel_registry = ChannelRuntimeRegistry()
 github_registry = GitHubRegistry()
 
+
+class _LegacyRegistryView:
+    """Backward-compatible platform registry view for older test scaffolding."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+
+    class _StoreProxy:
+        def __init__(self, platform: str) -> None:
+            self.platform = platform
+
+        def clear(self) -> None:
+            prefix = f"{self.platform}:"
+            stale_keys = [key for key in list(channel_registry._entries.keys()) if key.startswith(prefix)]
+            for key in stale_keys:
+                channel_registry._entries.pop(key, None)
+
+    @property
+    def _integrations(self) -> "_LegacyRegistryView._StoreProxy":
+        return self._StoreProxy(self.platform)
+
+    @property
+    def _configs(self) -> "_LegacyRegistryView._StoreProxy":
+        return self._StoreProxy(self.platform)
+
+    def upsert(self, integration_id: str, integration: Any, config: dict[str, Any]) -> None:
+        channel_registry.upsert(self.platform, integration_id, integration, config)
+
+    def get_config(self, integration_id: str) -> dict[str, Any]:
+        return channel_registry.get_config(self.platform, integration_id)
+
+
+telegram_registry = _LegacyRegistryView("telegram")
+slack_registry = _LegacyRegistryView("slack")
+discord_registry = _LegacyRegistryView("discord")
+
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
 _session_runtimes: dict[str, "SessionRuntime"] = {}
 runtime_telemetry = RuntimeTelemetry()
 runtime_events = RuntimeEventStore(ttl_seconds=6 * 60 * 60, max_events=10000)
+session_migration_counters: dict[str, int] = {
+    "send_total": 0,
+    "send_mismatch": 0,
+    "spawn_total": 0,
+    "spawn_mismatch": 0,
+}
 
 _BROWSER_CHAT_POLLUTION_PREFIXES = (
     "[click",
@@ -489,6 +541,305 @@ def _channel_webhook_response(result: dict[str, Any]) -> dict[str, Any]:
     if isinstance(response, dict):
         return response
     return {"ok": True, "result": result}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_platform(platform: str) -> str:
+    return str(platform or "").strip().lower()
+
+
+def _hash_pairing_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _new_pairing_code() -> str:
+    return secrets.token_hex(3).upper()
+
+
+async def _audit_pairing_event(
+    db: AsyncSession,
+    *,
+    platform: str,
+    integration_id: str,
+    request_id: str | None,
+    event_type: str,
+    actor_user_id: str | None = None,
+    external_user_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    from backend.database import PairingRequestAudit
+
+    row = PairingRequestAudit(
+        platform=_normalize_platform(platform),
+        integration_id=str(integration_id),
+        request_id=str(request_id) if request_id else None,
+        event_type=str(event_type),
+        actor_user_id=actor_user_id,
+        external_user_id=external_user_id,
+        details_json=json.dumps(details or {}),
+    )
+    db.add(row)
+    await db.flush()
+
+
+async def _get_or_create_integration_policy(
+    db: AsyncSession,
+    *,
+    platform: str,
+    integration_id: str,
+    owner_user_id: str | None,
+) -> Any:
+    from sqlalchemy import select as sa_select
+    from backend.database import IntegrationAccessPolicy
+
+    normalized_platform = _normalize_platform(platform)
+    policy = (
+        await db.execute(
+            sa_select(IntegrationAccessPolicy).where(
+                IntegrationAccessPolicy.platform == normalized_platform,
+                IntegrationAccessPolicy.integration_id == integration_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if policy is not None:
+        return policy
+    policy = IntegrationAccessPolicy(
+        platform=normalized_platform,
+        integration_id=integration_id,
+        owner_user_id=owner_user_id,
+        require_pairing=True,
+        allow_dm=True,
+        allow_group=False,
+        allow_unpaired_commands=False,
+    )
+    db.add(policy)
+    await db.flush()
+    await _audit_pairing_event(
+        db,
+        platform=normalized_platform,
+        integration_id=integration_id,
+        request_id=None,
+        event_type="policy_create",
+        actor_user_id=owner_user_id,
+        details={"require_pairing": True, "allow_dm": True, "allow_group": False},
+    )
+    return policy
+
+
+def _serialize_policy(policy: Any) -> dict[str, Any]:
+    created_at = policy.__dict__.get("created_at")
+    updated_at = policy.__dict__.get("updated_at")
+    return {
+        "platform": policy.platform,
+        "integration_id": policy.integration_id,
+        "owner_user_id": policy.owner_user_id,
+        "require_pairing": bool(policy.require_pairing),
+        "allow_dm": bool(policy.allow_dm),
+        "allow_group": bool(policy.allow_group),
+        "allow_unpaired_commands": bool(policy.allow_unpaired_commands),
+        "updated_by": policy.updated_by,
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
+        "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else None,
+    }
+
+
+def _resolve_ingress_identity(platform: str, payload: dict[str, Any], inbound: Any) -> dict[str, str | None]:
+    normalized_platform = _normalize_platform(platform)
+    if normalized_platform == "telegram":
+        callback = payload.get("callback_query") if isinstance(payload.get("callback_query"), dict) else {}
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        source = callback if callback else message
+        sender = source.get("from") if isinstance(source.get("from"), dict) else {}
+        chat = (source.get("chat") if isinstance(source.get("chat"), dict) else {}) or {}
+        chat_type_raw = str(chat.get("type") or "").strip().lower()
+        chat_kind = "dm" if chat_type_raw == "private" else "group"
+        return {
+            "external_user_id": str(sender.get("id") or "").strip() or None,
+            "external_username": str(sender.get("username") or sender.get("first_name") or "").strip() or None,
+            "chat_kind": chat_kind,
+            "chat_id": str(chat.get("id") or inbound.destination or "").strip() or None,
+        }
+    if normalized_platform == "slack":
+        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+        user_id = str(event.get("user") or payload.get("user_id") or "").strip() or None
+        username = str(payload.get("user_name") or event.get("username") or "").strip() or None
+        channel_type = str(event.get("channel_type") or payload.get("channel_type") or "").strip().lower()
+        chat_kind = "dm" if channel_type in {"im", "mpim"} else "group"
+        if not channel_type and str(payload.get("channel_name") or "").strip().lower() == "directmessage":
+            chat_kind = "dm"
+        return {
+            "external_user_id": user_id,
+            "external_username": username,
+            "chat_kind": chat_kind,
+            "chat_id": str(event.get("channel") or payload.get("channel_id") or inbound.destination or "").strip() or None,
+        }
+    if normalized_platform == "discord":
+        member = payload.get("member") if isinstance(payload.get("member"), dict) else {}
+        user = member.get("user") if isinstance(member.get("user"), dict) else {}
+        if not user and isinstance(payload.get("user"), dict):
+            user = payload.get("user")
+        external_user_id = str(user.get("id") or payload.get("user_id") or "").strip() or None
+        username = str(user.get("username") or "").strip() or None
+        chat_kind = "group" if str(payload.get("guild_id") or "").strip() else "dm"
+        return {
+            "external_user_id": external_user_id,
+            "external_username": username,
+            "chat_kind": chat_kind,
+            "chat_id": str(payload.get("channel_id") or inbound.destination or "").strip() or None,
+        }
+    return {"external_user_id": None, "external_username": None, "chat_kind": "group", "chat_id": inbound.destination}
+
+
+async def _enforce_ingress_policy(
+    *,
+    platform: str,
+    integration_id: str,
+    owner_user_id: str | None,
+    payload: dict[str, Any],
+    inbound: Any,
+    command_text: str | None,
+) -> dict[str, Any]:
+    """Resolve sender identity and enforce pairing/policy for command ingress."""
+    normalized_platform = _normalize_platform(platform)
+    identity = _resolve_ingress_identity(normalized_platform, payload, inbound)
+    external_user_id = identity.get("external_user_id")
+    external_username = identity.get("external_username")
+    chat_kind = str(identity.get("chat_kind") or "group")
+    chat_id = identity.get("chat_id")
+
+    if not external_user_id:
+        return {"allowed": False, "reason": "Unable to resolve sender identity.", "identity": identity}
+
+    async for db in get_session():
+        from sqlalchemy import select as sa_select
+        from backend.database import PairedChannelIdentity
+
+        policy = await _get_or_create_integration_policy(
+            db,
+            platform=normalized_platform,
+            integration_id=integration_id,
+            owner_user_id=owner_user_id,
+        )
+        if chat_kind == "dm" and not bool(policy.allow_dm):
+            await db.commit()
+            return {"allowed": False, "reason": "DM commands are disabled by policy.", "identity": identity}
+        if chat_kind == "group" and not bool(policy.allow_group):
+            await db.commit()
+            return {"allowed": False, "reason": "Group commands are disabled by policy.", "identity": identity}
+
+        pair_row = (
+            await db.execute(
+                sa_select(PairedChannelIdentity).where(
+                    PairedChannelIdentity.platform == normalized_platform,
+                    PairedChannelIdentity.integration_id == integration_id,
+                    PairedChannelIdentity.external_user_id == external_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if pair_row is None:
+            pair_row = PairedChannelIdentity(
+                platform=normalized_platform,
+                integration_id=integration_id,
+                external_user_id=external_user_id,
+                external_username=external_username,
+                external_chat_id=chat_id,
+                status="pending",
+                paired_user_id=owner_user_id,
+                last_seen_at=_utc_now(),
+            )
+            db.add(pair_row)
+            await db.flush()
+            await _audit_pairing_event(
+                db,
+                platform=normalized_platform,
+                integration_id=integration_id,
+                request_id=pair_row.id,
+                event_type="request",
+                actor_user_id=owner_user_id,
+                external_user_id=external_user_id,
+                details={"chat_kind": chat_kind, "chat_id": chat_id},
+            )
+        else:
+            pair_row.external_username = external_username or pair_row.external_username
+            pair_row.external_chat_id = chat_id or pair_row.external_chat_id
+            pair_row.last_seen_at = _utc_now()
+
+        if command_text and command_text.strip().lower().startswith("/pair"):
+            candidate = command_text.strip()[5:].strip()
+            if candidate:
+                valid_hash = pair_row.pairing_code_hash or ""
+                expires_at = pair_row.pairing_code_expires_at
+                if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                not_expired = isinstance(expires_at, datetime) and expires_at > _utc_now()
+                unused = pair_row.pairing_code_used_at is None
+                if valid_hash and _hash_pairing_code(candidate) == valid_hash and not_expired and unused:
+                    pair_row.pairing_code_used_at = _utc_now()
+                    await _audit_pairing_event(
+                        db,
+                        platform=normalized_platform,
+                        integration_id=integration_id,
+                        request_id=pair_row.id,
+                        event_type="verify",
+                        actor_user_id=owner_user_id,
+                        external_user_id=external_user_id,
+                    )
+                    await db.commit()
+                    return {
+                        "allowed": False,
+                        "reason": "✅ Pairing code verified. Await owner approval.",
+                        "identity": identity,
+                        "pairing_row_id": pair_row.id,
+                    }
+                await db.commit()
+                return {
+                    "allowed": False,
+                    "reason": "❌ Invalid or expired pairing code. Run /pair for a new code.",
+                    "identity": identity,
+                    "pairing_row_id": pair_row.id,
+                }
+            code = _new_pairing_code()
+            pair_row.pairing_code_hash = _hash_pairing_code(code)
+            pair_row.pairing_code_expires_at = _utc_now() + timedelta(minutes=10)
+            pair_row.pairing_code_used_at = None
+            await _audit_pairing_event(
+                db,
+                platform=normalized_platform,
+                integration_id=integration_id,
+                request_id=pair_row.id,
+                event_type="create",
+                actor_user_id=owner_user_id,
+                external_user_id=external_user_id,
+            )
+            await db.commit()
+            return {
+                "allowed": False,
+                "reason": (
+                    f"🔐 Pairing required. Your one-time code is `{code}` (expires in 10 minutes). "
+                    "Use `/pair <code>` to verify."
+                ),
+                "identity": identity,
+                "pairing_row_id": pair_row.id,
+            }
+
+        if pair_row.status == "denied":
+            await db.commit()
+            return {"allowed": False, "reason": "⛔ Access denied for this integration.", "identity": identity}
+        if bool(policy.require_pairing) and pair_row.status != "approved" and not bool(policy.allow_unpaired_commands):
+            await db.commit()
+            return {
+                "allowed": False,
+                "reason": "⛔ Access blocked: pairing approval is required for this integration. Run /pair.",
+                "identity": identity,
+                "pairing_row_id": pair_row.id,
+            }
+
+        await db.commit()
+        return {"allowed": True, "identity": identity, "pairing_row_id": pair_row.id}
+    return {"allowed": False, "reason": "Policy check unavailable.", "identity": identity}
 
 
 async def _dispatch_background_task_event(user_id: str, event: dict[str, Any]) -> None:
@@ -1029,11 +1380,35 @@ async def list_sessions(
     limit: int = 50,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return chat sessions, bridged from legacy conversation records."""
+    """Return chat sessions from v2 storage with legacy bridge fallback."""
     user = _get_current_user(request)
     uid = user["uid"]
     from sqlalchemy import select as sa_select, desc as sa_desc
-    from backend.database import Conversation as ConvModel
+    from backend.database import ChatSession as SessionModel, Conversation as ConvModel
+    rows: list[Any]
+    if sessions_v2_enabled():
+        stmt = (
+            sa_select(SessionModel)
+            .where(SessionModel.user_id == uid, SessionModel.platform == "web", SessionModel.status != "archived")
+            .order_by(sa_desc(SessionModel.updated_at))
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+        return {
+            "ok": True,
+            "sessions": [
+                {
+                    "session_id": row.session_id,
+                    "conversation_id": None,
+                    "parent_session_id": row.parent_session_id,
+                    "title": row.title,
+                    "status": row.status,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                }
+                for row in rows
+            ],
+        }
     stmt = (
         sa_select(ConvModel)
         .where(ConvModel.user_id == uid, ConvModel.platform == "web", ConvModel.status != "archived")
@@ -1112,14 +1487,60 @@ async def get_session_messages(
     limit: int = 500,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return messages for a session id, bridged to legacy conversation ids."""
+    """Return session messages while excluding system events from chat transcript."""
     user = _get_current_user(request)
     uid = user["uid"]
     import json as _json
     from sqlalchemy import select as sa_select
-    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    from backend.database import (
+        ChatSession as SessionModel,
+        ChatSessionMessage as SessionMsgModel,
+        Conversation as ConvModel,
+        ConversationMessage as MsgModel,
+    )
 
     requested_session_id = normalize_or_bridge_session_id(session_id)
+    if sessions_v2_enabled():
+        session_row = (
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == requested_session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        messages = (
+            await db.execute(
+                sa_select(SessionMsgModel)
+                .where(SessionMsgModel.session_ref_id == session_row.id, SessionMsgModel.role != "system")
+                .order_by(SessionMsgModel.created_at)
+                .limit(limit)
+            )
+        ).scalars().all()
+        return {
+            "ok": True,
+            "session": {
+                "session_id": session_row.session_id,
+                "conversation_id": None,
+                "parent_session_id": session_row.parent_session_id,
+                "title": session_row.title,
+                "created_at": session_row.created_at.isoformat() if session_row.created_at else None,
+            },
+            "messages": [
+                {
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "metadata": _json.loads(m.metadata_json) if m.metadata_json else None,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in messages
+            ],
+        }
+
     bridged_conversation_id = session_id_to_conversation_id(requested_session_id)
     conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
     if bridged_conversation_id:
@@ -1156,6 +1577,7 @@ async def get_session_messages(
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in msgs
+            if m.role != "system"
         ],
     }
 
@@ -1167,49 +1589,87 @@ async def send_session_message(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Append a user message to a session while preserving conversation storage."""
+    """Append a user message with sessions-v2 + dual-write migration safety."""
     user = _get_current_user(request)
     uid = user["uid"]
     content = str(payload.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
     import json as _json
-    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    from backend.database import ChatSession as SessionModel, Conversation as ConvModel, ConversationMessage as MsgModel
     from sqlalchemy import select as sa_select
 
     normalized_session_id = normalize_or_bridge_session_id(session_id)
-    bridged_conversation_id = session_id_to_conversation_id(normalized_session_id)
-    conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
-    if bridged_conversation_id:
-        conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
-    else:
-        conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == normalized_session_id)
-    conv = (await db.execute(conv_stmt)).scalar_one_or_none()
-    if not conv:
-        conv = ConvModel(
-            user_id=uid,
-            platform="web",
-            platform_chat_id=normalized_session_id,
-            title=(payload.get("title") or content[:80]).strip(),
-            status="active",
+    resolved_conversation_id: str | None = None
+    if sessions_v2_enabled():
+        session_row = (
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == normalized_session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if session_row is None:
+            session_row = await get_or_create_session(
+                db,
+                user_id=uid,
+                platform="web",
+                session_id=normalized_session_id,
+                title=(payload.get("title") or content[:80]).strip(),
+            )
+        await append_session_message(
+            db,
+            session_ref_id=session_row.id,
+            role="user",
+            content=content,
+            metadata={"source": "sessions_api"},
         )
-        db.add(conv)
-        await db.flush()
-    msg = MsgModel(
-        conversation_id=conv.id,
-        role="user",
-        content=content,
-        metadata_json=_json.dumps({"source": "sessions_api"}),
-    )
-    db.add(msg)
+
+    if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+        bridged_conversation_id = session_id_to_conversation_id(normalized_session_id)
+        conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
+        if bridged_conversation_id:
+            conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
+        else:
+            conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == normalized_session_id)
+        conv = (await db.execute(conv_stmt)).scalar_one_or_none()
+        if not conv:
+            conv = ConvModel(
+                user_id=uid,
+                platform="web",
+                platform_chat_id=normalized_session_id,
+                title=(payload.get("title") or content[:80]).strip(),
+                status="active",
+            )
+            db.add(conv)
+            await db.flush()
+        msg = MsgModel(
+            conversation_id=conv.id,
+            role="user",
+            content=content,
+            metadata_json=_json.dumps({"source": "sessions_api"}),
+        )
+        db.add(msg)
+        resolved_conversation_id = conv.id
+    else:
+        msg = type("TmpMsg", (), {"id": None, "role": "user", "content": content, "created_at": None})()
+
+    session_migration_counters["send_total"] = int(session_migration_counters["send_total"]) + 1
+    if sessions_dual_write_enabled() and resolved_conversation_id is None:
+        session_migration_counters["send_mismatch"] = int(session_migration_counters["send_mismatch"]) + 1
+
     from datetime import datetime as _dt
-    conv.updated_at = _dt.utcnow()
+    if resolved_conversation_id:
+        conv.updated_at = _dt.utcnow()
     await db.commit()
-    await db.refresh(msg)
+    if hasattr(msg, "__table__"):
+        await db.refresh(msg)
     return {
         "ok": True,
-        "session_id": normalize_or_bridge_session_id(conv.platform_chat_id or "", fallback_conversation_id=conv.id),
-        "conversation_id": conv.id,
+        "session_id": normalized_session_id,
+        "conversation_id": resolved_conversation_id,
         "message": {
             "id": msg.id,
             "role": msg.role,
@@ -1225,7 +1685,7 @@ async def spawn_session(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Spawn a sub-agent session entry (session-first, with legacy conversation bridge)."""
+    """Spawn a sub-agent session entry with dual-write safeguards."""
     user = _get_current_user(request)
     uid = user["uid"]
     parent_session_id = str(payload.get("parent_session_id") or SESSION_MAIN_ID).strip() or SESSION_MAIN_ID
@@ -1234,28 +1694,53 @@ async def spawn_session(
     title = str(payload.get("title") or instruction[:80] or "Subagent session").strip()
     from backend.database import Conversation as ConvModel
 
-    conv = ConvModel(
-        user_id=uid,
-        platform="web",
-        platform_chat_id=session_id,
-        title=title,
-        status="active",
-    )
-    db.add(conv)
-    await db.flush()
-    await append_message(
-        db,
-        conversation_id=conv.id,
-        role="assistant",
-        content=f"Spawned subagent session from parent {parent_session_id}",
-        metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
-    )
+    if sessions_v2_enabled():
+        session_row = await get_or_create_session(
+            db,
+            user_id=uid,
+            platform="web",
+            session_id=session_id,
+            title=title,
+            parent_session_id=parent_session_id,
+        )
+        await append_session_message(
+            db,
+            session_ref_id=session_row.id,
+            role="assistant",
+            content=f"Spawned subagent session from parent {parent_session_id}",
+            metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
+        )
+
+    conversation_id: str | None = None
+    if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+        conv = ConvModel(
+            user_id=uid,
+            platform="web",
+            platform_chat_id=session_id,
+            title=title,
+            status="active",
+        )
+        db.add(conv)
+        await db.flush()
+        await append_message(
+            db,
+            conversation_id=conv.id,
+            role="assistant",
+            content=f"Spawned subagent session from parent {parent_session_id}",
+            metadata={"source": "session_spawn", "parent_session_id": parent_session_id, "instruction": instruction},
+        )
+        conversation_id = conv.id
+
+    session_migration_counters["spawn_total"] = int(session_migration_counters["spawn_total"]) + 1
+    if sessions_dual_write_enabled() and conversation_id is None:
+        session_migration_counters["spawn_mismatch"] = int(session_migration_counters["spawn_mismatch"]) + 1
+
     await db.commit()
     return {
         "ok": True,
         "session": {
             "session_id": session_id,
-            "conversation_id": conv.id,
+            "conversation_id": conversation_id,
             "parent_session_id": parent_session_id,
             "title": title,
             "status": "active",
@@ -1321,7 +1806,8 @@ async def _send_initial_frame(websocket: WebSocket) -> None:
     """
     try:
         executor = _get_orchestrator().executor
-        current_url = executor.page.url if executor.page else "about:blank"
+        page = getattr(executor, "page", None)
+        current_url = getattr(page, "url", None) if page is not None else None
         if current_url in ("about:blank", ""):
             return  # Don't replace the welcome screen with a white blank frame
         screenshot_bytes = await executor.screenshot()
@@ -1499,28 +1985,49 @@ async def _log_web_message(
     metadata: dict[str, Any] | None = None,
     title_candidate: str | None = None,
 ) -> None:
-    """Persist a websocket message to the conversations DB and emit conversation_id to client."""
+    """Persist websocket messages with session-v2 dual-write and fallback support."""
     if not runtime.user_uid:
         return
     try:
         async for db in get_session():
-            conv = await get_or_create_conversation(
-                db,
-                user_id=runtime.user_uid,
-                platform="web",
-                platform_chat_id=session_id,
-                title=title,
-            )
-            runtime.conversation_id = conv.id
-            session_events.bind_conversation(session_id, conv.id)
-            await append_message(
-                db,
-                conv.id,
-                role,
-                content,
-                metadata=metadata,
-                title_candidate=title_candidate,
-            )
+            wrote_session = False
+            if sessions_v2_enabled():
+                session_row = await get_or_create_session(
+                    db,
+                    user_id=runtime.user_uid,
+                    platform="web",
+                    session_id=session_id,
+                    title=title or title_candidate,
+                )
+                await append_session_message(
+                    db,
+                    session_ref_id=session_row.id,
+                    role=role,
+                    content=content,
+                    metadata=metadata,
+                )
+                wrote_session = True
+
+            if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+                conv = await get_or_create_conversation(
+                    db,
+                    user_id=runtime.user_uid,
+                    platform="web",
+                    platform_chat_id=session_id,
+                    title=title,
+                )
+                runtime.conversation_id = conv.id
+                session_events.bind_conversation(session_id, conv.id)
+                await append_message(
+                    db,
+                    conv.id,
+                    role,
+                    content,
+                    metadata=metadata,
+                    title_candidate=title_candidate,
+                )
+            elif wrote_session:
+                runtime.conversation_id = None
             break
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to persist web message to DB for session %s: %s", session_id, exc)
@@ -2662,32 +3169,241 @@ async def _log_platform_message(
     metadata: dict[str, Any] | None = None,
     platform_message_id: str | None = None,
 ) -> None:
-    """Persist a platform message to conversation storage when an owner is available."""
+    """Persist a platform message with session-v2 dual-write compatibility."""
     if not user_id:
         return
     session_iter = get_session()
     db = await anext(session_iter)
     try:
-        conversation = await get_or_create_conversation(
-            db,
-            user_id=user_id,
-            platform=platform,
-            platform_chat_id=str(platform_chat_id),
-            title=title,
-        )
-        await append_message(
-            db,
-            conversation_id=conversation.id,
-            role=role,
-            content=content,
-            metadata=metadata or {},
-            platform_message_id=platform_message_id,
-        )
+        normalized_session_id = normalize_or_bridge_session_id(str(platform_chat_id))
+        if sessions_v2_enabled():
+            session_row = await get_or_create_session(
+                db,
+                user_id=user_id,
+                platform=platform,
+                session_id=normalized_session_id,
+                title=title,
+            )
+            await append_session_message(
+                db,
+                session_ref_id=session_row.id,
+                role=role,
+                content=content,
+                metadata=metadata or {},
+            )
+        if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+            conversation = await get_or_create_conversation(
+                db,
+                user_id=user_id,
+                platform=platform,
+                platform_chat_id=str(platform_chat_id),
+                title=title,
+            )
+            await append_message(
+                db,
+                conversation_id=conversation.id,
+                role=role,
+                content=content,
+                metadata=metadata or {},
+                platform_message_id=platform_message_id,
+            )
     finally:
         await session_iter.aclose()
 
 
 # ── Integration webhook / registration endpoints ─────────────────────
+
+
+def _validate_channel_platform(platform: str) -> str:
+    normalized = _normalize_platform(platform)
+    if normalized not in {"telegram", "slack", "discord"}:
+        raise HTTPException(status_code=400, detail="Unsupported platform")
+    return normalized
+
+
+@app.get("/api/integrations/{platform}/{integration_id}/pairing/pending")
+async def list_pending_pairings(
+    platform: str,
+    integration_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    normalized_platform = _validate_channel_platform(platform)
+    current_user = _get_current_user(request)
+    owner_user_id = str(_get_channel_config(normalized_platform, integration_id).get("owner_user_id", "")).strip() or None
+    if owner_user_id and owner_user_id != current_user["uid"] and current_user.get("role") not in {"admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Only owner/admin can view pairing queue")
+    from sqlalchemy import select as sa_select
+    from backend.database import PairedChannelIdentity
+
+    rows = (
+        await db.execute(
+            sa_select(PairedChannelIdentity).where(
+                PairedChannelIdentity.platform == normalized_platform,
+                PairedChannelIdentity.integration_id == integration_id,
+                PairedChannelIdentity.status == "pending",
+            )
+        )
+    ).scalars().all()
+    return {
+        "ok": True,
+        "platform": normalized_platform,
+        "integration_id": integration_id,
+        "requests": [
+            {
+                "request_id": row.id,
+                "external_user_id": row.external_user_id,
+                "external_username": row.external_username,
+                "external_chat_id": row.external_chat_id,
+                "status": row.status,
+                "code_verified": bool(row.pairing_code_used_at),
+                "code_expires_at": row.pairing_code_expires_at.isoformat() if row.pairing_code_expires_at else None,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.post("/api/integrations/{platform}/{integration_id}/pairing/{request_id}/approve")
+async def approve_pairing_request(
+    platform: str,
+    integration_id: str,
+    request_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    normalized_platform = _validate_channel_platform(platform)
+    current_user = _get_current_user(request)
+    owner_user_id = str(_get_channel_config(normalized_platform, integration_id).get("owner_user_id", "")).strip() or None
+    if owner_user_id and owner_user_id != current_user["uid"] and current_user.get("role") not in {"admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Only owner/admin can approve pairing")
+    from backend.database import PairedChannelIdentity
+
+    row = await db.get(PairedChannelIdentity, request_id)
+    if row is None or row.platform != normalized_platform or row.integration_id != integration_id:
+        raise HTTPException(status_code=404, detail="Pairing request not found")
+    row.status = "approved"
+    row.approved_at = _utc_now()
+    row.denied_at = None
+    row.revoked_at = None
+    await _audit_pairing_event(
+        db,
+        platform=normalized_platform,
+        integration_id=integration_id,
+        request_id=row.id,
+        event_type="approve",
+        actor_user_id=current_user["uid"],
+        external_user_id=row.external_user_id,
+        details={"code_verified": bool(row.pairing_code_used_at)},
+    )
+    await db.commit()
+    return {"ok": True, "request_id": row.id, "status": row.status}
+
+
+@app.post("/api/integrations/{platform}/{integration_id}/pairing/{request_id}/deny")
+async def deny_pairing_request(
+    platform: str,
+    integration_id: str,
+    request_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    normalized_platform = _validate_channel_platform(platform)
+    current_user = _get_current_user(request)
+    owner_user_id = str(_get_channel_config(normalized_platform, integration_id).get("owner_user_id", "")).strip() or None
+    if owner_user_id and owner_user_id != current_user["uid"] and current_user.get("role") not in {"admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Only owner/admin can deny pairing")
+    from backend.database import PairedChannelIdentity
+
+    row = await db.get(PairedChannelIdentity, request_id)
+    if row is None or row.platform != normalized_platform or row.integration_id != integration_id:
+        raise HTTPException(status_code=404, detail="Pairing request not found")
+    prior_status = row.status
+    row.status = "denied"
+    row.denied_at = _utc_now()
+    if prior_status == "approved":
+        row.revoked_at = _utc_now()
+        await _audit_pairing_event(
+            db,
+            platform=normalized_platform,
+            integration_id=integration_id,
+            request_id=row.id,
+            event_type="revoke",
+            actor_user_id=current_user["uid"],
+            external_user_id=row.external_user_id,
+        )
+    await _audit_pairing_event(
+        db,
+        platform=normalized_platform,
+        integration_id=integration_id,
+        request_id=row.id,
+        event_type="deny",
+        actor_user_id=current_user["uid"],
+        external_user_id=row.external_user_id,
+    )
+    await db.commit()
+    return {"ok": True, "request_id": row.id, "status": row.status}
+
+
+@app.get("/api/integrations/{platform}/{integration_id}/policy")
+async def get_integration_policy(
+    platform: str,
+    integration_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    normalized_platform = _validate_channel_platform(platform)
+    current_user = _get_current_user(request)
+    owner_user_id = str(_get_channel_config(normalized_platform, integration_id).get("owner_user_id", "")).strip() or None
+    if owner_user_id and owner_user_id != current_user["uid"] and current_user.get("role") not in {"admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Only owner/admin can view policy")
+    policy = await _get_or_create_integration_policy(
+        db,
+        platform=normalized_platform,
+        integration_id=integration_id,
+        owner_user_id=owner_user_id,
+    )
+    serialized = _serialize_policy(policy)
+    await db.commit()
+    return {"ok": True, "policy": serialized}
+
+
+@app.put("/api/integrations/{platform}/{integration_id}/policy")
+async def update_integration_policy(
+    platform: str,
+    integration_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    normalized_platform = _validate_channel_platform(platform)
+    current_user = _get_current_user(request)
+    owner_user_id = str(_get_channel_config(normalized_platform, integration_id).get("owner_user_id", "")).strip() or None
+    if owner_user_id and owner_user_id != current_user["uid"] and current_user.get("role") not in {"admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Only owner/admin can update policy")
+    policy = await _get_or_create_integration_policy(
+        db,
+        platform=normalized_platform,
+        integration_id=integration_id,
+        owner_user_id=owner_user_id,
+    )
+    for key in ("require_pairing", "allow_dm", "allow_group", "allow_unpaired_commands"):
+        if key in payload:
+            setattr(policy, key, bool(payload.get(key)))
+    policy.updated_by = current_user["uid"]
+    await _audit_pairing_event(
+        db,
+        platform=normalized_platform,
+        integration_id=integration_id,
+        request_id=None,
+        event_type="policy_update",
+        actor_user_id=current_user["uid"],
+        details=_serialize_policy(policy),
+    )
+    serialized = _serialize_policy(policy)
+    await db.commit()
+    return {"ok": True, "policy": serialized}
 
 
 @app.post("/api/integrations/telegram/webhook/{integration_id}")
@@ -2805,6 +3521,24 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     chat_id = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
+    if chat_id and text_content:
+        ingress = await _enforce_ingress_policy(
+            platform="telegram",
+            integration_id=integration_id,
+            owner_user_id=owner_user_id,
+            payload=update if isinstance(update, dict) else {},
+            inbound=inbound,
+            command_text=text_content if text_content.startswith("/") else None,
+        )
+        if not ingress.get("allowed"):
+            await _send_channel_text(
+                "telegram",
+                integration_id,
+                chat_id,
+                str(ingress.get("reason") or "Access denied."),
+                log_source="policy_block",
+            )
+            return _channel_webhook_response(result)
 
     if chat_id and text_content and text_content.startswith("/"):
         bot_cfg = _bot_configs.get(f"telegram:{integration_id}", {})
@@ -3090,6 +3824,24 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
     channel = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
+    if channel and text_content:
+        ingress = await _enforce_ingress_policy(
+            platform="slack",
+            integration_id=integration_id,
+            owner_user_id=owner_user_id,
+            payload=payload if isinstance(payload, dict) else {},
+            inbound=inbound,
+            command_text=text_content if text_content.startswith("/") else None,
+        )
+        if not ingress.get("allowed"):
+            await _send_channel_text(
+                "slack",
+                integration_id,
+                channel,
+                str(ingress.get("reason") or "Access denied."),
+                log_source="policy_block",
+            )
+            return _channel_webhook_response(result)
     if channel and text_content and text_content.startswith("/"):
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -3314,6 +4066,24 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
     channel = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
+    if channel and text_content:
+        ingress = await _enforce_ingress_policy(
+            platform="discord",
+            integration_id=integration_id,
+            owner_user_id=owner_user_id,
+            payload=payload if isinstance(payload, dict) else {},
+            inbound=inbound,
+            command_text=text_content if text_content.startswith("/") else None,
+        )
+        if not ingress.get("allowed"):
+            await _send_channel_text(
+                "discord",
+                integration_id,
+                channel,
+                str(ingress.get("reason") or "Access denied."),
+                log_source="policy_block",
+            )
+            return _channel_webhook_response(result)
     if channel and text_content and text_content.startswith("/"):
         cmd_response = await _handle_slash_command(
             text=text_content,
@@ -3485,6 +4255,8 @@ async def list_observability_events(
 ) -> dict[str, Any]:
     """List internal observability events with retention and pagination metadata."""
     _get_current_user(request)
+    if not feature_flags_snapshot()["observability_event_log"]:
+        raise HTTPException(status_code=503, detail="observability_event_log flag disabled")
     return runtime_events.list_events(
         session_id=session_id,
         subsystem=subsystem,
@@ -3492,6 +4264,57 @@ async def list_observability_events(
         limit=limit,
         cursor=cursor,
     )
+
+
+@app.get("/api/migration/validation")
+async def migration_validation_dashboard(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return migration mismatch counters for conversation-vs-session dual-write validation."""
+    _get_current_user(request)
+    from sqlalchemy import func
+    from backend.database import ChatSession, ChatSessionMessage, Conversation, ConversationMessage
+
+    conv_count = (
+        await db.execute(select(func.count()).select_from(Conversation).where(Conversation.platform == "web", Conversation.status != "archived"))
+    ).scalar_one()
+    session_count = (
+        await db.execute(
+            select(func.count()).select_from(ChatSession).where(ChatSession.platform == "web", ChatSession.status != "archived")
+        )
+    ).scalar_one()
+    conv_msg_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ConversationMessage)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(Conversation.platform == "web", Conversation.status != "archived")
+        )
+    ).scalar_one()
+    session_msg_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ChatSessionMessage)
+            .join(ChatSession, ChatSession.id == ChatSessionMessage.session_ref_id)
+            .where(ChatSession.platform == "web", ChatSession.status != "archived")
+        )
+    ).scalar_one()
+    store_mismatch_count = abs(int(conv_count) - int(session_count)) + abs(int(conv_msg_count) - int(session_msg_count))
+    return {
+        "ok": True,
+        "feature_flags": feature_flags_snapshot(),
+        "rollback_enabled": legacy_conversation_mode_enabled(),
+        "mismatch_counters": {
+            "api_send_mismatch": int(session_migration_counters["send_mismatch"]),
+            "api_spawn_mismatch": int(session_migration_counters["spawn_mismatch"]),
+            "store_mismatch_count": store_mismatch_count,
+            "conversation_count": int(conv_count),
+            "session_count": int(session_count),
+            "conversation_message_count": int(conv_msg_count),
+            "session_message_count": int(session_msg_count),
+        },
+    }
 
 
 @app.get("/api/agents/tasks")
