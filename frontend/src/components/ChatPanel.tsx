@@ -8,6 +8,7 @@ import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { SuggestionChips } from './SuggestionChips'
+import { SessionSwitcher, type SessionSwitcherItem } from './SessionSwitcher'
 import { PromptGallery } from './PromptGallery'
 import { SteeringControl } from './SteeringControl'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
@@ -89,6 +90,9 @@ export interface ChatPanelProps {
   pendingPrompt?: string | null
   /** Called once the pending prompt has been loaded into the composer */
   onPendingPromptConsumed?: () => void
+  sessions?: SessionSwitcherItem[]
+  selectedSessionId?: string | null
+  onSessionSwitch?: (sessionId: string) => void
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
@@ -1562,6 +1566,9 @@ export function ChatPanel({
   isActivityVisible = false,
   pendingPrompt,
   onPendingPromptConsumed,
+  sessions = [],
+  selectedSessionId,
+  onSessionSwitch,
 }: ChatPanelProps) {
   const effectiveSelectedMode = selectedMode ?? agentMode ?? 'orchestrator'
   const effectiveActiveMode = activeMode ?? effectiveSelectedMode
@@ -1916,6 +1923,17 @@ export function ChatPanel({
 
   return (
     <div className='flex h-full flex-col rounded-xl border border-[#2a2a2a] bg-[#111] overflow-hidden'>
+
+
+      {sessions.length > 0 && (
+        <div className='flex items-center justify-between border-b border-[#1e1e1e] px-3 py-2'>
+          <SessionSwitcher
+            sessions={sessions}
+            selectedSessionId={selectedSessionId ?? activeTaskId}
+            onSelect={(sessionId) => onSessionSwitch?.(sessionId)}
+          />
+        </div>
+      )}
 
       {/* Browsing pill */}
       {showBrowsePill && (

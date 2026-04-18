@@ -5470,3 +5470,40 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.17 - April 18, 2026 (chat panel session switcher UX)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added a new `SessionSwitcher` component (`frontend/src/components/SessionSwitcher.tsx`) with:
+  - searchable session list
+  - active-session highlight
+  - per-session status indicator (active/idle)
+  - session label + explicit ID + channel badge (Chat/Browser/System)
+  - desktop dropdown behavior and mobile full-screen overlay behavior.
+- Integrated the switcher into `ChatPanel` top-left header area and wired optional props for sessions + selection callback without touching composer logic.
+- Added session switcher data wiring in `App.tsx` by deriving switcher items from task history and sub-agent sessions, then routing selection to `setSelectedTaskId`.
+
+### What's Working
+- Session switcher now appears in chat header and supports quick switching between available sessions.
+- Selecting a session updates `selectedTaskId`, so transcript/state loading follows existing task-context hydration flow.
+- UI behaves responsively: dropdown on desktop (`sm+`) and overlay on mobile (`<sm`).
+
+### What's NOT Working Yet
+- No additional keyboard shortcut support was added for opening/focusing the switcher in this pass.
+- Screenshot capture via browser container was not possible in this environment (tool unavailable).
+
+### Next Steps
+1. Add keyboard shortcut support (e.g., `⌘/Ctrl + K`) to focus session search quickly.
+2. Add component-level tests for search filtering and select/close behavior.
+3. Optionally add grouping in switcher list (Today/Yesterday/etc.) to mirror sidebar mental model.
+
+### Decisions Made
+- Reused existing `selectedTaskId` switching path so transcript/state hydration remains unchanged and reliable.
+- Included sub-agent sessions in the switcher for parity with sidebar accessibility.
+
+### Blockers
+- Browser screenshot tool unavailable in this run.
