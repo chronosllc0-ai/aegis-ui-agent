@@ -5600,3 +5600,40 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.20 - April 18, 2026 (migration review fixes + compatibility test stabilization)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed review feedback on sessions-v2 schema isolation by adding `platform` to `ChatSession` and a scoped uniqueness constraint on `(user_id, platform, session_id)`.
+- Updated session-v2 persistence helper API (`get_or_create_session`) and all call sites to pass/use `platform` explicitly.
+- Corrected migration validation dashboard mismatch calculations to compare web-vs-web consistently:
+  - session counts now filter `ChatSession.platform == "web"`
+  - message counts now join parent records and filter by `platform == "web"` and non-archived status.
+- Added backward-compatible legacy registry shims in `main.py` (`telegram_registry`, `slack_registry`, `discord_registry`) backed by `channel_registry` so older tests/scaffolding continue to work.
+- Improved websocket initial frame behavior to gracefully handle executors that do not expose `executor.page` by still attempting screenshot emission.
+- Fixed the previously reported failing regression test path by updating `tests/test_conversation_persistence.py::test_websocket_navigation_persists_user_and_assistant_messages` to handle modern event ordering and assert required persisted content robustly.
+
+### What's Working
+- Session-v2 storage is now platform-aware, eliminating cross-platform session namespace collision risk.
+- Validation dashboard now avoids false mismatch positives from web-vs-all comparison.
+- Legacy test harness compatibility restored for registry accessors.
+- Previously failing conversation persistence websocket regression now passes.
+
+### What's NOT Working Yet
+- Existing deprecation warnings remain in test output (`on_event` lifespan deprecation, authlib deprecation); not addressed in this pass.
+
+### Next Steps
+1. Add DB migration scripts for existing deployed environments to backfill/initialize `chat_sessions.platform` if needed.
+2. Add dedicated tests for `/api/migration/validation` count filtering semantics with mixed platform fixtures.
+3. Consider replacing legacy registry shims in tests with direct `channel_registry` usage in a future cleanup pass.
+
+### Decisions Made
+- Kept compatibility shims in `main.py` to avoid broad test-suite refactors in this migration fix pass.
+- Scoped mismatch telemetry to consistent web domain for signal quality during rollout.
+
+### Blockers
+- None.

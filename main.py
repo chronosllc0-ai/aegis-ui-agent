@@ -318,6 +318,42 @@ class GitHubRegistry:
 channel_registry = ChannelRuntimeRegistry()
 github_registry = GitHubRegistry()
 
+
+class _LegacyRegistryView:
+    """Backward-compatible platform registry view for older test scaffolding."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+
+    class _StoreProxy:
+        def __init__(self, platform: str) -> None:
+            self.platform = platform
+
+        def clear(self) -> None:
+            prefix = f"{self.platform}:"
+            stale_keys = [key for key in list(channel_registry._entries.keys()) if key.startswith(prefix)]
+            for key in stale_keys:
+                channel_registry._entries.pop(key, None)
+
+    @property
+    def _integrations(self) -> "_LegacyRegistryView._StoreProxy":
+        return self._StoreProxy(self.platform)
+
+    @property
+    def _configs(self) -> "_LegacyRegistryView._StoreProxy":
+        return self._StoreProxy(self.platform)
+
+    def upsert(self, integration_id: str, integration: Any, config: dict[str, Any]) -> None:
+        channel_registry.upsert(self.platform, integration_id, integration, config)
+
+    def get_config(self, integration_id: str) -> dict[str, Any]:
+        return channel_registry.get_config(self.platform, integration_id)
+
+
+telegram_registry = _LegacyRegistryView("telegram")
+slack_registry = _LegacyRegistryView("slack")
+discord_registry = _LegacyRegistryView("discord")
+
 # Maps authenticated user_uid -> active SessionRuntime (for bot command bridging)
 _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
@@ -1051,7 +1087,7 @@ async def list_sessions(
     if sessions_v2_enabled():
         stmt = (
             sa_select(SessionModel)
-            .where(SessionModel.user_id == uid, SessionModel.status != "archived")
+            .where(SessionModel.user_id == uid, SessionModel.platform == "web", SessionModel.status != "archived")
             .order_by(sa_desc(SessionModel.updated_at))
             .limit(limit)
         )
@@ -1164,7 +1200,13 @@ async def get_session_messages(
     requested_session_id = normalize_or_bridge_session_id(session_id)
     if sessions_v2_enabled():
         session_row = (
-            await db.execute(sa_select(SessionModel).where(SessionModel.user_id == uid, SessionModel.session_id == requested_session_id))
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == requested_session_id,
+                )
+            )
         ).scalar_one_or_none()
         if not session_row:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1259,12 +1301,19 @@ async def send_session_message(
     resolved_conversation_id: str | None = None
     if sessions_v2_enabled():
         session_row = (
-            await db.execute(sa_select(SessionModel).where(SessionModel.user_id == uid, SessionModel.session_id == normalized_session_id))
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == normalized_session_id,
+                )
+            )
         ).scalar_one_or_none()
         if session_row is None:
             session_row = await get_or_create_session(
                 db,
                 user_id=uid,
+                platform="web",
                 session_id=normalized_session_id,
                 title=(payload.get("title") or content[:80]).strip(),
             )
@@ -1347,6 +1396,7 @@ async def spawn_session(
         session_row = await get_or_create_session(
             db,
             user_id=uid,
+            platform="web",
             session_id=session_id,
             title=title,
             parent_session_id=parent_session_id,
@@ -1454,7 +1504,8 @@ async def _send_initial_frame(websocket: WebSocket) -> None:
     """
     try:
         executor = _get_orchestrator().executor
-        current_url = executor.page.url if executor.page else "about:blank"
+        page = getattr(executor, "page", None)
+        current_url = getattr(page, "url", None) if page is not None else None
         if current_url in ("about:blank", ""):
             return  # Don't replace the welcome screen with a white blank frame
         screenshot_bytes = await executor.screenshot()
@@ -1642,6 +1693,7 @@ async def _log_web_message(
                 session_row = await get_or_create_session(
                     db,
                     user_id=runtime.user_uid,
+                    platform="web",
                     session_id=session_id,
                     title=title or title_candidate,
                 )
@@ -2826,6 +2878,7 @@ async def _log_platform_message(
             session_row = await get_or_create_session(
                 db,
                 user_id=user_id,
+                platform=platform,
                 session_id=normalized_session_id,
                 title=title,
             )
@@ -3679,10 +3732,26 @@ async def migration_validation_dashboard(
         await db.execute(select(func.count()).select_from(Conversation).where(Conversation.platform == "web", Conversation.status != "archived"))
     ).scalar_one()
     session_count = (
-        await db.execute(select(func.count()).select_from(ChatSession).where(ChatSession.status != "archived"))
+        await db.execute(
+            select(func.count()).select_from(ChatSession).where(ChatSession.platform == "web", ChatSession.status != "archived")
+        )
     ).scalar_one()
-    conv_msg_count = (await db.execute(select(func.count()).select_from(ConversationMessage))).scalar_one()
-    session_msg_count = (await db.execute(select(func.count()).select_from(ChatSessionMessage))).scalar_one()
+    conv_msg_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ConversationMessage)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(Conversation.platform == "web", Conversation.status != "archived")
+        )
+    ).scalar_one()
+    session_msg_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ChatSessionMessage)
+            .join(ChatSession, ChatSession.id == ChatSessionMessage.session_ref_id)
+            .where(ChatSession.platform == "web", ChatSession.status != "archived")
+        )
+    ).scalar_one()
     store_mismatch_count = abs(int(conv_count) - int(session_count)) + abs(int(conv_msg_count) - int(session_msg_count))
     return {
         "ok": True,

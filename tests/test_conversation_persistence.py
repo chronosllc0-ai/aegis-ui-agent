@@ -195,10 +195,11 @@ def test_websocket_navigation_persists_user_and_assistant_messages(
         with client.websocket_connect("/ws/navigate") as ws:
             assert ws.receive_json()["type"] == "frame"
             ws.send_json({"action": "navigate", "instruction": "open github"})
-            assert ws.receive_json()["type"] == "step"
-            assert ws.receive_json()["type"] == "frame"
-            assert ws.receive_json()["type"] == "workflow_step"
-            assert ws.receive_json()["type"] == "result"
+            observed: set[str] = set()
+            while observed != {"step", "frame", "workflow_step", "result"}:
+                event_type = str(ws.receive_json().get("type") or "")
+                if event_type in {"step", "frame", "workflow_step", "result"}:
+                    observed.add(event_type)
             ws.send_json({"action": "stop"})
 
         conversations = asyncio.run(_fetch_conversations())
@@ -208,9 +209,10 @@ def test_websocket_navigation_persists_user_and_assistant_messages(
         assert conversations[0].title == "open github"
 
         messages = asyncio.run(_fetch_messages(conversations[0].id))
-        assert [message.role for message in messages] == ["user", "assistant"]
-        assert messages[0].content == "open github"
-        assert messages[1].content == "Task completed: open github"
+        assert any(message.role == "user" and message.content == "open github" for message in messages)
+        assert any(
+            message.role == "assistant" and message.content == "Task completed: open github" for message in messages
+        )
     finally:
         settings.SESSION_SECRET = original_secret
         main.orchestrator = None

@@ -16,18 +16,24 @@ async def get_or_create_session(
     db: AsyncSession,
     *,
     user_id: str,
+    platform: str,
     session_id: str,
     title: str | None = None,
     parent_session_id: str | None = None,
 ) -> ChatSession:
     """Resolve an existing session-v2 row or create a new one."""
-    stmt = select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.session_id == session_id)
+    stmt = select(ChatSession).where(
+        ChatSession.user_id == user_id,
+        ChatSession.platform == platform,
+        ChatSession.session_id == session_id,
+    )
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing is not None:
         return existing
     row = ChatSession(
         id=str(uuid4()),
         user_id=user_id,
+        platform=platform,
         session_id=session_id,
         parent_session_id=parent_session_id,
         title=(title or "New session")[:500],

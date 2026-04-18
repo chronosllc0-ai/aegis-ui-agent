@@ -105,7 +105,11 @@ def test_subagent_spawn_creates_session_v2_entry(tmp_path: Path) -> None:
         session_id = response.json()["session"]["session_id"]
         async def _assert_session() -> None:
             async with database._session_factory() as session:  # type: ignore[union-attr]
-                row = (await session.execute(select(ChatSession).where(ChatSession.session_id == session_id))).scalar_one_or_none()
+                row = (
+                    await session.execute(
+                        select(ChatSession).where(ChatSession.platform == "web", ChatSession.session_id == session_id)
+                    )
+                ).scalar_one_or_none()
                 assert row is not None
                 assert row.parent_session_id == "agent:main:web:workspace:conversation:parent"
         asyncio.run(_assert_session())
@@ -125,7 +129,11 @@ def test_system_events_are_excluded_from_session_chat_messages(tmp_path: Path) -
 
         async def _insert_system_event() -> None:
             async with database._session_factory() as session:  # type: ignore[union-attr]
-                row = (await session.execute(select(ChatSession).where(ChatSession.session_id == session_id))).scalar_one()
+                row = (
+                    await session.execute(
+                        select(ChatSession).where(ChatSession.platform == "web", ChatSession.session_id == session_id)
+                    )
+                ).scalar_one()
                 session.add(ChatSessionMessage(session_ref_id=row.id, role="system", content="system-only", metadata_json=None))
                 await session.commit()
 

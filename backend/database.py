@@ -159,10 +159,14 @@ class ChatSession(Base):
     """Session-v2 record for chat threads with optional parent session."""
 
     __tablename__ = "chat_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "session_id", name="uq_chat_sessions_user_platform_session"),
+    )
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
-    session_id = Column(String(255), nullable=False, unique=True, index=True)
+    platform = Column(String(50), nullable=False, index=True)
+    session_id = Column(String(255), nullable=False, index=True)
     parent_session_id = Column(String(255), nullable=True, index=True)
     title = Column(String(500))
     status = Column(String(20), default="active", index=True)
