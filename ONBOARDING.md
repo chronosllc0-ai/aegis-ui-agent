@@ -5637,3 +5637,45 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.21 - April 18, 2026 (automations UI layout refactor)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Refactored `frontend/src/components/AutomationsPage.tsx` to a stacked card layout aligned with the requested dark mobile-first structure:
+  - top status cards (Enabled, Jobs count, Next wake, Refresh action)
+  - single scrollable New Job wizard card with grouped sections (Basics, Schedule, Execution, Delivery, Advanced collapsible)
+  - jobs panel with filters and row actions
+  - run history panel with scoped filters and pagination
+- Removed modal-only authoring flow and replaced it with inline wizard editing/creation while preserving all backend-wired task fields used by API operations (`name`, `description`, `prompt`, `cron_expr`, `timezone`, `enabled`).
+- Added responsive/mobile behavior improvements:
+  - full-width controls on narrow screens
+  - `min-h-11` touch-target sizing for interactive elements
+  - sticky primary wizard CTA container at mobile viewport bottom.
+- Added run history loading by calling existing backend endpoint (`GET /api/automation/tasks/{task_id}/runs`) per task and merged into a filtered/paginated history view.
+
+### What's Working
+- Automations page now renders as stacked panels with consistent card shell spacing and section subtitles in dark theme.
+- Job creation/editing stays in a single form (no modal stepper) and required indicators are visible.
+- Existing task CRUD and run actions remain connected to backend endpoints.
+- Jobs and run history filtering/pagination behavior is functional.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile main.py backend/pydantic_adk_runner.py` cannot run exactly as written because `backend/pydantic_adk_runner.py` does not exist in this repository.
+- No automated visual screenshot artifact was captured in this environment for this pass.
+
+### Next Steps
+1. Align/confirm whether the missing compile target file in AGENTS checklist should be updated to a valid path.
+2. Add targeted frontend tests for automations wizard validation and jobs/history filter interactions.
+3. If desired, add server-side run-history pagination endpoint to avoid loading per-task history on large task sets.
+
+### Decisions Made
+- Kept wizard as a single in-page form to satisfy the "no modal steps" requirement.
+- Used only backend-supported fields in save payloads; avoided introducing UI-only submission fields.
+- Kept run history scope + pagination client-side using currently available backend endpoints.
+
+### Blockers
+- Browser screenshot tooling was not available from this execution environment.
