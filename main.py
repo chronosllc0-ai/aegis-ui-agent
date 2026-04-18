@@ -628,6 +628,8 @@ _stream_subscribers: dict[str, dict[str, Any]] = {}
 # Bot config: integration_id -> config dict
 _bot_configs: dict[str, dict[str, Any]] = {}
 PAIRING_CODE_TTL_SECONDS = 600
+PAIRING_CHALLENGE_RATE_LIMIT_SECONDS = 90
+_pairing_challenge_last_issued_at: dict[str, float] = {}
 
 
 def _get_effective_bot_config(platform: str, integration_id: str) -> dict[str, Any]:
@@ -663,6 +665,51 @@ def _hash_pairing_code(code: str) -> str:
 
 def _generate_pairing_code() -> str:
     return secrets.token_urlsafe(6).replace("-", "").replace("_", "").upper()[:8]
+
+
+def _pairing_rate_limit_key(
+    *,
+    platform: str,
+    integration_id: str,
+    external_user_id: str,
+    external_channel_id: str | None,
+) -> str:
+    channel_fragment = external_channel_id or "dm"
+    return f"{platform}:{integration_id}:{external_user_id}:{channel_fragment}"
+
+
+def _remaining_pairing_ttl_seconds(expires_at: datetime | None, *, now: datetime) -> int:
+    if expires_at is None:
+        return 0
+    return max(0, int((expires_at.replace(tzinfo=timezone.utc) - now).total_seconds()))
+
+
+def _build_pairing_challenge_text(*, reject_message: str, pairing_code: str) -> str:
+    ttl_minutes = PAIRING_CODE_TTL_SECONDS // 60
+    return (
+        f"{reject_message}\n\n"
+        "🔐 Pairing challenge:\n"
+        f"Code: `{pairing_code}`\n"
+        f"Use `/pair {pairing_code}` to complete pairing (expires in {ttl_minutes}m)."
+    )
+
+
+def _build_pairing_challenge_metadata(
+    *,
+    platform: str,
+    request_id: str,
+    nonce: str,
+) -> dict[str, Any]:
+    if platform != "telegram":
+        return {}
+    return {"parse_mode": "Markdown", "reply_markup": TelegramIntegration.pairing_challenge_reply_markup(request_id, nonce)}
+
+
+def _parse_pairing_callback(update: dict[str, Any]) -> tuple[str, str, str] | None:
+    callback_query = update.get("callback_query")
+    if not isinstance(callback_query, dict):
+        return None
+    return TelegramIntegration.extract_pairing_callback(callback_query.get("data"))
 
 
 async def _get_or_create_integration_policy(
@@ -816,11 +863,11 @@ async def _enforce_ingress_policy(
     integration_id: str,
     payload: dict[str, Any],
     text_content: str | None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, dict[str, Any] | None]:
     external = _resolve_external_sender_identity(platform, payload)
     external_user_id = str(external.get("external_user_id") or "").strip()
     if not external_user_id:
-        return False, None
+        return False, None, None
     external_username = str(external.get("external_username") or "").strip() or None
     chat_type = str(external.get("chat_type") or "").strip().lower() or "group"
     external_channel_id = str(external.get("chat_id") or "").strip() or None
@@ -830,9 +877,9 @@ async def _enforce_ingress_policy(
     try:
         policy = await _get_or_create_integration_policy(db, platform=platform, integration_id=integration_id)
         if chat_type == "dm" and not policy.allow_direct_messages:
-            return False, "Direct messages are disabled for this integration."
+            return False, "Direct messages are disabled for this integration.", None
         if chat_type != "dm" and not policy.allow_group_messages:
-            return False, "Group messages are disabled for this integration."
+            return False, "Group messages are disabled for this integration.", None
 
         bot_cfg = _get_effective_bot_config(platform, integration_id)
         dm_mode = str(bot_cfg.get("dm_policy_mode") or "allow_all").strip().lower()
@@ -842,20 +889,20 @@ async def _enforce_ingress_policy(
 
         if chat_type == "dm":
             if dm_mode == "deny_all":
-                return False, "Direct messages are blocked by policy."
+                return False, "Direct messages are blocked by policy.", None
             if dm_mode == "allowlist" and external_user_id not in dm_allow_from:
-                return False, "You are not in the DM allowlist for this integration."
+                return False, "You are not in the DM allowlist for this integration.", None
         else:
             if group_mode == "deny_all":
-                return False, "Group messages are blocked by policy."
+                return False, "Group messages are blocked by policy.", None
             if group_mode == "allowlist":
                 # OR semantics are intentional: entries may be either approved user IDs or approved channel IDs.
                 allowlisted = external_user_id in group_allow_from or (external_channel_id is not None and external_channel_id in group_allow_from)
                 if not allowlisted:
-                    return False, "This group is not allowlisted for this integration."
+                    return False, "This group is not allowlisted for this integration.", None
 
         if not policy.pairing_required:
-            return True, None
+            return True, None, None
 
         pair_result = await db.execute(
             select(PairedChannelIdentity).where(
@@ -871,7 +918,37 @@ async def _enforce_ingress_policy(
         if pair and pair.status == "approved":
             pair.last_seen_at = now
             await db.commit()
-            return True, None
+            return True, None, None
+
+        pair_callback = _parse_pairing_callback(payload) if platform == "telegram" else None
+        if pair_callback is not None:
+            action, request_id, nonce = pair_callback
+            pending_result = await db.execute(
+                select(PairingRequestAudit).where(
+                    and_(
+                        PairingRequestAudit.id == request_id,
+                        PairingRequestAudit.platform == platform,
+                        PairingRequestAudit.integration_id == integration_id,
+                        PairingRequestAudit.external_user_id == external_user_id,
+                        PairingRequestAudit.status == "pending",
+                        PairingRequestAudit.event_type == "request",
+                    )
+                )
+            )
+            pending = pending_result.scalar_one_or_none()
+            if pending is None:
+                return False, "⚠️ This pairing request is no longer active. Send /pair to request a new code.", None
+            if pending.code_expires_at and pending.code_expires_at.replace(tzinfo=timezone.utc) < now:
+                pending.status = "expired"
+                await db.commit()
+                return False, "⌛ Pairing code expired. Send /pair to request a new challenge.", None
+            expected_nonce = pending.id[-8:]
+            if nonce != expected_nonce:
+                return False, "❌ Invalid pairing callback token. Send /pair for a new challenge.", None
+            ttl_seconds = _remaining_pairing_ttl_seconds(pending.code_expires_at, now=now)
+            if action == "help":
+                return False, "Use `/pair <code>` in this DM to complete pairing.", {"parse_mode": "Markdown"}
+            return False, f"⏳ Pending owner approval. Current code TTL: ~{max(1, ttl_seconds)}s.", None
 
         if text_content and text_content.lower().startswith("/pair "):
             parts = text_content.split(" ", 1)
@@ -887,9 +964,31 @@ async def _enforce_ingress_policy(
                 pairing_code=pairing_code,
             ):
                 await db.commit()
-                return False, "✅ Pairing complete. You can now run commands."
+                return False, "✅ Pairing complete. You can now run commands.", None
+            code_hash = _hash_pairing_code(pairing_code.strip().upper()) if pairing_code else ""
+            if code_hash:
+                expired_match = await db.execute(
+                    select(PairingRequestAudit).where(
+                        and_(
+                            PairingRequestAudit.platform == platform,
+                            PairingRequestAudit.integration_id == integration_id,
+                            PairingRequestAudit.external_user_id == external_user_id,
+                            PairingRequestAudit.pairing_code_hash == code_hash,
+                            PairingRequestAudit.event_type == "request",
+                        )
+                    )
+                )
+                expired_row = expired_match.scalar_one_or_none()
+                if (
+                    expired_row is not None
+                    and expired_row.code_expires_at is not None
+                    and expired_row.code_expires_at.replace(tzinfo=timezone.utc) < now
+                ):
+                    expired_row.status = "expired"
+                    await db.commit()
+                    return False, "⌛ Pairing code expired. Send /pair to request a new challenge.", None
             await db.commit()
-            return False, "❌ Invalid or expired pairing code."
+            return False, "❌ Invalid or expired pairing code.", None
 
         existing_pending = await db.execute(
             select(PairingRequestAudit).where(
@@ -898,13 +997,35 @@ async def _enforce_ingress_policy(
                     PairingRequestAudit.integration_id == integration_id,
                     PairingRequestAudit.external_user_id == external_user_id,
                     PairingRequestAudit.status == "pending",
+                    PairingRequestAudit.event_type == "request",
                 )
             )
         )
         pending = existing_pending.scalar_one_or_none()
+        if pending is not None and pending.code_expires_at and pending.code_expires_at.replace(tzinfo=timezone.utc) < now:
+            pending.status = "expired"
+            await db.commit()
+            pending = None
+        if text_content and text_content.strip().lower() == "/pair":
+            if pending is not None:
+                ttl_seconds = _remaining_pairing_ttl_seconds(pending.code_expires_at, now=now)
+                return False, f"⏳ Pairing challenge already issued. Expires in ~{max(1, ttl_seconds)}s.", None
+            return False, "ℹ️ Use `/pair <code>` after receiving your pairing challenge.", None
         if pending is None:
+            rate_key = _pairing_rate_limit_key(
+                platform=platform,
+                integration_id=integration_id,
+                external_user_id=external_user_id,
+                external_channel_id=external_channel_id,
+            )
+            last_issued_at = _pairing_challenge_last_issued_at.get(rate_key, 0.0)
+            now_ts = _time.time()
+            elapsed = now_ts - last_issued_at
+            if elapsed < PAIRING_CHALLENGE_RATE_LIMIT_SECONDS:
+                wait_seconds = max(1, int(PAIRING_CHALLENGE_RATE_LIMIT_SECONDS - elapsed))
+                return False, f"⏱️ Please wait ~{wait_seconds}s before requesting another pairing code.", None
             pairing_code = _generate_pairing_code()
-            await _record_pairing_audit(
+            request_event = await _record_pairing_audit(
                 db,
                 platform=platform,
                 integration_id=integration_id,
@@ -918,11 +1039,17 @@ async def _enforce_ingress_policy(
                 code_expires_at=now + timedelta(seconds=PAIRING_CODE_TTL_SECONDS),
                 notes="Pairing requested by external identity.",
             )
+            _pairing_challenge_last_issued_at[rate_key] = now_ts
             await db.commit()
-            return False, (
-                f"{policy.reject_message} Pairing code: `{pairing_code}` (expires in {PAIRING_CODE_TTL_SECONDS // 60}m)."
+            challenge_text = _build_pairing_challenge_text(reject_message=policy.reject_message, pairing_code=pairing_code)
+            challenge_metadata = _build_pairing_challenge_metadata(
+                platform=platform,
+                request_id=request_event.id,
+                nonce=request_event.id[-8:],
             )
-        return False, policy.reject_message
+            return False, challenge_text, challenge_metadata
+        ttl_seconds = _remaining_pairing_ttl_seconds(pending.code_expires_at, now=now)
+        return False, f"{policy.reject_message} Existing code expires in ~{max(1, ttl_seconds)}s.", None
     finally:
         await session_iter.aclose()
 
@@ -3338,7 +3465,7 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     chat_id = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
-    allowed, reject_message = await _enforce_ingress_policy(
+    allowed, reject_message, reject_metadata = await _enforce_ingress_policy(
         platform="telegram",
         integration_id=integration_id,
         payload=update if isinstance(update, dict) else {},
@@ -3346,7 +3473,14 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     )
     if not allowed:
         if chat_id and reject_message:
-            await _send_channel_text("telegram", integration_id, chat_id, reject_message, log_source="pairing_policy")
+            await _send_channel_text(
+                "telegram",
+                integration_id,
+                chat_id,
+                reject_message,
+                metadata=reject_metadata,
+                log_source="pairing_policy",
+            )
         return _channel_webhook_response(result)
 
     if chat_id and text_content and text_content.startswith("/"):
@@ -3633,7 +3767,7 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
     channel = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
-    allowed, reject_message = await _enforce_ingress_policy(
+    allowed, reject_message, _reject_metadata = await _enforce_ingress_policy(
         platform="slack",
         integration_id=integration_id,
         payload=payload if isinstance(payload, dict) else {},
@@ -3867,7 +4001,7 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
     channel = inbound.destination
     text_content = inbound.text
     platform_message_id = inbound.message_id
-    allowed, reject_message = await _enforce_ingress_policy(
+    allowed, reject_message, _reject_metadata = await _enforce_ingress_policy(
         platform="discord",
         integration_id=integration_id,
         payload=payload if isinstance(payload, dict) else {},
@@ -4785,6 +4919,41 @@ def _assert_integration_owner(request: Request, platform: str, integration_id: s
     return owner_uid
 
 
+async def _post_pairing_approval_effects(
+    *,
+    platform: str,
+    integration_id: str,
+    owner_uid: str,
+    external_channel_id: str | None,
+) -> None:
+    """Notify paired identity and wake owner runtime/event stream."""
+    if external_channel_id:
+        try:
+            await _send_channel_text(
+                platform,
+                integration_id,
+                external_channel_id,
+                "✅ Pairing approved by owner. You can now run commands.",
+                log_source="pairing_approval",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pairing approval confirmation send failed: %s", exc)
+    try:
+        await session_events.publish_to_user(
+            owner_uid,
+            {
+                "type": "pairing_approved",
+                "platform": platform,
+                "integration_id": integration_id,
+                "external_channel_id": external_channel_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            lane="system",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pairing approval wake event failed: %s", exc)
+
+
 @app.get("/api/integrations/{platform}/{integration_id}/pairing/pending")
 async def get_pending_pairing_requests(
     platform: str,
@@ -4900,6 +5069,14 @@ async def approve_pairing_request(
         notes=f"Approved request {request_id}",
     )
     await session.commit()
+    owner_uid = str(_get_channel_config(platform, integration_id).get("owner_user_id", "")).strip()
+    if owner_uid:
+        await _post_pairing_approval_effects(
+            platform=platform,
+            integration_id=integration_id,
+            owner_uid=owner_uid,
+            external_channel_id=row.external_channel_id,
+        )
     return {"ok": True, "request_id": request_id, "status": "approved"}
 
 

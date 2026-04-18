@@ -7,6 +7,7 @@ import base64
 from dataclasses import dataclass, field
 import io
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -18,6 +19,7 @@ from integrations.base import BaseIntegration
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+PAIR_CALLBACK_PATTERN = re.compile(r"^pair:(status|help):([a-zA-Z0-9_-]{1,64}):([a-zA-Z0-9_-]{6,64})$")
 
 
 @dataclass
@@ -376,6 +378,26 @@ class TelegramIntegration(BaseIntegration):
             return None
         raw_level = data[10:].strip().lower().replace("-", "").replace(" ", "")
         return raw_level or None
+
+    @staticmethod
+    def pairing_challenge_reply_markup(request_id: str, nonce: str) -> dict[str, Any]:
+        """Build pairing helper callbacks for Telegram challenge messages."""
+        return {
+            "inline_keyboard": [
+                [{"text": "Pairing help", "callback_data": f"pair:help:{request_id}:{nonce}"}],
+                [{"text": "Check status", "callback_data": f"pair:status:{request_id}:{nonce}"}],
+            ]
+        }
+
+    @staticmethod
+    def extract_pairing_callback(callback_data: object) -> tuple[str, str, str] | None:
+        """Extract pairing callback tuple (action, request_id, nonce)."""
+        data = str(callback_data or "").strip()
+        match = PAIR_CALLBACK_PATTERN.match(data)
+        if not match:
+            return None
+        action, request_id, nonce = match.groups()
+        return action, request_id, nonce
 
     @staticmethod
     def extract_sender_identity(update: dict[str, Any]) -> dict[str, str | None]:
