@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from backend.integrations.contracts import ChannelAdapter
 from backend.integrations.capability_matrix import resolve_capability_status, unsupported_action_fallback
@@ -277,6 +283,45 @@ def test_capability_matrix_fallbacks_for_unknown_tools() -> None:
         assert slash_control["envelope"]["control_action"] == "status"
 
     asyncio.run(_run())
+
+
+def test_slack_signature_verification() -> None:
+    integration = SlackIntegration()
+    integration._signing_secret = "secret"
+    body = b'{"type":"event_callback"}'
+    ts = str(int(time.time()))
+    signature = "v0=" + hmac.new(b"secret", f"v0:{ts}:{body.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+    assert integration.verify_request_signature(
+        body,
+        {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": signature},
+    )
+    assert not integration.verify_request_signature(
+        body,
+        {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": "v0=bad"},
+    )
+
+
+def test_discord_signature_verification() -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key_hex = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    integration = DiscordIntegration()
+    integration._public_key_hex = public_key_hex
+    body = b'{"type":1}'
+    ts = str(int(time.time()))
+    signature = private_key.sign(ts.encode("utf-8") + body).hex()
+
+    assert integration.verify_interaction_signature(
+        body,
+        {"X-Signature-Timestamp": ts, "X-Signature-Ed25519": signature},
+    )
+    assert not integration.verify_interaction_signature(
+        body,
+        {"X-Signature-Timestamp": ts, "X-Signature-Ed25519": "00"},
+    )
 
 
 def test_capability_matrix_unknown_platform_returns_graceful_fallback() -> None:

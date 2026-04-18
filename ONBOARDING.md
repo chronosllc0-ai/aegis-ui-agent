@@ -5868,3 +5868,49 @@
 - Decision: callback nonce currently derived from request id suffix and validated against request/user/integration binding for lightweight stateless verification.
 - Decision: rate-limit implemented in-process (memory) to minimize schema impact in this pass.
 - Blocker: no `backend/pydantic_adk_runner.py` present for exact checklist command.
+
+## Session 6.26 - April 18, 2026 (Slack/Discord secure ingress + pairing enforcement hardening)
+
+### What changed
+- Added Slack request-signature verification in `integrations/slack_connector.py`:
+  - stores per-integration `signing_secret`,
+  - verifies `X-Slack-Signature` + `X-Slack-Request-Timestamp` with HMAC-SHA256,
+  - enforces timestamp replay tolerance,
+  - returns explicit failure when signature headers/secret are missing or invalid.
+- Added Discord interaction-signature verification in `integrations/discord.py`:
+  - stores per-integration `public_key`,
+  - verifies `X-Signature-Ed25519` + `X-Signature-Timestamp` using Ed25519,
+  - rejects invalid hex, missing headers, and signature mismatch.
+- Improved stable identity extraction:
+  - Slack sender extraction now supports `channel.id` from interactive payloads and broader username fields.
+  - Discord sender extraction now normalizes chat type more deterministically (`dm` vs `group`) when `guild_id`/`channel_type` vary.
+- Hardened webhook ingress in `main.py` for Slack and Discord:
+  - Slack webhook now verifies signatures against raw body before parsing payload,
+  - Slack webhook now supports JSON and form-encoded interaction payloads (`payload=` JSON body),
+  - Discord webhook now verifies interaction signatures against raw body before JSON parsing,
+  - Discord webhook now short-circuits immediately for interaction PING responses.
+- Updated integration registration payloads:
+  - Slack registration now accepts `signing_secret`.
+  - Discord registration now accepts `public_key`.
+- Added/updated tests:
+  - request signature verification coverage for Slack and Discord integration helpers,
+  - reasoning webhook tests now include valid signed Slack/Discord requests.
+
+### What works / what does not
+- Works:
+  - Invalid Slack/Discord signatures are rejected at webhook ingress.
+  - Signed Slack/Discord webhook requests continue through existing ingress/pairing policy path.
+  - Discord interaction PING returns proper `{ "type": 1 }` response and exits early.
+  - Focused test coverage for signature checks and signed reasoning flows passes.
+- Does not / caveats:
+  - Existing project-wide checklist caveat remains: `backend/pydantic_adk_runner.py` is still absent for the exact AGENTS compile command.
+
+### Next steps
+1. Add integration-level endpoint tests that assert HTTP 403 for invalid Slack/Discord signatures directly on webhook routes.
+2. Add tests for Slack form-encoded interaction payloads (`application/x-www-form-urlencoded` + `payload=`).
+3. Add pairing-policy regression tests for Slack/Discord unpaired identities (deny text + challenge flow) at webhook level.
+
+### Blockers / decisions
+- Decision: signature verification is required at ingress using per-integration secrets/keys (`signing_secret` for Slack, `public_key` for Discord).
+- Decision: Discord webhook returns immediately on PING after signature verification to match interaction contract and avoid extra policy/runtime work.
+- Blocker: none beyond existing missing `backend/pydantic_adk_runner.py` checklist caveat.

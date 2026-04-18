@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -38,12 +40,14 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token: str | None = None
         self._workspace: str | None = None
+        self._signing_secret: str | None = None
         self._delivery_deduper = DeliveryDeduper(max_entries=10_000)
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate the provided token and store workspace metadata."""
         token = str(config.get("bot_token") or config.get("oauth_token") or "").strip()
         workspace = str(config.get("workspace", "")).strip()
+        self._signing_secret = str(config.get("signing_secret") or "").strip() or None
         self._token = token or None
         if not self._token:
             self.connected = False
@@ -71,7 +75,25 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         self.connected = False
         self._token = None
         self._workspace = None
+        self._signing_secret = None
         self._delivery_deduper.clear()
+
+    def verify_request_signature(self, body: bytes, headers: dict[str, str], *, tolerance_seconds: int = 300) -> bool:
+        """Validate Slack HMAC signature for inbound webhook requests."""
+        normalized_headers = {str(k).lower(): str(v) for k, v in headers.items()}
+        signature = normalized_headers.get("x-slack-signature", "").strip()
+        timestamp_raw = normalized_headers.get("x-slack-request-timestamp", "").strip()
+        if not self._signing_secret or not signature or not timestamp_raw:
+            return False
+        try:
+            timestamp = int(timestamp_raw)
+        except (TypeError, ValueError):
+            return False
+        if abs(int(time.time()) - timestamp) > tolerance_seconds:
+            return False
+        signature_base = f"v0:{timestamp_raw}:{body.decode('utf-8')}".encode("utf-8")
+        expected = "v0=" + hmac.new(self._signing_secret.encode("utf-8"), signature_base, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
@@ -241,13 +263,16 @@ class SlackIntegration(BaseIntegration, ChannelAdapter):
         """Resolve canonical external sender identity and chat context."""
         event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
         user_obj = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        channel_obj = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
         user_id = event.get("user") or payload.get("user_id") or user_obj.get("id")
         username = (
             event.get("username")
             or payload.get("user_name")
+            or user_obj.get("name")
             or user_obj.get("username")
+            or user_obj.get("real_name")
         )
-        channel = event.get("channel") or payload.get("channel_id")
+        channel = event.get("channel") or payload.get("channel_id") or channel_obj.get("id")
         channel_type = str(event.get("channel_type") or payload.get("channel_type") or "").strip().lower()
         normalized_type = "dm" if channel_type in {"im", "mpim"} else ("group" if channel_type else None)
         return {
