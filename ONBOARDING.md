@@ -5546,3 +5546,57 @@
 
 ### Blockers
 - Browser screenshot capture tool remains unavailable in this environment.
+
+---
+## Session 6.19 - April 18, 2026 (sessions-v2 staged migration with rollback + validation)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Added rollout configuration flags in `config.py` for migration control:
+  - `FEATURE_FLAG_WORKSPACE_PROMPT_MODE`
+  - `FEATURE_FLAG_SESSIONS_V2`
+  - `FEATURE_FLAG_OBSERVABILITY_EVENT_LOG`
+  - `SESSIONS_V2_DUAL_WRITE`
+  - `SESSIONS_V2_LEGACY_FALLBACK`
+- Added `backend/migration_rollout.py` to centralize feature-flag snapshots and one-switch rollback logic (`SESSIONS_V2_LEGACY_FALLBACK`).
+- Added session-v2 storage models in `backend/database.py`:
+  - `ChatSession`
+  - `ChatSessionMessage`
+- Added `backend/session_store.py` for session-v2 persistence helpers (get/create session + append messages).
+- Updated `main.py` to support staged migration behavior:
+  - session-v2 reads for `/api/sessions` and `/api/sessions/{session_id}/messages` when enabled
+  - dual-write for websocket/chat platform persistence paths
+  - dual-write for `/api/sessions/{session_id}/send` and `/api/sessions/spawn`
+  - system-role message filtering from session chat transcripts
+  - observability event log endpoint now gated by `observability_event_log` feature flag
+  - added `GET /api/migration/validation` dashboard endpoint with mismatch counters and rollout/rollback state
+- Added regression tests in `tests/test_sessions_migration.py` for:
+  - send/start path dual-write
+  - session switch persistence
+  - subagent-as-session creation
+  - system events excluded from chat
+
+### What's Working
+- Rollout can be staged by enabling `FEATURE_FLAG_SESSIONS_V2` while keeping `SESSIONS_V2_DUAL_WRITE=true`.
+- Rollback is one-switch via `SESSIONS_V2_LEGACY_FALLBACK=true`, which routes behavior back to legacy conversation mode.
+- Validation endpoint provides migration telemetry and mismatch counters for operational monitoring.
+- Regression coverage exists for the required migration acceptance scenarios.
+
+### What's NOT Working Yet
+- No dedicated frontend migration dashboard view was added in this pass (backend API exists).
+- Validation mismatch counters are process-local/API-level for write flow plus store-count deltas; no long-term persisted drift ledger yet.
+
+### Next Steps
+1. Add a frontend migration dashboard panel consuming `/api/migration/validation`.
+2. Add deeper row-level reconciliation checks (by session/message identity), not just aggregate count deltas.
+3. Add explicit runtime event emissions for rollback toggles to aid incident timelines.
+
+### Decisions Made
+- Implemented safe staged migration as v2-read + optional legacy dual-write to avoid hard cutover risk.
+- Kept rollback logic explicit and centralized in `backend/migration_rollout.py`.
+- Enforced system message filtering at API response layer to guarantee chat transcript cleanliness regardless of store content.
+
+### Blockers
+- None.
