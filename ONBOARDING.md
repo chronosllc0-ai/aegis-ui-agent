@@ -5914,3 +5914,38 @@
 - Decision: signature verification is required at ingress using per-integration secrets/keys (`signing_secret` for Slack, `public_key` for Discord).
 - Decision: Discord webhook returns immediately on PING after signature verification to match interaction contract and avoid extra policy/runtime work.
 - Blocker: none beyond existing missing `backend/pydantic_adk_runner.py` checklist caveat.
+
+## Session 6.27 - April 18, 2026 (Safe bootstrap wake on pairing approval)
+
+### What changed
+- Implemented pairing-approval runtime wake path in `main.py`:
+  - `_post_pairing_approval_effects` now deterministically initializes `bot_{owner_uid}` runtime when missing,
+  - emits `pairing_approved` runtime event with integration/channel metadata,
+  - materializes workspace files for the owner runtime session,
+  - loads `AGENTS.md` and `BOOTSTRAP.md` from the session workspace when present,
+  - emits `bootstrap_loaded` event with file presence/size details,
+  - consumes bootstrap with archival semantics and emits `bootstrap_consumed` event.
+- Extended workspace file service in `backend/workspace_files_service.py`:
+  - added `load_session_workspace_file(session_id, file_name)` helper,
+  - added `consume_session_bootstrap_file(session_id)` helper that renames `BOOTSTRAP.md` to a timestamped `BOOTSTRAP.consumed.*.md` archive (no hard delete).
+- Added focused regression tests in `tests/test_pairing_bootstrap_runtime.py`:
+  - verifies bootstrap archive-once behavior,
+  - verifies pairing approval wakes runtime and emits `pairing_approved` / `bootstrap_loaded` / `bootstrap_consumed` with one-time bootstrap consumption.
+
+### What works / what does not
+- Works:
+  - Pairing approval now wakes/initializes owner bot runtime without requiring an already-open UI websocket.
+  - Bootstrap loading is explicit and auditable via runtime events.
+  - `BOOTSTRAP.md` is consumed exactly once by archival rename, preserving traceability.
+- Does not / caveats:
+  - Pairing approval path still relies on in-memory runtime maps; process restart clears warm runtime state.
+
+### Next steps
+1. Add API-level pairing approval tests that invoke `/api/integrations/{platform}/{integration_id}/pairing/{request_id}/approve` end-to-end and assert runtime events via `/api/runtime/events`.
+2. Consider persisting lightweight “runtime warmed” metadata for bot runtimes if cross-restart continuity is required.
+3. Optionally add retention policy for archived `BOOTSTRAP.consumed.*` files to prevent long-term buildup.
+
+### Blockers / decisions
+- Decision: bootstrap consumption uses rename archival (`BOOTSTRAP.consumed.<UTC>.md`) instead of delete, to keep explicit audit trail at filesystem level.
+- Decision: pairing approval emits internal runtime events (`pairing_approved`, `bootstrap_loaded`, `bootstrap_consumed`) through existing `RuntimeEventStore`.
+- Blocker: none.
