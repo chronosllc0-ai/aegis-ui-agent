@@ -35,8 +35,8 @@ def session_id_to_conversation_id(session_id: str) -> str | None:
     if not raw or raw == SESSION_MAIN_ID:
         return None
     parts = raw.split(":")
-    if len(parts) == 6 and parts[:3] == ["agent", "main", "web"] and parts[3] == "legacy" and parts[4] == "conversation":
-        return parts[5] or None
+    if len(parts) >= 6 and parts[:3] == ["agent", "main", "web"] and parts[3] == "legacy" and parts[4] == "conversation":
+        return ":".join(parts[5:]) or None
     return None
 
 

@@ -1195,7 +1195,7 @@ async def spawn_session(
     uid = user["uid"]
     parent_session_id = str(payload.get("parent_session_id") or SESSION_MAIN_ID).strip() or SESSION_MAIN_ID
     instruction = str(payload.get("instruction") or "").strip()
-    session_id = f"agent:main:subagent:{uid}:task:{uuid4().hex}"
+    session_id = f"agent:main:subagent:spawn:task:{uuid4().hex}"
     title = str(payload.get("title") or instruction[:80] or "Subagent session").strip()
     from backend.database import Conversation as ConvModel
 

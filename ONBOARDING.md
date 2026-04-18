@@ -5439,3 +5439,34 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.16 - April 18, 2026 (review fixes for sessions bridge)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 fix pass
+
+### What Was Done
+- Fixed legacy session parsing in `backend/session_identity.py` so bridged session IDs round-trip correctly even when `conversation_id` contains colons.
+- Removed UID leakage from spawned subagent session IDs in `main.py`; IDs now use `agent:main:subagent:spawn:task:<uuid>` rather than embedding user identifiers.
+- Cleaned up stale frontend usage by removing `deleteConversation` from `useConversations` return payload and updated test mocks accordingly.
+- Extended `tests/test_session_identity.py` with explicit coverage for colon-containing legacy conversation IDs.
+
+### What's Working
+- `conversation_id <-> session_id` bridge now safely supports IDs with `:` characters.
+- Subagent session IDs no longer expose user UID in API responses/logged identifiers.
+- Frontend compiles cleanly with updated hook return shape.
+
+### What's NOT Working Yet
+- Parent-child session relation is still metadata-backed; dedicated persistent session relation table remains pending.
+
+### Next Steps
+1. Add first-class session persistence model for `parent_session_id` relations.
+2. Move frontend history data path from conversation-first hook to session-first hook.
+3. Add API tests for `/api/sessions/spawn` payload/response contracts.
+
+### Decisions Made
+- Prioritized non-breaking fixes to address review warnings without introducing schema migration risk in this pass.
+
+### Blockers
+- None.
