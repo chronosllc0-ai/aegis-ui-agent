@@ -5685,3 +5685,39 @@
 
 ### Blockers
 - None.
+
+---
+## Session 6.22 - April 18, 2026 (review fixups for pairing/policy PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 pass
+
+### What Was Done
+- Addressed review comments in `main.py` for pairing ingress handling:
+  - hardened `/pair` parsing to avoid indexing errors on malformed/empty code input
+  - removed transaction commits from `_try_consume_pairing_code` helper and shifted commit control to caller path
+  - ensured pairing-code verification path now commits state transitions from caller side
+  - removed plaintext pairing code leakage from `PairingRequestAudit.notes`
+  - changed pending-pairing GET query to filter out expired rows in SQL instead of mutating/committing in a GET route
+- Added `or_` SQL expression import to support expiry filtering logic.
+
+### What's Working
+- Pairing code processing no longer risks `IndexError` on malformed command payloads.
+- Helper no longer commits inside nested policy logic, reducing transaction-boundary surprises.
+- Pending pairing list endpoint remains read-only and excludes expired entries without side effects.
+- Audit logs no longer store plaintext pairing codes.
+
+### What's NOT Working Yet
+- Expired pending rows are now filtered from GET responses but are not eagerly backfilled to `expired` in this pass.
+
+### Next Steps
+1. Add a background cleanup job for pending pairing rows whose `code_expires_at` has passed.
+2. Add unit tests for malformed `/pair` payloads and helper transaction semantics.
+3. Add API tests validating that pending endpoint excludes expired requests via SQL filter.
+
+### Decisions Made
+- Prioritized read-only GET semantics by filtering expired rows in query rather than mutating status in handler.
+- Kept helper functions side-effect-light by avoiding commits inside subordinate functions.
+
+### Blockers
+- None.

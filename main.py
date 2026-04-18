@@ -23,7 +23,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Request, WebSocket, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -738,7 +738,6 @@ async def _try_consume_pairing_code(
         return False
     if pending.code_expires_at.replace(tzinfo=timezone.utc) < now:
         pending.status = "expired"
-        await db.commit()
         return False
 
     pending.status = "approved"
@@ -781,7 +780,6 @@ async def _try_consume_pairing_code(
         code_used_at=now,
         notes="Pairing code verified",
     )
-    await db.commit()
     return True
 
 
@@ -828,7 +826,8 @@ async def _enforce_ingress_policy(
             return True, None
 
         if text_content and text_content.lower().startswith("/pair "):
-            pairing_code = text_content.split(" ", 1)[1].strip()
+            parts = text_content.split(" ", 1)
+            pairing_code = parts[1].strip() if len(parts) > 1 else ""
             if pairing_code and await _try_consume_pairing_code(
                 db,
                 platform=platform,
@@ -839,7 +838,9 @@ async def _enforce_ingress_policy(
                 chat_type=chat_type,
                 pairing_code=pairing_code,
             ):
+                await db.commit()
                 return False, "✅ Pairing complete. You can now run commands."
+            await db.commit()
             return False, "❌ Invalid or expired pairing code."
 
         existing_pending = await db.execute(
@@ -867,7 +868,7 @@ async def _enforce_ingress_policy(
                 status="pending",
                 pairing_code_hash=_hash_pairing_code(pairing_code),
                 code_expires_at=now + timedelta(seconds=PAIRING_CODE_TTL_SECONDS),
-                notes=f"Pairing requested by external identity. code={pairing_code}",
+                notes="Pairing requested by external identity.",
             )
             await db.commit()
             return False, (
@@ -4752,14 +4753,15 @@ async def get_pending_pairing_requests(
                 PairingRequestAudit.integration_id == integration_id,
                 PairingRequestAudit.status == "pending",
                 PairingRequestAudit.event_type == "request",
+                or_(
+                    PairingRequestAudit.code_expires_at.is_(None),
+                    PairingRequestAudit.code_expires_at >= now,
+                ),
             )
         )
     )
     pending: list[dict[str, Any]] = []
     for row in rows.scalars().all():
-        if row.code_expires_at and row.code_expires_at.replace(tzinfo=timezone.utc) < now:
-            row.status = "expired"
-            continue
         pending.append(
             {
                 "request_id": row.id,
@@ -4771,7 +4773,6 @@ async def get_pending_pairing_requests(
                 "code_expires_at": row.code_expires_at.isoformat() if row.code_expires_at else None,
             }
         )
-    await session.commit()
     return {"ok": True, "pending": pending}
 
 
