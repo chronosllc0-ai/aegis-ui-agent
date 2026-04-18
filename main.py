@@ -67,7 +67,11 @@ from backend.skills_hub.router import skills_hub_router
 from backend.skills.runtime import resolve_runtime_skills
 from backend.tasks.router import task_router as tasks_router
 from backend.workspace_files import legacy_workspace_files_router, workspace_files_router
-from backend.workspace_files_service import materialize_workspace_files_for_session_safe
+from backend.workspace_files_service import (
+    consume_session_bootstrap_file,
+    load_session_workspace_file,
+    materialize_workspace_files_for_session_safe,
+)
 from backend.tasks.worker import BackgroundWorker
 from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
@@ -4954,6 +4958,70 @@ async def _post_pairing_approval_effects(
     external_channel_id: str | None,
 ) -> None:
     """Notify paired identity and wake owner runtime/event stream."""
+    session_id = f"bot_{owner_uid}"
+    runtime = _user_runtimes.get(owner_uid)
+    if runtime is None:
+        runtime = SessionRuntime()
+        runtime.user_uid = owner_uid
+        runtime.session_id = session_id
+        runtime.settings = _merge_runtime_settings(runtime.settings, {})
+        _normalize_runtime_mode(runtime.settings)
+        _user_runtimes[owner_uid] = runtime
+        _session_runtimes[session_id] = runtime
+    _record_runtime_event(
+        category="pairing_approved",
+        subsystem="pairing",
+        level="info",
+        message="pairing approved; owner runtime wake requested",
+        session_id=session_id,
+        details={
+            "platform": platform,
+            "integration_id": integration_id,
+            "external_channel_id": external_channel_id,
+            "owner_uid": owner_uid,
+        },
+    )
+    try:
+        session_iter = get_session()
+        db_session = await anext(session_iter)
+        try:
+            await materialize_workspace_files_for_session_safe(db_session, session_id, owner_uid)
+        finally:
+            await session_iter.aclose()
+    except Exception:  # noqa: BLE001
+        logger.exception("Pairing approval workspace materialize failed for owner=%s session=%s", owner_uid, session_id)
+    agents_content = load_session_workspace_file(session_id, "AGENTS.md")
+    bootstrap_content = load_session_workspace_file(session_id, "BOOTSTRAP.md")
+    if agents_content is not None or bootstrap_content is not None:
+        _record_runtime_event(
+            category="bootstrap_loaded",
+            subsystem="workspace",
+            level="info",
+            message="workspace bootstrap files loaded",
+            session_id=session_id,
+            details={
+                "owner_uid": owner_uid,
+                "agents_loaded": agents_content is not None,
+                "bootstrap_loaded": bootstrap_content is not None,
+                "agents_bytes": len(agents_content or ""),
+                "bootstrap_bytes": len(bootstrap_content or ""),
+            },
+        )
+    if bootstrap_content is not None:
+        consumed_path = consume_session_bootstrap_file(session_id)
+        if consumed_path is not None:
+            _record_runtime_event(
+                category="bootstrap_consumed",
+                subsystem="workspace",
+                level="info",
+                message="workspace bootstrap consumed and archived",
+                session_id=session_id,
+                details={
+                    "owner_uid": owner_uid,
+                    "archived_path": str(consumed_path),
+                    "archived_name": consumed_path.name,
+                },
+            )
     if external_channel_id:
         try:
             await _send_channel_text(

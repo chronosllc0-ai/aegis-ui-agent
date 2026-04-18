@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from difflib import unified_diff
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -335,3 +337,32 @@ async def materialize_workspace_files_for_session_safe(db: AsyncSession, session
         await materialize_workspace_files_for_session(db, session_id, user_id)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to materialize workspace files for session %s", session_id)
+
+
+def load_session_workspace_file(session_id: str, file_name: str) -> str | None:
+    """Load a workspace file content from a session filesystem root when present."""
+    canonical_name = normalize_workspace_file_name(file_name)
+    if canonical_name is None:
+        return None
+    target = get_session_files_root(session_id) / canonical_name
+    if not target.exists() or not target.is_file():
+        return None
+    return target.read_text(encoding="utf-8")
+
+
+def consume_session_bootstrap_file(session_id: str) -> Path | None:
+    """Archive ``BOOTSTRAP.md`` as consumed and return archived path.
+
+    The file is renamed in-place so bootstrap consumption remains auditable.
+    """
+    source = get_session_files_root(session_id) / "BOOTSTRAP.md"
+    if not source.exists() or not source.is_file():
+        return None
+    consumed_name = f"BOOTSTRAP.consumed.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.md"
+    archived = source.with_name(consumed_name)
+    suffix = 1
+    while archived.exists():
+        archived = source.with_name(f"{consumed_name}.{suffix}")
+        suffix += 1
+    source.rename(archived)
+    return archived
