@@ -249,6 +249,15 @@ function isSystemInternalMessage(metadata: Record<string, unknown> | null | unde
   if (!metadata || typeof metadata !== 'object') return false
   if (metadata.user_visible === false || metadata.observability_only === true) return true
   const action = String(metadata.action ?? '').trim().toLowerCase()
+  const source = String(metadata.source ?? '').trim().toLowerCase()
+  if (
+    source === 'pairing_policy'
+    || source === 'pairing_approval'
+    || source === 'integration_policy'
+    || source === 'policy_update'
+  ) {
+    return true
+  }
   return action === 'step' || action === 'workflow_step' || action === 'context_update'
 }
 function isDeniedChatText(text: string, rawStepType?: string): boolean {

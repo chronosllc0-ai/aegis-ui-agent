@@ -875,15 +875,39 @@ async def _enforce_ingress_policy(
     external_username = str(external.get("external_username") or "").strip() or None
     chat_type = str(external.get("chat_type") or "").strip().lower() or "group"
     external_channel_id = str(external.get("chat_id") or "").strip() or None
+    session_id = str(external.get("session_id") or "").strip() or None
+
+    def _blocked(
+        message: str | None,
+        *,
+        status: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        _record_runtime_event(
+            category="ingress.blocked",
+            subsystem="ingress",
+            level="info",
+            message=str(message or "Ingress blocked by policy."),
+            session_id=session_id,
+            details={
+                "platform": platform,
+                "integration_id": integration_id,
+                "external_user_id": external_user_id,
+                "external_channel_id": external_channel_id,
+                "chat_type": chat_type,
+                "status": status,
+            },
+        )
+        return False, message, metadata
 
     session_iter = get_session()
     db = await anext(session_iter)
     try:
         policy = await _get_or_create_integration_policy(db, platform=platform, integration_id=integration_id)
         if chat_type == "dm" and not policy.allow_direct_messages:
-            return False, "Direct messages are disabled for this integration.", None
+            return _blocked("Direct messages are disabled for this integration.", status="policy_direct_messages_disabled")
         if chat_type != "dm" and not policy.allow_group_messages:
-            return False, "Group messages are disabled for this integration.", None
+            return _blocked("Group messages are disabled for this integration.", status="policy_group_messages_disabled")
 
         bot_cfg = _get_effective_bot_config(platform, integration_id)
         dm_mode = str(bot_cfg.get("dm_policy_mode") or "allow_all").strip().lower()
@@ -893,17 +917,17 @@ async def _enforce_ingress_policy(
 
         if chat_type == "dm":
             if dm_mode == "deny_all":
-                return False, "Direct messages are blocked by policy.", None
+                return _blocked("Direct messages are blocked by policy.", status="dm_deny_all")
             if dm_mode == "allowlist" and external_user_id not in dm_allow_from:
-                return False, "You are not in the DM allowlist for this integration.", None
+                return _blocked("You are not in the DM allowlist for this integration.", status="dm_allowlist_blocked")
         else:
             if group_mode == "deny_all":
-                return False, "Group messages are blocked by policy.", None
+                return _blocked("Group messages are blocked by policy.", status="group_deny_all")
             if group_mode == "allowlist":
                 # OR semantics are intentional: entries may be either approved user IDs or approved channel IDs.
                 allowlisted = external_user_id in group_allow_from or (external_channel_id is not None and external_channel_id in group_allow_from)
                 if not allowlisted:
-                    return False, "This group is not allowlisted for this integration.", None
+                    return _blocked("This group is not allowlisted for this integration.", status="group_allowlist_blocked")
 
         if not policy.pairing_required:
             return True, None, None
@@ -941,18 +965,18 @@ async def _enforce_ingress_policy(
             )
             pending = pending_result.scalar_one_or_none()
             if pending is None:
-                return False, "⚠️ This pairing request is no longer active. Send /pair to request a new code.", None
+                return _blocked("⚠️ This pairing request is no longer active. Send /pair to request a new code.", status="pairing_request_missing")
             if pending.code_expires_at and pending.code_expires_at.replace(tzinfo=timezone.utc) < now:
                 pending.status = "expired"
                 await db.commit()
-                return False, "⌛ Pairing code expired. Send /pair to request a new challenge.", None
+                return _blocked("⌛ Pairing code expired. Send /pair to request a new challenge.", status="pairing_code_expired")
             expected_nonce = pending.id[-8:]
             if nonce != expected_nonce:
-                return False, "❌ Invalid pairing callback token. Send /pair for a new challenge.", None
+                return _blocked("❌ Invalid pairing callback token. Send /pair for a new challenge.", status="pairing_callback_invalid")
             ttl_seconds = _remaining_pairing_ttl_seconds(pending.code_expires_at, now=now)
             if action == "help":
-                return False, "Use `/pair <code>` in this DM to complete pairing.", {"parse_mode": "Markdown"}
-            return False, f"⏳ Pending owner approval. Current code TTL: ~{max(1, ttl_seconds)}s.", None
+                return _blocked("Use `/pair <code>` in this DM to complete pairing.", status="pairing_help", metadata={"parse_mode": "Markdown"})
+            return _blocked(f"⏳ Pending owner approval. Current code TTL: ~{max(1, ttl_seconds)}s.", status="pairing_pending")
 
         if text_content and text_content.lower().startswith("/pair "):
             parts = text_content.split(" ", 1)
@@ -968,6 +992,20 @@ async def _enforce_ingress_policy(
                 pairing_code=pairing_code,
             ):
                 await db.commit()
+                _record_runtime_event(
+                    category="pairing.approved",
+                    subsystem="pairing",
+                    level="info",
+                    message="pairing approved via code challenge",
+                    session_id=session_id,
+                    details={
+                        "platform": platform,
+                        "integration_id": integration_id,
+                        "external_user_id": external_user_id,
+                        "external_channel_id": external_channel_id,
+                        "status": "approved",
+                    },
+                )
                 return False, "✅ Pairing complete. You can now run commands.", None
             code_hash = _hash_pairing_code(pairing_code.strip().upper()) if pairing_code else ""
             if code_hash:
@@ -990,9 +1028,9 @@ async def _enforce_ingress_policy(
                 ):
                     expired_row.status = "expired"
                     await db.commit()
-                    return False, "⌛ Pairing code expired. Send /pair to request a new challenge.", None
+                    return _blocked("⌛ Pairing code expired. Send /pair to request a new challenge.", status="pairing_code_expired")
             await db.commit()
-            return False, "❌ Invalid or expired pairing code.", None
+            return _blocked("❌ Invalid or expired pairing code.", status="pairing_code_invalid")
 
         existing_pending = await db.execute(
             select(PairingRequestAudit).where(
@@ -1013,8 +1051,8 @@ async def _enforce_ingress_policy(
         if text_content and text_content.strip().lower() == "/pair":
             if pending is not None:
                 ttl_seconds = _remaining_pairing_ttl_seconds(pending.code_expires_at, now=now)
-                return False, f"⏳ Pairing challenge already issued. Expires in ~{max(1, ttl_seconds)}s.", None
-            return False, "ℹ️ Use `/pair <code>` after receiving your pairing challenge.", None
+                return _blocked(f"⏳ Pairing challenge already issued. Expires in ~{max(1, ttl_seconds)}s.", status="pairing_already_issued")
+            return _blocked("ℹ️ Use `/pair <code>` after receiving your pairing challenge.", status="pairing_usage_hint")
         if pending is None:
             rate_key = _pairing_rate_limit_key(
                 platform=platform,
@@ -1027,7 +1065,7 @@ async def _enforce_ingress_policy(
             elapsed = now_ts - last_issued_at
             if elapsed < PAIRING_CHALLENGE_RATE_LIMIT_SECONDS:
                 wait_seconds = max(1, int(PAIRING_CHALLENGE_RATE_LIMIT_SECONDS - elapsed))
-                return False, f"⏱️ Please wait ~{wait_seconds}s before requesting another pairing code.", None
+                return _blocked(f"⏱️ Please wait ~{wait_seconds}s before requesting another pairing code.", status="pairing_rate_limited")
             pairing_code = _generate_pairing_code()
             request_event = await _record_pairing_audit(
                 db,
@@ -1045,6 +1083,21 @@ async def _enforce_ingress_policy(
             )
             _pairing_challenge_last_issued_at[rate_key] = now_ts
             await db.commit()
+            _record_runtime_event(
+                category="pairing.requested",
+                subsystem="pairing",
+                level="info",
+                message="pairing challenge issued",
+                session_id=session_id,
+                details={
+                    "platform": platform,
+                    "integration_id": integration_id,
+                    "external_user_id": external_user_id,
+                    "external_channel_id": external_channel_id,
+                    "status": "pending",
+                    "request_id": request_event.id,
+                },
+            )
             challenge_text = _build_pairing_challenge_text(reject_message=policy.reject_message, pairing_code=pairing_code)
             challenge_metadata = _build_pairing_challenge_metadata(
                 platform=platform,
@@ -1053,7 +1106,7 @@ async def _enforce_ingress_policy(
             )
             return False, challenge_text, challenge_metadata
         ttl_seconds = _remaining_pairing_ttl_seconds(pending.code_expires_at, now=now)
-        return False, f"{policy.reject_message} Existing code expires in ~{max(1, ttl_seconds)}s.", None
+        return _blocked(f"{policy.reject_message} Existing code expires in ~{max(1, ttl_seconds)}s.", status="pairing_pending_existing")
     finally:
         await session_iter.aclose()
 
@@ -4208,6 +4261,10 @@ async def list_observability_events(
     session_id: str | None = Query(default=None),
     subsystem: str | None = Query(default=None),
     level: str | None = Query(default=None),
+    platform: str | None = Query(default=None),
+    integration: str | None = Query(default=None),
+    user: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     cursor: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -4219,6 +4276,10 @@ async def list_observability_events(
         session_id=session_id,
         subsystem=subsystem,
         level=level,
+        platform=platform,
+        integration=integration,
+        user=user,
+        status=status,
         limit=limit,
         cursor=cursor,
     )
@@ -4969,7 +5030,7 @@ async def _post_pairing_approval_effects(
         _user_runtimes[owner_uid] = runtime
         _session_runtimes[session_id] = runtime
     _record_runtime_event(
-        category="pairing_approved",
+        category="pairing.approved",
         subsystem="pairing",
         level="info",
         message="pairing approved; owner runtime wake requested",
@@ -5163,6 +5224,21 @@ async def approve_pairing_request(
         actor_user_id=actor_user_id,
         notes=f"Approved request {request_id}",
     )
+    _record_runtime_event(
+        category="pairing.approved",
+        subsystem="pairing",
+        level="info",
+        message="pairing request approved by owner",
+        details={
+            "platform": platform,
+            "integration_id": integration_id,
+            "external_user_id": row.external_user_id,
+            "external_channel_id": row.external_channel_id,
+            "actor_user_id": actor_user_id,
+            "status": "approved",
+            "request_id": request_id,
+        },
+    )
     await session.commit()
     owner_uid = str(_get_channel_config(platform, integration_id).get("owner_user_id", "")).strip()
     if owner_uid:
@@ -5223,6 +5299,21 @@ async def deny_pairing_request(
             actor_user_id=actor_user_id,
             notes=f"Revoked previously approved identity while denying {request_id}",
         )
+        _record_runtime_event(
+            category="pairing.revoked",
+            subsystem="pairing",
+            level="warning",
+            message="approved pairing identity revoked during denial",
+            details={
+                "platform": platform,
+                "integration_id": integration_id,
+                "external_user_id": row.external_user_id,
+                "external_channel_id": row.external_channel_id,
+                "actor_user_id": actor_user_id,
+                "status": "revoked",
+                "request_id": request_id,
+            },
+        )
     elif identity is None:
         session.add(
             PairedChannelIdentity(
@@ -5248,6 +5339,21 @@ async def deny_pairing_request(
         status="denied",
         actor_user_id=actor_user_id,
         notes=f"Denied request {request_id}",
+    )
+    _record_runtime_event(
+        category="pairing.denied",
+        subsystem="pairing",
+        level="info",
+        message="pairing request denied by owner",
+        details={
+            "platform": platform,
+            "integration_id": integration_id,
+            "external_user_id": row.external_user_id,
+            "external_channel_id": row.external_channel_id,
+            "actor_user_id": actor_user_id,
+            "status": "denied",
+            "request_id": request_id,
+        },
     )
     await session.commit()
     return {"ok": True, "request_id": request_id, "status": "denied"}
@@ -5293,6 +5399,21 @@ async def update_integration_policy(
     if "reject_message" in payload:
         policy.reject_message = str(payload.get("reject_message") or policy.reject_message).strip() or policy.reject_message
     policy.updated_by_user_id = actor_user_id
+    _record_runtime_event(
+        category="policy.updated",
+        subsystem="policy",
+        level="info",
+        message="integration ingress policy updated",
+        details={
+            "platform": platform,
+            "integration_id": integration_id,
+            "actor_user_id": actor_user_id,
+            "status": "updated",
+            "pairing_required": bool(policy.pairing_required),
+            "allow_direct_messages": bool(policy.allow_direct_messages),
+            "allow_group_messages": bool(policy.allow_group_messages),
+        },
+    )
     await session.commit()
     return {"ok": True}
 

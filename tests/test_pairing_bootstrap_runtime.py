@@ -98,7 +98,7 @@ def test_pairing_approval_wakes_runtime_and_emits_bootstrap_events(monkeypatch) 
 
     events = main.runtime_events.list_events(session_id="bot_owner-1", limit=30)["events"]
     categories = [str(event["category"]) for event in events]
-    assert "pairing_approved" in categories
+    assert "pairing.approved" in categories
     assert "bootstrap_loaded" in categories
     bootstrap_consumed_events = [event for event in events if event["category"] == "bootstrap_consumed"]
     assert len(bootstrap_consumed_events) == 1

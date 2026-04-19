@@ -124,6 +124,10 @@ class RuntimeEventStore:
         session_id: str | None = None,
         subsystem: str | None = None,
         level: str | None = None,
+        platform: str | None = None,
+        integration: str | None = None,
+        user: str | None = None,
+        status: str | None = None,
         limit: int = 50,
         cursor: int = 0,
     ) -> dict[str, Any]:
@@ -132,8 +136,23 @@ class RuntimeEventStore:
         normalized_session = str(session_id or "").strip() or None
         normalized_subsystem = str(subsystem or "").strip().lower() or None
         normalized_level = str(level or "").strip().lower() or None
+        normalized_platform = str(platform or "").strip().lower() or None
+        normalized_integration = str(integration or "").strip() or None
+        normalized_user = str(user or "").strip() or None
+        normalized_status = str(status or "").strip().lower() or None
         page_limit = min(max(1, int(limit)), 200)
         page_cursor = max(0, int(cursor))
+
+        def _details_user_matches(details: dict[str, Any]) -> bool:
+            if not normalized_user:
+                return True
+            candidates = (
+                details.get("user_id"),
+                details.get("external_user_id"),
+                details.get("owner_uid"),
+                details.get("actor_user_id"),
+            )
+            return normalized_user in {str(value or "").strip() for value in candidates if value is not None}
 
         filtered = [
             event
@@ -141,6 +160,19 @@ class RuntimeEventStore:
             if (not normalized_session or event.session_id == normalized_session)
             and (not normalized_subsystem or event.subsystem == normalized_subsystem)
             and (not normalized_level or event.level == normalized_level)
+            and (
+                not normalized_platform
+                or str(event.details.get("platform", "")).strip().lower() == normalized_platform
+            )
+            and (
+                not normalized_integration
+                or str(event.details.get("integration_id", "")).strip() == normalized_integration
+            )
+            and _details_user_matches(event.details)
+            and (
+                not normalized_status
+                or str(event.details.get("status", "")).strip().lower() == normalized_status
+            )
         ]
         total = len(filtered)
         page = filtered[page_cursor : page_cursor + page_limit]

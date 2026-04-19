@@ -68,6 +68,10 @@ export function ObservabilityTab() {
   const [sessionFilter, setSessionFilter] = useState('')
   const [subsystemFilter, setSubsystemFilter] = useState('')
   const [levelFilter, setLevelFilter] = useState('')
+  const [platformFilter, setPlatformFilter] = useState('')
+  const [integrationFilter, setIntegrationFilter] = useState('')
+  const [userFilter, setUserFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -99,6 +103,10 @@ export function ObservabilityTab() {
       if (trimmedSession) query.set('session_id', trimmedSession)
       if (trimmedSubsystem) query.set('subsystem', trimmedSubsystem)
       if (trimmedLevel) query.set('level', trimmedLevel)
+      if (platformFilter.trim()) query.set('platform', platformFilter.trim().toLowerCase())
+      if (integrationFilter.trim()) query.set('integration', integrationFilter.trim())
+      if (userFilter.trim()) query.set('user', userFilter.trim())
+      if (statusFilter.trim()) query.set('status', statusFilter.trim().toLowerCase())
       const response = await fetch(apiUrl(`/api/observability/events?${query.toString()}`), { credentials: 'include' })
       if (!response.ok) throw new Error(`Failed to load event log (${response.status})`)
       const data = await response.json() as RuntimeEventResponse
@@ -181,8 +189,24 @@ export function ObservabilityTab() {
               <option value='error'>error</option>
             </select>
           </div>
+          <div className='min-w-[120px]'>
+            <label className='mb-1 block text-[11px] text-zinc-400'>Platform</label>
+            <input value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} placeholder='telegram' className='w-full rounded border border-zinc-700 bg-[#0d0d0d] px-2 py-1.5 text-xs text-zinc-200' />
+          </div>
+          <div className='min-w-[160px]'>
+            <label className='mb-1 block text-[11px] text-zinc-400'>Integration</label>
+            <input value={integrationFilter} onChange={(e) => setIntegrationFilter(e.target.value)} placeholder='integration-id' className='w-full rounded border border-zinc-700 bg-[#0d0d0d] px-2 py-1.5 text-xs text-zinc-200' />
+          </div>
+          <div className='min-w-[140px]'>
+            <label className='mb-1 block text-[11px] text-zinc-400'>User</label>
+            <input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder='user or external user id' className='w-full rounded border border-zinc-700 bg-[#0d0d0d] px-2 py-1.5 text-xs text-zinc-200' />
+          </div>
+          <div className='min-w-[140px]'>
+            <label className='mb-1 block text-[11px] text-zinc-400'>Status</label>
+            <input value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} placeholder='approved / blocked / denied' className='w-full rounded border border-zinc-700 bg-[#0d0d0d] px-2 py-1.5 text-xs text-zinc-200' />
+          </div>
           <button type='button' onClick={() => void loadEvents(0)} className='rounded border border-zinc-600 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800'>Apply filters</button>
-          <button type='button' onClick={() => { setSessionFilter(''); setSubsystemFilter(''); setLevelFilter(''); void loadEvents(0) }} className='rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800'>Reset</button>
+          <button type='button' onClick={() => { setSessionFilter(''); setSubsystemFilter(''); setLevelFilter(''); setPlatformFilter(''); setIntegrationFilter(''); setUserFilter(''); setStatusFilter(''); void loadEvents(0) }} className='rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800'>Reset</button>
         </div>
 
         <div className='mb-2 flex items-center justify-between text-[11px] text-zinc-500'>
