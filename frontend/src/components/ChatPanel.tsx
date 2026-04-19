@@ -168,7 +168,13 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Workflow step update',
   'Starting task:',
   'Processing ',
+  'Final synthesis:',
+  'Outcome:',
+  'Worker refs:',
+  'Task completed',
 ]
+
+const CHAT_INTERNAL_SUMMARY_RE = /^(planner|architect|deep research|code|orchestrator) summary:/i
 
 type InternalEventClassification =
   | { kind: 'mode_router'; routeMode?: string; routeReason?: string; workerReference?: string }
@@ -263,11 +269,12 @@ function isSystemInternalMessage(metadata: Record<string, unknown> | null | unde
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
   // tool_start / tool_result are typed JSON events — always let them through
   if (rawStepType === 'tool_start' || rawStepType === 'tool_result') return false
-  const normalized = text.trim().toLowerCase()
+  const trimmed = text.trim()
+  const normalized = trimmed.toLowerCase()
   if (CHAT_HARD_DENY_PREFIXES.some((prefix) => normalized.startsWith(prefix.toLowerCase()))) return true
+  if (CHAT_INTERNAL_SUMMARY_RE.test(trimmed)) return true
   // Filter raw JSON tool blobs that leaked through (e.g. {"tool":"extract_page",...})
-  const t = text.trim()
-  if (t.startsWith('{') && t.includes('"tool"') && t.includes('"')) return true
+  if (trimmed.startsWith('{') && trimmed.includes('"tool"') && trimmed.includes('"')) return true
   return false
 }
 
@@ -1664,7 +1671,7 @@ export function ChatPanel({
         const optimistic = prev.filter(
           (m) => m.role === 'user' && String(m.id).startsWith('local-') && !serverUserTexts.has((m.text ?? '').trim()),
         )
-        return [...optimistic, ...mapped]
+        return [...mapped, ...optimistic]
       })
     } else {
       setSentMessages([])

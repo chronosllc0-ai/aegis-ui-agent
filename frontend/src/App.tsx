@@ -31,7 +31,7 @@ import { useContextMeter } from './hooks/useContextMeter'
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
-import { useWebSocket, type LogEntry } from './hooks/useWebSocket'
+import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
 import { useConversations, type ServerMessage } from './hooks/useConversations'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
@@ -636,7 +636,7 @@ function App() {
         serverMsg.content.trim() === optimisticMsg.content.trim()
       ))
     ))
-    return [...dedupedOptimistic, ...serverMessages]
+    return [...serverMessages, ...dedupedOptimistic]
   }, [optimisticMessagesByTask, selectedTaskId, serverMessages])
 
   const visibleLogs: LogEntry[] = useMemo(() => {
@@ -779,19 +779,32 @@ function App() {
     const finalInstruction = cleanedInstruction || trimmed
 
     const selectedAgentMode = normalizeAgentMode(settings.selectedMode)
+    const outboundMetadata = { ...(metadata ?? {}) }
+    const preferredRuntimeAction = typeof outboundMetadata.runtime_control_action === 'string'
+      ? outboundMetadata.runtime_control_action
+      : undefined
+    delete outboundMetadata.runtime_control_action
+    const runtimeControlAction: Exclude<SteeringMode, 'auto'> | null = isWorking
+      ? (preferredRuntimeAction === 'interrupt' || preferredRuntimeAction === 'queue' || preferredRuntimeAction === 'steer'
+        ? preferredRuntimeAction
+        : 'steer')
+      : null
     send({ action: 'config', settings: wsConfig })
 
     setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
-    const steeringMode = settings.steeringMode ?? 'auto'
-    if (!isNewTask && steeringMode === 'auto') {
-      toastCtx.info('Auto mode is active', 'Switch to Steer, Interrupt, or Queue to send a follow-up while the task is running.')
-      return
-    }
-    const action = isNewTask ? 'chat' : steeringMode
-    console.info('[AegisUI] action=%s', action)
-    const sent = send({ action, instruction: finalInstruction, metadata: { ...(metadata ?? {}), agent_mode: selectedAgentMode, target_subagents: mentionedAgents.map((a) => a.sub_id) } })
+    const action = runtimeControlAction ?? 'navigate'
+    console.info('[AegisUI] action=%s route=%s', action, isNewTask ? 'new_task' : 'runtime_control')
+    const sent = send({
+      action,
+      instruction: finalInstruction,
+      metadata: {
+        ...outboundMetadata,
+        agent_mode: selectedAgentMode,
+        target_subagents: mentionedAgents.map((a) => a.sub_id),
+      },
+    })
     if (!sent) {
       setPendingNavigation({ instruction: finalInstruction, metadata })
       toastCtx.error('Connection issue', 'Task was not sent. Please wait for reconnect and retry.')
@@ -855,7 +868,6 @@ function App() {
     isWorking,
     messageSubAgent,
     send,
-    settings.steeringMode,
     settings.selectedMode,
     toastCtx,
     wsConfig,
@@ -867,15 +879,19 @@ function App() {
   }
 
   useEffect(() => {
-    if (connectionStatus !== 'connected' || !pendingNavigation || isWorking) return
+    if (connectionStatus !== 'connected' || !pendingNavigation) return
     handleSend(pendingNavigation.instruction, pendingNavigation.metadata)
-  }, [connectionStatus, handleSend, isWorking, pendingNavigation])
+  }, [connectionStatus, handleSend, pendingNavigation])
 
   const submitUrl = () => {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, { task_label_source: 'browser', task_label: normalized })
+    handleSend(normalized, {
+      task_label_source: 'browser',
+      task_label: normalized,
+      runtime_control_action: 'interrupt',
+    })
   }
 
   const handleDecomposePlan = async (prompt: string) => {

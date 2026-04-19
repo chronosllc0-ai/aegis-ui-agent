@@ -12,6 +12,7 @@ from http.cookies import SimpleCookie
 import json
 import logging
 from pathlib import Path
+import re
 import secrets
 import time as _time
 from typing import Any
@@ -393,7 +394,17 @@ _BROWSER_CHAT_POLLUTION_PREFIXES = (
     "[go_back",
     "[screenshot",
     "[extract_page",
+    "final synthesis:",
+    "outcome:",
+    "worker refs:",
 )
+
+_BROWSER_CHAT_POLLUTION_EXACT = {
+    "task completed",
+    "task completed.",
+}
+
+_BROWSER_CHAT_POLLUTION_SUMMARY_RE = re.compile(r"^(planner|architect|deep research|code|orchestrator) summary:", re.IGNORECASE)
 
 
 def _is_browser_chat_pollution(step: dict[str, Any]) -> bool:
@@ -401,10 +412,15 @@ def _is_browser_chat_pollution(step: dict[str, Any]) -> bool:
     step_type = str(step.get("type") or "").strip().lower()
     if step_type in {"workflow_step", "browser_action", "human_browser_action"}:
         return True
-    content = str(step.get("content") or "").strip().lower()
+    content = str(step.get("content") or "").strip()
     if not content:
         return False
-    return any(content.startswith(prefix) for prefix in _BROWSER_CHAT_POLLUTION_PREFIXES)
+    normalized = content.lower()
+    if any(normalized.startswith(prefix) for prefix in _BROWSER_CHAT_POLLUTION_PREFIXES):
+        return True
+    if normalized in _BROWSER_CHAT_POLLUTION_EXACT:
+        return True
+    return bool(_BROWSER_CHAT_POLLUTION_SUMMARY_RE.match(content))
 
 
 def _runtime_snapshot() -> dict[str, Any]:

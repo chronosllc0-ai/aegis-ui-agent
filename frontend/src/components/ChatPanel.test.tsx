@@ -129,6 +129,49 @@ describe('ChatPanel plan intent UX', () => {
   })
 })
 
+describe('ChatPanel chronological message ordering', () => {
+  it('keeps a new local follow-up bubble after the prior assistant reply', async () => {
+    const onPrimarySend = vi.fn()
+
+    render(
+      <ChatPanel
+        {...baseChatPanelProps}
+        logs={[]}
+        isWorking={false}
+        onPrimarySend={onPrimarySend}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        activeTaskId='task-order'
+        serverMessages={[
+          { id: 'srv-user-1', role: 'user', content: 'First request', created_at: '2026-04-19T10:00:00Z', metadata: null },
+          { id: 'srv-assistant-1', role: 'assistant', content: 'First reply', created_at: '2026-04-19T10:00:05Z', metadata: null },
+        ]}
+      />,
+    )
+
+    await screen.findByText('First reply')
+
+    const composers = screen.getAllByPlaceholderText('Ask for a task, research, or code…')
+    const composer = composers[composers.length - 1]
+    fireEvent.change(composer, { target: { value: 'Follow-up request' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(onPrimarySend).toHaveBeenCalledWith(
+      'Follow-up request',
+      expect.objectContaining({ task_label: 'Follow-up request' }),
+    )
+
+    await screen.findByText('Follow-up request')
+    const assistantNode = screen.getByText('First reply')
+    const followUpNode = screen.getByText('Follow-up request')
+    expect(assistantNode.compareDocumentPosition(followUpNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
 describe('ChatPanel steering control in composer', () => {
   it('shows stop-only controls while running in auto mode', () => {
     const { rerender } = render(
@@ -234,9 +277,49 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         elapsedSeconds: 1,
       },
       {
+        id: 'noise-log-4',
+        taskId: 'task-noise',
+        type: 'result',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Final synthesis: completed',
+        elapsedSeconds: 2,
+      },
+      {
+        id: 'noise-log-5',
+        taskId: 'task-noise',
+        type: 'result',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Code summary: delegated implementation finished',
+        elapsedSeconds: 2,
+      },
+      {
+        id: 'noise-log-6',
+        taskId: 'task-noise',
+        type: 'result',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Outcome: completed. Specialist mode: code. Worker refs: child:primary.',
+        elapsedSeconds: 2,
+      },
+      {
+        id: 'noise-log-7',
+        taskId: 'task-noise',
+        type: 'result',
+        status: 'completed',
+        timestamp: '10:00 AM',
+        stepKind: 'other',
+        message: 'Task completed',
+        elapsedSeconds: 2,
+      },
+      {
         id: 'clean-log-1',
         taskId: 'task-noise',
-        type: 'step',
+        type: 'result',
         status: 'completed',
         timestamp: '10:00 AM',
         stepKind: 'other',
@@ -299,6 +382,10 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         serverMessages={[
           { id: 'srv-noise-1', role: 'assistant', content: 'Model response (no tool call): hidden' },
           { id: 'srv-noise-2', role: 'assistant', content: 'Workflow step update' },
+          { id: 'srv-noise-3', role: 'assistant', content: 'Final synthesis: completed' },
+          { id: 'srv-noise-4', role: 'assistant', content: 'Code summary: delegated implementation finished' },
+          { id: 'srv-noise-5', role: 'assistant', content: 'Outcome: completed. Specialist mode: code. Worker refs: child:primary.' },
+          { id: 'srv-noise-6', role: 'assistant', content: 'Task completed' },
           { id: 'srv-browser-1', role: 'assistant', content: '[extract_page] historical fixture' },
           { id: 'srv-browser-2', role: 'assistant', content: '[go_back] historical fixture' },
           { id: 'srv-browser-3', role: 'assistant', content: '[click] historical fixture' },
@@ -315,10 +402,14 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
     expect(screen.queryByText(/model response \(no tool call\):/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/session settings updated/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/workflow step update/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/shell — extract page/i)).toBeInTheDocument()
-    expect(screen.getByText(/shell — go back/i)).toBeInTheDocument()
-    expect(screen.getByText(/shell — click/i)).toBeInTheDocument()
-    expect(screen.getByText(/shell — go to url/i)).toBeInTheDocument()
+    expect(screen.queryByText(/final synthesis:/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/code summary:/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/outcome: completed/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^task completed$/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/\[extract_page\] historical fixture/i)).toBeInTheDocument()
+    expect(screen.getByText(/\[go_back\] historical fixture/i)).toBeInTheDocument()
+    expect(screen.getByText(/\[click\] historical fixture/i)).toBeInTheDocument()
+    expect(screen.getByText(/\[go_to_url\] historical fixture/i)).toBeInTheDocument()
   })
 
   it('shows one live activity accordion instead of repeated thinking rows', async () => {
@@ -337,7 +428,7 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
       {
         id: 'assistant-log-snapshot',
         taskId: 'task-snapshot',
-        type: 'step',
+        type: 'result',
         status: 'completed',
         timestamp: '10:00 AM',
         stepKind: 'other',
