@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import { Icons } from '../icons'
 import { useSettingsContext } from '../../context/useSettingsContext'
 import type { AppSettings } from '../../hooks/useSettings'
-import type { SteeringMode } from '../../hooks/useWebSocket'
 import { AgentTab } from './AgentTab'
 import { APIKeysTab } from './APIKeysTab'
 import { ConnectionsTab } from './ConnectionsTab'
 import { ProfileTab } from './ProfileTab'
 import { SupportTab } from './SupportTab'
-import { UsageTab } from './UsageTab'
-import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
 import { MemoryTab } from './MemoryTab'
@@ -19,19 +16,18 @@ import { SkillsTab } from './SkillsTab'
 
 type SettingsPageProps = {
   onBack: () => void
-  onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
   initialTab?: SettingsTab
   isAdmin?: boolean
   authRole?: string
   onTabChange?: (tab: SettingsTab) => void
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Billing', 'Connections', 'Workflows', 'Memory', 'Observability', 'Skills', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Credits', 'Invoices', 'Billing', 'Connections', 'Memory', 'Observability', 'Skills', 'Support', 'Admin'] as const
 const SETTINGS_NAV_TABS: SettingsTab[] = ['API Keys', 'Support', 'Billing']
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
-export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false, authRole, onTabChange }: SettingsPageProps) {
+export function SettingsPage({ onBack, initialTab, isAdmin = false, authRole, onTabChange }: SettingsPageProps) {
   const { settings, patchSettings } = useSettingsContext()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
@@ -110,7 +106,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
                 activeTab === tab ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
               }`}
             >
-              {tab === 'Billing' ? 'Billing' : tab}
+              {tab}
             </button>
           ))}
           {isAdmin && (
@@ -137,7 +133,6 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         {activeTab === 'Profile' && <ProfileTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
-        {activeTab === 'Usage' && <UsageTab />}
         {activeTab === 'Credits' && <CreditsTab />}
         {activeTab === 'Invoices' && <InvoiceTab />}
         {activeTab === 'Billing' && (
@@ -151,13 +146,6 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
             integrations={settings.integrations}
             onChange={(integrations) => onPatch({ integrations })}
             isAdmin={isAdmin}
-          />
-        )}
-        {activeTab === 'Workflows' && (
-          <WorkflowsTab
-            workflows={settings.workflowTemplates}
-            onChange={(workflowTemplates) => onPatch({ workflowTemplates })}
-            onRun={(instruction) => onRunWorkflow(instruction, 'steer')}
           />
         )}
         {activeTab === 'Memory' && <MemoryTab />}

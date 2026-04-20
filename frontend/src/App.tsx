@@ -74,12 +74,10 @@ const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   'agent-configuration': 'Agent Configuration',
   'workspace-files': 'Agent Configuration',
   'api-keys': 'API Keys',
-  usage: 'Usage',
   credits: 'Billing',
   invoices: 'Billing',
   billing: 'Billing',
   connections: 'Connections',
-  workflows: 'Workflows',
   memory: 'Memory',
   observability: 'Observability',
   skills: 'Skills',
@@ -374,7 +372,7 @@ function App() {
           // Handle ?settings=<Tab> deep-link (e.g. after OAuth callback redirect)
           const params = new URLSearchParams(window.location.search)
           const settingsTab = params.get('settings') as SettingsTab | null
-          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Billing', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
+          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Credits', 'Invoices', 'Billing', 'Connections', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
             setSettingsInitialTab(settingsTab)
             setShowSettings(true)
             // Strip the ?settings= param from the URL without a page reload
@@ -1071,7 +1069,7 @@ function App() {
                   {isAdmin && (
                     <button type='button' onClick={() => { navigateTo('/admin'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${isAdminPath ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}><LuShield className='h-3.5 w-3.5' /><span>Admin</span></button>
                   )}
-                  <button type='button' onClick={() => { navigateTo('/settings/credits'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/credits' || pathname === '/settings/invoices' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.settings({ className: 'h-3.5 w-3.5' })}<span>Billing</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/billing'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/credits' || pathname === '/settings/invoices' || pathname === '/settings/billing' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.settings({ className: 'h-3.5 w-3.5' })}<span>Billing</span></button>
                 </div>
               </div>
             </div>
@@ -1165,7 +1163,6 @@ function App() {
             {showSettings || isAdminPath ? (
               <SettingsPage
                 onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
-                onRunWorkflow={(instruction) => handleSend(instruction)}
                 initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
                 isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
                 authRole={authUser?.role}

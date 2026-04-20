@@ -6045,3 +6045,29 @@
 - Decision: preserved route compatibility for existing billing endpoints by aliasing `credits`/`invoices` to `Billing`.
 - Decision: kept SettingsPage content support for non-settings tabs via route-driven access while narrowing its visible nav to settings-focused items.
 - Blocker: none beyond existing missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.31 - April 20, 2026 (PR review follow-up: billing route + orphan cleanup)
+
+### What changed
+- Addressed review nit in `frontend/src/components/settings/SettingsPage.tsx` by removing a redundant ternary render and using `{tab}` directly for settings nav labels.
+- Updated app sidebar Billing nav button in `frontend/src/App.tsx` to navigate to `/settings/billing` (instead of `/settings/credits`) and expanded active-state matching to include `/settings/billing`.
+- Removed orphaned `Usage` and `Workflows` settings tabs from `SettingsPage` tab definitions and render branches, and removed their corresponding imports.
+- Removed obsolete route-map and query-tab references for `usage` and `workflows` in `App.tsx` so the settings routes and UI are aligned.
+- Removed now-unused `onRunWorkflow` prop from `SettingsPage` and corresponding call-site prop passing in `App.tsx`.
+
+### What works / what does not
+- Works:
+  - Billing button now routes to `/settings/billing` and highlights correctly on billing/credits/invoices URLs.
+  - Settings nav no longer contains redundant ternary rendering.
+  - Orphaned Usage/Workflows tabs are fully removed from Settings UI logic.
+  - Frontend build passes after cleanup.
+- Does not / caveats:
+  - Existing checklist caveat remains unchanged: `backend/pydantic_adk_runner.py` is absent, so the py_compile checklist command still fails.
+
+### Next steps
+1. If historical links to `/settings/usage` or `/settings/workflows` are expected externally, add an explicit redirect strategy.
+2. Consider adding a small route regression test for `/settings/billing` active-tab behavior.
+
+### Blockers / decisions
+- Decision: prefer route/IA consistency by removing orphaned tabs rather than re-surfacing them in nav.
+- Blocker: none (other than known missing checklist file in repo).
