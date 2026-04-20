@@ -32,27 +32,19 @@ import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
 import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
-import { useConversations, type ServerMessage } from './hooks/useConversations'
+import { useSessions, type ServerMessage } from './hooks/useSessions'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { modelInfo, PROVIDERS } from './lib/models'
 import { modeLabel, normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
-import { deriveTitleFromInstruction, isPlaceholderTitle, mergeTitlePreferMeaningful } from './lib/title'
 import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
 type AppMode = 'browser' | 'chat'
 
-type TaskHistoryItem = {
-  id: string
-  title: string
-  dateLabel: string
-  instruction: string
-  createdAt?: string
-  labelSource?: 'browser' | 'chat' | 'system'
-}
+const MAIN_SESSION_ID = 'agent:main:main'
 // Stop-words to skip when picking the first meaningful word from an instruction
 const STOP_WORDS = new Set(['a', 'an', 'the', 'to', 'do', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'with', 'by', 'from', 'please', 'now', 'then', 'that', 'this', 'it', 'is', 'be', 'can', 'will', 'your', 'my', 'our', 'their'])
 
@@ -68,7 +60,6 @@ function subAgentDisplayName(agent: { instruction: string; sub_id: string }): st
   const shortId = agent.sub_id.replace(/-/g, '').slice(0, 4)
   return `${label}-${shortId}`
 }
-const taskHistoryKey = (uid: string | null) => `aegis.taskHistory.${uid || 'anon'}`
 const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   profile: 'Profile',
   'agent-configuration': 'Agent Configuration',
@@ -96,7 +87,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
   const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, handoffActive, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
@@ -119,13 +110,10 @@ function App() {
   const [showSubAgentModal, setShowSubAgentModal] = useState(false)
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
-  const { conversations, fetchMessages, onNewConversationId } = useConversations(authUser?.uid ?? null)
-  // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
-  const taskToConvRef = useRef<Map<string, string>>(new Map())
+  const { sessions, fetchMessages, fetchSessions } = useSessions(authUser?.uid ?? null)
   // Server messages loaded for the selected conversation
   const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
   const [optimisticMessagesByTask, setOptimisticMessagesByTask] = useState<Record<string, ServerMessage[]>>({})
-  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const browserGridRef = useRef<HTMLDivElement>(null)
   const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
 
@@ -317,19 +305,6 @@ function App() {
   }, [isAuthenticated, isDocsRoute, isPrivacyRoute, isTermsRoute])
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(taskHistoryKey(authUser?.uid ?? null))
-      const parsed = saved ? (JSON.parse(saved) as TaskHistoryItem[]) : []
-      setTaskHistory(parsed.map((item) => ({
-        ...item,
-        createdAt: item.createdAt ?? undefined,
-      })))
-    } catch {
-      setTaskHistory([])
-    }
-  }, [authUser?.uid])
-
-  useEffect(() => {
     setShowSettings(isSettingsPath || isAdminPath)
     setShowAutomations(isAutomationsPath)
     if (!isSettingsPath) return
@@ -468,86 +443,26 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTaskId])
 
-  // When the server assigns a conversationId for the current navigate action,
-  // map the client-side taskId to it and update the conversation list.
   useEffect(() => {
-    if (!activeConversationId) return
-    const taskId = activeTaskIdRef.current
-    taskToConvRef.current.set(taskId, activeConversationId)
-    const localTask = taskHistory.find((item) => item.id === taskId)
-    onNewConversationId(activeConversationId, localTask?.title)
-  }, [activeConversationId, activeTaskIdRef, onNewConversationId, taskHistory])
-
-  // When the selected task changes, load messages from server for that conversation
-  // ── Seed taskHistory from server conversations so history survives refresh ──
-  // When the server returns a conversation list (cross-device / post-refresh),
-  // merge any server conversations that aren't already in the local history.
-  useEffect(() => {
-    if (!conversations.length) return
-    setTaskHistory((prev) => {
-      const byId = new Map(prev.map((item) => [item.id, item]))
-      const next = [...prev]
-
-      for (const conv of conversations) {
-        const existing = byId.get(conv.id)
-        if (existing) {
-          const mergedTitle = mergeTitlePreferMeaningful(
-            existing.title,
-            conv.title,
-            existing.instruction || existing.title,
-          )
-          if (mergedTitle !== existing.title) {
-            const idx = next.findIndex((item) => item.id === conv.id)
-            if (idx >= 0) next[idx] = { ...next[idx], title: mergedTitle }
-          }
-          continue
-        }
-
-        const createdAt = conv.created_at ? new Date(conv.created_at) : new Date()
-        const today = new Date()
-        const yesterday = new Date(today)
-        yesterday.setDate(today.getDate() - 1)
-        let dateLabel = createdAt.toLocaleDateString([], { month: 'short', day: 'numeric' })
-        if (createdAt.toDateString() === today.toDateString()) dateLabel = 'Today'
-        else if (createdAt.toDateString() === yesterday.toDateString()) dateLabel = 'Yesterday'
-
-        const fallbackInstruction = deriveTitleFromInstruction(conv.title)
-        next.unshift({
-          id: conv.id,
-          title: mergeTitlePreferMeaningful(undefined, conv.title, fallbackInstruction),
-          dateLabel,
-          instruction: isPlaceholderTitle(conv.title) ? fallbackInstruction : (conv.title ?? ''),
-          createdAt: conv.created_at ?? new Date().toISOString(),
-          labelSource: 'system',
-        })
-      }
-
-      const merged = next.slice(0, 200)
-      try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(merged)) } catch { /* quota */ }
-      return merged
-    })
-  }, [authUser?.uid, conversations])
+    if (!authUser?.uid) return
+    void fetchSessions()
+  }, [activeConversationId, authUser?.uid, fetchSessions])
 
   useEffect(() => {
-    if (!selectedTaskId) { setServerMessages([]); return }
-    const convId = taskToConvRef.current.get(selectedTaskId)
-    if (convId) {
-      void fetchMessages(convId).then(setServerMessages)
-    } else {
-      // Try matching by conversation list (for tasks loaded from history on another device)
-      const matchedConv = conversations.find(c => c.id === selectedTaskId)
-      if (matchedConv) {
-        void fetchMessages(matchedConv.id).then(setServerMessages)
-      } else {
-        setServerMessages([])
-      }
+    if (!sessions.length) return
+    if (!selectedTaskId || !sessions.some((session) => session.session_id === selectedTaskId)) {
+      setSelectedTaskId(sessions[0]?.session_id ?? MAIN_SESSION_ID)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTaskId])
+  }, [selectedTaskId, sessions])
+
+  useEffect(() => {
+    const targetSessionId = selectedTaskId ?? MAIN_SESSION_ID
+    void fetchMessages(targetSessionId).then(setServerMessages)
+  }, [fetchMessages, selectedTaskId])
 
   const taskLabels = useMemo(
-    () => Object.fromEntries(taskHistory.map((item) => [item.id, item.title])),
-    [taskHistory],
+    () => Object.fromEntries(sessions.map((item) => [item.session_id, item.title])),
+    [sessions],
   )
 
   const scopedSubAgents = useMemo(() => {
@@ -566,11 +481,11 @@ function App() {
 
 
   const sessionSwitcherItems = useMemo<SessionSwitcherItem[]>(() => {
-    const historyItems: SessionSwitcherItem[] = taskHistory.map((item) => ({
-      id: item.id,
-      label: item.title || item.instruction.slice(0, 40) || 'Untitled session',
-      channel: item.labelSource === 'browser' ? 'browser' : item.labelSource === 'system' ? 'system' : 'chat',
-      status: selectedTaskId === item.id && isWorking ? 'active' : 'idle',
+    const historyItems: SessionSwitcherItem[] = sessions.map((item) => ({
+      id: item.session_id,
+      label: item.title || 'Untitled session',
+      channel: 'chat',
+      status: selectedTaskId === item.session_id && isWorking ? 'active' : 'idle',
     }))
 
     const subAgentItems: SessionSwitcherItem[] = subAgents.map((agent) => ({
@@ -586,7 +501,7 @@ function App() {
       if (!deduped.has(item.id)) deduped.set(item.id, item)
     }
     return Array.from(deduped.values())
-  }, [isWorking, selectedTaskId, subAgents, taskHistory])
+  }, [isWorking, selectedTaskId, sessions, subAgents])
 
   const mergedChatMessages = useMemo(() => {
     if (!selectedTaskId) return serverMessages
@@ -643,22 +558,8 @@ function App() {
 
     if (restoredFromServer.length > 0) return restoredFromServer
 
-    const saved = taskHistory.find((t) => t.id === selectedTaskId)
-    if (saved) {
-      return [{
-        id: `restored-${selectedTaskId}`,
-        taskId: selectedTaskId,
-        message: saved.instruction,
-        timestamp: saved.dateLabel,
-        type: 'step' as const,
-        status: 'completed' as const,
-        stepKind: 'navigate' as const,
-        elapsedSeconds: 0,
-      }]
-    }
-
     return filtered
-  }, [logs, selectedTaskId, taskHistory, serverMessages])
+  }, [logs, selectedTaskId, serverMessages])
 
   // ── Inject compaction entries into visible logs ──
   const enrichedLogs: LogEntry[] = useMemo(() => {
@@ -775,37 +676,15 @@ function App() {
     setPendingNavigation(null)
     mentionedAgents.forEach((agent) => { void messageSubAgent(agent.sub_id, finalInstruction) })
 
-    // Save to task history optimistically at send-time so the title always reflects
-    // the real user instruction. We generate a stable taskId from a UUID that the
-    // WebSocket hook will also assign synchronously for 'navigate' (it calls
-    // crypto.randomUUID() internally). We capture it immediately after send().
-    // We save regardless of WS state so the history entry is never lost - if the
-    // WS was closed the agent won't respond but the user still sees their input.
+    const targetSessionId = selectedTaskId ?? MAIN_SESSION_ID
     if (isNewTask) {
-      const taskId = activeTaskIdRef.current !== 'idle'
-        ? activeTaskIdRef.current
-        : `pending-${crypto.randomUUID()}`
-      const now = new Date()
-      const dateLabel = now.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      const labelSource = metadata?.task_label_source === 'browser' ? 'browser' : 'chat'
-      const lockedTitle = typeof metadata?.task_label === 'string' && metadata.task_label.trim()
-        ? metadata.task_label.trim()
-        : finalInstruction
-      const newEntry: TaskHistoryItem = {
-        id: taskId,
-        title: lockedTitle,
-        dateLabel,
-        instruction: finalInstruction,
-        createdAt: now.toISOString(),
-        labelSource,
-      }
       setOptimisticMessagesByTask((prev) => {
-        const existing = prev[taskId] ?? []
+        const existing = prev[targetSessionId] ?? []
         if (existing.some((msg) => msg.role === 'user' && msg.content.trim() === finalInstruction.trim())) {
           return prev
         }
         const optimisticMessage: ServerMessage = {
-          id: `optimistic-${taskId}-${existing.length + 1}`,
+          id: `optimistic-${targetSessionId}-${existing.length + 1}`,
           role: 'user',
           content: finalInstruction,
           metadata: null,
@@ -813,22 +692,15 @@ function App() {
         }
         return {
           ...prev,
-          [taskId]: [...existing, optimisticMessage],
+          [targetSessionId]: [...existing, optimisticMessage],
         }
       })
-      setTaskHistory((prev) => {
-        if (prev.some((t) => t.id === taskId)) return prev
-        const next = [newEntry, ...prev]
-        try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* quota */ }
-        return next
-      })
-      setSelectedTaskId(taskId)
+      setSelectedTaskId(targetSessionId)
     }
   }, [
-    activeTaskIdRef,
-    authUser?.uid,
     isWorking,
     messageSubAgent,
+    selectedTaskId,
     send,
     settings.selectedMode,
     toastCtx,
@@ -898,7 +770,7 @@ function App() {
     resetClientState()
     resetUsageSession()
     contextMeter.reset()
-    setSelectedTaskId(null)
+    setSelectedTaskId(MAIN_SESSION_ID)
     setOptimisticMessagesByTask({})
     setShowWorkflow(false)
     void stopVoice()
@@ -906,10 +778,6 @@ function App() {
 
   const saveWorkflow = () => {
     if (!visibleLogs.length) return
-
-    const selectedTaskInstruction = selectedTaskId
-      ? taskHistory.find((item) => item.id === selectedTaskId)?.instruction
-      : null
 
     const fallbackInstruction = visibleLogs.find(
       (entry) =>
@@ -920,7 +788,7 @@ function App() {
           !entry.message.toLowerCase().includes('queued instruction')),
     )?.message
 
-    const instruction = selectedTaskInstruction ?? fallbackInstruction ?? 'Saved workflow instruction'
+    const instruction = fallbackInstruction ?? 'Saved workflow instruction'
 
     patchSettings({
       workflowTemplates: [
@@ -1110,7 +978,7 @@ function App() {
                 clearFrameCache()
                 setAuthUser(null)
                 setIsAuthenticated(false)
-                setTaskHistory([])
+                setSelectedTaskId(MAIN_SESSION_ID)
                 window.location.href = '/'
               }}
             />
