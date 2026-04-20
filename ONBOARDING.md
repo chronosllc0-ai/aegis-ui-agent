@@ -6012,3 +6012,62 @@
 - Decision: adopted dot-notation event categories for pairing/policy/ingress (`pairing.*`, `policy.updated`, `ingress.blocked`) to match requested taxonomy.
 - Decision: chat suppression of internals is source-metadata based (`pairing_policy`, `pairing_approval`, `integration_policy`, `policy_update`) to avoid hiding user-visible content.
 - Blocker: `backend/pydantic_adk_runner.py` absent in repo (known existing checklist limitation).
+
+## Session 6.30 - April 19, 2026 (Grouped sidebar IA + settings/operations split)
+
+### What changed
+- Redesigned the main app sidebar in `frontend/src/App.tsx` into grouped IA sections:
+  - **Dashboard:** Profile, Chat, Sessions, Observability
+  - **Agent & AI:** Automations, Connections, Memory, Agent Configuration, Skills
+  - **Settings:** API Keys, Support, Admin (role-gated), Billing
+- Moved `Automations` and `Settings` access out of the old bottom utility area and into the grouped top nav.
+- Reduced the pinned bottom section to **Usage meter + account menu only**.
+- Removed the sidebar task/thread history list UI (including search and grouped history rendering) from `App.tsx`.
+- Updated settings tab routing aliases:
+  - `/settings/credits` and `/settings/invoices` now map to a unified `Billing` settings tab.
+- Updated `frontend/src/components/settings/SettingsPage.tsx` sidebar to focus on settings-only tabs (`API Keys`, `Support`, `Billing`) and retain role-gated `Admin` visibility.
+
+### What works / what does not
+- Works:
+  - Grouped sidebar nav renders and routes to expected destinations.
+  - Bottom area now only contains usage + account controls.
+  - Admin visibility remains role-gated in both app sidebar and Settings page.
+  - Frontend build passes with these navigation changes.
+- Does not / caveats:
+  - Existing checklist caveat remains: `backend/pydantic_adk_runner.py` is still absent, so the checklist py_compile command still fails in this repo state.
+
+### Next steps
+1. If desired, add a dedicated standalone Sessions view route instead of reusing dashboard home state.
+2. Consider consolidating Billing internals further (single billing component) to avoid duplicated Credits/Invoices legacy tabs.
+3. Add frontend tests around grouped sidebar active-state highlighting and route mapping.
+
+### Blockers / decisions
+- Decision: preserved route compatibility for existing billing endpoints by aliasing `credits`/`invoices` to `Billing`.
+- Decision: kept SettingsPage content support for non-settings tabs via route-driven access while narrowing its visible nav to settings-focused items.
+- Blocker: none beyond existing missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.31 - April 20, 2026 (PR review follow-up: billing route + orphan cleanup)
+
+### What changed
+- Addressed review nit in `frontend/src/components/settings/SettingsPage.tsx` by removing a redundant ternary render and using `{tab}` directly for settings nav labels.
+- Updated app sidebar Billing nav button in `frontend/src/App.tsx` to navigate to `/settings/billing` (instead of `/settings/credits`) and expanded active-state matching to include `/settings/billing`.
+- Removed orphaned `Usage` and `Workflows` settings tabs from `SettingsPage` tab definitions and render branches, and removed their corresponding imports.
+- Removed obsolete route-map and query-tab references for `usage` and `workflows` in `App.tsx` so the settings routes and UI are aligned.
+- Removed now-unused `onRunWorkflow` prop from `SettingsPage` and corresponding call-site prop passing in `App.tsx`.
+
+### What works / what does not
+- Works:
+  - Billing button now routes to `/settings/billing` and highlights correctly on billing/credits/invoices URLs.
+  - Settings nav no longer contains redundant ternary rendering.
+  - Orphaned Usage/Workflows tabs are fully removed from Settings UI logic.
+  - Frontend build passes after cleanup.
+- Does not / caveats:
+  - Existing checklist caveat remains unchanged: `backend/pydantic_adk_runner.py` is absent, so the py_compile checklist command still fails.
+
+### Next steps
+1. If historical links to `/settings/usage` or `/settings/workflows` are expected externally, add an explicit redirect strategy.
+2. Consider adding a small route regression test for `/settings/billing` active-tab behavior.
+
+### Blockers / decisions
+- Decision: prefer route/IA consistency by removing orphaned tabs rather than re-surfacing them in nav.
+- Blocker: none (other than known missing checklist file in repo).

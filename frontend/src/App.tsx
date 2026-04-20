@@ -74,11 +74,10 @@ const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   'agent-configuration': 'Agent Configuration',
   'workspace-files': 'Agent Configuration',
   'api-keys': 'API Keys',
-  usage: 'Usage',
-  credits: 'Credits',
-  invoices: 'Invoices',
+  credits: 'Billing',
+  invoices: 'Billing',
+  billing: 'Billing',
   connections: 'Connections',
-  workflows: 'Workflows',
   memory: 'Memory',
   observability: 'Observability',
   skills: 'Skills',
@@ -92,23 +91,6 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
-const startOfLocalDay = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), date.getDate())
-
-const dayDiffFromNow = (createdAt: Date, now: Date): number => {
-  const diffMs = startOfLocalDay(now).getTime() - startOfLocalDay(createdAt).getTime()
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24))
-}
-
-const resolveTaskGroup = (task: TaskHistoryItem, now: Date): 'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Sessions' => {
-  const createdAt = task.createdAt ? new Date(task.createdAt) : new Date()
-  if (Number.isNaN(createdAt.getTime())) return 'Today'
-  const dayDiff = dayDiffFromNow(createdAt, now)
-  if (dayDiff <= 0) return 'Today'
-  if (dayDiff === 1) return 'Yesterday'
-  if (dayDiff <= 7) return 'Past 7 Days'
-  return 'Older Sessions'
-}
-
 function App() {
   const { balance, handleUsageMessage, resetSession: resetUsageSession } = useUsage()
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
@@ -117,7 +99,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, handoffActive, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, handoffActive, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -137,7 +119,6 @@ function App() {
   const [showSubAgentModal, setShowSubAgentModal] = useState(false)
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
-  const [historySearch, setHistorySearch] = useState('')
   const { conversations, fetchMessages, onNewConversationId } = useConversations(authUser?.uid ?? null)
   // Map from clientTaskId → server conversationId (filled when WS emits conversation_id)
   const taskToConvRef = useRef<Map<string, string>>(new Map())
@@ -391,7 +372,7 @@ function App() {
           // Handle ?settings=<Tab> deep-link (e.g. after OAuth callback redirect)
           const params = new URLSearchParams(window.location.search)
           const settingsTab = params.get('settings') as SettingsTab | null
-          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
+          if (settingsTab && ['Profile', 'Agent Configuration', 'API Keys', 'Credits', 'Invoices', 'Billing', 'Connections', 'Memory', 'Observability', 'Support'].includes(settingsTab)) {
             setSettingsInitialTab(settingsTab)
             setShowSettings(true)
             // Strip the ?settings= param from the URL without a page reload
@@ -563,25 +544,6 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTaskId])
-
-  const filteredHistory = useMemo(
-    () => taskHistory.filter((item) => item.title.toLowerCase().includes(historySearch.toLowerCase())),
-    [historySearch, taskHistory],
-  )
-
-  const groupedHistory = useMemo(() => {
-    const now = new Date()
-    const groups: Record<'Today' | 'Yesterday' | 'Past 7 Days' | 'Older Sessions', TaskHistoryItem[]> = {
-      Today: [],
-      Yesterday: [],
-      'Past 7 Days': [],
-      'Older Sessions': [],
-    }
-    for (const item of filteredHistory) {
-      groups[resolveTaskGroup(item, now)].push(item)
-    }
-    return groups
-  }, [filteredHistory])
 
   const taskLabels = useMemo(
     () => Object.fromEntries(taskHistory.map((item) => [item.id, item.title])),
@@ -929,25 +891,6 @@ function App() {
     send({ action: 'handoff_continue', request_id: requestId })
   }
 
-  const onClearSession = (id: string) => {
-    removeFrameForThread(id)
-    setTaskHistory((prev) => {
-      const next = prev.filter((t) => t.id !== id)
-      try { localStorage.setItem(taskHistoryKey(authUser?.uid ?? null), JSON.stringify(next)) } catch { /* ok */ }
-      return next
-    })
-    // Keep server history intact by default during migration (no hard delete).
-    const convId = taskToConvRef.current.get(id)
-    if (convId) { taskToConvRef.current.delete(id) }
-    if (selectedTaskId === id) setSelectedTaskId(null)
-    setOptimisticMessagesByTask((prev) => {
-      if (!(id in prev)) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }
-
   const newSession = () => {
     send({ action: 'stop_task' })
     setTaskStartedAt(null)
@@ -1107,86 +1050,48 @@ function App() {
           <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
         )}
         <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-gradient-to-b from-[#1a1f2d] via-[#191b26] to-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
-          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false) }} className='mb-2 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
+          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false); setSidebarOpen(false); navigateTo('/') }} className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
             ⌁ New Session
           </button>
-          <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder='Search sessions' className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111] px-3 py-2 text-sm md:text-xl' />
 
-          {/* ── Sessions list — Codex-style text-only rows ── */}
           <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
-            {(['Today', 'Yesterday', 'Past 7 Days', 'Older Sessions'] as const).map((group) => {
-              const items = groupedHistory[group]
-              if (!items.length) return null
-              return (
-                <div key={group} className='mb-4'>
-                  <p className='mb-1 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>{group}</p>
-                  <div className='space-y-0'>
-                    {items.map((item) => {
-                      const agentsForTask = subAgents.filter((agent) => agent.parent_task_id === item.id)
-                      const isActive = selectedTaskId === item.id
-                      return (
-                        <div key={item.id}>
-                          {/* Parent session row */}
-                          <div className='group relative flex items-center'>
-                            <button
-                              type='button'
-                              onClick={() => { setSelectedTaskId(item.id); setSidebarOpen(false) }}
-                              className={`flex-1 min-w-0 px-2 py-1 text-left transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
-                            >
-                              <p className={`truncate text-sm font-normal ${isActive ? 'text-zinc-100' : ''}`}>
-                                {item.title || item.instruction.slice(0, 40) || 'Untitled'}
-                              </p>
-                            </button>
-                            <button
-                              type='button'
-                              onClick={(e) => { e.stopPropagation(); onClearSession(item.id) }}
-                              className='mr-1 hidden rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300 group-hover:flex flex-shrink-0'
-                              aria-label='Clear session'
-                              title='Clear session'
-                            >
-                              {Icons.trash({ className: 'h-3 w-3' })}
-                            </button>
-                          </div>
-
-                          {/* Sub-agent child sessions — nested under parent */}
-                          {agentsForTask.length > 0 && (
-                            <div className='ml-3 border-l border-[#252525] pl-2'>
-                              {agentsForTask.map((agent, aIdx) => {
-                                const nameColors = ['text-orange-400','text-green-400','text-sky-400','text-violet-400','text-rose-400']
-                                const nc = nameColors[aIdx % nameColors.length]
-                                const taskTitle = agent.instruction.split(' ').slice(0, 6).join(' ').slice(0, 36) || 'Sub-session'
-                                const isLive = agent.status === 'spawning' || agent.status === 'running'
-                                const shortName = subAgentDisplayName(agent).slice(0, 12) || `Agent ${aIdx + 1}`
-                                return (
-                                  <button
-                                    key={agent.sub_id}
-                                    type='button'
-                                    onClick={() => { setSelectedTaskId(agent.sub_id); setSidebarOpen(false) }}
-                                    className={`flex w-full items-baseline gap-1.5 px-2 py-1 text-left transition-colors ${selectedTaskId === agent.sub_id ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
-                                  >
-                                    <span className={`text-[11px] font-semibold flex-shrink-0 ${nc} ${isLive ? 'agent-name-shimmer' : ''}`}>
-                                      {shortName}
-                                    </span>
-                                    <span className='truncate text-[11px] flex-1'>
-                                      — {taskTitle}{taskTitle.length < agent.instruction.length ? '…' : ''}
-                                    </span>
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+            <div className='space-y-4 pr-1'>
+              <div>
+                <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Dashboard</p>
+                <div className='space-y-1'>
+                  <button type='button' onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/profile' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.user({ className: 'h-3.5 w-3.5' })}<span>Profile</span></button>
+                  <button type='button' onClick={() => { navigateTo('/'); setAppMode('chat'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && appMode === 'chat' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.chat({ className: 'h-3.5 w-3.5' })}<span>Chat</span></button>
+                  <button type='button' onClick={() => { navigateTo('/'); setAppMode('browser'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && appMode === 'browser' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.workflows({ className: 'h-3.5 w-3.5' })}<span>Sessions</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/observability'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/observability' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.alert({ className: 'h-3.5 w-3.5' })}<span>Observability</span></button>
                 </div>
-              )
-            })}
+              </div>
+
+              <div>
+                <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Agent & AI</p>
+                <div className='space-y-1'>
+                  <button type='button' onClick={() => { navigateTo('/automations'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.clock({ className: 'h-3.5 w-3.5' })}<span>Automations</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/connections'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/connections' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.globe({ className: 'h-3.5 w-3.5' })}<span>Connections</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/memory'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/memory' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.folder({ className: 'h-3.5 w-3.5' })}<span>Memory</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/agent-configuration'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/agent-configuration' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.settings({ className: 'h-3.5 w-3.5' })}<span>Agent Configuration</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/skills'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/skills' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.star({ className: 'h-3.5 w-3.5' })}<span>Skills</span></button>
+                </div>
+              </div>
+
+              <div>
+                <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Settings</p>
+                <div className='space-y-1'>
+                  <button type='button' onClick={() => { navigateTo('/settings/api-keys'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/api-keys' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.lock({ className: 'h-3.5 w-3.5' })}<span>API Keys</span></button>
+                  <button type='button' onClick={() => { navigateTo('/settings/support'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/support' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.chat({ className: 'h-3.5 w-3.5' })}<span>Support</span></button>
+                  {isAdmin && (
+                    <button type='button' onClick={() => { navigateTo('/admin'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${isAdminPath ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}><LuShield className='h-3.5 w-3.5' /><span>Admin</span></button>
+                  )}
+                  <button type='button' onClick={() => { navigateTo('/settings/billing'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/credits' || pathname === '/settings/invoices' || pathname === '/settings/billing' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.settings({ className: 'h-3.5 w-3.5' })}<span>Billing</span></button>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* ── Bottom section: Usage → Workflows → Settings → User ── */}
           <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
-            {/* Usage dropdown (Botpress-style) - above workflow templates */}
             <UsageDropdown
               balance={balance}
               context={{
@@ -1196,28 +1101,6 @@ function App() {
               }}
               modelLabel={currentModelLabel}
             />
-            <button type='button' onClick={() => { navigateTo('/automations'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left ${showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a]'}`}>
-              {Icons.clock({ className: 'h-3.5 w-3.5' })}
-              <span>Automations</span>
-            </button>
-            <button type='button' onClick={() => { navigateTo('/settings/workflows'); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
-              {Icons.workflows({ className: 'h-3.5 w-3.5' })}
-              <span>Workflow templates ({settings.workflowTemplates.length})</span>
-            </button>
-            <button type='button' onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left'>
-              {Icons.settings({ className: 'h-3.5 w-3.5' })}
-              <span>Settings</span>
-            </button>
-            {isAdmin && (
-              <button
-                type='button'
-                onClick={() => { navigateTo('/admin'); setSidebarOpen(false) }}
-                className='flex w-full items-center gap-2 rounded border border-[#2a2a2a] px-2 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800'
-              >
-                <LuShield className='h-3.5 w-3.5' />
-                <span>Admin Panel</span>
-              </button>
-            )}
             <UserMenu
               name={authUser?.name ?? settings.displayName}
               avatarUrl={authUser?.avatar_url ?? settings.avatarUrl}
@@ -1296,7 +1179,6 @@ function App() {
             {showSettings || isAdminPath ? (
               <SettingsPage
                 onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
-                onRunWorkflow={(instruction) => handleSend(instruction)}
                 initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
                 isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
                 authRole={authUser?.role}

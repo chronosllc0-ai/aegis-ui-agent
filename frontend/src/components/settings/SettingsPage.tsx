@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import { Icons } from '../icons'
 import { useSettingsContext } from '../../context/useSettingsContext'
 import type { AppSettings } from '../../hooks/useSettings'
-import type { SteeringMode } from '../../hooks/useWebSocket'
 import { AgentTab } from './AgentTab'
 import { APIKeysTab } from './APIKeysTab'
 import { ConnectionsTab } from './ConnectionsTab'
 import { ProfileTab } from './ProfileTab'
 import { SupportTab } from './SupportTab'
-import { UsageTab } from './UsageTab'
-import { WorkflowsTab } from './WorkflowsTab'
 import { CreditsTab } from './CreditsTab'
 import { InvoiceTab } from './InvoiceTab'
 import { MemoryTab } from './MemoryTab'
@@ -19,23 +16,24 @@ import { SkillsTab } from './SkillsTab'
 
 type SettingsPageProps = {
   onBack: () => void
-  onRunWorkflow: (instruction: string, mode?: SteeringMode) => void
   initialTab?: SettingsTab
   isAdmin?: boolean
   authRole?: string
   onTabChange?: (tab: SettingsTab) => void
 }
 
-const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Usage', 'Credits', 'Invoices', 'Connections', 'Workflows', 'Memory', 'Observability', 'Skills', 'Support', 'Admin'] as const
+const TABS = ['Profile', 'Agent Configuration', 'API Keys', 'Credits', 'Invoices', 'Billing', 'Connections', 'Memory', 'Observability', 'Skills', 'Support', 'Admin'] as const
+const SETTINGS_NAV_TABS: SettingsTab[] = ['API Keys', 'Support', 'Billing']
 export type SettingsTab = (typeof TABS)[number]
 const TAB_KEY = 'aegis.settings.activeTab'
 
-export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = false, authRole, onTabChange }: SettingsPageProps) {
+export function SettingsPage({ onBack, initialTab, isAdmin = false, authRole, onTabChange }: SettingsPageProps) {
   const { settings, patchSettings } = useSettingsContext()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
     if (initialTab && TABS.includes(initialTab)) return initialTab
     const persisted = localStorage.getItem(TAB_KEY) as SettingsTab | null
+    if (persisted === 'Credits' || persisted === 'Invoices') return 'Billing'
     return persisted && TABS.includes(persisted) ? persisted : 'Profile'
   })
 
@@ -49,7 +47,7 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
   // If initialTab changes externally, switch to it
   useEffect(() => {
     if (initialTab && TABS.includes(initialTab)) {
-      setActiveTab(initialTab)
+      setActiveTab(initialTab === 'Credits' || initialTab === 'Invoices' ? 'Billing' : initialTab)
       setSidebarOpen(false) // auto-collapse on mobile when navigating to a tab
     }
   }, [initialTab])
@@ -99,26 +97,34 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         </button>
         <h2 className='mb-2 text-sm font-semibold'>Settings</h2>
         <div className='space-y-1'>
-          {TABS.filter((tab) => tab !== 'Admin' || isAdmin).map((tab) => (
+          {SETTINGS_NAV_TABS.map((tab) => (
             <button
               key={tab}
               type='button'
               onClick={() => selectTab(tab)}
               className={`w-full rounded px-2 py-2 text-left text-sm ${
                 activeTab === tab ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
-              } ${tab === 'Admin' ? 'mt-2 border-t border-[#2a2a2a] pt-3 text-red-400 hover:bg-red-500/10' : ''}`}
+              }`}
             >
-              {tab === 'Admin' ? (
-                <span className='flex items-center gap-1.5'>
-                  <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-3.5 w-3.5'>
-                    <path d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z'/>
-                    <circle cx='12' cy='12' r='3'/>
-                  </svg>
-                  Admin
-                </span>
-              ) : tab}
+              {tab}
             </button>
           ))}
+          {isAdmin && (
+            <button
+              key='Admin'
+              type='button'
+              onClick={() => selectTab('Admin')}
+              className={`w-full rounded px-2 py-2 text-left text-sm ${activeTab === 'Admin' ? 'bg-blue-600 text-white' : 'text-red-400 hover:bg-red-500/10'} mt-2 border-t border-[#2a2a2a] pt-3`}
+            >
+              <span className='flex items-center gap-1.5'>
+                <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='h-3.5 w-3.5'>
+                  <path d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z'/>
+                  <circle cx='12' cy='12' r='3'/>
+                </svg>
+                Admin
+              </span>
+            </button>
+          )}
         </div>
       </nav>
 
@@ -127,21 +133,19 @@ export function SettingsPage({ onBack, onRunWorkflow, initialTab, isAdmin = fals
         {activeTab === 'Profile' && <ProfileTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
         {activeTab === 'API Keys' && <APIKeysTab />}
-        {activeTab === 'Usage' && <UsageTab />}
         {activeTab === 'Credits' && <CreditsTab />}
         {activeTab === 'Invoices' && <InvoiceTab />}
+        {activeTab === 'Billing' && (
+          <div className='space-y-6'>
+            <CreditsTab />
+            <InvoiceTab />
+          </div>
+        )}
         {activeTab === 'Connections' && (
           <ConnectionsTab
             integrations={settings.integrations}
             onChange={(integrations) => onPatch({ integrations })}
             isAdmin={isAdmin}
-          />
-        )}
-        {activeTab === 'Workflows' && (
-          <WorkflowsTab
-            workflows={settings.workflowTemplates}
-            onChange={(workflowTemplates) => onPatch({ workflowTemplates })}
-            onRun={(instruction) => onRunWorkflow(instruction, 'steer')}
           />
         )}
         {activeTab === 'Memory' && <MemoryTab />}
