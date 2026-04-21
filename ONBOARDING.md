@@ -6508,3 +6508,38 @@
 - Decision: implement `reflection_candidate` as metadata only (no execution side effects) to match current scope.
 - Decision: keep existing `last_status` while adding `last_run_status` as compatibility bridge.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.44 - April 21, 2026 (PR review follow-up: run history cache/dependency/date normalization fixes)
+
+### What changed
+- Fixed React callback dependency/caching issues in `frontend/src/components/AutomationsPage.tsx`:
+  - removed `runHistoryByTask` from `loadRunHistoryForTask` callback dependencies,
+  - removed cache short-circuit behavior tied only to `task.id` so filter changes correctly re-fetch server-filtered run history,
+  - updated `handleRun` to call the simplified loader signature.
+- Simplified client-side run filtering in `frontend/src/components/AutomationsPage.tsx`:
+  - removed duplicate status/scope/delivery/date filtering in the `scopedRuns` memo,
+  - retained only client-local scope selector (`job scope`) + search text filtering and sorting, while relying on server filters for status/scope/channel/date.
+- Hardened datetime comparisons in `backend/automation.py` run-history endpoint:
+  - added `_normalize_datetime` to convert both query datetimes and run timestamps to UTC-aware values,
+  - now safely handles naive datetime query params without mixed aware/naive comparison errors.
+- Added an explicit TODO comment in `backend/automation.py` noting that in-memory run-history filtering should migrate to DB-backed querying if history size grows.
+
+### What works / what does not
+- Works:
+  - run-history filter changes now re-fetch correctly instead of reusing stale filtered subsets,
+  - infinite-loop dependency risk from callback/cache coupling is removed,
+  - datetime range filters no longer risk `TypeError` on naive-vs-aware comparisons,
+  - frontend build and targeted tests pass.
+- Does not / caveats:
+  - Run history is still an in-memory ring buffer; DB-backed history/filtering remains future work.
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so checklist py_compile command still errors for missing file.
+
+### Next steps
+1. Add API tests that exercise date-only (`YYYY-MM-DD`) and full-ISO date filters to guard normalized datetime behavior.
+2. Add run-history endpoint tests covering filter transitions and frontend state sync behavior.
+3. Design DB-backed run-history persistence + indexed filtering path once history retention exceeds in-memory limits.
+
+### Blockers / decisions
+- Decision: rely on server-side status/scope/channel/date filtering to avoid duplicated filter logic drift on the client.
+- Decision: keep only local scope/search/sort operations client-side.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).

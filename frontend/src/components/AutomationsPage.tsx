@@ -580,8 +580,7 @@ export function AutomationsPage() {
     }
   }, [workflows])
 
-  const loadRunHistoryForTask = useCallback(async (task: ScheduledTask, force = false) => {
-    if (!force && runHistoryByTask[task.id]) return
+  const loadRunHistoryForTask = useCallback(async (task: ScheduledTask) => {
     setRunHistoryLoading(true)
     try {
       const params = new URLSearchParams()
@@ -604,7 +603,7 @@ export function AutomationsPage() {
     } finally {
       setRunHistoryLoading(false)
     }
-  }, [runHistoryByTask, runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo])
+  }, [runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo])
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -715,7 +714,7 @@ export function AutomationsPage() {
       })
       setTimeout(() => {
         const ranTask = tasks.find((task) => task.id === taskId)
-        if (ranTask) void loadRunHistoryForTask(ranTask, true)
+        if (ranTask) void loadRunHistoryForTask(ranTask)
         void fetchTasks()
       }, 1200)
     } finally {
@@ -754,17 +753,9 @@ export function AutomationsPage() {
   const scopedRuns = useMemo(() => {
     const filtered = flattenedRuns.filter((run) => {
       const matchesScope = runScope === 'all' || run.taskId === runScope
-      const matchesStatus = runStatus === 'all' || run.status === runStatus
-      const matchesSessionScope = runScopeFilter === 'all' || run.session_scope === runScopeFilter
-      const matchesDelivery = runDeliveryFilter === 'all' || run.delivery_channel === runDeliveryFilter
-      const runStarted = run.started_at ? new Date(run.started_at).getTime() : null
-      const fromBoundary = runDateFrom ? new Date(runDateFrom).getTime() : null
-      const toBoundary = runDateTo ? new Date(`${runDateTo}T23:59:59.999Z`).getTime() : null
-      const matchesDateFrom = fromBoundary === null || (runStarted !== null && runStarted >= fromBoundary)
-      const matchesDateTo = toBoundary === null || (runStarted !== null && runStarted <= toBoundary)
       const haystack = `${run.taskName} ${run.error ?? ''}`.toLowerCase()
       const matchesSearch = !runSearch.trim() || haystack.includes(runSearch.toLowerCase())
-      return matchesScope && matchesStatus && matchesSessionScope && matchesDelivery && matchesDateFrom && matchesDateTo && matchesSearch
+      return matchesScope && matchesSearch
     })
     const sorted = [...filtered].sort((a, b) => {
       const aStarted = new Date(a.started_at ?? a.finished_at ?? 0).getTime()
@@ -777,7 +768,7 @@ export function AutomationsPage() {
       return bStarted - aStarted
     })
     return sorted
-  }, [flattenedRuns, runScope, runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo, runSearch, runSort])
+  }, [flattenedRuns, runScope, runSearch, runSort])
 
   const totalPages = Math.max(1, Math.ceil(scopedRuns.length / runPageSize))
   const pagedRuns = scopedRuns.slice((runPage - 1) * runPageSize, runPage * runPageSize)

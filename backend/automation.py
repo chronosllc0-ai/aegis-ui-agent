@@ -237,6 +237,13 @@ def _parse_history_ts(entry: dict[str, Any]) -> datetime | None:
         return None
 
 
+def _normalize_datetime(value: datetime) -> datetime:
+    """Normalize parsed datetimes to timezone-aware UTC for safe comparisons."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -398,6 +405,10 @@ async def get_run_history(
     if not task or task.user_id != user["uid"]:
         raise HTTPException(status_code=404, detail="Task not found")
     history = _run_history.get(task_id, [])
+    # TODO: run history is currently an in-memory ring buffer; if this grows beyond
+    # small operational size, migrate history + filtering to DB-backed queries.
+    normalized_date_from = _normalize_datetime(date_from) if date_from is not None else None
+    normalized_date_to = _normalize_datetime(date_to) if date_to is not None else None
     if status is not None:
         history = [entry for entry in history if entry.get("status") == status]
     if scope is not None:
@@ -405,16 +416,16 @@ async def get_run_history(
     if delivery_channel is not None:
         normalized_channel = delivery_channel.strip().lower()
         history = [entry for entry in history if str(entry.get("delivery_channel", "")).lower() == normalized_channel]
-    if date_from is not None:
+    if normalized_date_from is not None:
         history = [
             entry
             for entry in history
-            if (parsed_ts := _parse_history_ts(entry)) is not None and parsed_ts >= date_from
+            if (parsed_ts := _parse_history_ts(entry)) is not None and _normalize_datetime(parsed_ts) >= normalized_date_from
         ]
-    if date_to is not None:
+    if normalized_date_to is not None:
         history = [
             entry
             for entry in history
-            if (parsed_ts := _parse_history_ts(entry)) is not None and parsed_ts <= date_to
+            if (parsed_ts := _parse_history_ts(entry)) is not None and _normalize_datetime(parsed_ts) <= normalized_date_to
         ]
     return {"runs": history}
