@@ -782,7 +782,7 @@ export function AutomationsPage() {
     const task = tasks.find((row) => row.id === runScope)
     if (!task) return
     void loadRunHistoryForTask(task)
-  }, [runScope, tasks, loadRunHistoryForTask])
+  }, [runScope, tasks, loadRunHistoryForTask, runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo])
 
   if (loading) {
     return <div className='flex h-full items-center justify-center text-sm text-zinc-400'>Loading automations…</div>

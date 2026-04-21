@@ -6543,3 +6543,26 @@
 - Decision: rely on server-side status/scope/channel/date filtering to avoid duplicated filter logic drift on the client.
 - Decision: keep only local scope/search/sort operations client-side.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.45 - April 21, 2026 (PR review follow-up: explicit run-history effect dependencies)
+
+### What changed
+- Updated run-history loading effect dependencies in `frontend/src/components/AutomationsPage.tsx` to explicitly include the active server filter states (`runStatus`, `runScopeFilter`, `runDeliveryFilter`, `runDateFrom`, `runDateTo`) in addition to `runScope`, `tasks`, and `loadRunHistoryForTask`.
+- This removes ambiguity around stale closures in effect-triggered run fetches and makes the re-fetch contract explicit when any server-backed filter input changes.
+
+### What works / what does not
+- Works:
+  - run history reload effect now has explicit dependency tracking for all server-side filter inputs,
+  - targeted automation schema test and websocket smoke test pass,
+  - frontend build passes.
+- Does not / caveats:
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so checklist py_compile command still errors for missing file.
+
+### Next steps
+1. Add frontend unit/integration tests for the run-history effect trigger matrix (`scope + server filter` combinations).
+2. Add abort/cancellation handling for overlapping run-history fetches to reduce race risk under rapid filter changes.
+3. Continue planned migration from in-memory run history to DB-backed query path as volume grows.
+
+### Blockers / decisions
+- Decision: keep effect dependencies explicit for readability and to prevent future stale-closure regressions.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
