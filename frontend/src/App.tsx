@@ -90,7 +90,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, handoffActive, handoffRequestId, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, handoffActive, handoffRequestId, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -148,15 +148,13 @@ function App() {
 
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
-  const activityDetailWithMode = activityDetail
+  const activityDetailText = activityDetail
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
   const isSettingsPath = pathname.startsWith('/settings')
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
-
-  void activeExecutionMode
 
   const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -1118,7 +1116,7 @@ function App() {
                 onPlanReject={handlePlanReject}
                 onHandoffContinue={handleHandoffContinue}
                 activityStatusLabel={activityStatusLabel}
-                activityDetail={activityDetailWithMode}
+                activityDetail={activityDetailText}
                 isActivityVisible={isActivityVisible}
                 provider={settings.provider}
                 model={settings.model}

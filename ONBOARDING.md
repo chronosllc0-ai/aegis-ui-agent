@@ -6797,3 +6797,35 @@
 - None.
 
 ---
+
+## Session 5.73 - April 21, 2026 (Review follow-up: remove mode cleanup no-ops)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted cleanup pass
+
+### What Was Done
+- Removed leftover no-op `void activeExecutionMode` pattern from `frontend/src/App.tsx`.
+- Cleaned `App` websocket state destructuring to stop pulling unused `activeExecutionMode`.
+- Renamed the activity-detail passthrough variable to a neutral name (`activityDetailText`) after mode label removal.
+- Fully removed the backend `_normalize_runtime_mode(...)` helper from `main.py` instead of keeping a placeholder that returned a constant.
+- Removed all remaining calls to `_normalize_runtime_mode(...)` in task execution, websocket receive loop, sub-agent spawn path, and pairing runtime bootstrap.
+
+### What's Working
+- Frontend build still passes.
+- `main.py` compiles.
+- Target websocket smoke test and slash-command tests continue to pass.
+
+### What's NOT Working Yet
+- AGENTS checklist path mismatch remains (`backend/pydantic_adk_runner.py` is still absent in this repo).
+
+### Next Steps
+1. Optionally remove remaining backend/frontend mode-event parser artifacts if they are no longer needed for orchestrator telemetry.
+2. Update AGENTS checklist command list to current repository file layout.
+
+### Decisions Made
+- Followed review guidance to remove no-op scaffolding entirely instead of retaining placeholder functions/calls.
+
+### Blockers
+- None.
+
+---

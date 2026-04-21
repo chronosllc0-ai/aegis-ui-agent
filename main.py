@@ -1168,12 +1168,6 @@ async def _enforce_ingress_policy(
         await session_iter.aclose()
 
 
-def _normalize_runtime_mode(runtime_settings: dict[str, Any]) -> str:
-    """Return fixed runtime mode placeholder now that user-selectable modes are removed."""
-    _ = runtime_settings
-    return "default"
-
-
 def _get_orchestrator() -> AgentOrchestrator:
     """Return a lazily initialized orchestrator instance."""
     global orchestrator
@@ -2435,7 +2429,6 @@ async def _run_navigation_task(
 
     runtime.task_running = True
     runtime.cancel_event.clear()
-    _normalize_runtime_mode(runtime.settings)
     await _safe_ws_send(
         websocket,
         {"type": "task_state", "data": {"task_id": task_id, "state": "running", "timestamp": _time.time()}},
@@ -2815,7 +2808,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if raw_prompt is not None
                 else ""
             ).strip()
-            _normalize_runtime_mode(runtime.settings)
             raw_metadata = data.get("metadata")
             client_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
             task_label = str(client_metadata.get("task_label", "")).strip()
@@ -3289,7 +3281,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 )
             elif action == "spawn_subagent":
                 # ── Spawn a sub-agent ──────────────────────────────────
-                _normalize_runtime_mode(runtime.settings)
                 sub_instruction = str(data.get("instruction", "")).strip()
                 sub_model = str(data.get("model", runtime.settings.get("model", ""))).strip()
                 if not sub_instruction:
@@ -4916,7 +4907,6 @@ async def _post_pairing_approval_effects(
         runtime.user_uid = owner_uid
         runtime.session_id = session_id
         runtime.settings = _merge_runtime_settings(runtime.settings, {})
-        _normalize_runtime_mode(runtime.settings)
         _user_runtimes[owner_uid] = runtime
         _session_runtimes[session_id] = runtime
     _record_runtime_event(
