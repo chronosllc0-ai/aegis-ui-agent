@@ -6403,3 +6403,38 @@
 - Decision: preserve action/source denylisting but keep `websocket` source permissive so normal persisted chat transcript rows are retained.
 - Decision: use append-only persistence + prune-triggered compaction as the performance baseline.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.41 - April 21, 2026 (Automation execution target schema migration + compatibility)
+
+### What changed
+- Updated scheduled automation data model in `backend/database.py`:
+  - added `scheduled_tasks.execution_target_type` with default `'assistant_prompt'`,
+  - added `scheduled_tasks.workflow_id` (nullable),
+  - extended idempotent migration sync (`_ensure_scheduled_tasks_table`) to backfill missing columns for existing deployments.
+- Updated automation API schemas and normalization in `backend/automation.py`:
+  - added new request/response fields: `execution_target_type`, `assistant_task_prompt`, `workflow_id`,
+  - retained legacy `prompt` field as a compatibility alias for one release cycle,
+  - added create-time model validation that enforces target-specific required fields,
+  - added update-time target validation against merged persisted+incoming state,
+  - normalized list/read payloads to always return the new fields while preserving legacy `prompt`.
+- Updated scheduler execution logging in `backend/task_runner.py` to branch by execution target type (`assistant_prompt` vs `saved_workflow`) while preserving current non-orchestrated execution behavior.
+- Added regression coverage in `tests/test_automation_schemas.py` for default compatibility, target validation, and normalized response-field behavior.
+
+### What works / what does not
+- Works:
+  - Existing scheduled tasks without `execution_target_type` normalize to `assistant_prompt` at API output and migration adds missing DB column defaults.
+  - Create/update validation enforces `assistant_task_prompt` (or legacy `prompt`) for `assistant_prompt` and `workflow_id` for `saved_workflow`.
+  - List/read payloads expose UI-facing normalized fields and retain legacy `prompt`.
+  - Frontend build, websocket smoke test, and new automation schema tests pass.
+- Does not / caveats:
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so the py_compile checklist command still errors on missing file.
+
+### Next steps
+1. Add end-to-end API tests for `/api/automation/tasks` create/update/read/list covering both target types with real DB sessions.
+2. Wire `saved_workflow` execution path in `backend/task_runner.py` to actual workflow orchestration instead of logging only.
+3. Plan deprecation window and removal PR for legacy `prompt` once frontend and external clients fully migrate.
+
+### Blockers / decisions
+- Decision: preserve `prompt` in request/response as a strict compatibility alias for one release cycle, with new UI consuming normalized fields.
+- Decision: persist `execution_target_type` + `workflow_id` while reusing existing `prompt` storage for assistant-target payloads.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).

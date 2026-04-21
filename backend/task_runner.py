@@ -52,14 +52,19 @@ async def execute_task(task_id: str) -> None:
     error: str | None = None
 
     try:
+        execution_target_type = task.execution_target_type or "assistant_prompt"
         logger.info(
-            "Executing scheduled task %r (id=%s): %s",
+            "Executing scheduled task %r (id=%s, target=%s)",
             task.name,
             task_id,
-            task.prompt[:120],
+            execution_target_type,
         )
+        if execution_target_type == "saved_workflow":
+            logger.info("Scheduled task %s will execute workflow_id=%s", task_id, task.workflow_id)
+        else:
+            logger.info("Scheduled task %s prompt preview: %s", task_id, task.prompt[:120])
         # TODO: wire up to the AgentOrchestrator once the integration is ready.
-        # For now we log the prompt execution so the system is fully operational.
+        # For now we log the target execution so the system is fully operational.
         await asyncio.sleep(0.1)  # simulate async work
         logger.info("Scheduled task %s completed successfully", task_id)
     except Exception as exc:  # noqa: BLE001

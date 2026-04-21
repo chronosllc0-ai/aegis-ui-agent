@@ -17,10 +17,10 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,11 +75,17 @@ def _compute_next_run(cron_expr: str, tz_name: str) -> datetime | None:
 
 
 def _task_to_dict(task: ScheduledTask) -> dict[str, Any]:
+    execution_target_type = task.execution_target_type or "assistant_prompt"
+    assistant_task_prompt = task.prompt if execution_target_type == "assistant_prompt" else None
+    workflow_id = task.workflow_id if execution_target_type == "saved_workflow" else None
     return {
         "id": task.id,
         "user_id": task.user_id,
         "name": task.name,
         "description": task.description,
+        "execution_target_type": execution_target_type,
+        "assistant_task_prompt": assistant_task_prompt,
+        "workflow_id": workflow_id,
         "prompt": task.prompt,
         "cron_expr": task.cron_expr,
         "timezone": task.timezone,
@@ -112,7 +118,10 @@ def _get_current_user(request: Request) -> dict[str, Any]:
 class TaskCreate(BaseModel):
     name: str
     description: str | None = None
-    prompt: str
+    execution_target_type: Literal["assistant_prompt", "saved_workflow"] = "assistant_prompt"
+    assistant_task_prompt: str | None = None
+    workflow_id: str | None = None
+    prompt: str | None = None  # legacy alias for assistant_task_prompt
     cron_expr: str
     timezone: str = "UTC"
 
@@ -124,10 +133,31 @@ class TaskCreate(BaseModel):
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
+    @model_validator(mode="after")
+    def validate_target_fields(self) -> "TaskCreate":
+        prompt_value = self.assistant_task_prompt or self.prompt
+        if self.execution_target_type == "assistant_prompt":
+            if not prompt_value or not prompt_value.strip():
+                raise ValueError("assistant_task_prompt is required for execution_target_type=assistant_prompt")
+            self.assistant_task_prompt = prompt_value.strip()
+            self.prompt = prompt_value.strip()
+            self.workflow_id = None
+            return self
+
+        if not self.workflow_id or not self.workflow_id.strip():
+            raise ValueError("workflow_id is required for execution_target_type=saved_workflow")
+        self.workflow_id = self.workflow_id.strip()
+        self.assistant_task_prompt = None
+        self.prompt = None
+        return self
+
 
 class TaskUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    execution_target_type: Literal["assistant_prompt", "saved_workflow"] | None = None
+    assistant_task_prompt: str | None = None
+    workflow_id: str | None = None
     prompt: str | None = None
     cron_expr: str | None = None
     timezone: str | None = None
@@ -142,6 +172,32 @@ class TaskUpdate(BaseModel):
             return _validate_cron(v)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+
+
+def _validate_target_update(
+    task: ScheduledTask,
+    body: TaskUpdate,
+) -> tuple[str, str, str | None]:
+    """Validate create/update target fields and return normalized values."""
+    execution_target_type = body.execution_target_type or task.execution_target_type or "assistant_prompt"
+    existing_prompt = task.prompt if (task.execution_target_type or "assistant_prompt") == "assistant_prompt" else ""
+    prompt_value = body.assistant_task_prompt if body.assistant_task_prompt is not None else body.prompt
+    if prompt_value is None:
+        prompt_value = existing_prompt
+
+    workflow_id = body.workflow_id if body.workflow_id is not None else task.workflow_id
+
+    if execution_target_type == "assistant_prompt":
+        if not prompt_value or not prompt_value.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="assistant_task_prompt is required for execution_target_type=assistant_prompt",
+            )
+        return execution_target_type, prompt_value.strip(), None
+
+    if not workflow_id or not workflow_id.strip():
+        raise HTTPException(status_code=422, detail="workflow_id is required for execution_target_type=saved_workflow")
+    return execution_target_type, task.prompt, workflow_id.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +247,9 @@ async def create_task(
         user_id=user["uid"],
         name=body.name,
         description=body.description,
-        prompt=body.prompt,
+        execution_target_type=body.execution_target_type,
+        prompt=body.prompt or body.assistant_task_prompt or "",
+        workflow_id=body.workflow_id,
         cron_expr=body.cron_expr,
         timezone=body.timezone,
         enabled=True,
@@ -230,12 +288,15 @@ async def update_task(
     if not task or task.user_id != user["uid"]:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    execution_target_type, normalized_prompt, normalized_workflow_id = _validate_target_update(task, body)
+    task.execution_target_type = execution_target_type
+    task.prompt = normalized_prompt
+    task.workflow_id = normalized_workflow_id
+
     if body.name is not None:
         task.name = body.name
     if body.description is not None:
         task.description = body.description
-    if body.prompt is not None:
-        task.prompt = body.prompt
     if body.enabled is not None:
         task.enabled = body.enabled
     if body.timezone is not None:

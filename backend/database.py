@@ -860,6 +860,8 @@ class ScheduledTask(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     prompt = Column(Text, nullable=False)           # the agent instruction to run
+    execution_target_type = Column(String(50), nullable=False, default="assistant_prompt")
+    workflow_id = Column(String(255), nullable=True)
     cron_expr = Column(String(100), nullable=False)  # e.g. "0 9 * * 1" (every Monday 9am)
     timezone = Column(String(100), default="UTC")
     enabled = Column(Boolean, default=True)
@@ -982,6 +984,11 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
         ("description", "ALTER TABLE scheduled_tasks ADD COLUMN description TEXT"),
         ("timezone", "ALTER TABLE scheduled_tasks ADD COLUMN timezone VARCHAR(100) DEFAULT 'UTC'"),
         ("enabled", "ALTER TABLE scheduled_tasks ADD COLUMN enabled BOOLEAN DEFAULT TRUE"),
+        (
+            "execution_target_type",
+            "ALTER TABLE scheduled_tasks ADD COLUMN execution_target_type VARCHAR(50) DEFAULT 'assistant_prompt'",
+        ),
+        ("workflow_id", "ALTER TABLE scheduled_tasks ADD COLUMN workflow_id VARCHAR(255)"),
         ("last_run_at", "ALTER TABLE scheduled_tasks ADD COLUMN last_run_at TIMESTAMP WITH TIME ZONE"),
         ("next_run_at", "ALTER TABLE scheduled_tasks ADD COLUMN next_run_at TIMESTAMP WITH TIME ZONE"),
         ("last_status", "ALTER TABLE scheduled_tasks ADD COLUMN last_status VARCHAR(20) DEFAULT 'pending'"),
