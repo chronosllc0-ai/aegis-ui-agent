@@ -6566,3 +6566,85 @@
 ### Blockers / decisions
 - Decision: keep effect dependencies explicit for readability and to prevent future stale-closure regressions.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 5.72 - April 21, 2026 (Cron jobs row actions + backend wiring pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend+frontend feature wiring pass
+
+### What Was Done
+- Added missing backend automation endpoints in `backend/automation.py`:
+  - `POST /api/automation/tasks/{task_id}/clone`
+  - `POST /api/automation/tasks/{task_id}/run-if-due`
+  - upgraded `DELETE /api/automation/tasks/{task_id}` to soft-delete behavior.
+- Added soft-delete persistence support in `backend/database.py` by introducing `scheduled_tasks.deleted_at` plus idempotent column migration.
+- Updated task query/ownership guards to treat soft-deleted tasks as unavailable.
+- Updated scheduler execution safeguards in `backend/task_runner.py` to skip soft-deleted tasks.
+- Expanded Jobs row actions in `frontend/src/components/AutomationsPage.tsx` to include:
+  - Edit
+  - Clone
+  - Disable/Enable
+  - Run
+  - Run if due
+  - History
+  - Remove
+- Wired all row actions to real backend endpoints with explicit response checks and user-facing errors.
+- Added confirmation dialogs for destructive actions (Disable and Remove).
+- Implemented optimistic row updates with rollback on error for toggle, remove, run, and run-if-due flows.
+
+### What's Working
+- Jobs row now exposes all requested action affordances and each action calls a live API route.
+- Soft-deleted jobs no longer appear in list/get/update/run paths.
+- Scheduler avoids executing soft-deleted tasks.
+- Frontend and backend compile/build checks passed in this environment.
+
+### What's NOT Working Yet
+- No end-to-end browser screenshot artifact captured in this environment (browser screenshot tool unavailable in this run context).
+
+### Next Steps
+1. Add API tests for clone/run-if-due/soft-delete routes (including ownership + deleted-task cases).
+2. Add frontend interaction tests for optimistic rollback behavior per action.
+3. Consider replacing `window.confirm` with a reusable styled modal for full design-system consistency.
+
+### Decisions Made
+- Kept soft-delete behind existing `DELETE` route for API compatibility while changing semantics to non-destructive removal.
+- Treated `run-if-due` as a guard endpoint that returns `{triggered:false}` instead of raising errors when a task is not due.
+
+### Blockers
+- None.
+
+## Session 5.73 - April 21, 2026 (PR review fixes: indexing + UX/status polish)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Added a `scheduled_tasks.deleted_at` index at both model and migration-sync levels in `backend/database.py`:
+  - model `__table_args__` now includes `Index("idx_scheduled_tasks_deleted_at", "deleted_at")`
+  - schema sync now creates index if missing via `CREATE INDEX IF NOT EXISTS ...`.
+- Fixed `run-if-due` due-time guard in `backend/automation.py` to normalize `next_run_at` to timezone-aware UTC before comparison, preventing naive-vs-aware datetime comparison errors in SQLite-like environments.
+- Updated `frontend/src/components/AutomationsPage.tsx` review UX items:
+  - Added non-error `info` state and used it for expected `run-if-due` no-op (`not due yet`) outcome.
+  - Added clone in-flight state via `runningIds` and disabled clone/run/run-if-due buttons while in flight for the row.
+  - Fixed optimistic run rollback path to restore previous task snapshot on failure.
+
+### What's Working
+- Soft-delete query filter now has an index-backed path.
+- `run-if-due` guard handles timezone normalization safely.
+- UI no longer surfaces expected not-due behavior as an error.
+- Run failure now correctly restores optimistic row state.
+
+### What's NOT Working Yet
+- Browser screenshot tooling remains unavailable in this execution environment.
+
+### Next Steps
+1. Add backend tests that validate `run-if-due` behavior with naive datetime fixtures.
+2. Add frontend tests asserting clone/run button disabled states during in-flight requests.
+3. Consider consolidating `error/info` banners into a reusable notification component.
+
+### Decisions Made
+- Used `CREATE INDEX IF NOT EXISTS` for portability across environments, avoiding PostgreSQL-only `CONCURRENTLY` semantics in transactional startup flows.
+- Kept `runningIds` as the single in-flight map for row action disablement.
+
+### Blockers
+- None.

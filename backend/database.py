@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -854,6 +855,7 @@ class ScheduledTask(Base):
     """A user-defined cron job that runs an agent prompt on a schedule."""
 
     __tablename__ = "scheduled_tasks"
+    __table_args__ = (Index("idx_scheduled_tasks_deleted_at", "deleted_at"),)
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
@@ -873,6 +875,7 @@ class ScheduledTask(Base):
     last_status = Column(String(20), default="pending")  # pending | running | success | failed
     last_error = Column(Text, nullable=True)
     run_count = Column(Integer, default=0)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -982,6 +985,7 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
         return  # table was just created by create_all; nothing to migrate
 
     existing = {col["name"] for col in inspector.get_columns("scheduled_tasks")}
+    existing_indexes = {idx.get("name") for idx in inspector.get_indexes("scheduled_tasks")}
 
     migrations = [
         ("description", "ALTER TABLE scheduled_tasks ADD COLUMN description TEXT"),
@@ -1000,6 +1004,7 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
         ("last_status", "ALTER TABLE scheduled_tasks ADD COLUMN last_status VARCHAR(20) DEFAULT 'pending'"),
         ("last_error", "ALTER TABLE scheduled_tasks ADD COLUMN last_error TEXT"),
         ("run_count", "ALTER TABLE scheduled_tasks ADD COLUMN run_count INTEGER DEFAULT 0"),
+        ("deleted_at", "ALTER TABLE scheduled_tasks ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"),
     ]
     for col_name, ddl in migrations:
         if col_name not in existing:
@@ -1010,6 +1015,12 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
                 logger.warning(
                     "Skipping scheduled_tasks.%s sync; assuming already exists: %s", col_name, exc
                 )
+
+    if "idx_scheduled_tasks_deleted_at" not in existing_indexes:
+        try:
+            sync_conn.execute(text("CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_deleted_at ON scheduled_tasks (deleted_at)"))
+        except Exception as exc:
+            logger.warning("Skipping scheduled_tasks deleted_at index sync; assuming already exists: %s", exc)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

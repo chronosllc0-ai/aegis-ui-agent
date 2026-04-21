@@ -38,6 +38,9 @@ async def execute_task(task_id: str) -> None:
         if task is None:
             logger.warning("Task %s not found; skipping", task_id)
             return
+        if task.deleted_at is not None:
+            logger.info("Task %s is soft-deleted; skipping", task_id)
+            return
 
         if task.last_status == "running":
             logger.info("Task %s is already running; skipping", task_id)
@@ -152,6 +155,7 @@ async def _scheduler_loop() -> None:
                 result = await session.execute(
                     select(ScheduledTask).where(
                         ScheduledTask.enabled.is_(True),
+                        ScheduledTask.deleted_at.is_(None),
                         ScheduledTask.next_run_at <= now,
                         ScheduledTask.last_status != "running",
                     )

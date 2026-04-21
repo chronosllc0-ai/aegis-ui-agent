@@ -6,14 +6,15 @@ Mounted at ``/api/automation/``:
 - ``POST /api/automation/tasks``                — create a task
 - ``GET  /api/automation/tasks/{task_id}``      — get a single task
 - ``PATCH /api/automation/tasks/{task_id}``     — update a task
-- ``DELETE /api/automation/tasks/{task_id}``    — delete a task
+- ``DELETE /api/automation/tasks/{task_id}``    — soft-delete/remove a task
 - ``POST /api/automation/tasks/{task_id}/run``  — trigger an immediate run
+- ``POST /api/automation/tasks/{task_id}/run-if-due`` — trigger only when due
+- ``POST /api/automation/tasks/{task_id}/clone`` — clone an existing task
 - ``GET  /api/automation/tasks/{task_id}/runs`` — run history (last 20)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -21,7 +22,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator, model_validator
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import ScheduledTask, get_session
@@ -102,6 +103,11 @@ def _task_to_dict(task: ScheduledTask) -> dict[str, Any]:
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     }
+
+
+def _is_task_active_for_user(task: ScheduledTask | None, user_id: str) -> bool:
+    """Return True when task exists, belongs to user, and is not soft-deleted."""
+    return bool(task and task.user_id == user_id and task.deleted_at is None)
 
 
 def _get_current_user(request: Request) -> dict[str, Any]:
@@ -257,7 +263,7 @@ async def list_tasks(
     user = _get_current_user(request)
     result = await session.execute(
         select(ScheduledTask)
-        .where(ScheduledTask.user_id == user["uid"])
+        .where(ScheduledTask.user_id == user["uid"], ScheduledTask.deleted_at.is_(None))
         .order_by(ScheduledTask.created_at.desc())
     )
     tasks = result.scalars().all()
@@ -303,7 +309,7 @@ async def get_task(
 ) -> dict[str, Any]:
     user = _get_current_user(request)
     task = await session.get(ScheduledTask, task_id)
-    if not task or task.user_id != user["uid"]:
+    if not _is_task_active_for_user(task, user["uid"]):
         raise HTTPException(status_code=404, detail="Task not found")
     return {"task": _task_to_dict(task)}
 
@@ -317,7 +323,7 @@ async def update_task(
 ) -> dict[str, Any]:
     user = _get_current_user(request)
     task = await session.get(ScheduledTask, task_id)
-    if not task or task.user_id != user["uid"]:
+    if not _is_task_active_for_user(task, user["uid"]):
         raise HTTPException(status_code=404, detail="Task not found")
 
     execution_target_type, normalized_prompt, normalized_workflow_id = _validate_target_update(task, body)
@@ -361,12 +367,13 @@ async def delete_task(
 ) -> dict[str, Any]:
     user = _get_current_user(request)
     task = await session.get(ScheduledTask, task_id)
-    if not task or task.user_id != user["uid"]:
+    if not _is_task_active_for_user(task, user["uid"]):
         raise HTTPException(status_code=404, detail="Task not found")
-    await session.delete(task)
+    task.deleted_at = datetime.now(timezone.utc)
+    task.enabled = False
     await session.commit()
     _run_history.pop(task_id, None)
-    return {"ok": True}
+    return {"ok": True, "task_id": task_id, "removed": True}
 
 
 @automation_router.post("/tasks/{task_id}/run")
@@ -378,7 +385,7 @@ async def trigger_run(
     """Trigger an immediate (fire-and-forget) run of the task."""
     user = _get_current_user(request)
     task = await session.get(ScheduledTask, task_id)
-    if not task or task.user_id != user["uid"]:
+    if not _is_task_active_for_user(task, user["uid"]):
         raise HTTPException(status_code=404, detail="Task not found")
 
     # Fire and forget — import task_runner to reuse execution logic
@@ -387,6 +394,66 @@ async def trigger_run(
 
     asyncio.create_task(task_runner.execute_task(task_id))
     return {"ok": True, "message": "Task execution triggered"}
+
+
+@automation_router.post("/tasks/{task_id}/run-if-due")
+async def trigger_run_if_due(
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Trigger a run only if the task is enabled and due now."""
+    user = _get_current_user(request)
+    task = await session.get(ScheduledTask, task_id)
+    if not _is_task_active_for_user(task, user["uid"]):
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    now = datetime.now(timezone.utc)
+    normalized_next_run = _normalize_datetime(task.next_run_at) if task.next_run_at is not None else None
+    due_now = bool(task.enabled and normalized_next_run and normalized_next_run <= now and task.last_status != "running")
+    if not due_now:
+        return {"ok": True, "triggered": False, "reason": "not_due"}
+
+    import asyncio
+    from backend import task_runner
+
+    asyncio.create_task(task_runner.execute_task(task_id))
+    return {"ok": True, "triggered": True}
+
+
+@automation_router.post("/tasks/{task_id}/clone")
+async def clone_task(
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Clone an existing task for the current user."""
+    user = _get_current_user(request)
+    task = await session.get(ScheduledTask, task_id)
+    if not _is_task_active_for_user(task, user["uid"]):
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    clone = ScheduledTask(
+        user_id=task.user_id,
+        name=f"{task.name} (Copy)",
+        description=task.description,
+        execution_target_type=task.execution_target_type or "assistant_prompt",
+        prompt=task.prompt,
+        workflow_id=task.workflow_id,
+        session_scope=task.session_scope or "main",
+        wake_mode=task.wake_mode or "now",
+        delivery_channel=task.delivery_channel or "chat",
+        cron_expr=task.cron_expr,
+        timezone=task.timezone or "UTC",
+        enabled=task.enabled,
+        next_run_at=_compute_next_run(task.cron_expr, task.timezone or "UTC"),
+        last_status="pending",
+        run_count=0,
+    )
+    session.add(clone)
+    await session.commit()
+    await session.refresh(clone)
+    return {"ok": True, "task": _task_to_dict(clone)}
 
 
 @automation_router.get("/tasks/{task_id}/runs")
@@ -402,7 +469,7 @@ async def get_run_history(
 ) -> dict[str, Any]:
     user = _get_current_user(request)
     task = await session.get(ScheduledTask, task_id)
-    if not task or task.user_id != user["uid"]:
+    if not _is_task_active_for_user(task, user["uid"]):
         raise HTTPException(status_code=404, detail="Task not found")
     history = _run_history.get(task_id, [])
     # TODO: run history is currently an in-memory ring buffer; if this grows beyond
