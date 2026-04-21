@@ -7276,3 +7276,34 @@
 
 ### Blockers
 - No browser screenshot tooling available in current runtime.
+## Session 5.88 - April 21, 2026 (Shared one-line TopBar + mobile action drawer)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend UX pass
+
+### What Was Done
+- Added a reusable `TopBar` component at `frontend/src/components/ui/TopBar.tsx` with a single-line primary layout (title + optional status + actions), mobile kebab action drawer, and optional collapsible helper/details row.
+- Replaced the standalone settings header shell usage in `frontend/src/components/settings/StandaloneSettingsPage.tsx` to use `TopBar` instead of multi-line title/subtitle blocks.
+- Updated `frontend/src/components/AutomationsPage.tsx` to use `TopBar` for the page header, moved subtitle-style metadata into the collapsible helper row, and removed the duplicated stacked header/title row from the stats card section.
+
+### What's Working
+- Header treatment is now shared/consistent across top-level standalone settings tabs and automations.
+- Secondary metadata is no longer always-on in the top line; it is accessible via the helper toggle.
+- Mobile behavior now includes action collapsing behind a kebab trigger.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` remains inapplicable because that file does not exist in this repository.
+- Browser-based screenshot capture tool is not available in this runtime.
+
+### Next Steps
+1. Adopt `TopBar` in any additional top-level routes that still use bespoke page headers.
+2. Add a small component test for mobile action drawer toggling to prevent regressions.
+
+### Decisions Made
+- Kept helper/details collapsed by default to maximize vertical space for primary content.
+- Used a lightweight inline kebab/drawer implementation to avoid introducing new dependencies.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---

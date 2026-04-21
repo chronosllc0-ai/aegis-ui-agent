@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { HeaderBar } from '../ui/DesignSystem'
+import { TopBar } from '../ui/TopBar'
 import type { AppSettings } from '../../hooks/useSettings'
 import type { SettingsTab } from './SettingsPage'
 import { AgentTab } from './AgentTab'
@@ -23,8 +23,9 @@ type StandaloneSettingsPageProps = {
 
 type HeaderMeta = {
   title: string
-  subtitle?: string
-  right?: ReactNode
+subtitle?: string
+status?: ReactNode
+actions?: ReactNode
 }
 
 const HEADER_BY_TAB: Partial<Record<SettingsTab, HeaderMeta>> = {
@@ -74,14 +75,11 @@ export function StandaloneSettingsPage({ tab, settings, onPatch, authRole, isAdm
   return (
     <div className='h-full min-h-0 overflow-y-auto'>
       <div className='space-y-4 p-2 sm:p-3'>
-        <HeaderBar
-          left={(
-            <div>
-              <h2 className='text-base font-semibold text-white'>{headerMeta.title}</h2>
-              {headerMeta.subtitle && <p className='text-xs text-zinc-400'>{headerMeta.subtitle}</p>}
-            </div>
-          )}
-          right={headerMeta.right}
+        <TopBar
+          title={headerMeta.title}
+          status={headerMeta.status}
+          helperText={headerMeta.subtitle}
+          actions={headerMeta.actions}
         />
 
         <div className='space-y-6'>
