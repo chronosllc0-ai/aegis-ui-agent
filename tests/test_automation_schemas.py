@@ -68,3 +68,57 @@ def test_task_to_dict_normalizes_new_and_legacy_fields() -> None:
     assert payload["assistant_task_prompt"] == "Do work"
     assert payload["workflow_id"] is None
     assert payload["prompt"] == "Do work"
+
+
+def test_task_to_dict_hides_legacy_prompt_for_saved_workflow() -> None:
+    task = _TaskStub(
+        id="task-2",
+        user_id="u-1",
+        name="Workflow task",
+        description=None,
+        execution_target_type="saved_workflow",
+        workflow_id="wf-123",
+        prompt="stale legacy prompt",
+        cron_expr="0 9 * * 1",
+        timezone="UTC",
+        enabled=True,
+        last_run_at=None,
+        next_run_at=None,
+        last_status="pending",
+        last_error=None,
+        run_count=0,
+        created_at=None,
+        updated_at=None,
+    )
+
+    payload = _task_to_dict(task)
+
+    assert payload["assistant_task_prompt"] is None
+    assert payload["workflow_id"] == "wf-123"
+    assert payload["prompt"] is None
+
+
+def test_validate_target_update_clears_prompt_when_switching_to_saved_workflow() -> None:
+    task = _TaskStub(execution_target_type="assistant_prompt", prompt="legacy", workflow_id=None)
+
+    target_type, normalized_prompt, workflow_id = _validate_target_update(
+        task,
+        TaskUpdate(execution_target_type="saved_workflow", workflow_id="wf-456"),
+    )
+
+    assert target_type == "saved_workflow"
+    assert normalized_prompt == ""
+    assert workflow_id == "wf-456"
+
+
+def test_validate_target_update_uses_legacy_prompt_when_assistant_field_blank() -> None:
+    task = _TaskStub(execution_target_type="assistant_prompt", prompt="existing", workflow_id=None)
+
+    target_type, normalized_prompt, workflow_id = _validate_target_update(
+        task,
+        TaskUpdate(execution_target_type="assistant_prompt", assistant_task_prompt="", prompt="legacy fallback"),
+    )
+
+    assert target_type == "assistant_prompt"
+    assert normalized_prompt == "legacy fallback"
+    assert workflow_id is None

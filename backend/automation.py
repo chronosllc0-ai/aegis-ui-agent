@@ -86,7 +86,7 @@ def _task_to_dict(task: ScheduledTask) -> dict[str, Any]:
         "execution_target_type": execution_target_type,
         "assistant_task_prompt": assistant_task_prompt,
         "workflow_id": workflow_id,
-        "prompt": task.prompt,
+        "prompt": task.prompt if execution_target_type == "assistant_prompt" else None,
         "cron_expr": task.cron_expr,
         "timezone": task.timezone,
         "enabled": task.enabled,
@@ -181,8 +181,10 @@ def _validate_target_update(
     """Validate create/update target fields and return normalized values."""
     execution_target_type = body.execution_target_type or task.execution_target_type or "assistant_prompt"
     existing_prompt = task.prompt if (task.execution_target_type or "assistant_prompt") == "assistant_prompt" else ""
-    prompt_value = body.assistant_task_prompt if body.assistant_task_prompt is not None else body.prompt
-    if prompt_value is None:
+    prompt_value = body.assistant_task_prompt
+    if prompt_value is None or not prompt_value.strip():
+        prompt_value = body.prompt
+    if prompt_value is None or not str(prompt_value).strip():
         prompt_value = existing_prompt
 
     workflow_id = body.workflow_id if body.workflow_id is not None else task.workflow_id
@@ -197,7 +199,7 @@ def _validate_target_update(
 
     if not workflow_id or not workflow_id.strip():
         raise HTTPException(status_code=422, detail="workflow_id is required for execution_target_type=saved_workflow")
-    return execution_target_type, task.prompt, workflow_id.strip()
+    return execution_target_type, "", workflow_id.strip()
 
 
 # ---------------------------------------------------------------------------

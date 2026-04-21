@@ -6438,3 +6438,34 @@
 - Decision: preserve `prompt` in request/response as a strict compatibility alias for one release cycle, with new UI consuming normalized fields.
 - Decision: persist `execution_target_type` + `workflow_id` while reusing existing `prompt` storage for assistant-target payloads.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.42 - April 21, 2026 (PR review follow-up: legacy prompt cleanup fixes)
+
+### What changed
+- Addressed PR review findings in `backend/automation.py`:
+  - updated `_task_to_dict` so legacy `prompt` is returned only for `assistant_prompt` tasks and `None` for `saved_workflow` tasks,
+  - updated `_validate_target_update` to clear persisted prompt (`""`) when converting to `saved_workflow`, preventing stale legacy prompt leakage,
+  - improved PATCH compatibility fallback so blank `assistant_task_prompt` values (e.g., empty-string serializer output) now fall back to non-empty legacy `prompt` before failing validation.
+- Expanded `tests/test_automation_schemas.py` with regression tests that specifically cover:
+  - hidden legacy prompt for saved-workflow serialization,
+  - prompt clearing on assistant->saved workflow conversion,
+  - empty-string assistant prompt fallback to legacy `prompt` in update validation.
+
+### What works / what does not
+- Works:
+  - API output no longer leaks stale `prompt` values for `saved_workflow` tasks.
+  - Switching a task to `saved_workflow` now actively removes stale prompt payload.
+  - One-release compatibility path is more robust for PATCH payloads that send `assistant_task_prompt=""` while still providing legacy `prompt`.
+  - Updated automation schema tests and websocket smoke test pass.
+- Does not / caveats:
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so the py_compile checklist command remains non-runnable as written.
+
+### Next steps
+1. Add API-level PATCH tests that hit FastAPI routes directly to verify serializer-driven empty-string behavior end-to-end.
+2. Add a targeted migration validation check in integration tests to ensure previously saved stale prompt data is not exposed after target conversion.
+3. Plan and communicate final deprecation/removal date for legacy `prompt` field.
+
+### Blockers / decisions
+- Decision: continue returning `prompt` as compatibility alias only when target type is `assistant_prompt`.
+- Decision: clear prompt storage on target conversion to avoid stale-data confusion and enforce canonical source-of-truth fields.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
