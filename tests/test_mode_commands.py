@@ -60,6 +60,23 @@ def test_subagent_steer_command_alias_routes_to_runtime_message_path() -> None:
         main_mod._user_runtimes.pop(user_id, None)
 
 
+def test_mode_command_returns_deprecation_message() -> None:
+    """/mode should return a clear deprecation message for backward compatibility."""
+    main_mod = import_module("main")
+
+    reply = asyncio.run(
+        main_mod._handle_slash_command(
+            text="/mode",
+            owner_uid=None,
+            platform="telegram",
+            integration_id="tg-1",
+            chat_id=123,
+        )
+    )
+    assert reply
+    assert "has been removed" in str(reply)
+
+
 def test_subagent_steering_payload_encodes_priority_annotation() -> None:
     """Subagent steering helper should preserve message text and prepend valid priorities."""
     main_mod = import_module("main")

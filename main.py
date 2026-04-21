@@ -4348,7 +4348,6 @@ TELEGRAM_SLASH_COMMANDS = [
     {"command": "reason", "description": "Legacy reasoning controls"},
     {"command": "reasoning", "description": "Reasoning controls (alias of /reason)"},
     {"command": "model", "description": "Show current model"},
-    {"command": "mode", "description": "Show or switch agent mode"},
     {"command": "activation", "description": "Show activation/session details"},
     {"command": "config", "description": "Show runtime config summary"},
     {"command": "acp", "description": "Agent control protocol: /acp spawn <task>"},
@@ -4708,6 +4707,9 @@ async def _handle_slash_command(
         model = runtime.settings.get("model", "not set")
         provider = runtime.settings.get("provider", "")
         return f"🧠 Current model: *{model}* ({provider})"
+
+    if cmd == "mode":
+        return "ℹ️ `/mode` has been removed. Use `/model` or `/reasoning` controls instead."
 
     if cmd == "models":
         providers = list_providers()

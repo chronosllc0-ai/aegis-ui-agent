@@ -6829,3 +6829,32 @@
 - None.
 
 ---
+
+## Session 5.74 - April 21, 2026 (Telegram /mode menu regression fix)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted review-fix pass
+
+### What Was Done
+- Removed stale `/mode` from `TELEGRAM_SLASH_COMMANDS` so Telegram command registration no longer advertises a removed feature.
+- Added an explicit compatibility branch in `_handle_slash_command` for `cmd == "mode"` that returns a clear deprecation message and points users to `/model` and `/reasoning`.
+- Added regression coverage in `tests/test_mode_commands.py` to assert `/mode` returns the deprecation message.
+
+### What's Working
+- `main.py` compiles.
+- Updated slash-command tests pass, including new `/mode` deprecation assertion.
+
+### What's NOT Working Yet
+- AGENTS checklist still references missing `backend/pydantic_adk_runner.py` path.
+
+### Next Steps
+1. Optionally remove obsolete mode helper methods from integration adapters (e.g., legacy `extract_mode_selection`) if no longer used anywhere.
+2. Keep compatibility message for at least one release window, then decide whether to drop `/mode` alias entirely.
+
+### Decisions Made
+- Chose dual mitigation (remove menu registration + keep friendly compatibility response) to prevent user-facing regression from stale cached command menus.
+
+### Blockers
+- None.
+
+---
