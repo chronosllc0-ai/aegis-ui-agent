@@ -53,7 +53,7 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
                 User System Instruction
               </label>
               <p className='text-[11px] text-zinc-500'>
-                CTA: This instruction applies to your runtime only. Do not paste secrets or third-party private data you are not authorized to process.
+                This instruction applies to your runtime only. Do not paste secrets or third-party private data you are not authorized to process.
               </p>
               <textarea
                 id='user-system-instruction'

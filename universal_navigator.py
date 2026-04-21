@@ -981,17 +981,17 @@ async def _build_system_prompt(
         else ""
     )
     custom_block = (
-        "User instruction (applies after global policy and workspace context):\n"
+        "\n\nUser instruction (applies after global policy and workspace context):\n"
         f"{custom_instruction}\n\n"
         if custom_instruction
         else ""
     )
     prefix_blocks = (
-        f"{baseline_block}{global_block}{workspace_global_block}{workspace_user_block}{custom_block}"
+        f"{baseline_block}{global_block}{workspace_global_block}{workspace_user_block}"
         if prompt_mode == "v2"
         else f"{baseline_block}{global_block}{mode_block}"
     )
-    suffix_block = "" if prompt_mode == "v2" else custom_block
+    suffix_block = custom_block
     return (
         f"{prefix_blocks}"
         "You are Aegis, an autonomous AI agent built by Chronos AI. "
