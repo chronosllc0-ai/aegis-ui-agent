@@ -45,7 +45,9 @@ export function NavItem({ icon, label, active = false, onClick }: NavItemProps) 
       }`}
     >
       <span className={`${active ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)] group-hover:text-[var(--ds-text-primary)]'}`}>{icon}</span>
-      <span className={`border-b border-transparent leading-5 ${active ? 'border-[var(--ds-border-accent)]' : 'group-hover:border-[var(--ds-border-subtle)]/80'}`}>{label}</span>
+      <span className={`leading-5 ${active ? 'shadow-[inset_0_-1px_0_var(--ds-border-accent)]' : 'shadow-[inset_0_-1px_0_transparent] group-hover:shadow-[inset_0_-1px_0_var(--ds-border-subtle)]'}`}>
+        {label}
+      </span>
     </button>
   )
 }

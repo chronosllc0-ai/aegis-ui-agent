@@ -7307,6 +7307,36 @@
 - No browser screenshot tool available in this environment.
 
 ---
+## Session 5.91 - April 21, 2026 (Review follow-up: smoother utility fade + no-hover layout shift)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick review-fix pass
+
+### What Was Done
+- Updated sidebar bottom utility area gradient in `frontend/src/App.tsx` from a hard 24% stop to a full-range fade (`100%`) for a smoother visual transition.
+- Replaced nav label underline border treatment in `frontend/src/components/ui/DesignSystem.tsx` with inset `box-shadow` utilities to avoid 1px hover layout shift while preserving active/hover emphasis.
+
+### What's Working
+- Bottom usage/account area now transitions more naturally without an abrupt visual cutoff.
+- Sidebar nav hover/active label emphasis no longer changes element height, preventing wobble/shift on hover.
+- Existing keyboard-focus styles remain intact.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` remains inapplicable because that file does not exist in this repository.
+- Browser screenshot capture is still unavailable in this runtime.
+
+### Next Steps
+1. Validate hover behavior visually across Chrome/Safari/Firefox once browser tooling is available.
+2. If desired, centralize underline/accent effects into shared utility classes for consistent nav behavior.
+
+### Decisions Made
+- Used inset shadow underline instead of border-based underline to keep layout stable under hover.
+- Accepted review suggestion for a full-length gradient fade in the sidebar utility section.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---
 ## Session 5.90 - April 21, 2026 (Sidebar nav visual cleanup: text-first inactive, chip-only active)
 
 **Agent:** GPT-5.3-Codex  

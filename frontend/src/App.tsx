@@ -787,7 +787,7 @@ function App() {
             </div>
           </div>
 
-          <div className='mt-3 space-y-2 border-t border-[var(--ds-border-strong)] bg-[linear-gradient(180deg,transparent_0%,var(--ds-surface-2)_24%)] pt-3 text-xs'>
+          <div className='mt-3 space-y-2 border-t border-[var(--ds-border-strong)] bg-[linear-gradient(180deg,transparent_0%,var(--ds-surface-2)_100%)] pt-3 text-xs'>
             <UsageDropdown
               balance={balance}
               context={{
