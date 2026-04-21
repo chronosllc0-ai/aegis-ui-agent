@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../lib/api'
 import { useSettingsContext } from '../context/useSettingsContext'
+import { TopBar } from './ui/TopBar'
 
 type TaskStatus = 'pending' | 'running' | 'success' | 'failed'
 
@@ -883,17 +884,24 @@ export function AutomationsPage() {
   return (
     <div className='h-full overflow-y-auto bg-[#0a0f1d] p-3 sm:p-5'>
       <div className='space-y-4'>
+        <TopBar
+          title='Automations'
+          status={<span className='rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-200'>{enabledCount} enabled</span>}
+          helperText='Commands, hooks, cron, and plugins.'
+          actions={(
+            <>
+              <button
+                type='button'
+                onClick={() => void fetchTasks()}
+                className='min-h-10 rounded-lg border border-[#2a334a] px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100'
+              >
+                Refresh
+              </button>
+            </>
+          )}
+        />
+
         <section className='rounded-2xl border border-[#273044] bg-[#0e1422] p-4 sm:p-5'>
-          <div className='mb-3 flex items-center justify-between'>
-            <h2 className='text-base font-semibold text-zinc-100'>Automations</h2>
-            <button
-              type='button'
-              onClick={() => void fetchTasks()}
-              className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100'
-            >
-              Refresh
-            </button>
-          </div>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
             <div className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3'>
               <p className='text-[11px] uppercase tracking-wide text-zinc-500'>Enabled</p>
