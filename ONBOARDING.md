@@ -6140,3 +6140,40 @@
 - Decision: implemented ON CONFLICT protection at insert level instead of lock-based coordination.
 - Decision: kept endpoint-level explicit commit to match current repository session lifecycle (no implicit commit in `get_session`).
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.34 - April 21, 2026 (Automation wizard execution-mode split: prompt vs saved workflow)
+
+### What changed
+- Updated `frontend/src/components/AutomationsPage.tsx` New Job wizard execution UX to add a `What should run?` selector with explicit backend-compatible mode keys:
+  - `run_assistant_prompt`
+  - `run_saved_workflow`
+- Moved mode-specific fields into the `Execution` section:
+  - prompt mode shows required `assistant_task_prompt` textarea,
+  - workflow mode shows required workflow picker and optional workflow version pin input.
+- Added mode-aware validation:
+  - prompt mode now requires non-empty assistant task prompt,
+  - workflow mode now requires a selected workflow id.
+- Updated submit payload mapping to preserve backend payload shape compatibility:
+  - frontend mutation payload is mode-aware,
+  - API request body remains backend-compatible (`name`, `description`, `prompt`, `cron_expr`, `timezone`, optional `enabled` on PATCH),
+  - only mode-relevant fields are mapped into `prompt` for API submission.
+- Added UX persistence for last selected execution mode using localStorage (`aegis.automation.lastExecutionMode`) and wired wizard init to that persisted value.
+
+### What works / what does not
+- Works:
+  - Execution section now conditionally renders correct fields by selected mode.
+  - Validation errors are specific to selected mode requirements.
+  - API payloads remain compatible with current backend automation schema.
+  - Last selected mode is preserved across wizard reopen/re-render.
+- Does not / caveats:
+  - Workflow version pin is collected in UI state but not yet sent to backend because backend task schema currently accepts prompt-only execution payload semantics.
+
+### Next steps
+1. Extend backend automation schema to persist structured execution metadata (`execution_mode`, `workflow_id`, `workflow_version`) if workflow pinning must be enforced server-side.
+2. Add frontend unit tests for mode switch rendering + validation + payload mapping.
+3. Add edit-flow hydration logic for mode/workflow when backend exposes structured execution fields.
+
+### Blockers / decisions
+- Decision: keep POST/PATCH API body in existing backend shape to avoid contract breakage.
+- Decision: source workflow-mode `prompt` from selected saved workflow instruction for runtime compatibility.
+- Blocker: none.
