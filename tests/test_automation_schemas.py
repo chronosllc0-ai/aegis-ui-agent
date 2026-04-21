@@ -49,6 +49,9 @@ def test_task_to_dict_normalizes_new_and_legacy_fields() -> None:
         description=None,
         execution_target_type=None,
         workflow_id=None,
+        session_scope="main",
+        wake_mode="now",
+        delivery_channel="chat",
         prompt="Do work",
         cron_expr="0 9 * * 1",
         timezone="UTC",
@@ -68,6 +71,10 @@ def test_task_to_dict_normalizes_new_and_legacy_fields() -> None:
     assert payload["assistant_task_prompt"] == "Do work"
     assert payload["workflow_id"] is None
     assert payload["prompt"] == "Do work"
+    assert payload["session_scope"] == "main"
+    assert payload["wake_mode"] == "now"
+    assert payload["delivery_channel"] == "chat"
+    assert payload["last_run_status"] == "pending"
 
 
 def test_task_to_dict_hides_legacy_prompt_for_saved_workflow() -> None:
@@ -78,6 +85,9 @@ def test_task_to_dict_hides_legacy_prompt_for_saved_workflow() -> None:
         description=None,
         execution_target_type="saved_workflow",
         workflow_id="wf-123",
+        session_scope="isolated",
+        wake_mode="next-heartbeat",
+        delivery_channel="webhook",
         prompt="stale legacy prompt",
         cron_expr="0 9 * * 1",
         timezone="UTC",
@@ -96,6 +106,9 @@ def test_task_to_dict_hides_legacy_prompt_for_saved_workflow() -> None:
     assert payload["assistant_task_prompt"] is None
     assert payload["workflow_id"] == "wf-123"
     assert payload["prompt"] is None
+    assert payload["session_scope"] == "isolated"
+    assert payload["wake_mode"] == "next-heartbeat"
+    assert payload["delivery_channel"] == "webhook"
 
 
 def test_validate_target_update_clears_prompt_when_switching_to_saved_workflow() -> None:

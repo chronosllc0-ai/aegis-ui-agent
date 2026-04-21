@@ -6469,3 +6469,100 @@
 - Decision: continue returning `prompt` as compatibility alias only when target type is `assistant_prompt`.
 - Decision: clear prompt storage on target conversion to avoid stale-data confusion and enforce canonical source-of-truth fields.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.43 - April 21, 2026 (Automation run metadata + run-history filters/sorting scaffold)
+
+### What changed
+- Extended scheduled automation model/API payload shape for jobs in `backend/database.py` + `backend/automation.py`:
+  - added persisted task fields `session_scope`, `wake_mode`, and `delivery_channel` with defaults,
+  - exposed `last_run_status` alongside existing `last_status` in task payloads for forward-compatible clients.
+- Extended run payload shape in `backend/task_runner.py`:
+  - run entries now include `session_scope`, `wake_mode`, `delivery_channel`, `last_run_status`, `last_run_at`, `next_run_at`, and `reflection_candidate`,
+  - `reflection_candidate` is currently a lightweight placeholder policy tag (`true` when run status is `failed`) with no reflection execution logic attached.
+- Added server-side run-history query filters in `backend/automation.py` (`GET /api/automation/tasks/{task_id}/runs`):
+  - `status`, `scope`, `delivery_channel`, `date_from`, and `date_to`.
+- Updated run history panel UI in `frontend/src/components/AutomationsPage.tsx`:
+  - renders new run metadata fields/tags,
+  - adds filter controls for session scope, delivery channel, and date range,
+  - adds sort controls (started/finished asc/desc),
+  - threads current filter values into run-history API requests.
+- Updated schema tests in `tests/test_automation_schemas.py` for new task payload fields.
+
+### What works / what does not
+- Works:
+  - Job payloads include new scope/wake/delivery + `last_run_status` shape.
+  - Run payloads include reflection candidate marker and scheduling metadata shape.
+  - Run-history API accepts and applies requested server-side filters.
+  - Run history panel now supports richer filtering/sorting and displays new metadata.
+  - Frontend build and targeted pytest suites pass.
+- Does not / caveats:
+  - Reflection behavior is intentionally not implemented; only metadata surface/tag is present.
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so checklist py_compile command still errors for missing file.
+
+### Next steps
+1. Persist per-job editable values for `session_scope`, `wake_mode`, and `delivery_channel` in the job creation/edit UI instead of currently sending default placeholders.
+2. Add API integration tests for run-history query filtering (`status/scope/delivery/date`) against seeded history entries.
+3. Replace placeholder `reflection_candidate` policy with a centralized policy module once reflection pipeline contracts are finalized.
+
+### Blockers / decisions
+- Decision: implement `reflection_candidate` as metadata only (no execution side effects) to match current scope.
+- Decision: keep existing `last_status` while adding `last_run_status` as compatibility bridge.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.44 - April 21, 2026 (PR review follow-up: run history cache/dependency/date normalization fixes)
+
+### What changed
+- Fixed React callback dependency/caching issues in `frontend/src/components/AutomationsPage.tsx`:
+  - removed `runHistoryByTask` from `loadRunHistoryForTask` callback dependencies,
+  - removed cache short-circuit behavior tied only to `task.id` so filter changes correctly re-fetch server-filtered run history,
+  - updated `handleRun` to call the simplified loader signature.
+- Simplified client-side run filtering in `frontend/src/components/AutomationsPage.tsx`:
+  - removed duplicate status/scope/delivery/date filtering in the `scopedRuns` memo,
+  - retained only client-local scope selector (`job scope`) + search text filtering and sorting, while relying on server filters for status/scope/channel/date.
+- Hardened datetime comparisons in `backend/automation.py` run-history endpoint:
+  - added `_normalize_datetime` to convert both query datetimes and run timestamps to UTC-aware values,
+  - now safely handles naive datetime query params without mixed aware/naive comparison errors.
+- Added an explicit TODO comment in `backend/automation.py` noting that in-memory run-history filtering should migrate to DB-backed querying if history size grows.
+
+### What works / what does not
+- Works:
+  - run-history filter changes now re-fetch correctly instead of reusing stale filtered subsets,
+  - infinite-loop dependency risk from callback/cache coupling is removed,
+  - datetime range filters no longer risk `TypeError` on naive-vs-aware comparisons,
+  - frontend build and targeted tests pass.
+- Does not / caveats:
+  - Run history is still an in-memory ring buffer; DB-backed history/filtering remains future work.
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so checklist py_compile command still errors for missing file.
+
+### Next steps
+1. Add API tests that exercise date-only (`YYYY-MM-DD`) and full-ISO date filters to guard normalized datetime behavior.
+2. Add run-history endpoint tests covering filter transitions and frontend state sync behavior.
+3. Design DB-backed run-history persistence + indexed filtering path once history retention exceeds in-memory limits.
+
+### Blockers / decisions
+- Decision: rely on server-side status/scope/channel/date filtering to avoid duplicated filter logic drift on the client.
+- Decision: keep only local scope/search/sort operations client-side.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.45 - April 21, 2026 (PR review follow-up: explicit run-history effect dependencies)
+
+### What changed
+- Updated run-history loading effect dependencies in `frontend/src/components/AutomationsPage.tsx` to explicitly include the active server filter states (`runStatus`, `runScopeFilter`, `runDeliveryFilter`, `runDateFrom`, `runDateTo`) in addition to `runScope`, `tasks`, and `loadRunHistoryForTask`.
+- This removes ambiguity around stale closures in effect-triggered run fetches and makes the re-fetch contract explicit when any server-backed filter input changes.
+
+### What works / what does not
+- Works:
+  - run history reload effect now has explicit dependency tracking for all server-side filter inputs,
+  - targeted automation schema test and websocket smoke test pass,
+  - frontend build passes.
+- Does not / caveats:
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so checklist py_compile command still errors for missing file.
+
+### Next steps
+1. Add frontend unit/integration tests for the run-history effect trigger matrix (`scope + server filter` combinations).
+2. Add abort/cancellation handling for overlapping run-history fetches to reduce race risk under rapid filter changes.
+3. Continue planned migration from in-memory run history to DB-backed query path as volume grows.
+
+### Blockers / decisions
+- Decision: keep effect dependencies explicit for readability and to prevent future stale-closure regressions.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).

@@ -11,10 +11,14 @@ interface ScheduledTask {
   prompt: string
   cron_expr: string
   timezone: string
+  session_scope?: 'main' | 'isolated'
+  wake_mode?: 'now' | 'next-heartbeat' | 'scheduled'
+  delivery_channel?: string
   enabled: boolean
   last_run_at?: string
   next_run_at?: string
   last_status: TaskStatus
+  last_run_status?: TaskStatus
   last_error?: string
   run_count: number
   created_at: string
@@ -27,6 +31,13 @@ interface TaskRun {
   finished_at?: string
   status: TaskStatus
   error?: string | null
+  session_scope?: 'main' | 'isolated'
+  wake_mode?: string
+  delivery_channel?: string
+  last_run_status?: TaskStatus
+  last_run_at?: string
+  next_run_at?: string
+  reflection_candidate?: boolean
 }
 
 interface TaskMutationPayload {
@@ -47,6 +58,9 @@ interface TaskApiPayload {
   prompt: string
   cron_expr: string
   timezone: string
+  session_scope: 'main' | 'isolated'
+  wake_mode: 'now' | 'next-heartbeat' | 'scheduled'
+  delivery_channel: string
 }
 
 const PRESETS: { label: string; value: string }[] = [
@@ -528,6 +542,11 @@ export function AutomationsPage() {
 
   const [runScope, setRunScope] = useState<'all' | string>('all')
   const [runStatus, setRunStatus] = useState<'all' | TaskStatus>('all')
+  const [runScopeFilter, setRunScopeFilter] = useState<'all' | 'main' | 'isolated'>('all')
+  const [runDeliveryFilter, setRunDeliveryFilter] = useState<'all' | string>('all')
+  const [runDateFrom, setRunDateFrom] = useState('')
+  const [runDateTo, setRunDateTo] = useState('')
+  const [runSort, setRunSort] = useState<'started_desc' | 'started_asc' | 'finished_desc' | 'finished_asc'>('started_desc')
   const [runSearch, setRunSearch] = useState('')
   const [runPage, setRunPage] = useState(1)
   const runPageSize = 5
@@ -555,14 +574,23 @@ export function AutomationsPage() {
       prompt,
       cron_expr: data.cron_expr,
       timezone: data.timezone,
+      session_scope: 'main',
+      wake_mode: 'now',
+      delivery_channel: 'chat',
     }
   }, [workflows])
 
-  const loadRunHistoryForTask = useCallback(async (task: ScheduledTask, force = false) => {
-    if (!force && runHistoryByTask[task.id]) return
+  const loadRunHistoryForTask = useCallback(async (task: ScheduledTask) => {
     setRunHistoryLoading(true)
     try {
-      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/runs`), { credentials: 'include' })
+      const params = new URLSearchParams()
+      if (runStatus !== 'all') params.set('status', runStatus)
+      if (runScopeFilter !== 'all') params.set('scope', runScopeFilter)
+      if (runDeliveryFilter !== 'all') params.set('delivery_channel', runDeliveryFilter)
+      if (runDateFrom) params.set('date_from', new Date(runDateFrom).toISOString())
+      if (runDateTo) params.set('date_to', new Date(`${runDateTo}T23:59:59.999Z`).toISOString())
+      const query = params.toString()
+      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/runs${query ? `?${query}` : ''}`), { credentials: 'include' })
       if (!response.ok) return
       const body = await response.json()
       const items = Array.isArray(body.runs) ? body.runs : []
@@ -575,7 +603,7 @@ export function AutomationsPage() {
     } finally {
       setRunHistoryLoading(false)
     }
-  }, [runHistoryByTask])
+  }, [runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo])
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -686,7 +714,7 @@ export function AutomationsPage() {
       })
       setTimeout(() => {
         const ranTask = tasks.find((task) => task.id === taskId)
-        if (ranTask) void loadRunHistoryForTask(ranTask, true)
+        if (ranTask) void loadRunHistoryForTask(ranTask)
         void fetchTasks()
       }, 1200)
     } finally {
@@ -723,31 +751,38 @@ export function AutomationsPage() {
   const flattenedRuns = useMemo(() => Object.values(runHistoryByTask).flat(), [runHistoryByTask])
 
   const scopedRuns = useMemo(() => {
-    const sorted = [...flattenedRuns].sort(
-      (a, b) => new Date(b.started_at ?? b.finished_at ?? 0).getTime() - new Date(a.started_at ?? a.finished_at ?? 0).getTime(),
-    )
-    return sorted.filter((run) => {
+    const filtered = flattenedRuns.filter((run) => {
       const matchesScope = runScope === 'all' || run.taskId === runScope
-      const matchesStatus = runStatus === 'all' || run.status === runStatus
       const haystack = `${run.taskName} ${run.error ?? ''}`.toLowerCase()
       const matchesSearch = !runSearch.trim() || haystack.includes(runSearch.toLowerCase())
-      return matchesScope && matchesStatus && matchesSearch
+      return matchesScope && matchesSearch
     })
-  }, [flattenedRuns, runScope, runStatus, runSearch])
+    const sorted = [...filtered].sort((a, b) => {
+      const aStarted = new Date(a.started_at ?? a.finished_at ?? 0).getTime()
+      const bStarted = new Date(b.started_at ?? b.finished_at ?? 0).getTime()
+      const aFinished = new Date(a.finished_at ?? a.started_at ?? 0).getTime()
+      const bFinished = new Date(b.finished_at ?? b.started_at ?? 0).getTime()
+      if (runSort === 'started_asc') return aStarted - bStarted
+      if (runSort === 'finished_desc') return bFinished - aFinished
+      if (runSort === 'finished_asc') return aFinished - bFinished
+      return bStarted - aStarted
+    })
+    return sorted
+  }, [flattenedRuns, runScope, runSearch, runSort])
 
   const totalPages = Math.max(1, Math.ceil(scopedRuns.length / runPageSize))
   const pagedRuns = scopedRuns.slice((runPage - 1) * runPageSize, runPage * runPageSize)
 
   useEffect(() => {
     setRunPage(1)
-  }, [runScope, runStatus, runSearch])
+  }, [runScope, runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo, runSort, runSearch])
 
   useEffect(() => {
     if (runScope === 'all') return
     const task = tasks.find((row) => row.id === runScope)
     if (!task) return
     void loadRunHistoryForTask(task)
-  }, [runScope, tasks, loadRunHistoryForTask])
+  }, [runScope, tasks, loadRunHistoryForTask, runStatus, runScopeFilter, runDeliveryFilter, runDateFrom, runDateTo])
 
   if (loading) {
     return <div className='flex h-full items-center justify-center text-sm text-zinc-400'>Loading automations…</div>
@@ -812,7 +847,7 @@ export function AutomationsPage() {
             <p className='text-xs text-zinc-500'>{filteredTasks.length} shown of {tasks.length}</p>
           </div>
 
-          <div className='grid grid-cols-1 gap-2 md:grid-cols-3'>
+          <div className='grid grid-cols-1 gap-2 md:grid-cols-4'>
             <input
               value={jobSearch}
               onChange={(event) => setJobSearch(event.target.value)}
@@ -947,6 +982,45 @@ export function AutomationsPage() {
               placeholder='Search error or job'
               className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
             />
+            <select
+              value={runScopeFilter}
+              onChange={(event) => setRunScopeFilter(event.target.value as 'all' | 'main' | 'isolated')}
+              className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+            >
+              <option value='all'>All session scopes</option>
+              <option value='main'>Main</option>
+              <option value='isolated'>Isolated</option>
+            </select>
+            <select
+              value={runDeliveryFilter}
+              onChange={(event) => setRunDeliveryFilter(event.target.value)}
+              className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+            >
+              <option value='all'>All channels</option>
+              <option value='chat'>chat</option>
+            </select>
+            <input
+              type='date'
+              value={runDateFrom}
+              onChange={(event) => setRunDateFrom(event.target.value)}
+              className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+            />
+            <input
+              type='date'
+              value={runDateTo}
+              onChange={(event) => setRunDateTo(event.target.value)}
+              className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+            />
+            <select
+              value={runSort}
+              onChange={(event) => setRunSort(event.target.value as 'started_desc' | 'started_asc' | 'finished_desc' | 'finished_asc')}
+              className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+            >
+              <option value='started_desc'>Started (newest)</option>
+              <option value='started_asc'>Started (oldest)</option>
+              <option value='finished_desc'>Finished (newest)</option>
+              <option value='finished_asc'>Finished (oldest)</option>
+            </select>
           </div>
 
           <div className='mt-4 space-y-2'>
@@ -965,6 +1039,11 @@ export function AutomationsPage() {
                 </div>
                 <p className='mt-1 text-xs text-zinc-500'>Started: {formatDateTime(run.started_at)}</p>
                 <p className='mt-1 text-xs text-zinc-500'>Finished: {formatDateTime(run.finished_at)}</p>
+                <p className='mt-1 text-xs text-zinc-500'>Scope: {run.session_scope ?? 'main'} · Delivery: {run.delivery_channel ?? 'chat'} · Wake: {run.wake_mode ?? 'now'}</p>
+                <p className='mt-1 text-xs text-zinc-500'>Last run status: {run.last_run_status ?? run.status} · Last run at: {formatDateTime(run.last_run_at)} · Next run at: {formatDateTime(run.next_run_at)}</p>
+                {run.reflection_candidate && (
+                  <p className='mt-1 inline-flex rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] text-violet-200'>reflection_candidate</p>
+                )}
                 {run.error && <p className='mt-1 text-xs text-red-300'>Error: {run.error}</p>}
               </article>
             ))}

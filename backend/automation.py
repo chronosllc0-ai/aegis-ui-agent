@@ -19,7 +19,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,6 +86,9 @@ def _task_to_dict(task: ScheduledTask) -> dict[str, Any]:
         "execution_target_type": execution_target_type,
         "assistant_task_prompt": assistant_task_prompt,
         "workflow_id": workflow_id,
+        "session_scope": task.session_scope or "main",
+        "wake_mode": task.wake_mode or "now",
+        "delivery_channel": task.delivery_channel or "chat",
         "prompt": task.prompt if execution_target_type == "assistant_prompt" else None,
         "cron_expr": task.cron_expr,
         "timezone": task.timezone,
@@ -93,6 +96,7 @@ def _task_to_dict(task: ScheduledTask) -> dict[str, Any]:
         "last_run_at": task.last_run_at.isoformat() if task.last_run_at else None,
         "next_run_at": task.next_run_at.isoformat() if task.next_run_at else None,
         "last_status": task.last_status,
+        "last_run_status": task.last_status,
         "last_error": task.last_error,
         "run_count": task.run_count,
         "created_at": task.created_at.isoformat() if task.created_at else None,
@@ -124,6 +128,9 @@ class TaskCreate(BaseModel):
     prompt: str | None = None  # legacy alias for assistant_task_prompt
     cron_expr: str
     timezone: str = "UTC"
+    session_scope: Literal["main", "isolated"] = "main"
+    wake_mode: Literal["now", "next-heartbeat", "scheduled"] = "now"
+    delivery_channel: str = "chat"
 
     @field_validator("cron_expr")
     @classmethod
@@ -162,6 +169,9 @@ class TaskUpdate(BaseModel):
     cron_expr: str | None = None
     timezone: str | None = None
     enabled: bool | None = None
+    session_scope: Literal["main", "isolated"] | None = None
+    wake_mode: Literal["now", "next-heartbeat", "scheduled"] | None = None
+    delivery_channel: str | None = None
 
     @field_validator("cron_expr")
     @classmethod
@@ -217,6 +227,23 @@ def _record_run(task_id: str, entry: dict[str, Any]) -> None:
         buf.pop()
 
 
+def _parse_history_ts(entry: dict[str, Any]) -> datetime | None:
+    ts_value = entry.get("started_at") or entry.get("finished_at")
+    if not isinstance(ts_value, str) or not ts_value:
+        return None
+    try:
+        return datetime.fromisoformat(ts_value)
+    except ValueError:
+        return None
+
+
+def _normalize_datetime(value: datetime) -> datetime:
+    """Normalize parsed datetimes to timezone-aware UTC for safe comparisons."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -252,6 +279,9 @@ async def create_task(
         execution_target_type=body.execution_target_type,
         prompt=body.prompt or body.assistant_task_prompt or "",
         workflow_id=body.workflow_id,
+        session_scope=body.session_scope,
+        wake_mode=body.wake_mode,
+        delivery_channel=(body.delivery_channel or "chat").strip() or "chat",
         cron_expr=body.cron_expr,
         timezone=body.timezone,
         enabled=True,
@@ -303,6 +333,12 @@ async def update_task(
         task.enabled = body.enabled
     if body.timezone is not None:
         task.timezone = body.timezone
+    if body.session_scope is not None:
+        task.session_scope = body.session_scope
+    if body.wake_mode is not None:
+        task.wake_mode = body.wake_mode
+    if body.delivery_channel is not None:
+        task.delivery_channel = body.delivery_channel.strip() or "chat"
 
     cron_changed = body.cron_expr is not None
     if cron_changed:
@@ -357,6 +393,11 @@ async def trigger_run(
 async def get_run_history(
     task_id: str,
     request: Request,
+    status: Literal["pending", "running", "success", "failed"] | None = Query(default=None),
+    scope: Literal["main", "isolated"] | None = Query(default=None),
+    delivery_channel: str | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     user = _get_current_user(request)
@@ -364,4 +405,27 @@ async def get_run_history(
     if not task or task.user_id != user["uid"]:
         raise HTTPException(status_code=404, detail="Task not found")
     history = _run_history.get(task_id, [])
+    # TODO: run history is currently an in-memory ring buffer; if this grows beyond
+    # small operational size, migrate history + filtering to DB-backed queries.
+    normalized_date_from = _normalize_datetime(date_from) if date_from is not None else None
+    normalized_date_to = _normalize_datetime(date_to) if date_to is not None else None
+    if status is not None:
+        history = [entry for entry in history if entry.get("status") == status]
+    if scope is not None:
+        history = [entry for entry in history if entry.get("session_scope") == scope]
+    if delivery_channel is not None:
+        normalized_channel = delivery_channel.strip().lower()
+        history = [entry for entry in history if str(entry.get("delivery_channel", "")).lower() == normalized_channel]
+    if normalized_date_from is not None:
+        history = [
+            entry
+            for entry in history
+            if (parsed_ts := _parse_history_ts(entry)) is not None and _normalize_datetime(parsed_ts) >= normalized_date_from
+        ]
+    if normalized_date_to is not None:
+        history = [
+            entry
+            for entry in history
+            if (parsed_ts := _parse_history_ts(entry)) is not None and _normalize_datetime(parsed_ts) <= normalized_date_to
+        ]
     return {"runs": history}
