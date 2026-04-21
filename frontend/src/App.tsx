@@ -716,12 +716,31 @@ function App() {
     handleSend(instruction, metadata)
   }
 
+  const browserSendBlocked = connectionStatus !== 'connected' || (isWorking && settings.steeringMode === 'auto')
+
+  const dispatchPromptFromBrowserView = useCallback((instruction: string, source: 'browser_composer' | 'browser_example') => {
+    const trimmed = instruction.trim()
+    if (!trimmed) return false
+    if (browserSendBlocked) {
+      if (connectionStatus !== 'connected') {
+        toastCtx.error('Agent offline', 'Reconnect to send instructions from browser view.')
+      } else {
+        toastCtx.error('Auto mode running', 'Switch from Auto mode or wait for the task to complete before sending.')
+      }
+      return false
+    }
+    dispatchPromptFromUI(trimmed, {
+      task_label_source: 'chat',
+      task_label: trimmed,
+      ui_surface: source,
+    })
+    return true
+  }, [browserSendBlocked, connectionStatus, dispatchPromptFromUI, toastCtx])
+
   const submitBrowserInstruction = useCallback(() => {
-    const trimmed = browserInstructionInput.trim()
-    if (!trimmed) return
-    dispatchPromptFromUI(trimmed)
-    setBrowserInstructionInput('')
-  }, [browserInstructionInput, dispatchPromptFromUI])
+    const sent = dispatchPromptFromBrowserView(browserInstructionInput, 'browser_composer')
+    if (sent) setBrowserInstructionInput('')
+  }, [browserInstructionInput, dispatchPromptFromBrowserView])
 
   const routeBrowserCommandToChatComposer = useCallback((instruction: string) => {
     const trimmed = instruction.trim()
@@ -1064,11 +1083,18 @@ function App() {
                 aria-label='Send instruction'
                 value={browserInstructionInput}
                 onChange={(event) => setBrowserInstructionInput(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && submitBrowserInstruction()}
+                onKeyDown={(event) => event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && submitBrowserInstruction()}
                 placeholder='Send instruction from browser view (same execution path as chat)'
                 className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm'
               />
-              <button type='button' onClick={submitBrowserInstruction} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 sm:px-3'>Send</button>
+              <button
+                type='button'
+                onClick={submitBrowserInstruction}
+                disabled={browserSendBlocked || !browserInstructionInput.trim()}
+                className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3'
+              >
+                Send
+              </button>
             </section>
           )}
 
@@ -1164,7 +1190,7 @@ function App() {
                       steeringFlashKey={steeringFlashKey}
                       onExampleClick={(prompt) => {
                         console.info('[AegisUI] example_click -> send prompt immediately')
-                        dispatchPromptFromUI(prompt)
+                        dispatchPromptFromBrowserView(prompt, 'browser_example')
                       }}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}

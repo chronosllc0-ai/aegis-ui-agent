@@ -6262,3 +6262,33 @@
 ### Blockers / decisions
 - Decision: keep browser composer as single-line input and treat modified Enter as non-submit.
 - Blocker: none beyond known missing checklist file.
+
+## Session 6.38 - April 21, 2026 (Main-branch bugfix: browser composer guard parity + metadata parity)
+
+### What changed
+- Updated `frontend/src/App.tsx` browser-view send path to enforce the same key send guards used by chat behavior:
+  - block sends when websocket is disconnected,
+  - block sends when runtime is working in `Auto` steering mode.
+- Added `dispatchPromptFromBrowserView(...)` helper so browser composer and browser example cards both use one guarded path.
+- Added parity metadata for browser-origin sends:
+  - `task_label_source: 'chat'`,
+  - `task_label`,
+  - `ui_surface` (`browser_composer` / `browser_example`).
+- Updated browser Send button disabled state to reflect guard conditions and empty-input state.
+- Extended Enter handler guard to also ignore `Meta+Enter` (in addition to Shift/Ctrl/Alt modifiers).
+
+### What works / what does not
+- Works:
+  - Browser composer no longer bypasses chat-intended safety conditions.
+  - Browser example click and browser composer now both carry task-label metadata parity.
+  - Guarded states provide immediate user feedback via toast errors instead of silently attempting sends.
+- Does not / caveats:
+  - Existing AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is still missing for py_compile checklist command.
+
+### Next steps
+1. Add a regression UI test asserting browser composer is disabled while `isWorking && steeringMode === 'auto'`.
+2. Add payload-level test asserting `task_label_source` / `task_label` are present for browser example dispatch.
+
+### Blockers / decisions
+- Decision: keep browser-origin task labels aligned to chat label semantics for downstream telemetry/title consistency.
+- Blocker: none beyond known missing checklist file.
