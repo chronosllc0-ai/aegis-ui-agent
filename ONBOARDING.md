@@ -6686,3 +6686,23 @@
 ### Blockers / decisions
 - Decision: prioritize automated behavior coverage first (wizard + automation APIs) while deferring mobile visual verification until screenshot tooling is available.
 - Blocker: no browser screenshot tool accessible in this environment during this pass.
+
+## Session 6.47 - April 21, 2026 (Review follow-up: automation endpoint test isolation)
+
+### What changed
+- Fixed `tests/test_automation_endpoints.py::test_create_and_update_saved_workflow_validation_errors` to initialize its own DB and seed user state (`_init_test_db(tmp_path)` + `_seed_user()`), removing hidden order dependence on previous tests.
+
+### What works / what does not
+- Works:
+  - Running the test in isolation now passes without requiring prior test-side `init_db` setup.
+  - Full `tests/test_automation_endpoints.py` continues to pass.
+- Does not / caveats:
+  - Existing upstream dependency warning (`authlib.jose` deprecation) remains unchanged.
+
+### Next steps
+1. Keep endpoint tests self-contained as new cases are added (always include local DB bootstrap for each test).
+2. Consider adding a tiny fixture to centralize automation test DB/user setup and reduce duplication.
+
+### Blockers / decisions
+- Decision: prioritize explicit per-test setup over shared implicit state to avoid flaky selection/reordering behavior.
+- Blocker: none.

@@ -140,7 +140,10 @@ def test_run_history_filters_by_status_scope_channel_and_date(tmp_path: Path) ->
     assert filtered.json()["runs"][0]["status"] == "success"
 
 
-def test_create_and_update_saved_workflow_validation_errors() -> None:
+def test_create_and_update_saved_workflow_validation_errors(tmp_path: Path) -> None:
+    _init_test_db(tmp_path)
+    asyncio.run(_seed_user())
+
     with patch("backend.automation._compute_next_run", return_value=None):
         with patch("auth._verify_session", side_effect=_mock_verify_session):
             app = _build_app()
