@@ -6241,3 +6241,24 @@
 - Decision: keep execution source-of-truth in runtime state (`isWorking`, `handoffActive`, task/session IDs), not view state.
 - Decision: preserve browse noise filtering in chat while maintaining summary/handoff visibility.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.37 - April 21, 2026 (Review follow-up: comment accuracy + Enter key guard)
+
+### What changed
+- Updated `frontend/src/App.tsx` browser composer key handler to only submit on plain Enter (no Shift/Ctrl/Alt modifiers).
+- Updated example click log copy in browser view from “pre-fill composer” to “send prompt immediately” to match actual behavior (`dispatchPromptFromUI(prompt)`).
+
+### What works / what does not
+- Works:
+  - Review-reported log/message mismatch is resolved.
+  - Browser composer Enter behavior now avoids modified-key accidental submits.
+- Does not / caveats:
+  - Existing AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is missing for py_compile command.
+
+### Next steps
+1. If multiline browser composer input is desired later, switch to `<textarea>` and preserve plain Enter submit via explicit shortcut UX.
+2. Add a focused UI test for browser composer key handling (plain Enter submits; modified Enter does not).
+
+### Blockers / decisions
+- Decision: keep browser composer as single-line input and treat modified Enter as non-submit.
+- Blocker: none beyond known missing checklist file.

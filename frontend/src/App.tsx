@@ -1064,7 +1064,7 @@ function App() {
                 aria-label='Send instruction'
                 value={browserInstructionInput}
                 onChange={(event) => setBrowserInstructionInput(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && submitBrowserInstruction()}
+                onKeyDown={(event) => event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && submitBrowserInstruction()}
                 placeholder='Send instruction from browser view (same execution path as chat)'
                 className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm'
               />
