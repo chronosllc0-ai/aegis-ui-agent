@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import (
@@ -41,8 +43,6 @@ async def migrate_user_to_sessions_first(
         session_id=SESSION_MAIN_ID,
         title="Main session",
     )
-    await db.commit()
-
     return {
         "user_id": user_id,
         "archived_conversations": archived_conversations,
@@ -66,9 +66,8 @@ async def _archive_legacy_conversations(db: AsyncSession, *, user_id: str, platf
     archived = 0
     for row in rows:
         key = f"conversation:{row.id}"
-        if await _archive_exists(db, archive_key=key):
-            row.status = "archived"
-            continue
+        # NOTE: this currently snapshots the full conversation into memory.
+        # If very large histories are expected, replace this with batched reads.
         messages = (
             await db.execute(
                 select(ConversationMessage)
@@ -96,8 +95,9 @@ async def _archive_legacy_conversations(db: AsyncSession, *, user_id: str, platf
                 for m in messages
             ],
         }
-        db.add(
-            LegacySessionArchive(
+        inserted = await _insert_archive_if_absent(
+            db,
+            archive=LegacySessionArchive(
                 id=str(uuid4()),
                 user_id=user_id,
                 platform=platform,
@@ -106,10 +106,11 @@ async def _archive_legacy_conversations(db: AsyncSession, *, user_id: str, platf
                 source_id=row.id,
                 payload_json=json.dumps(payload),
                 archived_at=datetime.now(timezone.utc),
-            )
+            ),
         )
         row.status = "archived"
-        archived += 1
+        if inserted:
+            archived += 1
     return archived
 
 
@@ -129,9 +130,8 @@ async def _archive_legacy_sessions(db: AsyncSession, *, user_id: str, platform: 
     archived = 0
     for row in rows:
         key = f"chat_session:{row.id}"
-        if await _archive_exists(db, archive_key=key):
-            row.status = "archived"
-            continue
+        # NOTE: this currently snapshots the full session thread into memory.
+        # If very large histories are expected, replace this with batched reads.
         messages = (
             await db.execute(
                 select(ChatSessionMessage)
@@ -160,8 +160,9 @@ async def _archive_legacy_sessions(db: AsyncSession, *, user_id: str, platform: 
                 for m in messages
             ],
         }
-        db.add(
-            LegacySessionArchive(
+        inserted = await _insert_archive_if_absent(
+            db,
+            archive=LegacySessionArchive(
                 id=str(uuid4()),
                 user_id=user_id,
                 platform=platform,
@@ -170,15 +171,35 @@ async def _archive_legacy_sessions(db: AsyncSession, *, user_id: str, platform: 
                 source_id=row.id,
                 payload_json=json.dumps(payload),
                 archived_at=datetime.now(timezone.utc),
-            )
+            ),
         )
         row.status = "archived"
-        archived += 1
+        if inserted:
+            archived += 1
     return archived
 
 
-async def _archive_exists(db: AsyncSession, *, archive_key: str) -> bool:
-    existing = (
-        await db.execute(select(LegacySessionArchive.id).where(LegacySessionArchive.archive_key == archive_key))
-    ).scalar_one_or_none()
-    return existing is not None
+async def _insert_archive_if_absent(db: AsyncSession, *, archive: LegacySessionArchive) -> bool:
+    """Insert archive row atomically; ignore duplicates created by concurrent requests."""
+    values = {
+        "id": archive.id,
+        "user_id": archive.user_id,
+        "platform": archive.platform,
+        "archive_key": archive.archive_key,
+        "source_type": archive.source_type,
+        "source_id": archive.source_id,
+        "payload_json": archive.payload_json,
+        "archived_at": archive.archived_at,
+    }
+    bind = db.bind
+    dialect_name = bind.dialect.name if bind is not None else ""
+    if dialect_name == "postgresql":
+        stmt = pg_insert(LegacySessionArchive).values(**values).on_conflict_do_nothing(index_elements=["archive_key"])
+    elif dialect_name == "sqlite":
+        stmt = sqlite_insert(LegacySessionArchive).values(**values).on_conflict_do_nothing(index_elements=["archive_key"])
+    else:
+        db.add(archive)
+        await db.flush()
+        return True
+    result = await db.execute(stmt)
+    return bool(result.rowcount)

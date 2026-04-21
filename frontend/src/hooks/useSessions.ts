@@ -34,7 +34,7 @@ export function useSessions(userUid: string | null) {
       const data = await res.json() as { ok: boolean; sessions: ServerSession[] }
       if (data.ok) setSessions(data.sessions)
     } catch {
-      setSessions((prev) => prev)
+      // keep existing cached state when network fetch fails
     }
   }, [userUid])
 

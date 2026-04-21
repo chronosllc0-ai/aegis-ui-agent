@@ -1561,6 +1561,7 @@ async def list_conversations(
     user = _get_current_user(request)
     uid = user["uid"]
     await migrate_user_to_sessions_first(db, user_id=uid, platform="web")
+    await db.commit()
     from sqlalchemy import select as sa_select, desc as sa_desc
     from backend.database import ChatSession as SessionModel
     stmt = (
@@ -1595,6 +1596,7 @@ async def list_sessions(
     user = _get_current_user(request)
     uid = user["uid"]
     await migrate_user_to_sessions_first(db, user_id=uid, platform="web")
+    await db.commit()
     from sqlalchemy import select as sa_select, desc as sa_desc
     from backend.database import ChatSession as SessionModel, Conversation as ConvModel
     rows: list[Any]
