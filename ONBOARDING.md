@@ -7307,3 +7307,33 @@
 - No browser screenshot tool available in this environment.
 
 ---
+## Session 5.89 - April 21, 2026 (TopBar review fixes: mobile close behavior + icon/accessibility + formatting)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Updated `frontend/src/components/ui/TopBar.tsx` mobile actions drawer behavior to close on outside pointer interactions and `Escape` key via `useEffect` document listeners when the drawer is open.
+- Replaced unicode kebab glyph with an inline SVG 3-dot icon marked `aria-hidden='true'` for more consistent rendering and better accessibility semantics.
+- Fixed mis-indented `HeaderMeta` fields in `frontend/src/components/settings/StandaloneSettingsPage.tsx`.
+
+### What's Working
+- Mobile header action drawer no longer traps users in an always-open state.
+- Kebab trigger uses a deterministic icon primitive with explicit accessibility treatment.
+- Header metadata typing block is now cleanly formatted.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` remains inapplicable because that file does not exist in this repository.
+- Browser screenshot capture is still unavailable in this runtime.
+
+### Next Steps
+1. Add a lightweight component test for outside-click + Escape-close behavior in `TopBar`.
+2. Consider extracting a shared icon token for kebab/more-actions controls used across the app.
+
+### Decisions Made
+- Kept the close listeners scoped to the open state only to avoid unnecessary global event handling when the drawer is closed.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---

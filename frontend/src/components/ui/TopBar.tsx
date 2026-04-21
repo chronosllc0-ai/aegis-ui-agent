@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 export type TopBarProps = {
   title: string
@@ -19,6 +19,35 @@ export function TopBar({
 }: TopBarProps) {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const [helperOpen, setHelperOpen] = useState(helperDefaultOpen)
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!mobileActionsOpen) return
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!mobileMenuRef.current) return
+      const target = event.target as Node | null
+      if (target && !mobileMenuRef.current.contains(target)) {
+        setMobileActionsOpen(false)
+      }
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileActionsOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('touchstart', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('touchstart', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [mobileActionsOpen])
 
   return (
     <header className={`sticky top-1 z-20 rounded-2xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-1)]/95 px-3 py-2 backdrop-blur ${className}`}>
@@ -34,7 +63,7 @@ export function TopBar({
         {actions && (
           <>
             <div className='hidden items-center gap-2 md:flex'>{actions}</div>
-            <div className='relative md:hidden'>
+            <div ref={mobileMenuRef} className='relative md:hidden'>
               <button
                 type='button'
                 aria-label='Open header actions'
@@ -42,7 +71,11 @@ export function TopBar({
                 onClick={() => setMobileActionsOpen((prev) => !prev)}
                 className='inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-2)] text-[var(--ds-text-secondary)]'
               >
-                <span className='text-lg leading-none'>⋮</span>
+                <svg viewBox='0 0 20 20' fill='currentColor' className='h-4 w-4' aria-hidden='true'>
+                  <circle cx='10' cy='4' r='1.5' />
+                  <circle cx='10' cy='10' r='1.5' />
+                  <circle cx='10' cy='16' r='1.5' />
+                </svg>
               </button>
               {mobileActionsOpen && (
                 <div className='absolute right-0 z-30 mt-2 w-[min(86vw,18rem)] rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-1)] p-2 shadow-[var(--ds-shadow-soft)]'>

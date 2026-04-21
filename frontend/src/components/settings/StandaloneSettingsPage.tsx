@@ -23,9 +23,9 @@ type StandaloneSettingsPageProps = {
 
 type HeaderMeta = {
   title: string
-subtitle?: string
-status?: ReactNode
-actions?: ReactNode
+  subtitle?: string
+  status?: ReactNode
+  actions?: ReactNode
 }
 
 const HEADER_BY_TAB: Partial<Record<SettingsTab, HeaderMeta>> = {
