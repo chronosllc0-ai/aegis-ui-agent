@@ -627,4 +627,4 @@ def test_websocket_config_rejects_invalid_enabled_skill_ids_shape() -> None:
         ws.send_json({"action": "stop"})
 
     assert error["type"] == "error"
-    assert "enabled_skill_ids must be an array of strings" in error["data"]["message"]
+    assert "enabled_skill_ids must be a list of strings" in error["data"]["message"]
