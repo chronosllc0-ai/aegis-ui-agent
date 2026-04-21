@@ -7213,3 +7213,66 @@
 - None for the current requested regression scope.
 
 ---
+
+---
+## Session 5.86 - April 21, 2026 (Standalone headers for moved settings tabs/pages)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend layout pass
+
+### What Was Done
+- Added a new standalone settings-route renderer in `frontend/src/components/settings/StandaloneSettingsPage.tsx` that provides a top-level `HeaderBar` contract (title + optional subtitle + optional right-side actions) and renders moved pages without the legacy settings-shell container.
+- Updated `frontend/src/App.tsx` routing/render logic to route moved tabs (`Agent Configuration`, `API Keys`, `Billing`, `Connections`, `Memory`, `Observability`, `Skills`, `Support`, `Admin`) through the standalone page shell instead of `SettingsPage`.
+- Kept legacy `SettingsPage` behavior for non-moved settings contexts (e.g., profile/root settings), while ensuring moved pages no longer inherit “back to settings” shell affordances.
+
+### What's Working
+- Frontend build passes with the new standalone route rendering.
+- Websocket navigate smoke test still passes.
+- Moved settings routes now render as top-level pages (no nested settings card shell around page content).
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Browser screenshot capture could not be produced because no browser screenshot tool was available in this runtime.
+
+### Next Steps
+1. Add a small frontend route-level test asserting moved settings slugs render the standalone shell (and not `SettingsPage`).
+2. Consider moving `Profile` to the same standalone contract for full settings-surface consistency.
+
+### Decisions Made
+- Implemented route-level shell swap in `App.tsx` rather than refactoring each tab component individually, minimizing risk while meeting acceptance criteria for moved pages.
+
+### Blockers
+- No browser screenshot tooling was available in the current agent runtime.
+
+---
+## Session 5.87 - April 21, 2026 (Admin subroute slug parsing fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused routing fix pass
+
+### What Was Done
+- Fixed settings/admin route tab resolution in `frontend/src/App.tsx` so `/admin/:slug` paths parse the slug and map via `SETTINGS_ROUTE_MAP` (same behavior as `/settings/:slug`).
+- Removed the hardcoded `activeSettingsTab = isAdminPath ? 'Admin' : ...` behavior that previously forced all admin subroutes to render the Admin tab.
+- Added explicit fallback behavior:
+  - `/admin` (no slug) resolves to `Admin`.
+  - `/admin/:unknown` falls back to `Admin`.
+  - non-settings/non-admin routes clear `settingsInitialTab`.
+
+### What's Working
+- Frontend build passes after routing fix.
+- Websocket navigate smoke test passes.
+- Admin subroutes now preserve intended tab routing instead of always forcing `Admin`.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Browser screenshot capture still not available in this runtime (no browser screenshot tool provided).
+
+### Next Steps
+1. Add route-level tests that assert `/admin/api-keys`, `/admin/billing`, `/admin/memory`, etc. resolve to expected tabs.
+2. Add one regression test for `/admin` no-slug fallback to `Admin`.
+
+### Decisions Made
+- Reused existing `SETTINGS_ROUTE_MAP` to keep `/settings` and `/admin` slug parsing behavior unified and deterministic.
+
+### Blockers
+- No browser screenshot tooling available in current runtime.
