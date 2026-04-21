@@ -6566,3 +6566,49 @@
 ### Blockers / decisions
 - Decision: keep effect dependencies explicit for readability and to prevent future stale-closure regressions.
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 5.72 - April 21, 2026 (Cron jobs row actions + backend wiring pass)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend+frontend feature wiring pass
+
+### What Was Done
+- Added missing backend automation endpoints in `backend/automation.py`:
+  - `POST /api/automation/tasks/{task_id}/clone`
+  - `POST /api/automation/tasks/{task_id}/run-if-due`
+  - upgraded `DELETE /api/automation/tasks/{task_id}` to soft-delete behavior.
+- Added soft-delete persistence support in `backend/database.py` by introducing `scheduled_tasks.deleted_at` plus idempotent column migration.
+- Updated task query/ownership guards to treat soft-deleted tasks as unavailable.
+- Updated scheduler execution safeguards in `backend/task_runner.py` to skip soft-deleted tasks.
+- Expanded Jobs row actions in `frontend/src/components/AutomationsPage.tsx` to include:
+  - Edit
+  - Clone
+  - Disable/Enable
+  - Run
+  - Run if due
+  - History
+  - Remove
+- Wired all row actions to real backend endpoints with explicit response checks and user-facing errors.
+- Added confirmation dialogs for destructive actions (Disable and Remove).
+- Implemented optimistic row updates with rollback on error for toggle, remove, run, and run-if-due flows.
+
+### What's Working
+- Jobs row now exposes all requested action affordances and each action calls a live API route.
+- Soft-deleted jobs no longer appear in list/get/update/run paths.
+- Scheduler avoids executing soft-deleted tasks.
+- Frontend and backend compile/build checks passed in this environment.
+
+### What's NOT Working Yet
+- No end-to-end browser screenshot artifact captured in this environment (browser screenshot tool unavailable in this run context).
+
+### Next Steps
+1. Add API tests for clone/run-if-due/soft-delete routes (including ownership + deleted-task cases).
+2. Add frontend interaction tests for optimistic rollback behavior per action.
+3. Consider replacing `window.confirm` with a reusable styled modal for full design-system consistency.
+
+### Decisions Made
+- Kept soft-delete behind existing `DELETE` route for API compatibility while changing semantics to non-destructive removal.
+- Treated `run-if-due` as a guard endpoint that returns `{triggered:false}` instead of raising errors when a task is not due.
+
+### Blockers
+- None.

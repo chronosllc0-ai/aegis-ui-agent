@@ -687,42 +687,121 @@ export function AutomationsPage() {
   }
 
   const handleToggle = async (task: ScheduledTask, enabled: boolean) => {
-    await fetch(apiUrl(`/api/automation/tasks/${task.id}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ enabled }),
-    })
-    setTasks((previous) => previous.map((row) => (row.id === task.id ? { ...row, enabled } : row)))
+    const previousTasks = tasks
+    if (!enabled && !window.confirm(`Disable "${task.name}"?`)) return
+
+    setTasks((current) => current.map((row) => (row.id === task.id ? { ...row, enabled } : row)))
+    try {
+      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled }),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body?.detail ?? `Error ${response.status}`)
+      }
+    } catch (err: unknown) {
+      setTasks(previousTasks)
+      setError(err instanceof Error ? err.message : 'Failed to update job state')
+    }
   }
 
-  const handleDelete = async (taskId: string) => {
-    if (!window.confirm('Delete this automation job?')) return
-    await fetch(apiUrl(`/api/automation/tasks/${taskId}`), {
-      method: 'DELETE',
-      credentials: 'include',
-    })
-    await fetchTasks()
+  const handleDelete = async (task: ScheduledTask) => {
+    if (!window.confirm(`Remove "${task.name}"? This action hides the job from lists.`)) return
+    const previousTasks = tasks
+    setTasks((current) => current.filter((row) => row.id !== task.id))
+    try {
+      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}`), {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body?.detail ?? `Error ${response.status}`)
+      }
+    } catch (err: unknown) {
+      setTasks(previousTasks)
+      setError(err instanceof Error ? err.message : 'Failed to remove job')
+    }
   }
 
   const handleRun = async (taskId: string) => {
     setRunningIds((previous) => new Set(previous).add(taskId))
     try {
-      await fetch(apiUrl(`/api/automation/tasks/${taskId}/run`), {
+      const previousTasks = tasks
+      setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, last_status: 'running' } : task)))
+      const response = await fetch(apiUrl(`/api/automation/tasks/${taskId}/run`), {
         method: 'POST',
         credentials: 'include',
       })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        setTasks(previousTasks)
+        throw new Error(body?.detail ?? `Error ${response.status}`)
+      }
       setTimeout(() => {
         const ranTask = tasks.find((task) => task.id === taskId)
         if (ranTask) void loadRunHistoryForTask(ranTask)
         void fetchTasks()
       }, 1200)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger run')
     } finally {
       setRunningIds((previous) => {
         const next = new Set(previous)
         next.delete(taskId)
         return next
       })
+    }
+  }
+
+  const handleRunIfDue = async (task: ScheduledTask) => {
+    const previousTasks = tasks
+    setRunningIds((previous) => new Set(previous).add(task.id))
+    setTasks((current) => current.map((row) => (row.id === task.id ? { ...row, last_status: 'running' } : row)))
+    try {
+      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/run-if-due`), {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body?.detail ?? `Error ${response.status}`)
+      if (!body?.triggered) {
+        setTasks(previousTasks)
+        setError(`"${task.name}" is not due yet.`)
+        return
+      }
+      setTimeout(() => {
+        void fetchTasks()
+        void loadRunHistoryForTask(task)
+      }, 1200)
+    } catch (err: unknown) {
+      setTasks(previousTasks)
+      setError(err instanceof Error ? err.message : 'Failed to run due job')
+    } finally {
+      setRunningIds((previous) => {
+        const next = new Set(previous)
+        next.delete(task.id)
+        return next
+      })
+    }
+  }
+
+  const handleClone = async (task: ScheduledTask) => {
+    try {
+      const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/clone`), {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body?.detail ?? `Error ${response.status}`)
+      const clonedTask = body?.task as ScheduledTask | undefined
+      if (!clonedTask) throw new Error('Clone endpoint did not return a task payload')
+      setTasks((current) => [clonedTask, ...current])
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to clone job')
     }
   }
 
@@ -899,13 +978,20 @@ export function AutomationsPage() {
                       <p className='mt-1 text-xs text-zinc-500'>Last run: {formatDateTime(task.last_run_at)} · Runs: {task.run_count}</p>
                     </div>
 
-                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[360px]'>
+                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[460px]'>
                       <button
                         type='button'
                         onClick={() => setEditingTask(task)}
                         className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
                       >
                         Edit
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => void handleClone(task)}
+                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                      >
+                        Clone
                       </button>
                       <button
                         type='button'
@@ -923,14 +1009,21 @@ export function AutomationsPage() {
                       </button>
                       <button
                         type='button'
-                        onClick={() => setRunScope(task.id)}
-                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                        onClick={() => void handleRunIfDue(task)}
+                        className='min-h-11 rounded-lg border border-cyan-500/30 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10'
                       >
-                        View history
+                        Run if due
                       </button>
                       <button
                         type='button'
-                        onClick={() => void handleDelete(task.id)}
+                        onClick={() => setRunScope(task.id)}
+                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                      >
+                        History
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => void handleDelete(task)}
                         className='min-h-11 rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10'
                       >
                         Remove

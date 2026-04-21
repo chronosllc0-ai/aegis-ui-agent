@@ -873,6 +873,7 @@ class ScheduledTask(Base):
     last_status = Column(String(20), default="pending")  # pending | running | success | failed
     last_error = Column(Text, nullable=True)
     run_count = Column(Integer, default=0)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1000,6 +1001,7 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
         ("last_status", "ALTER TABLE scheduled_tasks ADD COLUMN last_status VARCHAR(20) DEFAULT 'pending'"),
         ("last_error", "ALTER TABLE scheduled_tasks ADD COLUMN last_error TEXT"),
         ("run_count", "ALTER TABLE scheduled_tasks ADD COLUMN run_count INTEGER DEFAULT 0"),
+        ("deleted_at", "ALTER TABLE scheduled_tasks ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"),
     ]
     for col_name, ddl in migrations:
         if col_name not in existing:
