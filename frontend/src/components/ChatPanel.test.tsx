@@ -243,6 +243,61 @@ describe('ChatPanel steering control in composer', () => {
   })
 })
 
+describe('ChatPanel control surface regressions', () => {
+  it('does not render any mode selector control', () => {
+    render(
+      <ChatPanel
+        {...baseChatPanelProps}
+        logs={[]}
+        isWorking={false}
+        onPrimarySend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+      />,
+    )
+
+    expect(screen.queryByLabelText('Mode')).not.toBeInTheDocument()
+  })
+
+  it('shows six thinking effort levels in the selector', () => {
+    const onReasoningEffortChange = vi.fn()
+    render(
+      <ChatPanel
+        {...baseChatPanelProps}
+        logs={[]}
+        isWorking={false}
+        onPrimarySend={vi.fn()}
+        onUserInputResponse={vi.fn()}
+        onDecomposePlan={vi.fn()}
+        connectionStatus='connected'
+        transcripts={[]}
+        onSwitchToBrowser={vi.fn()}
+        latestFrame={null}
+        serverMessages={[]}
+        reasoningEffort='medium'
+        onReasoningEffortChange={onReasoningEffortChange}
+      />,
+    )
+
+    const selector = screen.getByLabelText('Thinking effort')
+    const options = Array.from(selector.querySelectorAll('option'))
+    expect(options).toHaveLength(6)
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Off',
+      'Minimal',
+      'Low',
+      'Medium',
+      'High',
+      'Extra High',
+    ])
+  })
+})
+
 describe('ChatPanel noise filtering + thinking row spacing', () => {
   it('hard-deny filters noisy status artifacts from logs and server messages', async () => {
     const noisyLogs: LogEntry[] = [

@@ -28,7 +28,7 @@ def test_build_system_prompt_uses_global_and_optional_user_instructions(monkeypa
     )
     assert "Global operator instructions" in prompt_with_user
     assert "Global admin instruction" in prompt_with_user
-    assert "Runtime instructions from the user" in prompt_with_user
+    assert "User instruction (applies after global policy and workspace context)" in prompt_with_user
     assert "User override guidance" in prompt_with_user
 
     prompt_without_user = asyncio.run(
@@ -40,4 +40,4 @@ def test_build_system_prompt_uses_global_and_optional_user_instructions(monkeypa
     )
     assert "Global operator instructions" in prompt_without_user
     assert "Global admin instruction" in prompt_without_user
-    assert "Runtime instructions from the user" not in prompt_without_user
+    assert "User instruction (applies after global policy and workspace context)" not in prompt_without_user

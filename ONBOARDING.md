@@ -7179,3 +7179,37 @@
 - Browser screenshot tooling unavailable in this runtime.
 
 ---
+## Session 5.85 - April 21, 2026 (Regression guards: chat send/selector/system-prompt coverage)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused regression pass
+
+### What Was Done
+- Added frontend regression tests in `frontend/src/components/ChatPanel.test.tsx` to ensure:
+  - no mode selector is rendered in the chat composer controls.
+  - thinking selector renders exactly six effort levels (Off/Minimal/Low/Medium/High/Extra High).
+- Updated websocket config validation test wording in `tests/test_main_websocket.py` to match current server error message text (`list of strings`).
+- Updated system prompt composition assertions in `tests/test_universal_navigator_system_prompt.py` to match the current user-instruction section label.
+- Ran requested build and targeted backend/frontend regression checks.
+
+### What's Working
+- Frontend production build passes.
+- Targeted websocket start-flow and config-parse tests pass.
+- System prompt assembly test confirms global + user instruction inclusion semantics.
+- Frontend chat transcript filtering and new selector-coverage tests pass.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` remains inapplicable because that file is absent in this repository.
+- No browser screenshot was captured (no front-end visual component change requiring screenshot in this pass).
+
+### Next Steps
+1. Add a dedicated app-shell test harness that can assert chat-only shell behavior without brittle async teardown behavior.
+2. Expand websocket config tests to cover additional malformed payload variants (mixed arrays, non-string members).
+
+### Decisions Made
+- Chose to strengthen existing targeted regression suites rather than introduce a new broad app integration test that proved unstable under current async teardown behavior.
+
+### Blockers
+- None for the current requested regression scope.
+
+---
