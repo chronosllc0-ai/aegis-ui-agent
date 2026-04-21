@@ -587,43 +587,142 @@ function UsersTab() {
 /* ─── Agent Config Tab ───────────────────────────────────────────────── */
 
 function AgentConfigTab() {
+  const toast = useToast()
   const [globalStats, setGlobalStats] = useState<{ total: number; running: number; completed: number; failed: number; total_credits_used: number; by_platform: Record<string, number> } | null>(null)
   const [recentFailures, setRecentFailures] = useState<Array<{ id: string; instruction: string; error_message?: string | null; created_at?: string | null }>>([])
+  const [globalSystemInstruction, setGlobalSystemInstruction] = useState('')
+  const [platformSettingsLoading, setPlatformSettingsLoading] = useState(true)
+  const [platformSettingsLoadFailed, setPlatformSettingsLoadFailed] = useState(false)
+  const [savingInstruction, setSavingInstruction] = useState(false)
+
+  const hasWorkspaceDirective = /\b(workspace|identity\.md|soul\.md|memory\.md|user\.md)\b/i.test(globalSystemInstruction)
 
   useEffect(() => {
     void (async () => {
-      try {
-        const [statsResp, failedResp] = await Promise.all([
-          fetch(apiUrl('/api/admin/agents/stats'), { credentials: 'include' }),
-          fetch(apiUrl('/api/admin/agents/tasks?status=failed&limit=8'), { credentials: 'include' }),
-        ])
-        if (statsResp.ok) {
-          const stats = await statsResp.json() as { total: number; running: number; completed: number; failed: number; total_credits_used: number; by_platform: Record<string, number> }
-          setGlobalStats(stats)
+      void (async () => {
+        try {
+          const statsResp = await fetch(apiUrl('/api/admin/agents/stats'), { credentials: 'include' })
+          if (statsResp.ok) {
+            const stats = await statsResp.json() as { total: number; running: number; completed: number; failed: number; total_credits_used: number; by_platform: Record<string, number> }
+            setGlobalStats(stats)
+          }
+        } catch {
+          // non-critical telemetry fetch
         }
-        if (failedResp.ok) {
-          const failed = await failedResp.json() as { tasks?: Array<{ id: string; instruction: string; error_message?: string | null; created_at?: string | null }> }
-          setRecentFailures(failed.tasks ?? [])
+      })()
+      void (async () => {
+        try {
+          const failedResp = await fetch(apiUrl('/api/admin/agents/tasks?status=failed&limit=8'), { credentials: 'include' })
+          if (failedResp.ok) {
+            const failed = await failedResp.json() as { tasks?: Array<{ id: string; instruction: string; error_message?: string | null; created_at?: string | null }> }
+            setRecentFailures(failed.tasks ?? [])
+          }
+        } catch {
+          // non-critical telemetry fetch
+        }
+      })()
+      try {
+        setPlatformSettingsLoadFailed(false)
+        const platformResp = await fetch(apiUrl('/api/admin/platform-settings'), { credentials: 'include' })
+        if (platformResp.ok) {
+          const platform = await platformResp.json() as { global_system_instruction?: string }
+          setGlobalSystemInstruction(String(platform.global_system_instruction ?? ''))
+        } else {
+          setPlatformSettingsLoadFailed(true)
+          toast.error('Failed to load global system instruction')
         }
       } catch {
-        // silent - main editor still works
+        setPlatformSettingsLoadFailed(true)
+        toast.error('Failed to load global system instruction')
+      } finally {
+        setPlatformSettingsLoading(false)
       }
     })()
-  }, [])
+  }, [toast])
+
+  const saveGlobalInstruction = useCallback(async () => {
+    if (savingInstruction || platformSettingsLoadFailed) return
+    setSavingInstruction(true)
+    try {
+      const response = await fetch(apiUrl('/api/admin/platform-settings'), {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          global_system_instruction: globalSystemInstruction.trim(),
+        }),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to save')
+      }
+      toast.success('Global system instruction saved')
+    } catch {
+      toast.error('Failed to save global system instruction')
+    } finally {
+      setSavingInstruction(false)
+    }
+  }, [globalSystemInstruction, platformSettingsLoadFailed, savingInstruction, toast])
 
   return (
     <div className='max-w-2xl space-y-6'>
       <div>
         <h2 className='text-base font-semibold text-white'>Aegis Prompt Policy</h2>
         <p className='mt-1 text-xs text-zinc-400'>
-          Runtime prompting is now workspace-file driven. The immutable hidden safety baseline stays server-owned and is not editable in UI.
+          Global policy should focus on safety/tool-use guardrails and explicitly direct runtime to use workspace files for identity/personality/context.
         </p>
       </div>
 
       <div className='rounded-xl border border-amber-500/20 bg-amber-500/5 p-4'>
         <p className='text-xs font-medium text-amber-300'>Admin-only</p>
         <p className='mt-1 text-xs text-zinc-400'>
-          Update the global workspace overlay files below. These files are materialized into every runtime workspace.
+          Keep this policy scoped to runtime rules. User-specific preferences belong in User System Instructions.
+        </p>
+      </div>
+
+      <section className='space-y-3 rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
+        <div>
+          <h3 className='text-sm font-semibold text-zinc-200'>Global System Instruction</h3>
+          <p className='mt-1 text-xs text-zinc-500'>
+            Authoritative top-level instruction injected before workspace and user context.
+          </p>
+        </div>
+        <textarea
+          value={globalSystemInstruction}
+          onChange={(event) => setGlobalSystemInstruction(event.target.value)}
+          rows={7}
+          className='w-full rounded border border-[#2a2a2a] bg-[#0c0c0c] px-3 py-2 text-xs text-zinc-100'
+          placeholder='Define safety and tool-use policy. Explicitly instruct runtime to use workspace files for identity/personality/context.'
+        />
+        {platformSettingsLoading && <p className='text-xs text-zinc-500'>Loading current value…</p>}
+        {platformSettingsLoadFailed && (
+          <p className='text-xs text-amber-300'>
+            Could not load the current policy. Reload this page before saving to avoid overwriting with stale/empty content.
+          </p>
+        )}
+        {!globalSystemInstruction.trim() && (
+          <p className='text-xs text-amber-300'>Warning: Global system instruction is empty.</p>
+        )}
+        {globalSystemInstruction.trim() && !hasWorkspaceDirective && (
+          <p className='text-xs text-amber-300'>
+            Warning: Add explicit guidance to use workspace files as identity/personality/context source.
+          </p>
+        )}
+        <div className='flex justify-end'>
+          <button
+            type='button'
+            disabled={savingInstruction || platformSettingsLoading || platformSettingsLoadFailed}
+            onClick={() => void saveGlobalInstruction()}
+            className='rounded border border-[#2a2a2a] px-3 py-1.5 text-xs text-zinc-100 hover:bg-zinc-800 disabled:opacity-50'
+          >
+            {savingInstruction ? 'Saving…' : 'Save Global Instruction'}
+          </button>
+        </div>
+      </section>
+
+      <div className='rounded-xl border border-[#2a2a2a] bg-[#111] p-4'>
+        <p className='text-xs font-medium text-zinc-300'>Workspace Context Layer</p>
+        <p className='mt-1 text-xs text-zinc-500'>
+          Global workspace files are injected after global policy and before user instruction.
         </p>
       </div>
 

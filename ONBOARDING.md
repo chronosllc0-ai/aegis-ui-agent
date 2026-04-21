@@ -6953,3 +6953,71 @@
 - None.
 
 ---
+---
+## Session 5.78 - April 21, 2026 (Instruction surfaces restored)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Restored editable **Global System Instruction** in Admin → Agent Config with API load/save wiring to `/api/admin/platform-settings`.
+- Added admin helper text clarifying intent (tool-use/safety policy only) and warnings for empty policy or missing workspace-file directive language.
+- Restored editable **User System Instruction** in Settings → Agent → General with explicit CTA/privacy text and non-empty warning.
+- Updated runtime prompt assembly in `universal_navigator.py` (v2 mode) so deterministic order is now:
+  1) global policy instruction,
+  2) workspace-file context,
+  3) user instruction.
+
+### What's Working
+- Frontend build passes.
+- Python compile passes for touched runtime modules.
+- Websocket smoke test passes.
+- Both instruction surfaces are visible in UI code paths and persist through existing settings/platform APIs.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+- Screenshot artifact not captured in this run because no `browser_container` tool is available in the current environment.
+
+### Next Steps
+1. Optionally add frontend tests for admin/user instruction editor visibility and warning states.
+2. Optionally add prompt-builder unit assertions for strict v2 block ordering.
+
+### Decisions Made
+- Kept `system_instruction` wire format for user instruction to preserve backwards compatibility.
+- Applied validation as non-blocking warnings (not hard errors) to reduce admin/user friction.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
+## Session 5.79 - April 21, 2026 (PR review fixes)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Fixed prompt assembly regression by ensuring user instruction is appended as a suffix block (with delimiter) instead of being injected into the v2 prefix before core agent/tool/rules context.
+- Added a leading section delimiter to user instruction text so v1 mode no longer concatenates rules and user instruction into one sentence.
+- Updated user-facing copy in Agent settings to remove internal jargon prefix ("CTA:") while preserving the privacy/scope warning.
+- Refactored Admin Agent Config loading so global policy fetch is isolated from noncritical telemetry calls; added a load-failure guard that disables save to prevent accidental empty-policy overwrite.
+
+### What's Working
+- Frontend build passes.
+- Python compile passes for touched runtime modules.
+- Websocket smoke test passes.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+- Screenshot artifact not captured because no `browser_container` tool is available in the runtime.
+
+### Next Steps
+1. Add targeted regression tests for v1/v2 prompt block separators and ordering.
+2. Add a small UI test for admin policy load-failure save disabling behavior.
+
+### Decisions Made
+- Kept deterministic instruction ordering requirements while moving user instruction placement to a safe suffix location after tool/rules context.
+- Treated telemetry APIs as best-effort and policy load as critical path in admin editor initialization.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+

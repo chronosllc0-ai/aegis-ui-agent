@@ -980,20 +980,14 @@ async def _build_system_prompt(
         if user_workspace_overlay
         else ""
     )
-    custom_block = ""
-    if custom_instruction:
-        if prompt_mode == "v2":
-            custom_block = (
-                "\nLegacy runtime custom instruction (migration compatibility from v1 systemInstruction):\n"
-                f"{custom_instruction}\n"
-            )
-        else:
-            custom_block = (
-                "\nRuntime instructions from the user (additive — follow unless they conflict with global instructions above):\n"
-                f"{custom_instruction}\n"
-            )
+    custom_block = (
+        "\n\nUser instruction (applies after global policy and workspace context):\n"
+        f"{custom_instruction}\n\n"
+        if custom_instruction
+        else ""
+    )
     prefix_blocks = (
-        f"{baseline_block}{workspace_global_block}{workspace_user_block}"
+        f"{baseline_block}{global_block}{workspace_global_block}{workspace_user_block}"
         if prompt_mode == "v2"
         else f"{baseline_block}{global_block}{mode_block}"
     )
