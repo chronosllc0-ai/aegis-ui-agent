@@ -1120,6 +1120,8 @@ function App() {
                 isActivityVisible={isActivityVisible}
                 provider={settings.provider}
                 model={settings.model}
+                reasoningEffort={settings.reasoningEffort}
+                onReasoningEffortChange={(nextEffort) => patchSettings({ reasoningEffort: nextEffort, enableReasoning: nextEffort !== 'none' })}
                 onProviderChange={(nextProvider) => {
                   const providerMeta = PROVIDERS.find((item) => item.id === nextProvider) ?? PROVIDERS[0]
                   patchSettings({ provider: nextProvider, model: providerMeta.models[0].id })

@@ -14,6 +14,7 @@ import { SteeringControl } from './SteeringControl'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
 import { FaBrain } from 'react-icons/fa6'
 import type { SteeringMode } from '../hooks/useWebSocket'
+import { THINKING_EFFORT_LABELS, THINKING_EFFORT_LEVELS, type ReasoningEffort } from '../hooks/useSettings'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -64,6 +65,8 @@ export interface ChatPanelProps {
   model: string
   onProviderChange: (provider: string) => void
   onModelChange: (model: string) => void
+  reasoningEffort: ReasoningEffort
+  onReasoningEffortChange: (effort: ReasoningEffort) => void
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
     tokensUsed: number
@@ -1414,6 +1417,8 @@ interface InputBarCursorProps {
   model: string
   onProviderChange: (provider: string) => void
   onModelChange: (model: string) => void
+  reasoningEffort: ReasoningEffort
+  onReasoningEffortChange: (effort: ReasoningEffort) => void
   isWorking: boolean
   isDisabled: boolean
   micIsActive: boolean
@@ -1429,7 +1434,7 @@ interface InputBarCursorProps {
 
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
-  provider, model, onProviderChange, onModelChange,
+  provider, model, onProviderChange, onModelChange, reasoningEffort, onReasoningEffortChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments, steeringMode,
 }: InputBarCursorProps) {
@@ -1519,6 +1524,23 @@ function InputBarCursor({
             <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
           </label>
 
+          <label className='group relative inline-flex h-7 w-11 items-center justify-between rounded-md px-1.5 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1 sm:px-1'>
+            <FaBrain className='h-3.5 w-3.5 text-zinc-500' />
+            <select
+              value={reasoningEffort}
+              onChange={(event) => onReasoningEffortChange(event.target.value as ReasoningEffort)}
+              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none sm:static sm:max-w-[90px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100'
+              aria-label='Thinking effort'
+            >
+              {THINKING_EFFORT_LEVELS.map((effort) => (
+                <option key={effort} value={effort} className='bg-[#0f0f0f] text-zinc-100'>
+                  {THINKING_EFFORT_LABELS[effort]}
+                </option>
+              ))}
+            </select>
+            <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
+          </label>
+
           <div className='flex-1' />
 
           <button type='button' onClick={onMicClick} disabled={!micAvailable}
@@ -1576,6 +1598,8 @@ export function ChatPanel({
   onHandoffContinue,
   provider,
   model,
+  reasoningEffort,
+  onReasoningEffortChange,
   onProviderChange,
   onModelChange,
   contextSnapshot,
@@ -2265,6 +2289,8 @@ export function ChatPanel({
           onSelectSuggestion={handleSuggestionSelect}
           provider={provider}
           model={model}
+          reasoningEffort={reasoningEffort}
+          onReasoningEffortChange={onReasoningEffortChange}
           onProviderChange={onProviderChange}
           onModelChange={onModelChange}
           isWorking={isWorking}

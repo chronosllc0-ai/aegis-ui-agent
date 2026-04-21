@@ -128,7 +128,18 @@ class GoogleProvider(BaseProvider):
             config["system_instruction"] = system
 
         if enable_reasoning and model_name in GOOGLE_THINKING_MODELS:
-            _effort_to_budget = {"low": 2000, "medium": 8000, "high": 16000, "extended": 24000, "adaptive": 10000}
+            _effort_to_budget = {
+                "none": 0,
+                "minimal": 2000,
+                "low": 4000,
+                "medium": 8000,
+                "high": 16000,
+                "xhigh": 24000,
+                "extended": 24000,
+                "adaptive": 10000,
+                "x-high": 24000,
+                "extra_high": 24000,
+            }
             thinking_budget = _effort_to_budget.get(reasoning_effort, 8000)
             config["thinking_config"] = {"thinking_budget": thinking_budget}
             # Gemini thinking models do not support explicit temperature

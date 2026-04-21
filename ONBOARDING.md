@@ -6858,3 +6858,98 @@
 - None.
 
 ---
+## Session 5.75 - April 21, 2026 (Thinking effort selector canonicalization)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused implementation pass
+
+### What Was Done
+- Canonicalized frontend thinking effort state to six levels: `none|minimal|low|medium|high|xhigh`, with migration normalization for legacy stored values (`extended`, `adaptive`, on/off booleans).
+- Updated Agent settings reasoning selector UI to render the six canonical effort levels directly.
+- Added a brain-icon thinking effort selector to the composer control row (same compact selector footprint as provider/model controls), wired to settings patch updates.
+- Threaded `reasoningEffort` through `ChatPanel` props from `App`, ensuring persisted selection reaches websocket config payload via existing `reasoning_effort` mapping.
+- Removed legacy model-specific reasoning mode selector helper from frontend model catalog.
+- Expanded backend reasoning normalization aliases so legacy effort inputs normalize into canonical levels (`extended -> xhigh`, `adaptive -> medium`).
+
+### What's Working
+- Frontend build passes with updated selector wiring and type changes.
+- Websocket smoke test passes.
+- Reasoning effort remains part of websocket config as `reasoning_effort` and is now constrained to canonical levels.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+
+### Next Steps
+1. Optionally add/adjust frontend tests to assert the composer brain selector lists exactly six effort options and persists selection.
+2. Optionally add backend unit coverage for reasoning alias normalization (`extended`, `adaptive`) for regression safety.
+
+### Decisions Made
+- Kept the existing `reasoning_effort` websocket field name for compatibility and only canonicalized allowed values.
+- Preserved compact selector footprint and icon-based controls in composer row while replacing selector semantics with thinking effort.
+
+### Blockers
+- None.
+
+---
+## Session 5.76 - April 21, 2026 (PR review follow-up: effort sync + labels)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 review-fix pass
+
+### What Was Done
+- Fixed frontend normalization parity by adding `x-high` and `extra_high` aliases to `normalizeReasoningEffort`.
+- Added shared human-readable thinking effort labels (`Off`, `Minimal`, `Low`, `Medium`, `High`, `Extra High`) and applied them in both the composer brain selector and Agent settings buttons.
+- Synced reasoning enablement with effort selection in chat composer callback (`none` now forces `enableReasoning=false`; other levels enable reasoning).
+- Improved Agent settings toggle behavior so turning reasoning off sets effort `none`, and turning it back on from `none` restores `medium`.
+- Expanded backend provider/runtime effort mappings so canonical levels are explicitly honored:
+  - OpenAI/xAI normalize `minimal -> low`, `xhigh -> high` (plus aliases).
+  - Google thinking budgets now include canonical levels.
+  - Universal navigator reasoning budgets now include canonical levels.
+
+### What's Working
+- Frontend build passes.
+- Python compilation passes for all touched backend modules.
+- Websocket smoke test passes.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+
+### Next Steps
+1. Optionally add unit tests for `normalizeReasoningEffort` alias coverage (`x-high`, `extra_high`) and reasoning toggle/effort sync behavior.
+2. Optionally add provider-level tests asserting canonical efforts map to expected request params/budgets.
+
+### Decisions Made
+- Used one shared frontend label map to keep wording consistent across selector surfaces.
+- Kept provider-specific normalization conservative while guaranteeing deterministic handling of all six canonical frontend levels.
+
+### Blockers
+- None.
+
+---
+## Session 5.77 - April 21, 2026 (Review fix: none/off semantics)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted review pass
+
+### What Was Done
+- Updated Agent settings thinking-effort buttons to exclude `none` while reasoning is enabled; turning reasoning off remains controlled by the toggle only.
+- Removed `none/off/false/0 -> medium` normalization from OpenAI and xAI provider effort normalizers so provider-level effort conversion no longer overrides explicit off semantics.
+
+### What's Working
+- Frontend build passes after selector behavior adjustment.
+- Python compilation passes for touched provider modules.
+- Websocket smoke test passes.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+
+### Next Steps
+1. Optionally add targeted unit tests for AgentTab effort-button visibility and provider effort normalization edge cases.
+
+### Decisions Made
+- Kept the enable/disable toggle as the sole control for entering/leaving `none`, avoiding hidden-list UX confusion.
+
+### Blockers
+- None.
+
+---

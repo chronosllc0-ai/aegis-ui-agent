@@ -31,6 +31,10 @@ _REASONING_ALIASES: dict[str, ReasoningLevel] = {
     "1": "medium",
     "false": "none",
     "0": "none",
+    "extended": "xhigh",
+    "adaptive": "medium",
+    "x-high": "xhigh",
+    "extra_high": "xhigh",
 }
 
 

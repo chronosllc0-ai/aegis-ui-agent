@@ -28,7 +28,9 @@ OPENAI_REASONING_MODELS = {"o3", "o4-mini"}
 
 def _normalize_reasoning_effort(effort: str) -> str:
     normalized = (effort or "medium").strip().lower()
-    if normalized == "extended":
+    if normalized == "minimal":
+        return "low"
+    if normalized in {"extended", "xhigh", "x-high", "extra_high"}:
         return "high"
     if normalized == "adaptive":
         return "medium"

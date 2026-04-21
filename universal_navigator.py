@@ -2366,7 +2366,18 @@ async def run_universal_navigation(
             if enable_reasoning and on_step:
                 await on_step({"type": "reasoning_start", "step_id": thinking_step_id, "content": "[thinking]", "steering": []})
 
-            effort_budgets = {"low": 2000, "medium": 8000, "high": 16000}
+            effort_budgets = {
+                "none": 0,
+                "minimal": 2000,
+                "low": 4000,
+                "medium": 8000,
+                "high": 16000,
+                "xhigh": 24000,
+                "extended": 24000,
+                "adaptive": 10000,
+                "x-high": 24000,
+                "extra_high": 24000,
+            }
             reasoning_budget = effort_budgets.get(reasoning_effort, 8000)
             stream_kwargs: dict[str, Any] = {
                 "model": model,
