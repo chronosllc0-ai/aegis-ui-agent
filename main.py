@@ -43,14 +43,6 @@ from backend.integrations.channel_runtime import ChannelRuntimeRegistry, Discord
 from backend.integrations.text_normalization import normalize_for_channel
 from backend.gallery.router import gallery_router
 from backend.memory.router import memory_router
-from backend.modes import (
-    MODE_LABELS,
-    blocked_tools_for_mode,
-    mode_definitions,
-    normalize_agent_mode,
-    parse_mode_runtime_event,
-    serialize_mode_definition,
-)
 from backend.payments import payments_router
 from backend.planner.executor_routes import executor_router
 from backend.planner.router import planner_router
@@ -1176,71 +1168,10 @@ async def _enforce_ingress_policy(
         await session_iter.aclose()
 
 
-def _apply_runtime_mode_update(
-    runtime: SessionRuntime,
-    requested_mode_raw: object,
-    *,
-    apply: bool = True,
-) -> tuple[str, bool, str | None]:
-    """Validate/apply requested mode for a runtime and return outcome details."""
-    requested_mode, mode_valid = validate_requested_mode(requested_mode_raw)
-    if mode_valid and apply:
-        previous_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-        runtime.settings["agent_mode"] = requested_mode
-        if previous_mode != requested_mode:
-            runtime_telemetry.record_control_mode_change()
-        return requested_mode, True, None
-    allowed = ", ".join(MODE_LABELS.keys())
-    return (
-        requested_mode,
-        False,
-        f"Invalid mode `{requested_mode_raw}`. Allowed modes: {allowed}.",
-    )
-
-
-def validate_requested_mode(requested_mode_raw: object) -> tuple[str, bool]:
-    """Normalize a raw mode payload and return whether it is an allowed explicit mode."""
-    candidate = str(requested_mode_raw or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if candidate in MODE_LABELS:
-        return candidate, True
-    return normalize_agent_mode(candidate), False
-
-
 def _normalize_runtime_mode(runtime_settings: dict[str, Any]) -> str:
-    """Normalize the active runtime mode and persist canonical value in settings."""
-    normalized = normalize_agent_mode(runtime_settings.get("agent_mode", ""))
-    runtime_settings["agent_mode"] = normalized
-    return normalized
-
-
-def allowed_tool_alternatives(mode: str, *, limit: int = 8) -> list[str]:
-    """Return representative tools that remain available in the requested mode."""
-    blocked = blocked_tools_for_mode(mode)
-    candidates = (
-        "screenshot",
-        "analyze_screen",
-        "ask_user_input",
-        "memory_search",
-        "memory_read",
-        "web_search",
-        "extract_page",
-        "list_files",
-        "read_file",
-        "done",
-        "error",
-    )
-    return [tool for tool in candidates if tool not in blocked][: max(1, limit)]
-
-
-def _mode_refusal_payload(*, requested_mode: object, effective_mode: str, reason: str) -> dict[str, Any]:
-    """Create a consistent websocket payload for mode-policy refusals."""
-    return {
-        "type": "mode_policy_refusal",
-        "requested_mode": str(requested_mode or ""),
-        "effective_mode": effective_mode,
-        "reason": reason,
-        "allowed_alternatives": allowed_tool_alternatives(effective_mode),
-    }
+    """Return fixed runtime mode placeholder now that user-selectable modes are removed."""
+    _ = runtime_settings
+    return "default"
 
 
 def _get_orchestrator() -> AgentOrchestrator:
@@ -1328,42 +1259,6 @@ def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -
 async def get_providers() -> dict[str, Any]:
     """List all supported LLM providers and their models."""
     return {"ok": True, "providers": list_providers()}
-
-
-@app.get("/api/modes")
-async def get_modes(request: Request) -> dict[str, Any]:
-    """Return the canonical immutable mode registry."""
-    _get_current_user(request)
-    return {"ok": True, "modes": [serialize_mode_definition(mode.key) for mode in mode_definitions()]}
-
-
-@app.post("/api/modes")
-async def create_mode(_: dict[str, Any], request: Request) -> None:
-    """Reject mode creation; modes are immutable system-owned nodes."""
-    _get_current_user(request)
-    raise HTTPException(
-        status_code=403,
-        detail="Modes are immutable system-level nodes and cannot be created, modified, or deleted via this API.",
-    )
-
-
-@app.patch("/api/modes/{mode_key}")
-async def patch_mode(mode_key: str, _: dict[str, Any], request: Request) -> None:
-    """Reject mode mutation; protected mode policy fields are immutable."""
-    _get_current_user(request)
-    _ = mode_key
-    raise HTTPException(status_code=403, detail="Protected mode policy fields are immutable")
-
-
-@app.delete("/api/modes/{mode_key}")
-async def delete_mode(mode_key: str, request: Request) -> None:
-    """Reject mode deletion; canonical mode registry is fixed."""
-    _get_current_user(request)
-    _ = mode_key
-    raise HTTPException(
-        status_code=403,
-        detail="Modes are immutable system-level nodes and cannot be created, modified, or deleted via this API.",
-    )
 
 
 @app.get("/api/keys")
@@ -2132,55 +2027,6 @@ async def _send_workflow_step(
 ) -> None:
     """Send workflow graph step payload to frontend."""
     await websocket.send_json({"type": "workflow_step", "data": workflow_step})
-    parsed_mode_event, parse_error = parse_mode_runtime_event(workflow_step)
-    if parsed_mode_event is not None:
-        mode_event_payload = {
-            **parsed_mode_event,
-            "task_id": task_id,
-            "frontend_task_id": frontend_task_id,
-        }
-        await websocket.send_json({"type": "mode_event", "data": mode_event_payload})
-        _record_runtime_event(
-            category="mode_orchestration",
-            subsystem="mode_router",
-            level="info",
-            message=f"mode event: {parsed_mode_event.get('event_name', 'unknown')}",
-            session_id=session_id,
-            task_id=task_id,
-            details=dict(parsed_mode_event),
-        )
-        if parsed_mode_event.get("event_name") == "mode_transition":
-            await websocket.send_json(
-                {
-                    "type": "mode_transition",
-                    "data": {
-                        **parsed_mode_event.get("payload", {}),
-                        "task_id": task_id,
-                        "frontend_task_id": frontend_task_id,
-                    },
-                }
-            )
-        if parsed_mode_event.get("event_name") == "final_synthesis":
-            await websocket.send_json(
-                {
-                    "type": "final_synthesis",
-                    "data": {
-                        **parsed_mode_event.get("payload", {}),
-                        "task_id": task_id,
-                        "frontend_task_id": frontend_task_id,
-                    },
-                }
-            )
-    elif parse_error and isinstance(workflow_step, dict) and workflow_step.get("event_name"):
-        await websocket.send_json(
-            {
-                "type": "mode_event_parse_failed",
-                "data": {
-                    "error": parse_error,
-                    "raw_event_name": str(workflow_step.get("event_name", "")),
-                },
-            }
-        )
     # Workflow graph steps belong in action log, not user-facing chat history.
 
 
@@ -2262,7 +2108,6 @@ def _normalize_start_metadata(raw_metadata: object) -> dict[str, Any]:
         return {}
     allowed_keys = {
         "frontend_task_id",
-        "agent_mode",
         "task_label",
         "task_label_source",
         "source",
@@ -2970,22 +2815,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 if raw_prompt is not None
                 else ""
             ).strip()
-            requested_mode_raw = data.get("mode")
-            if requested_mode_raw is not None:
-                requested_mode, mode_valid, _ = _apply_runtime_mode_update(runtime, requested_mode_raw)
-                if not mode_valid:
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "data": _mode_refusal_payload(
-                                requested_mode=requested_mode_raw,
-                                effective_mode=requested_mode,
-                                reason="invalid_mode",
-                            ),
-                        }
-                    )
-                    continue
-            active_mode = _normalize_runtime_mode(runtime.settings)
+            _normalize_runtime_mode(runtime.settings)
             raw_metadata = data.get("metadata")
             client_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
             task_label = str(client_metadata.get("task_label", "")).strip()
@@ -3099,7 +2929,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 server_metadata = {
                     **normalized_metadata,
                     "frontend_task_id": frontend_task_id,
-                    "agent_mode": str(normalized_metadata.get("agent_mode", "") or active_mode),
                 }
                 await _log_web_message(
                     runtime,
@@ -3460,21 +3289,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 )
             elif action == "spawn_subagent":
                 # ── Spawn a sub-agent ──────────────────────────────────
-                active_mode = _normalize_runtime_mode(runtime.settings)
-                if "spawn_subagent" in blocked_tools_for_mode(active_mode):
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "data": {
-                                "type": "mode_policy_refusal",
-                                "requested_tool": "spawn_subagent",
-                                "effective_mode": active_mode,
-                                "reason": "tool_disallowed_for_mode",
-                                "allowed_alternatives": allowed_tool_alternatives(active_mode),
-                            },
-                        }
-                    )
-                    continue
+                _normalize_runtime_mode(runtime.settings)
                 sub_instruction = str(data.get("instruction", "")).strip()
                 sub_model = str(data.get("model", runtime.settings.get("model", ""))).strip()
                 if not sub_instruction:
@@ -3668,53 +3483,6 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     update = await request.json()
     result = await adapter.handle_event(update, dict(request.headers))
     owner_user_id = str(config.get("owner_user_id", "")).strip() or None
-
-    callback_mode_raw = adapter.extract_mode_selection(update)
-    if callback_mode_raw is not None:
-        callback_message = update.get("callback_query", {}).get("message", {})
-        callback_chat_id = (callback_message.get("chat") or {}).get("id")
-        callback_destination = str(callback_chat_id) if callback_chat_id is not None else None
-        if not owner_user_id:
-            if callback_destination:
-                await _send_channel_text(
-                    "telegram",
-                    integration_id,
-                    callback_destination,
-                    "⚠️ Mode switching is only available for the owner session.",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        runtime = _user_runtimes.get(owner_user_id)
-        if not runtime:
-            if callback_destination:
-                await _send_channel_text(
-                    "telegram",
-                    integration_id,
-                    callback_destination,
-                    "⚠️ No active session. Start a session first.",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, callback_mode_raw)
-        if not mode_valid:
-            if callback_destination:
-                await _send_channel_text(
-                    "telegram",
-                    integration_id,
-                    callback_destination,
-                    f"❌ {mode_error}",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        if callback_destination:
-            await _send_channel_text(
-                "telegram",
-                integration_id,
-                callback_destination,
-                f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
-                log_source="mode_switch",
-            )
-        return _channel_webhook_response(result)
 
     callback_reasoning_raw = adapter.extract_reasoning_selection(update)
     if callback_reasoning_raw is not None:
@@ -3998,51 +3766,6 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
             )
         return _channel_webhook_response(result)
 
-    selected_mode_raw = adapter.extract_mode_selection(payload if isinstance(payload, dict) else {})
-    if selected_mode_raw:
-        channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
-        if not owner_user_id:
-            if channel:
-                await _send_channel_text(
-                    "slack",
-                    integration_id,
-                    channel,
-                    "⚠️ Mode switching is only available for the owner session.",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        runtime = _user_runtimes.get(owner_user_id)
-        if not runtime:
-            if channel:
-                await _send_channel_text(
-                    "slack",
-                    integration_id,
-                    channel,
-                    "⚠️ No active session. Start a session first.",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
-        if not mode_valid:
-            if channel:
-                await _send_channel_text(
-                    "slack",
-                    integration_id,
-                    channel,
-                    f"❌ {mode_error}",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        if channel:
-            await _send_channel_text(
-                "slack",
-                integration_id,
-                channel,
-                f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
-                log_source="mode_switch",
-            )
-        return _channel_webhook_response(result)
-
     selected_reasoning_raw = adapter.extract_reasoning_selection(payload if isinstance(payload, dict) else {})
     if selected_reasoning_raw:
         channel = str(payload.get("channel", {}).get("id") or payload.get("channel_id") or "").strip()
@@ -4239,51 +3962,6 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
                 channel,
                 cmd_response,
                 log_source="slash_command",
-            )
-        return _channel_webhook_response(result)
-
-    selected_mode_raw = adapter.extract_mode_selection(payload if isinstance(payload, dict) else {})
-    if selected_mode_raw:
-        channel = str(payload.get("channel_id") or "").strip()
-        if not owner_user_id:
-            if channel:
-                await _send_channel_text(
-                    "discord",
-                    integration_id,
-                    channel,
-                    "⚠️ Mode switching is only available for the owner session.",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        runtime = _user_runtimes.get(owner_user_id)
-        if not runtime:
-            if channel:
-                await _send_channel_text(
-                    "discord",
-                    integration_id,
-                    channel,
-                    "⚠️ No active session. Start a session first.",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        selected_mode, mode_valid, mode_error = _apply_runtime_mode_update(runtime, selected_mode_raw)
-        if not mode_valid:
-            if channel:
-                await _send_channel_text(
-                    "discord",
-                    integration_id,
-                    channel,
-                    f"❌ {mode_error}",
-                    log_source="mode_switch",
-                )
-            return _channel_webhook_response(result)
-        if channel:
-            await _send_channel_text(
-                "discord",
-                integration_id,
-                channel,
-                f"✅ Mode switched to *{MODE_LABELS.get(selected_mode, selected_mode.title())}*",
-                log_source="mode_switch",
             )
         return _channel_webhook_response(result)
 
@@ -4996,7 +4674,6 @@ async def _handle_slash_command(
             "/queue <instruction> — queue for later\n"
             "/status — agent status + credits\n"
             "/model — current model\n"
-            "/mode [name] — show or switch mode\n"
             "/models — list & switch model\n"
             "/stream start|stop — live screenshots\n"
             "/reasoning [none|minimal|low|medium|high|xhigh|status] — reasoning mode\n"
@@ -5027,12 +4704,10 @@ async def _handle_slash_command(
                 break
         except Exception:
             pass
-        mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-        mode_label = MODE_LABELS.get(mode, mode.title())
         reasoning_status = runtime_reasoning_status(runtime.settings)
         reasoning_enabled = "enabled" if reasoning_status["enabled"] else "disabled"
         return (
-            f"{state}\n🧠 Model: {model} ({provider})\n🧭 Mode: {mode_label}\n"
+            f"{state}\n🧠 Model: {model} ({provider})\n"
             f"🧠 Reasoning: {reasoning_enabled}\n⚙️ Effort: {reasoning_status['label']}\n📋 Queued: {queued}{credits_info}"
         )
 
@@ -5042,16 +4717,6 @@ async def _handle_slash_command(
         model = runtime.settings.get("model", "not set")
         provider = runtime.settings.get("provider", "")
         return f"🧠 Current model: *{model}* ({provider})"
-
-    if cmd == "mode":
-        if not runtime:
-            return "⚪ No active session."
-        if not arg:
-            active_mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
-            return f"🧭 Current mode: *{MODE_LABELS.get(active_mode, active_mode.title())}*"
-        requested_mode = normalize_agent_mode(arg.replace("-", "_").replace(" ", "_"))
-        runtime.settings["agent_mode"] = requested_mode
-        return f"✅ Mode switched to *{MODE_LABELS.get(requested_mode, requested_mode.title())}*"
 
     if cmd == "models":
         providers = list_providers()
@@ -5207,12 +4872,10 @@ async def _handle_slash_command(
     if cmd == "config":
         if not runtime:
             return "⚪ No active session."
-        mode = normalize_agent_mode(runtime.settings.get("agent_mode", ""))
         return (
             "⚙️ Runtime config\n"
             f"- provider: `{runtime.settings.get('provider', '')}`\n"
             f"- model: `{runtime.settings.get('model', '')}`\n"
-            f"- mode: `{mode}`\n"
             f"- reasoning: `{'on' if runtime_reasoning_level(runtime.settings) != 'none' else 'off'}`\n"
             f"- reasoning_effort: `{runtime_reasoning_status(runtime.settings)['label']}`"
         )
@@ -5226,21 +4889,6 @@ async def _handle_slash_command(
         return "💾 Backup command is acknowledged. Full backup workflows are not wired in this channel yet."
 
     return f"❓ Unknown command: /{cmd}\nType /help for a list of commands."
-
-
-def _telegram_mode_reply_markup() -> dict[str, Any]:
-    """Build Telegram inline keyboard for all available modes."""
-    return TelegramIntegration.mode_selector_reply_markup(MODE_LABELS)
-
-
-def _parse_telegram_mode_callback(update: dict[str, Any]) -> tuple[str | None, bool]:
-    """Parse Telegram callback payload for mode selection actions."""
-    callback = update.get("callback_query") or {}
-    mode_data = TelegramIntegration.extract_mode_selection(callback_data=callback.get("data"))
-    if mode_data is None:
-        return None, False
-    resolved_mode, is_valid = validate_requested_mode(mode_data)
-    return resolved_mode, is_valid
 
 
 def _assert_integration_owner(request: Request, platform: str, integration_id: str) -> str:

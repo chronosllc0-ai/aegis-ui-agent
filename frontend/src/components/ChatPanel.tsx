@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import type { LogEntry } from '../hooks/useWebSocket'
 import type { ServerMessage } from '../hooks/useConversations'
 import { apiUrl } from '../lib/api'
-import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
 import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
@@ -63,14 +62,8 @@ export interface ChatPanelProps {
   onHandoffContinue?: (requestId: string) => void
   provider: string
   model: string
-  /** @deprecated use selectedMode */
-  agentMode?: AgentModeId
-  selectedMode?: AgentModeId
-  activeMode?: AgentModeId
-  modeLocked?: boolean
   onProviderChange: (provider: string) => void
   onModelChange: (model: string) => void
-  onAgentModeChange: (mode: AgentModeId) => void
   /** Current task context meter snapshot (persisted with outgoing user messages) */
   contextSnapshot?: {
     tokensUsed: number
@@ -1419,11 +1412,8 @@ interface InputBarCursorProps {
   onSelectSuggestion: (templateId: string) => void
   provider: string
   model: string
-  activeMode: AgentModeId
-  modeLocked: boolean
   onProviderChange: (provider: string) => void
   onModelChange: (model: string) => void
-  onAgentModeChange: (mode: AgentModeId) => void
   isWorking: boolean
   isDisabled: boolean
   micIsActive: boolean
@@ -1439,7 +1429,7 @@ interface InputBarCursorProps {
 
 function InputBarCursor({
   input, onInputChange, onKeyDown, onSend, onStop, onMicClick, onPlusClick, onOpenGallery, onSelectSuggestion,
-  provider, model, activeMode, modeLocked, onProviderChange, onModelChange, onAgentModeChange,
+  provider, model, onProviderChange, onModelChange,
   isWorking, isDisabled, micIsActive, micAvailable, micTitle, textareaRef, placeholder,
   activeConnector, onRemoveConnector, hasAttachments, steeringMode,
 }: InputBarCursorProps) {
@@ -1529,29 +1519,6 @@ function InputBarCursor({
             <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
           </label>
 
-          <label className='group relative inline-flex h-7 w-11 items-center justify-between rounded-md px-1.5 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1 sm:px-1'>
-            <FaBrain className='h-3.5 w-3.5 text-zinc-500' />
-            <select
-              value={activeMode}
-              onChange={(event) => onAgentModeChange(normalizeAgentMode(event.target.value))}
-              disabled={modeLocked}
-              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none disabled:cursor-not-allowed sm:static sm:max-w-[104px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100'
-              aria-label='Agent mode'
-            >
-              {AGENT_MODES.map((option) => (
-                <option key={option.id} value={option.id} className='bg-[#0f0f0f] text-zinc-100'>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
-          </label>
-          {modeLocked && (
-            <span className='rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300'>
-              Delegated · Locked
-            </span>
-          )}
-
           <div className='flex-1' />
 
           <button type='button' onClick={onMicClick} disabled={!micAvailable}
@@ -1609,13 +1576,8 @@ export function ChatPanel({
   onHandoffContinue,
   provider,
   model,
-  agentMode,
-  selectedMode,
-  activeMode,
-  modeLocked = false,
   onProviderChange,
   onModelChange,
-  onAgentModeChange,
   contextSnapshot,
   userName,
   subAgentNames = [],
@@ -1630,9 +1592,6 @@ export function ChatPanel({
   selectedSessionId,
   onSessionSwitch,
 }: ChatPanelProps) {
-  const effectiveSelectedMode = selectedMode ?? agentMode ?? 'orchestrator'
-  const effectiveActiveMode = activeMode ?? effectiveSelectedMode
-  const effectiveModeLocked = modeLocked
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
 
@@ -2306,11 +2265,8 @@ export function ChatPanel({
           onSelectSuggestion={handleSuggestionSelect}
           provider={provider}
           model={model}
-          activeMode={effectiveActiveMode}
-          modeLocked={effectiveModeLocked}
           onProviderChange={onProviderChange}
           onModelChange={onModelChange}
-          onAgentModeChange={onAgentModeChange}
           isWorking={isWorking}
           isDisabled={isDisabled}
           micIsActive={micIsActive}

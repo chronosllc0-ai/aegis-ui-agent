@@ -37,7 +37,6 @@ import { useSessions, type ServerMessage } from './hooks/useSessions'
 import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { modelInfo, PROVIDERS } from './lib/models'
-import { modeLabel, normalizeAgentMode } from './lib/agentModes'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
 import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
@@ -150,8 +149,6 @@ function App() {
   const currentModelMeta = modelInfo(settings.model)
   const currentModelLabel = currentModelMeta?.label ?? settings.model
   const activityDetailWithMode = activityDetail
-    ? `${activityDetail} · Mode: ${modeLabel(activeExecutionMode)}`
-    : `Mode: ${modeLabel(activeExecutionMode)}`
   const isAdmin = authUser?.role === 'admin' || authUser?.role === 'superadmin'
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
@@ -159,18 +156,7 @@ function App() {
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
-  useEffect(() => {
-    const normalizedActiveMode = normalizeAgentMode(activeExecutionMode)
-    if (settings.activeMode === normalizedActiveMode) return
-    patchSettings({ activeMode: normalizedActiveMode })
-  }, [activeExecutionMode, normalizeAgentMode, patchSettings, settings.activeMode])
-
-  useEffect(() => {
-    if (isWorking) return
-    const normalizedSelectedMode = normalizeAgentMode(settings.selectedMode)
-    if (settings.activeMode === normalizedSelectedMode) return
-    patchSettings({ activeMode: normalizedSelectedMode })
-  }, [isWorking, normalizeAgentMode, patchSettings, settings.activeMode, settings.selectedMode])
+  void activeExecutionMode
 
   const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
     useMicrophone({ onChunk: (payload) => sendAudioChunk(payload) })
@@ -643,7 +629,6 @@ function App() {
     const cleanedInstruction = trimmed.replace(/@[a-zA-Z0-9._-]+/g, '').replace(/\s{2,}/g, ' ').trim()
     const finalInstruction = cleanedInstruction || trimmed
 
-    const selectedAgentMode = normalizeAgentMode(settings.selectedMode)
     const outboundMetadata = { ...(metadata ?? {}) }
     const preferredRuntimeAction = typeof outboundMetadata.runtime_control_action === 'string'
       ? outboundMetadata.runtime_control_action
@@ -669,7 +654,6 @@ function App() {
       instruction: finalInstruction,
       metadata: {
         ...outboundMetadata,
-        agent_mode: selectedAgentMode,
         target_subagents: mentionedAgents.map((a) => a.sub_id),
       },
     })
@@ -707,7 +691,6 @@ function App() {
     messageSubAgent,
     selectedTaskId,
     send,
-    settings.selectedMode,
     toastCtx,
     wsConfig,
   ])
@@ -1139,15 +1122,11 @@ function App() {
                 isActivityVisible={isActivityVisible}
                 provider={settings.provider}
                 model={settings.model}
-                selectedMode={settings.selectedMode}
-                activeMode={settings.activeMode}
-                modeLocked={settings.activeMode !== settings.selectedMode}
                 onProviderChange={(nextProvider) => {
                   const providerMeta = PROVIDERS.find((item) => item.id === nextProvider) ?? PROVIDERS[0]
                   patchSettings({ provider: nextProvider, model: providerMeta.models[0].id })
                 }}
                 onModelChange={(nextModel) => patchSettings({ model: nextModel })}
-                onAgentModeChange={(nextMode) => patchSettings({ selectedMode: nextMode, activeMode: nextMode })}
                 contextSnapshot={{
                   tokensUsed: contextMeter.current.tokensUsed,
                   contextLimit: contextMeter.current.contextLimit,

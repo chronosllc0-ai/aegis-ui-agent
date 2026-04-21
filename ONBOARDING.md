@@ -6758,3 +6758,42 @@
 ### Blockers / decisions
 - Decision: keep watchdog cancellation local to lifecycle handlers (`send`, `onmessage`, `onclose`, `onerror`, reset/unmount) for explicitness over abstraction.
 - Blocker: none.
+
+## Session 5.72 - April 21, 2026 (Mode feature removal pass)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 backend/frontend cleanup pass
+
+### What Was Done
+- Removed frontend runtime mode plumbing from user settings websocket payload and send metadata.
+- Removed the mode selector from chat composer controls and simplified ChatPanel/App props accordingly.
+- Disabled backend mode handling paths in `main.py`:
+  - removed `/api/modes` endpoints,
+  - removed `/mode` slash command handling,
+  - removed mode callback handling for Telegram/Slack/Discord,
+  - removed mode-policy gating around websocket task start and subagent spawn.
+- Archived mode-focused docs under `docs/archive/` (`mode-instruction-pack.md`, `modes-industry-feasibility.md`, `modes-system-node-prompts.md`).
+- Removed mode-specific tests (`tests/test_modes.py`, `tests/test_mode_instruction_precedence.py`) and replaced `/mode` command coverage with `/model` command coverage in `tests/test_mode_commands.py`.
+- Removed now-invalid websocket mode telemetry unit tests from `tests/test_main_websocket.py`.
+
+### What's Working
+- Frontend build passes with mode selector removed.
+- Websocket navigate smoke test passes.
+- Slash command test module passes after replacing mode assertion with model assertion.
+
+### What's NOT Working Yet
+- AGENTS checklist compile command still references missing `backend/pydantic_adk_runner.py`; that command fails due missing file path.
+
+### Next Steps
+1. Remove or fully deprecate remaining `agentModes` artifacts (`frontend/src/lib/agentModes.ts`, mode event parsing paths) if no longer required for orchestrator telemetry UX.
+2. Decide whether to also retire backend `backend/modes.py` and integration adapters' mode-selection helpers once downstream dependencies are cleaned.
+3. Update AGENTS delivery checklist to reflect current repo file layout.
+
+### Decisions Made
+- Prioritized disabling runtime mode behavior and user-facing controls without broad refactors to unrelated orchestrator internals.
+- Archived (not deleted) historical mode design docs for traceability.
+
+### Blockers
+- None.
+
+---
