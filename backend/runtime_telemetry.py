@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 import json
+import logging
 from pathlib import Path
 import time
 from typing import Any, Deque
 from uuid import uuid4
 
+logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class RuntimeTelemetry:
@@ -99,7 +101,14 @@ class RuntimeEventStore:
             loaded: Deque[RuntimeEvent] = deque()
             with self._persistence_path.open("r", encoding="utf-8") as handle:
                 for line in handle:
-                    payload = json.loads(line)
+                    raw_line = line.strip()
+                    if not raw_line:
+                        continue
+                    try:
+                        payload = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        logger.warning("Skipping malformed runtime event row during load")
+                        continue
                     loaded.append(
                         RuntimeEvent(
                             id=str(payload.get("id") or uuid4()),
@@ -117,15 +126,16 @@ class RuntimeEventStore:
             self._events = loaded
             self._prune()
         except Exception:
+            logger.exception("Failed to load runtime events from disk")
             self._events = deque()
 
-    def _persist_to_disk(self) -> None:
-        """Persist retained rows to disk when persistence is enabled."""
+    def _append_event_to_disk(self, event: RuntimeEvent) -> None:
+        """Append one event row to the persistence file."""
         if self._persistence_path is None:
             return
-        self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._persistence_path.open("w", encoding="utf-8") as handle:
-            for event in self._events:
+        try:
+            self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._persistence_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     json.dumps(
                         {
@@ -144,13 +154,48 @@ class RuntimeEventStore:
                     )
                     + "\n"
                 )
+        except Exception:
+            logger.exception("Failed to append runtime event to disk")
 
-    def _prune(self, now: float | None = None) -> None:
+    def _compact_persistence_file(self) -> None:
+        """Rewrite retention-pruned in-memory rows back to disk."""
+        if self._persistence_path is None:
+            return
+        try:
+            self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._persistence_path.open("w", encoding="utf-8") as handle:
+                for event in self._events:
+                    handle.write(
+                        json.dumps(
+                            {
+                                "id": event.id,
+                                "ts": event.ts,
+                                "category": event.category,
+                                "subsystem": event.subsystem,
+                                "level": event.level,
+                                "message": event.message,
+                                "session_id": event.session_id,
+                                "request_id": event.request_id,
+                                "task_id": event.task_id,
+                                "details": event.details,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+        except Exception:
+            logger.exception("Failed to compact runtime event persistence file")
+
+    def _prune(self, now: float | None = None) -> bool:
+        removed = False
         threshold = (now if now is not None else time.time()) - self.ttl_seconds
         while self._events and self._events[0].ts < threshold:
             self._events.popleft()
+            removed = True
         while len(self._events) > self.max_events:
             self._events.popleft()
+            removed = True
+        return removed
 
     def append(
         self,
@@ -179,8 +224,11 @@ class RuntimeEventStore:
             details=dict(details or {}),
         )
         self._events.append(event)
-        self._prune(now)
-        self._persist_to_disk()
+        pruned = self._prune(now)
+        if pruned:
+            self._compact_persistence_file()
+        else:
+            self._append_event_to_disk(event)
         return event
 
     def list_events(
@@ -197,7 +245,8 @@ class RuntimeEventStore:
         cursor: int = 0,
     ) -> dict[str, Any]:
         """List events with optional filters and offset cursor pagination."""
-        self._prune()
+        if self._prune():
+            self._compact_persistence_file()
         normalized_session = str(session_id or "").strip() or None
         normalized_subsystem = str(subsystem or "").strip().lower() or None
         normalized_level = str(level or "").strip().lower() or None

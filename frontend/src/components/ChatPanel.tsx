@@ -283,7 +283,7 @@ function isSystemInternalMessage(metadata: Record<string, unknown> | null | unde
   ) {
     return true
   }
-  if (source === 'heartbeat' || source === 'websocket' || source === 'runtime_internal' || source === 'mode_router') {
+  if (source === 'heartbeat' || source === 'runtime_internal' || source === 'mode_router') {
     return true
   }
   return action === 'step'

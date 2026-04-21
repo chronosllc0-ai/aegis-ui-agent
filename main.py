@@ -455,7 +455,7 @@ def _is_system_internal_chat_message(role: str, metadata: dict[str, Any] | None)
         return True
     source = str(payload.get("source") or "").strip().lower()
     action = str(payload.get("action") or "").strip().lower()
-    if source in {"heartbeat", "websocket", "runtime_internal", "mode_router"}:
+    if source in {"heartbeat", "runtime_internal", "mode_router"}:
         return True
     return action in _SYSTEM_CHAT_ACTION_DENYLIST
 
@@ -2901,37 +2901,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             client_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
             task_label = str(client_metadata.get("task_label", "")).strip()
             title_candidate = task_label or instruction
-
-            if action in {"steer", "interrupt", "queue", "dequeue"}:
-                runtime_telemetry.record_auto_mode_blocked_send()
-                _record_runtime_event(
-                    category="queue_steer_runtime",
-                    subsystem="runtime",
-                    level="warning",
-                    message="runtime control blocked",
-                    session_id=session_id,
-                    request_id=str(data.get("request_id") or "") or runtime.current_request_id,
-                    task_id=runtime.current_task_id,
-                    details={"action": action, "reason": "navigate_only_policy"},
-                )
-                await _safe_ws_send(
-                    websocket,
-                    {
-                        "type": "task_error",
-                        "data": {
-                            "request_id": str(data.get("request_id") or ""),
-                            "task_id": runtime.current_task_id,
-                            "code": "E_BAD_PAYLOAD",
-                            "message": f"{action} is disabled. Use navigate_start as the sole command action.",
-                            "retryable": False,
-                        },
-                    },
-                    request_id=runtime.current_request_id,
-                    task_id=runtime.current_task_id,
-                    ws_session_id=session_id,
-                    phase="disabled_runtime_control",
-                )
-                continue
 
             if action == "navigate_start":
                 request_id = str(data.get("request_id") or "").strip()
