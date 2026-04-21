@@ -229,7 +229,7 @@ function AutomationWizard({
     }
     setWorkflowVersionPin('')
     setError(null)
-  }, [initial])
+  }, [initial, lastExecutionMode, workflows])
 
   const cronExpr = preset === '__custom__' ? customCron : preset
 
