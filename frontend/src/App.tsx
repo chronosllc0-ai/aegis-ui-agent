@@ -1163,7 +1163,7 @@ function App() {
                       onHandoffContinue={handoffRequestId ? () => handleHandoffContinue(handoffRequestId) : undefined}
                       steeringFlashKey={steeringFlashKey}
                       onExampleClick={(prompt) => {
-                        console.info('[AegisUI] example_click -> pre-fill composer')
+                        console.info('[AegisUI] example_click -> send prompt immediately')
                         dispatchPromptFromUI(prompt)
                       }}
                       dataTour='screen-view'
