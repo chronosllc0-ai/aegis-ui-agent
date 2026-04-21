@@ -32,10 +32,21 @@ interface TaskRun {
 interface TaskMutationPayload {
   name: string
   description: string
-  prompt: string
+  execution_mode: 'run_assistant_prompt' | 'run_saved_workflow'
+  assistant_task_prompt?: string
+  workflow_id?: string
+  workflow_version?: string
   cron_expr: string
   timezone: string
   enabled: boolean
+}
+
+interface TaskApiPayload {
+  name: string
+  description: string
+  prompt: string
+  cron_expr: string
+  timezone: string
 }
 
 const PRESETS: { label: string; value: string }[] = [
@@ -158,11 +169,15 @@ function FieldLabel({ label, required = false }: { label: string; required?: boo
 function AutomationWizard({
   initial,
   saving,
+  lastExecutionMode,
+  onLastExecutionModeChange,
   onSubmit,
   onCancelEdit,
 }: {
   initial?: ScheduledTask
   saving: boolean
+  lastExecutionMode: 'run_assistant_prompt' | 'run_saved_workflow'
+  onLastExecutionModeChange: (mode: 'run_assistant_prompt' | 'run_saved_workflow') => void
   onSubmit: (data: TaskMutationPayload) => Promise<void>
   onCancelEdit: () => void
 }) {
@@ -173,8 +188,9 @@ function AutomationWizard({
   const [description, setDescription] = useState(initial?.description ?? '')
   const [prompt, setPrompt] = useState(initial?.prompt ?? '')
   const [enabled, setEnabled] = useState(initial?.enabled ?? true)
-  const [triggerType, setTriggerType] = useState<'prompt' | 'workflow'>('prompt')
+  const [executionMode, setExecutionMode] = useState<'run_assistant_prompt' | 'run_saved_workflow'>(lastExecutionMode)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('')
+  const [workflowVersionPin, setWorkflowVersionPin] = useState('')
   const [preset, setPreset] = useState(() => {
     if (!initial?.cron_expr) return PRESETS[1].value
     const found = PRESETS.find((p) => p.value === initial.cron_expr)
@@ -198,8 +214,20 @@ function AutomationWizard({
     })
     setCustomCron(initial?.cron_expr ?? '')
     setTimezone(initial?.timezone ?? 'UTC')
-    setTriggerType('prompt')
-    setSelectedWorkflowId('')
+    if (!initial) {
+      setExecutionMode(lastExecutionMode)
+      setSelectedWorkflowId('')
+    } else {
+      const matchedWorkflow = workflows.find((workflow) => workflow.instruction === initial.prompt)
+      if (matchedWorkflow) {
+        setExecutionMode('run_saved_workflow')
+        setSelectedWorkflowId(matchedWorkflow.id)
+      } else {
+        setExecutionMode('run_assistant_prompt')
+        setSelectedWorkflowId('')
+      }
+    }
+    setWorkflowVersionPin('')
     setError(null)
   }, [initial])
 
@@ -223,22 +251,16 @@ function AutomationWizard({
     event.preventDefault()
     setError(null)
 
-    let resolvedPrompt = prompt.trim()
-    if (triggerType === 'workflow') {
-      const workflow = workflows.find((wf) => wf.id === selectedWorkflowId)
-      if (!workflow) {
-        setError('Please select a workflow')
-        return
-      }
-      resolvedPrompt = workflow.instruction
-    }
-
     if (!name.trim()) {
       setError('Name is required')
       return
     }
-    if (!resolvedPrompt) {
-      setError('Prompt is required')
+    if (executionMode === 'run_assistant_prompt' && !prompt.trim()) {
+      setError('Assistant task prompt is required')
+      return
+    }
+    if (executionMode === 'run_saved_workflow' && !selectedWorkflowId) {
+      setError('Please select a workflow')
       return
     }
     if (!cronExpr.trim()) {
@@ -246,14 +268,30 @@ function AutomationWizard({
       return
     }
 
-    await onSubmit({
-      name: name.trim(),
-      description: description.trim(),
-      prompt: resolvedPrompt,
-      cron_expr: cronExpr.trim(),
-      timezone,
-      enabled,
-    })
+    if (executionMode === 'run_saved_workflow') {
+      const workflow = workflows.find((wf) => wf.id === selectedWorkflowId)
+      if (!workflow) {
+        setError('Selected workflow no longer exists. Please pick another workflow.')
+        return
+      }
+    }
+
+    try {
+      await onSubmit({
+        name: name.trim(),
+        description: description.trim(),
+        execution_mode: executionMode,
+        assistant_task_prompt: executionMode === 'run_assistant_prompt' ? prompt.trim() : undefined,
+        workflow_id: executionMode === 'run_saved_workflow' ? selectedWorkflowId : undefined,
+        workflow_version: executionMode === 'run_saved_workflow' && workflowVersionPin.trim() ? workflowVersionPin.trim() : undefined,
+        cron_expr: cronExpr.trim(),
+        timezone,
+        enabled,
+      })
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save automation job')
+      return
+    }
 
     if (!initial?.id) {
       setName('')
@@ -265,8 +303,8 @@ function AutomationWizard({
       setTzSearch('')
       setEnabled(true)
       setAdvancedOpen(false)
-      setTriggerType('prompt')
       setSelectedWorkflowId('')
+      setWorkflowVersionPin('')
     }
   }
 
@@ -300,53 +338,6 @@ function AutomationWizard({
               placeholder='Optional context for this job'
             />
           </div>
-          <div>
-            <FieldLabel label='Execution source' required />
-            <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-              <button
-                type='button'
-                onClick={() => setTriggerType('prompt')}
-                className={`min-h-11 rounded-lg border px-3 py-2 text-sm ${triggerType === 'prompt' ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-200' : 'border-[#2a334a] bg-[#0b1220] text-zinc-400'}`}
-              >
-                Assistant prompt
-              </button>
-              <button
-                type='button'
-                onClick={() => setTriggerType('workflow')}
-                className={`min-h-11 rounded-lg border px-3 py-2 text-sm ${triggerType === 'workflow' ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-200' : 'border-[#2a334a] bg-[#0b1220] text-zinc-400'}`}
-              >
-                Saved workflow
-              </button>
-            </div>
-          </div>
-          {triggerType === 'workflow' ? (
-            <div>
-              <FieldLabel label='Workflow' required />
-              <select
-                value={selectedWorkflowId}
-                onChange={(event) => handleWorkflowSelect(event.target.value)}
-                className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
-              >
-                <option value=''>Select workflow</option>
-                {workflows.map((workflow) => (
-                  <option key={workflow.id} value={workflow.id}>
-                    {workflow.name}
-                  </option>
-                ))}
-              </select>
-              {workflows.length === 0 && <p className='mt-1 text-xs text-zinc-500'>No saved workflows yet.</p>}
-            </div>
-          ) : (
-            <div>
-              <FieldLabel label='Assistant task prompt' required />
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                rows={5}
-                className='min-h-32 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
-              />
-            </div>
-          )}
           <label className='flex min-h-11 items-center gap-2 text-sm text-zinc-200'>
             <input
               type='checkbox'
@@ -388,7 +379,61 @@ function AutomationWizard({
         </SectionShell>
 
         <SectionShell title='Execution' description='Choose what is executed when the wake event fires.'>
-          <p className='text-xs text-zinc-500'>Execution payload maps directly to the scheduler task prompt field.</p>
+          <div>
+            <FieldLabel label='What should run?' required />
+            <select
+              value={executionMode}
+              onChange={(event) => {
+                const selectedMode = event.target.value as 'run_assistant_prompt' | 'run_saved_workflow'
+                setExecutionMode(selectedMode)
+                onLastExecutionModeChange(selectedMode)
+              }}
+              className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+            >
+              <option value='run_assistant_prompt'>Assistant prompt</option>
+              <option value='run_saved_workflow'>Saved workflow</option>
+            </select>
+          </div>
+          {executionMode === 'run_assistant_prompt' ? (
+            <div>
+              <FieldLabel label='assistant_task_prompt' required />
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                rows={5}
+                className='min-h-32 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+              />
+            </div>
+          ) : (
+            <>
+              <div>
+                <FieldLabel label='Workflow' required />
+                <select
+                  value={selectedWorkflowId}
+                  onChange={(event) => handleWorkflowSelect(event.target.value)}
+                  className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+                >
+                  <option value=''>Select workflow</option>
+                  {workflows.map((workflow) => (
+                    <option key={workflow.id} value={workflow.id}>
+                      {workflow.name}
+                    </option>
+                  ))}
+                </select>
+                {workflows.length === 0 && <p className='mt-1 text-xs text-zinc-500'>No saved workflows yet.</p>}
+              </div>
+              <div>
+                <FieldLabel label='Workflow version pin (optional)' />
+                <input
+                  value={workflowVersionPin}
+                  onChange={(event) => setWorkflowVersionPin(event.target.value)}
+                  className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
+                  placeholder='latest, v2, sha, or tag'
+                />
+              </div>
+            </>
+          )}
+          <p className='text-xs text-zinc-500'>Compatible mapping: both modes still resolve into the backend task prompt payload shape.</p>
         </SectionShell>
 
         <SectionShell title='Delivery' description='Control where run updates are visible.'>
@@ -458,6 +503,8 @@ function AutomationWizard({
 }
 
 export function AutomationsPage() {
+  const { settings } = useSettingsContext()
+  const workflows = settings.workflowTemplates ?? []
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [runHistoryByTask, setRunHistoryByTask] = useState<Record<string, TaskRun[]>>({})
   const [loading, setLoading] = useState(true)
@@ -466,6 +513,10 @@ export function AutomationsPage() {
   const [runHistoryLoading, setRunHistoryLoading] = useState(false)
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
   const [editingTask, setEditingTask] = useState<ScheduledTask | undefined>(undefined)
+  const [lastExecutionMode, setLastExecutionMode] = useState<'run_assistant_prompt' | 'run_saved_workflow'>(() => {
+    const storedValue = typeof window !== 'undefined' ? window.localStorage.getItem('aegis.automation.lastExecutionMode') : null
+    return storedValue === 'run_saved_workflow' ? 'run_saved_workflow' : 'run_assistant_prompt'
+  })
 
   const [jobSearch, setJobSearch] = useState('')
   const [enabledFilter, setEnabledFilter] = useState<'all' | 'enabled' | 'disabled'>('all')
@@ -476,6 +527,29 @@ export function AutomationsPage() {
   const [runSearch, setRunSearch] = useState('')
   const [runPage, setRunPage] = useState(1)
   const runPageSize = 5
+
+  useEffect(() => {
+    window.localStorage.setItem('aegis.automation.lastExecutionMode', lastExecutionMode)
+  }, [lastExecutionMode])
+
+  const toTaskApiPayload = useCallback((data: TaskMutationPayload): TaskApiPayload => {
+    let prompt = data.assistant_task_prompt ?? ''
+    if (data.execution_mode === 'run_saved_workflow') {
+      const selectedWorkflow = workflows.find((workflow) => workflow.id === data.workflow_id)
+      if (!selectedWorkflow) {
+        throw new Error('Selected workflow no longer exists. Please pick another workflow.')
+      }
+      prompt = selectedWorkflow.instruction
+    }
+
+    return {
+      name: data.name,
+      description: data.description,
+      prompt,
+      cron_expr: data.cron_expr,
+      timezone: data.timezone,
+    }
+  }, [workflows])
 
   const loadRunHistoryForTask = useCallback(async (task: ScheduledTask, force = false) => {
     if (!force && runHistoryByTask[task.id]) return
@@ -522,17 +596,12 @@ export function AutomationsPage() {
   const handleCreate = async (data: TaskMutationPayload) => {
     setSaving(true)
     try {
+      const taskApiPayload = toTaskApiPayload(data)
       const response = await fetch(apiUrl('/api/automation/tasks'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          name: data.name,
-          description: data.description,
-          prompt: data.prompt,
-          cron_expr: data.cron_expr,
-          timezone: data.timezone,
-        }),
+        body: JSON.stringify(taskApiPayload),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -561,11 +630,15 @@ export function AutomationsPage() {
     if (!editingTask) return
     setSaving(true)
     try {
+      const taskApiPayload = toTaskApiPayload(data)
       const response = await fetch(apiUrl(`/api/automation/tasks/${editingTask.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...taskApiPayload,
+          enabled: data.enabled,
+        }),
       })
       if (!response.ok) {
         const body = await response.json().catch(() => ({}))
@@ -717,6 +790,8 @@ export function AutomationsPage() {
         <AutomationWizard
           initial={editingTask}
           saving={saving}
+          lastExecutionMode={lastExecutionMode}
+          onLastExecutionModeChange={setLastExecutionMode}
           onSubmit={editingTask ? handleUpdate : handleCreate}
           onCancelEdit={() => setEditingTask(undefined)}
         />
