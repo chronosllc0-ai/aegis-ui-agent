@@ -10,9 +10,10 @@ type Suggestion = {
 type SuggestionChipsProps = {
   onSelectSuggestion: (templateId: string) => void
   onOpenGallery: () => void
+  onRequestWebScreenshot: () => void
 }
 
-export function SuggestionChips({ onSelectSuggestion, onOpenGallery }: SuggestionChipsProps) {
+export function SuggestionChips({ onSelectSuggestion, onOpenGallery, onRequestWebScreenshot }: SuggestionChipsProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
 
   const fetchSuggestions = useCallback(async () => {
@@ -36,6 +37,13 @@ export function SuggestionChips({ onSelectSuggestion, onOpenGallery }: Suggestio
 
   return (
     <div className='flex items-center gap-2 overflow-x-auto px-2 py-1.5'>
+      <button
+        type='button'
+        onClick={onRequestWebScreenshot}
+        className='shrink-0 rounded-full border border-emerald-600/50 bg-emerald-900/20 px-3 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-900/40'
+      >
+        Request web screenshot
+      </button>
       <button
         type='button'
         onClick={onOpenGallery}

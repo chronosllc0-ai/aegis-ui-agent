@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActionLog } from './components/ActionLog'
 import { ChangelogModal, SubAgentModal, useChangelog } from './components/ChangelogModal'
 import { NotificationBell } from './components/NotificationBell'
 import { PrivacyPage } from './components/PrivacyPage'
@@ -10,11 +9,9 @@ import { AuthPage } from './components/AuthPage'
 import { LandingPage } from './components/LandingPage'
 import { OnboardingWizard, isOnboardingComplete } from './components/OnboardingWizard'
 import { ProductTour, isTourComplete } from './components/ProductTour'
-import { ScreenView } from './components/ScreenView'
 import { SpendingAlert } from './components/SpendingAlert'
 import { UsageDropdown } from './components/UsageDropdown'
 import { UserMenu } from './components/UserMenu'
-import { WorkflowView } from './components/WorkflowView'
 import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
 import { ChatPanel } from './components/ChatPanel'
@@ -38,11 +35,8 @@ import { apiUrl } from './lib/api'
 import { LuShield } from 'react-icons/lu'
 import { modelInfo, PROVIDERS } from './lib/models'
 import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
-import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
-
-type ViewMode = 'browser' | 'chat'
 
 const MAIN_SESSION_ID = 'agent:main:main'
 // Stop-words to skip when picking the first meaningful word from an instruction
@@ -90,7 +84,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, handoffActive, handoffRequestId, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, logs, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -101,12 +95,9 @@ function App() {
 
   const contextMeter = useContextMeter(settings.model)
 
-  const [steeringFlashKey, setSteeringFlashKey] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
-  const [showWorkflow, setShowWorkflow] = useState(false)
-  const [urlInput, setUrlInput] = useState('about:blank')
   const [showSubAgentModal, setShowSubAgentModal] = useState(false)
   const [taskStartedAt, setTaskStartedAt] = useState<number | null>(null)
   const [durationSeconds, setDurationSeconds] = useState(0)
@@ -114,8 +105,6 @@ function App() {
   // Server messages loaded for the selected conversation
   const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
   const [optimisticMessagesByTask, setOptimisticMessagesByTask] = useState<Record<string, ServerMessage[]>>({})
-  const browserGridRef = useRef<HTMLDivElement>(null)
-  const [lastClickCoords, setLastClickCoords] = useState<{ x: number; y: number } | null>(null)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -126,14 +115,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
-  const [viewMode, setViewMode] = useState<ViewMode>('browser')
-  const [browserInstructionInput, setBrowserInstructionInput] = useState('')
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const [pendingNavigation, setPendingNavigation] = useState<{ instruction: string; metadata?: Record<string, unknown> } | null>(null)
   const subAgentsRef = useRef(subAgents)
-  const [showBrowseHandoffPrompt, setShowBrowseHandoffPrompt] = useState(false)
-  const promptShownTaskIdsRef = useRef<Set<string>>(new Set())
-  const prevIsWorkingRef = useRef(false)
   // Use case page routing
   const [activeUseCaseId, setActiveUseCaseId] = useState<string | null>(null)
   // draftInput reserved for future InputBar onChange wiring
@@ -224,53 +207,6 @@ function App() {
     return { cls: 'bg-red-400', label: 'Disconnected' }
   }, [connectionStatus])
 
-  useEffect(() => {
-    setUrlInput(currentUrl)
-  }, [currentUrl])
-
-  // Split-surface UX helpers:
-  // 1) Contextual handoff prompt when browsing starts while user is in chat mode.
-  // 2) Optional auto-return to chat when the task completes.
-  useEffect(() => {
-    const wasWorking = prevIsWorkingRef.current
-    const startedWorking = !wasWorking && isWorking
-    const finishedWorking = wasWorking && !isWorking
-    prevIsWorkingRef.current = isWorking
-
-    if (!settings.separateExecutionSurfaces) {
-      setShowBrowseHandoffPrompt(false)
-      return
-    }
-
-    if (startedWorking && viewMode === 'chat' && settings.promptToSwitchOnBrowse) {
-      const activeTaskId = activeTaskIdRef.current
-      if (activeTaskId && !promptShownTaskIdsRef.current.has(activeTaskId)) {
-        promptShownTaskIdsRef.current.add(activeTaskId)
-        setShowBrowseHandoffPrompt(true)
-      }
-    }
-
-    if (finishedWorking) {
-      setShowBrowseHandoffPrompt(false)
-      if (viewMode === 'browser' && settings.autoReturnToChat) {
-        setViewMode('chat')
-        addNotification({
-          type: 'info',
-          title: 'Task complete',
-          message: 'Browsing finished. Returned you to chat.',
-          source: 'websocket',
-        })
-      }
-    }
-  }, [
-    isWorking,
-    viewMode,
-    settings.separateExecutionSurfaces,
-    settings.promptToSwitchOnBrowse,
-    settings.autoReturnToChat,
-    activeTaskIdRef,
-    addNotification,
-  ])
 
   // ── Browser tab title: Working… / Aegis ───────────────────────────
   const [titleMode, setTitleMode] = useState<'idle' | 'working'>('idle')
@@ -383,18 +319,6 @@ function App() {
   // Task history is saved at send-time (see handleSend) so titles always reflect
   // the actual user instruction, not a backend log message.
 
-  // ── Click coordinate extraction for ScreenView pulse overlay ──
-  useEffect(() => {
-    const lastClick = [...logs].reverse().find(l =>
-      l.message?.startsWith('[click]') || l.stepKind === 'click'
-    )
-    if (lastClick) {
-      const match = lastClick.message?.match(/"x":\s*(\d+).*?"y":\s*(\d+)/)
-      if (match) {
-        setLastClickCoords({ x: parseInt(match[1]), y: parseInt(match[2]) })
-      }
-    }
-  }, [logs])
 
   // ── Context tracking: feed log tokens into the context meter ──
   useEffect(() => {
@@ -445,11 +369,6 @@ function App() {
     const targetSessionId = selectedTaskId ?? MAIN_SESSION_ID
     void fetchMessages(targetSessionId).then(setServerMessages)
   }, [fetchMessages, selectedTaskId])
-
-  const taskLabels = useMemo(
-    () => Object.fromEntries(sessions.map((item) => [item.session_id, item.title])),
-    [sessions],
-  )
 
   const scopedSubAgents = useMemo(() => {
     if (!selectedTaskId) return []
@@ -565,57 +484,6 @@ function App() {
     return result
   }, [visibleLogs, contextMeter.isCompacting, selectedTaskId])
 
-  const actionLogEntries = useMemo(
-    () => enrichedLogs.filter((entry) => isBrowserPrimitiveActionLogEntry(entry)),
-    [enrichedLogs],
-  )
-  const hasBrowserActivityForActiveTask = useMemo(() => {
-    const activeTaskId = selectedTaskId ?? activeTaskIdRef.current
-    if (!activeTaskId || activeTaskId === 'idle') return false
-    return actionLogEntries.some((entry) => entry.taskId === activeTaskId)
-  }, [actionLogEntries, selectedTaskId, activeTaskIdRef])
-
-  // ── Auto-return to chat when a browser task finishes ────────────────────
-  // When isWorking flips true→false and the task had browser activity,
-  // automatically switch the user back to chat so they see the summary card.
-  const prevBrowsingWorkingRef = useRef(isWorking)
-  const browserActivityDuringRunRef = useRef(false)
-
-  useEffect(() => {
-    const wasWorking = prevBrowsingWorkingRef.current
-
-    if (!wasWorking && isWorking) {
-      browserActivityDuringRunRef.current = false
-    }
-
-    if (isWorking && hasBrowserActivityForActiveTask) {
-      browserActivityDuringRunRef.current = true
-    }
-
-    if (wasWorking && !isWorking) {
-      const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
-      browserActivityDuringRunRef.current = false
-      if (hadBrowserActivityThisRun && viewMode === 'browser') {
-        setViewMode('chat')
-      }
-    }
-
-    prevBrowsingWorkingRef.current = isWorking
-  }, [isWorking, hasBrowserActivityForActiveTask, viewMode])
-
-  // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
-  // If the agent needs user input mid-task and the user is watching the
-  // browser, jump them to chat so they see (and can answer) the question.
-  useEffect(() => {
-    if (!enrichedLogs.length || viewMode !== 'browser') return
-    const last = enrichedLogs[enrichedLogs.length - 1]
-    if (last?.message?.includes('[ask_user_input]') ||
-        last?.message?.includes('[confirm_plan]') ||
-        last?.message?.includes('[plan_steps]')) {
-      setViewMode('chat')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrichedLogs.length, viewMode])
 
   const handleSend = useCallback((instruction: string, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
@@ -641,8 +509,6 @@ function App() {
       console.warn('[AegisUI] viewMode metadata detected on execution payload; execution routing must remain view-agnostic.')
     }
     send({ action: 'config', settings: wsConfig })
-
-    setSteeringFlashKey((prev) => prev + 1)
 
     const isNewTask = !isWorking
     const action = runtimeControlAction ?? 'navigate'
@@ -698,51 +564,10 @@ function App() {
     handleSend(instruction, metadata)
   }
 
-  const browserSendBlocked = connectionStatus !== 'connected' || (isWorking && settings.steeringMode === 'auto')
-
-  const dispatchPromptFromBrowserView = useCallback((instruction: string, source: 'browser_composer' | 'browser_example') => {
-    const trimmed = instruction.trim()
-    if (!trimmed) return false
-    if (browserSendBlocked) {
-      if (connectionStatus !== 'connected') {
-        toastCtx.error('Agent offline', 'Reconnect to send instructions from browser view.')
-      } else {
-        toastCtx.error('Auto mode running', 'Switch from Auto mode or wait for the task to complete before sending.')
-      }
-      return false
-    }
-    dispatchPromptFromUI(trimmed, {
-      task_label_source: 'chat',
-      task_label: trimmed,
-      ui_surface: source,
-    })
-    return true
-  }, [browserSendBlocked, connectionStatus, dispatchPromptFromUI, toastCtx])
-
-  const submitBrowserInstruction = useCallback(() => {
-    const sent = dispatchPromptFromBrowserView(browserInstructionInput, 'browser_composer')
-    if (sent) setBrowserInstructionInput('')
-  }, [browserInstructionInput, dispatchPromptFromBrowserView])
-
-  const routeBrowserCommandToChatComposer = useCallback((instruction: string) => {
-    const trimmed = instruction.trim()
-    if (!trimmed) return
-    setPendingPrompt(trimmed)
-    setShowBrowseHandoffPrompt(false)
-    setViewMode('chat')
-  }, [])
-
   useEffect(() => {
     if (connectionStatus !== 'connected' || !pendingNavigation) return
     handleSend(pendingNavigation.instruction, pendingNavigation.metadata)
   }, [connectionStatus, handleSend, pendingNavigation])
-
-  const submitUrl = () => {
-    const trimmed = urlInput.trim()
-    if (!trimmed) return
-    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    routeBrowserCommandToChatComposer(normalized)
-  }
 
   const handleDecomposePlan = async (prompt: string) => {
     const trimmed = prompt.trim()
@@ -788,36 +613,7 @@ function App() {
     contextMeter.reset()
     setSelectedTaskId(MAIN_SESSION_ID)
     setOptimisticMessagesByTask({})
-    setShowWorkflow(false)
     void stopVoice()
-  }
-
-  const saveWorkflow = () => {
-    if (!visibleLogs.length) return
-
-    const fallbackInstruction = visibleLogs.find(
-      (entry) =>
-        entry.isUserMessage === true ||
-        (entry.type === 'step' &&
-          entry.stepKind === 'navigate' &&
-          !entry.message.toLowerCase().includes('session settings updated') &&
-          !entry.message.toLowerCase().includes('queued instruction')),
-    )?.message
-
-    const instruction = fallbackInstruction ?? 'Saved workflow instruction'
-
-    patchSettings({
-      workflowTemplates: [
-        ...settings.workflowTemplates,
-        {
-          id: crypto.randomUUID(),
-          name: `Workflow ${settings.workflowTemplates.length + 1}`,
-          instruction,
-          stepCount: visibleLogs.length,
-          lastRunAt: new Date().toISOString(),
-        },
-      ],
-    })
   }
 
   const openDocsHome = () => navigateTo('/docs')
@@ -942,8 +738,7 @@ function App() {
             <div className='space-y-4 pr-1'>
               <SidebarSection title='Dashboard'>
                 <NavItem icon={Icons.user({ className: 'h-3.5 w-3.5' })} label='Profile' active={pathname === '/settings/profile'} onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} />
-                <NavItem icon={Icons.chat({ className: 'h-3.5 w-3.5' })} label='Chat' active={pathname === '/' && viewMode === 'chat' && !showSettings && !showAutomations} onClick={() => { navigateTo('/'); setViewMode('chat'); setSidebarOpen(false) }} />
-                <NavItem icon={Icons.workflows({ className: 'h-3.5 w-3.5' })} label='Sessions' active={pathname === '/' && viewMode === 'browser' && !showSettings && !showAutomations} onClick={() => { navigateTo('/'); setViewMode('browser'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.chat({ className: 'h-3.5 w-3.5' })} label='Chat' active={pathname === '/' && !showSettings && !showAutomations} onClick={() => { navigateTo('/'); setSidebarOpen(false) }} />
                 <NavItem icon={Icons.alert({ className: 'h-3.5 w-3.5' })} label='Observability' active={pathname === '/settings/observability'} onClick={() => { navigateTo('/settings/observability'); setSidebarOpen(false) }} />
               </SidebarSection>
 
@@ -1003,27 +798,6 @@ function App() {
                 </button>
                 <img src='/aegis-shield.png' alt='Aegis' className='h-5 w-5 sm:h-6 sm:w-6 object-contain mix-blend-screen' />
                 <h1 className='text-sm font-semibold sm:text-lg'>Aegis</h1>
-                {/* ── Chat ↔ Browser mode switcher ── */}
-                {!showSettings && !showAutomations && (
-                  <div className='ml-1 flex max-w-[42vw] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[#2a2a2a] bg-[#111] p-0.5 sm:max-w-none'>
-                    <button
-                      type='button'
-                      onClick={() => setViewMode('browser')}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${viewMode === 'browser' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      {Icons.globe({ className: 'h-3 w-3' })}
-                      <span className='hidden xs:inline'>Browser</span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => setViewMode('chat')}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${viewMode === 'chat' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      {Icons.chat({ className: 'h-3 w-3' })}
-                      <span className='hidden xs:inline'>Chat</span>
-                    </button>
-                  </div>
-                )}
               </div>
               )}
               right={(
@@ -1039,41 +813,6 @@ function App() {
               )}
             />
           </div>
-
-          {!showSettings && !showAutomations && viewMode === 'browser' && (
-            <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
-              <button type='button' onClick={() => routeBrowserCommandToChatComposer('go back')} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
-                {Icons.back({ className: 'h-4 w-4' })}
-              </button>
-              <button type='button' onClick={() => routeBrowserCommandToChatComposer('go forward')} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Forward'>
-                {Icons.chevronRight({ className: 'h-4 w-4' })}
-              </button>
-              <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>
-              <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm md:text-xl' />
-              <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 sm:px-3'>Go</button>
-            </section>
-          )}
-          {!showSettings && !showAutomations && viewMode === 'browser' && (
-            <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
-              <span className='text-xs text-zinc-400'>{Icons.chat({ className: 'h-3.5 w-3.5' })}</span>
-              <input
-                aria-label='Send instruction'
-                value={browserInstructionInput}
-                onChange={(event) => setBrowserInstructionInput(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && submitBrowserInstruction()}
-                placeholder='Send instruction from browser view (same execution path as chat)'
-                className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm'
-              />
-              <button
-                type='button'
-                onClick={submitBrowserInstruction}
-                disabled={browserSendBlocked || !browserInstructionInput.trim()}
-                className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3'
-              >
-                Send
-              </button>
-            </section>
-          )}
 
           <div className='min-h-0 flex-1'>
             {showSettings || isAdminPath ? (
@@ -1093,7 +832,7 @@ function App() {
               <div className='h-full overflow-y-auto p-2'>
                 <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
               </div>
-            ) : viewMode === 'chat' ? (
+            ) : (
               <ChatPanel
                 logs={enrichedLogs}
                 isWorking={isWorking}
@@ -1103,8 +842,6 @@ function App() {
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
-                onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setViewMode('browser') }}
-                latestFrame={latestFrame}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
                 voiceDisabled={!voiceSupported || connectionStatus !== 'connected'}
@@ -1134,10 +871,6 @@ function App() {
                   isCompacting: contextMeter.isCompacting,
                 }}
                 subAgentNames={scopedSubAgents.map((agent) => subAgentDisplayName(agent))}
-                browseHandoffPromptVisible={settings.separateExecutionSurfaces && showBrowseHandoffPrompt}
-                onDismissBrowsePrompt={() => setShowBrowseHandoffPrompt(false)}
-                pendingPrompt={pendingPrompt}
-                onPendingPromptConsumed={() => setPendingPrompt(null)}
                 sessions={sessionSwitcherItems}
                 selectedSessionId={selectedTaskId}
                 onSessionSwitch={(sessionId) => {
@@ -1145,39 +878,6 @@ function App() {
                   setSidebarOpen(false)
                 }}
               />
-            ) : (
-              /* Browser layout - ScreenView full height, ActionLog as floating overlay on desktop */
-              <div
-                ref={browserGridRef}
-                className='relative flex h-full min-h-0 flex-col gap-1.5 sm:gap-2 lg:gap-3'
-              >
-                {/* Main content (screen / workflow) - full width */}
-                <div className='min-h-0 min-w-0 flex-1'>
-                  {showWorkflow ? (
-                    <WorkflowView steps={workflowSteps} />
-                  ) : (
-                    <ScreenView
-                      frameSrc={latestFrame}
-                      isWorking={isWorking}
-                      handoffActive={handoffActive}
-                      onHumanBrowserAction={(action) => send({ action: 'human_browser_action', ...action })}
-                      onHandoffContinue={handoffRequestId ? () => handleHandoffContinue(handoffRequestId) : undefined}
-                      steeringFlashKey={steeringFlashKey}
-                      onExampleClick={(prompt) => {
-                        console.info('[AegisUI] example_click -> send prompt immediately')
-                        dispatchPromptFromBrowserView(prompt, 'browser_example')
-                      }}
-                      dataTour='screen-view'
-                      lastClickCoords={lastClickCoords}
-                    />
-                  )}
-                </div>
-
-                {/* Action log - stacked below the browser, full width on all screen sizes */}
-                <div className='h-40 min-h-0 shrink-0 sm:h-48'>
-                  <ActionLog entries={actionLogEntries} taskLabels={taskLabels} dataTour='action-log' showWorkflow={showWorkflow} onToggleWorkflow={() => setShowWorkflow((prev) => !prev)} onSaveWorkflow={saveWorkflow} reasoningMap={reasoningMap} />
-                </div>
-              </div>
             )}
           </div>
 

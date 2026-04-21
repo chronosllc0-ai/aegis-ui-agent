@@ -49,8 +49,6 @@ export interface ChatPanelProps {
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
-  onSwitchToBrowser: () => void
-  latestFrame: string | null
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -78,15 +76,9 @@ export interface ChatPanelProps {
   userName?: string
   /** Mentionable sub-agent handles (used for @ picker in composer) */
   subAgentNames?: string[]
-  browseHandoffPromptVisible?: boolean
-  onDismissBrowsePrompt?: () => void
   activityStatusLabel?: string
   activityDetail?: string
   isActivityVisible?: boolean
-  /** Pre-fill the composer with this prompt (e.g. from an example click). Consumed on first render. */
-  pendingPrompt?: string | null
-  /** Called once the pending prompt has been loaded into the composer */
-  onPendingPromptConsumed?: () => void
   sessions?: SessionSwitcherItem[]
   selectedSessionId?: string | null
   onSessionSwitch?: (sessionId: string) => void
@@ -1479,7 +1471,13 @@ function InputBarCursor({
 
         {isExpanded && (
           <div className='space-y-1.5 border-t border-[#242424] px-2.5 py-2'>
-            <SuggestionChips onSelectSuggestion={onSelectSuggestion} onOpenGallery={onOpenGallery} />
+            <SuggestionChips
+              onSelectSuggestion={onSelectSuggestion}
+              onOpenGallery={onOpenGallery}
+              onRequestWebScreenshot={() => {
+                onSelectSuggestion('__request_web_screenshot__')
+              }}
+            />
           </div>
         )}
 
@@ -1583,8 +1581,6 @@ export function ChatPanel({
   onSteeringModeChange = () => undefined,
   onDecomposePlan,
   connectionStatus,
-  onSwitchToBrowser,
-  latestFrame,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
@@ -1605,13 +1601,9 @@ export function ChatPanel({
   contextSnapshot,
   userName,
   subAgentNames = [],
-  browseHandoffPromptVisible = false,
-  onDismissBrowsePrompt,
   activityStatusLabel = 'Aegis is working…',
   activityDetail,
   isActivityVisible = false,
-  pendingPrompt,
-  onPendingPromptConsumed,
   sessions = [],
   selectedSessionId,
   onSessionSwitch,
@@ -1755,22 +1747,6 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
-  // Pre-fill composer when a pending prompt arrives (e.g. from example click in browser panel)
-  useEffect(() => {
-    if (!pendingPrompt) return
-    setInput(pendingPrompt)
-    const t = window.setTimeout(() => {
-      textareaRef.current?.focus()
-      // Auto-resize
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-      }
-    }, 0)
-    onPendingPromptConsumed?.()
-    return () => window.clearTimeout(t)
-  }, [pendingPrompt, onPendingPromptConsumed])
-
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
@@ -1793,8 +1769,6 @@ export function ChatPanel({
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allMessages.length, activeTaskId])
-
-  const showBrowsePill = browseHandoffPromptVisible && isWorking && latestFrame
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1874,6 +1848,11 @@ export function ChatPanel({
   }
 
   const handleSuggestionSelect = async (templateId: string) => {
+    if (templateId === '__request_web_screenshot__') {
+      setInput('Request web screenshot of ')
+      window.setTimeout(() => textareaRef.current?.focus(), 0)
+      return
+    }
     try {
       const response = await fetch(apiUrl(`/api/gallery/${templateId}`), { credentials: 'include' })
       const data = await response.json()
@@ -1975,31 +1954,6 @@ export function ChatPanel({
             selectedSessionId={selectedSessionId ?? activeTaskId}
             onSelect={(sessionId) => onSessionSwitch?.(sessionId)}
           />
-        </div>
-      )}
-
-      {/* Browsing pill */}
-      {showBrowsePill && (
-        <div className='flex justify-center pt-2 px-4'>
-          <div className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 shadow-md'>
-            <button
-              type='button'
-              onClick={onSwitchToBrowser}
-              className='flex items-center gap-2 rounded-full px-1 py-0.5 text-xs font-medium text-blue-300 hover:text-blue-100 transition-colors'
-            >
-              <IcoGlobe className='h-3.5 w-3.5' />
-              Agent is browsing — Switch to Browser
-            </button>
-            <button
-              type='button'
-              onClick={onDismissBrowsePrompt}
-              className='rounded-full border border-blue-400/30 px-1.5 py-0.5 text-[10px] text-blue-200/80 hover:text-blue-100'
-              title='Dismiss'
-              aria-label='Dismiss browse switch prompt'
-            >
-              Dismiss
-            </button>
-          </div>
         </div>
       )}
 
