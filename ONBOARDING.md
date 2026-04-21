@@ -6926,3 +6926,30 @@
 - None.
 
 ---
+## Session 5.77 - April 21, 2026 (Review fix: none/off semantics)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted review pass
+
+### What Was Done
+- Updated Agent settings thinking-effort buttons to exclude `none` while reasoning is enabled; turning reasoning off remains controlled by the toggle only.
+- Removed `none/off/false/0 -> medium` normalization from OpenAI and xAI provider effort normalizers so provider-level effort conversion no longer overrides explicit off semantics.
+
+### What's Working
+- Frontend build passes after selector behavior adjustment.
+- Python compilation passes for touched provider modules.
+- Websocket smoke test passes.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+
+### Next Steps
+1. Optionally add targeted unit tests for AgentTab effort-button visibility and provider effort normalization edge cases.
+
+### Decisions Made
+- Kept the enable/disable toggle as the sole control for entering/leaving `none`, avoiding hidden-list UX confusion.
+
+### Blockers
+- None.
+
+---

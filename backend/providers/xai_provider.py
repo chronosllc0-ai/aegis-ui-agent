@@ -26,8 +26,6 @@ XAI_REASONING_MODELS = {"grok-3-mini", "grok-3-mini-fast"}
 
 def _normalize_reasoning_effort(effort: str) -> str:
     normalized = (effort or "medium").strip().lower()
-    if normalized in {"none", "off", "false", "0"}:
-        return "medium"
     if normalized == "minimal":
         return "low"
     if normalized in {"extended", "xhigh", "x-high", "extra_high"}:

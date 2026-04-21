@@ -142,11 +142,11 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
               <div className='mt-3'>
                 <p className='mb-1 text-[11px] font-medium text-zinc-400'>Thinking effort</p>
                 <div className='flex flex-wrap gap-1.5'>
-                  {THINKING_EFFORT_LEVELS.map((effort) => (
+                  {THINKING_EFFORT_LEVELS.filter((effort) => effort !== 'none').map((effort) => (
                     <button
                       key={effort}
                       type='button'
-                      onClick={() => onPatch({ reasoningEffort: effort, enableReasoning: effort !== 'none' })}
+                      onClick={() => onPatch({ reasoningEffort: effort, enableReasoning: true })}
                       className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
                         settings.reasoningEffort === effort
                           ? 'bg-violet-600 text-white'
