@@ -7,6 +7,7 @@ import { AGENT_MODES, normalizeAgentMode, type AgentModeId } from '../lib/agentM
 import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
+import { isBrowserPrimitiveActionLogEntry } from '../lib/actionLogFilter'
 import { SuggestionChips } from './SuggestionChips'
 import { SessionSwitcher, type SessionSwitcherItem } from './SessionSwitcher'
 import { PromptGallery } from './PromptGallery'
@@ -281,6 +282,7 @@ function isDeniedChatText(text: string, rawStepType?: string): boolean {
 function logsToMessages(logs: LogEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const entry of logs) {
+    if (isBrowserPrimitiveActionLogEntry(entry)) continue
     if (entry.type === 'step') {
       const rawType = String(entry.rawStepType ?? '').trim().toLowerCase()
       const allowedStepTypes = new Set(['assistant_message', 'result', 'handoff_request', 'handoff_complete', 'user_input_request'])
