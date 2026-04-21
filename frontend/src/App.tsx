@@ -150,7 +150,7 @@ function App() {
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
   const isSettingsPath = pathname.startsWith('/settings')
-  const activeSettingsTab: SettingsTab | undefined = isAdminPath ? 'Admin' : settingsInitialTab
+  const activeSettingsTab: SettingsTab | undefined = settingsInitialTab
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
@@ -244,14 +244,25 @@ function App() {
   useEffect(() => {
     setShowSettings(isSettingsPath || isAdminPath)
     setShowAutomations(isAutomationsPath)
-    if (!isSettingsPath) return
-    const slug = pathname.split('/')[2]
-    if (!slug) {
+
+    if (!isSettingsPath && !isAdminPath) {
       setSettingsInitialTab(undefined)
       return
     }
+
+    const slug = pathname.split('/')[2]
+    if (!slug) {
+      setSettingsInitialTab(isAdminPath ? 'Admin' : undefined)
+      return
+    }
+
     const mapped = SETTINGS_ROUTE_MAP[slug]
-    if (mapped) setSettingsInitialTab(mapped)
+    if (mapped) {
+      setSettingsInitialTab(mapped)
+      return
+    }
+
+    setSettingsInitialTab(isAdminPath ? 'Admin' : undefined)
   }, [isAdminPath, isAutomationsPath, isSettingsPath, pathname])
 
   useEffect(() => {

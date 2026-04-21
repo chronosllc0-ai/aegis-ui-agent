@@ -7243,3 +7243,36 @@
 
 ### Blockers
 - No browser screenshot tooling was available in the current agent runtime.
+
+---
+## Session 5.87 - April 21, 2026 (Admin subroute slug parsing fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused routing fix pass
+
+### What Was Done
+- Fixed settings/admin route tab resolution in `frontend/src/App.tsx` so `/admin/:slug` paths parse the slug and map via `SETTINGS_ROUTE_MAP` (same behavior as `/settings/:slug`).
+- Removed the hardcoded `activeSettingsTab = isAdminPath ? 'Admin' : ...` behavior that previously forced all admin subroutes to render the Admin tab.
+- Added explicit fallback behavior:
+  - `/admin` (no slug) resolves to `Admin`.
+  - `/admin/:unknown` falls back to `Admin`.
+  - non-settings/non-admin routes clear `settingsInitialTab`.
+
+### What's Working
+- Frontend build passes after routing fix.
+- Websocket navigate smoke test passes.
+- Admin subroutes now preserve intended tab routing instead of always forcing `Admin`.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Browser screenshot capture still not available in this runtime (no browser screenshot tool provided).
+
+### Next Steps
+1. Add route-level tests that assert `/admin/api-keys`, `/admin/billing`, `/admin/memory`, etc. resolve to expected tabs.
+2. Add one regression test for `/admin` no-slug fallback to `Admin`.
+
+### Decisions Made
+- Reused existing `SETTINGS_ROUTE_MAP` to keep `/settings` and `/admin` slug parsing behavior unified and deterministic.
+
+### Blockers
+- No browser screenshot tooling available in current runtime.
