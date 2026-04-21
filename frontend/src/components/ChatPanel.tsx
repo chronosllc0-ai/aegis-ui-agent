@@ -58,6 +58,8 @@ export interface ChatPanelProps {
   onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
+  handoffActive?: boolean
+  onHumanBrowserAction?: (action: { kind: 'click' | 'type_text' | 'scroll' | 'press_key'; x?: number; y?: number; text?: string; key?: string; deltaY?: number }) => void
   onHandoffContinue?: (requestId: string) => void
   provider: string
   model: string
@@ -1591,6 +1593,8 @@ export function ChatPanel({
   onUserInputResponse,
   onPlanConfirm,
   onPlanReject,
+  handoffActive = false,
+  onHumanBrowserAction,
   onHandoffContinue,
   provider,
   model,
@@ -1695,6 +1699,10 @@ export function ChatPanel({
   const [approvedIds, setApprovedIds]   = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds]   = useState<Set<string>>(new Set())
   const [activityExpanded, setActivityExpanded] = useState(false)
+  const [handoffClickX, setHandoffClickX] = useState('640')
+  const [handoffClickY, setHandoffClickY] = useState('360')
+  const [handoffText, setHandoffText] = useState('')
+  const [handoffScrollDelta, setHandoffScrollDelta] = useState('600')
 
   // ── Voice (Gemini Live + browser SR fallback) ─────────────────────────────
   type AnySR = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
@@ -1954,6 +1962,80 @@ export function ChatPanel({
             selectedSessionId={selectedSessionId ?? activeTaskId}
             onSelect={(sessionId) => onSessionSwitch?.(sessionId)}
           />
+        </div>
+      )}
+
+      {handoffActive && (
+        <div className='border-b border-amber-500/30 bg-amber-500/10 px-3 py-2'>
+          <p className='text-xs font-medium text-amber-200'>Manual handoff active</p>
+          <div className='mt-2 grid gap-2 md:grid-cols-2'>
+            <div className='flex items-center gap-1'>
+              <input
+                value={handoffClickX}
+                onChange={(event) => setHandoffClickX(event.target.value)}
+                className='w-20 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='x'
+                aria-label='Click X'
+              />
+              <input
+                value={handoffClickY}
+                onChange={(event) => setHandoffClickY(event.target.value)}
+                className='w-20 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='y'
+                aria-label='Click Y'
+              />
+              <button
+                type='button'
+                onClick={() => onHumanBrowserAction?.({ kind: 'click', x: Number(handoffClickX), y: Number(handoffClickY) })}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+              >
+                Send click
+              </button>
+            </div>
+            <div className='flex items-center gap-1'>
+              <input
+                value={handoffText}
+                onChange={(event) => setHandoffText(event.target.value)}
+                className='flex-1 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='Type text'
+                aria-label='Type text'
+              />
+              <button
+                type='button'
+                onClick={() => {
+                  if (!handoffText.trim()) return
+                  onHumanBrowserAction?.({ kind: 'type_text', text: handoffText })
+                  setHandoffText('')
+                }}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+              >
+                Type
+              </button>
+            </div>
+            <div className='flex items-center gap-1'>
+              <input
+                value={handoffScrollDelta}
+                onChange={(event) => setHandoffScrollDelta(event.target.value)}
+                className='w-24 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='deltaY'
+                aria-label='Scroll delta'
+              />
+              <button
+                type='button'
+                onClick={() => onHumanBrowserAction?.({ kind: 'scroll', deltaY: Number(handoffScrollDelta) })}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+              >
+                Scroll
+              </button>
+              <button
+                type='button'
+                onClick={() => onHumanBrowserAction?.({ kind: 'press_key', key: 'Enter' })}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+              >
+                Enter
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

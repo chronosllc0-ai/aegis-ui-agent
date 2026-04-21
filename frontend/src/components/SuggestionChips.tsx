@@ -33,8 +33,6 @@ export function SuggestionChips({ onSelectSuggestion, onOpenGallery, onRequestWe
     return () => window.clearTimeout(timeout)
   }, [fetchSuggestions])
 
-  if (suggestions.length === 0) return null
-
   return (
     <div className='flex items-center gap-2 overflow-x-auto px-2 py-1.5'>
       <button

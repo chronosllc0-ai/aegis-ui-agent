@@ -84,7 +84,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, logs, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, handoffActive, logs, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -851,6 +851,8 @@ function App() {
                 onUserInputResponse={handleUserInputResponse}
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
+                handoffActive={handoffActive}
+                onHumanBrowserAction={(action) => send({ action: 'human_browser_action', ...action })}
                 onHandoffContinue={handleHandoffContinue}
                 activityStatusLabel={activityStatusLabel}
                 activityDetail={activityDetailText}

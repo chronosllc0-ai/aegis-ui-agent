@@ -7119,3 +7119,34 @@
 - Browser screenshot tooling unavailable in this runtime.
 
 ---
+## Session 5.83 - April 21, 2026 (Review fixes: handoff action path + screenshot CTA persistence)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Restored a user-facing path to emit `human_browser_action` events during manual handoff by adding a compact handoff control strip to `ChatPanel` (click coordinates, text typing, scroll delta, Enter key).
+- Wired `App.tsx` to pass `handoffActive` and a live `onHumanBrowserAction` callback (`send({ action: 'human_browser_action', ...action })`) into `ChatPanel`.
+- Updated `SuggestionChips` so the `Request web screenshot` CTA always renders, even when gallery suggestions are empty or suggestion fetch fails.
+
+### What's Working
+- Frontend build passes with the review fixes.
+- Websocket navigate smoke test passes.
+- Manual handoff mode now has an explicit chat-surface control path for browser actions.
+- Screenshot CTA remains discoverable independent of suggestion availability.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Screenshot artifact not captured because no `browser_container` tool is available in the runtime.
+
+### Next Steps
+1. Add targeted frontend tests for `handoffActive` control-strip action dispatch payloads.
+2. Add a focused UI test proving screenshot CTA renders when suggestions list is empty.
+
+### Decisions Made
+- Kept chat-only shell architecture while restoring minimum viable manual-handoff interaction controls in chat to preserve execution reliability.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
