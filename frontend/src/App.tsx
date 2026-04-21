@@ -42,7 +42,7 @@ import { isBrowserPrimitiveActionLogEntry } from './lib/actionLogFilter'
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
-type AppMode = 'browser' | 'chat'
+type ViewMode = 'browser' | 'chat'
 
 const MAIN_SESSION_ID = 'agent:main:main'
 // Stop-words to skip when picking the first meaningful word from an instruction
@@ -90,7 +90,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, handoffActive, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, activeExecutionMode, handoffActive, handoffRequestId, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -126,7 +126,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
-  const [appMode, setAppMode] = useState<AppMode>('browser')
+  const [viewMode, setViewMode] = useState<ViewMode>('browser')
+  const [browserInstructionInput, setBrowserInstructionInput] = useState('')
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const [pendingNavigation, setPendingNavigation] = useState<{ instruction: string; metadata?: Record<string, unknown> } | null>(null)
   const subAgentsRef = useRef(subAgents)
@@ -256,7 +257,7 @@ function App() {
       return
     }
 
-    if (startedWorking && appMode === 'chat' && settings.promptToSwitchOnBrowse) {
+    if (startedWorking && viewMode === 'chat' && settings.promptToSwitchOnBrowse) {
       const activeTaskId = activeTaskIdRef.current
       if (activeTaskId && !promptShownTaskIdsRef.current.has(activeTaskId)) {
         promptShownTaskIdsRef.current.add(activeTaskId)
@@ -266,8 +267,8 @@ function App() {
 
     if (finishedWorking) {
       setShowBrowseHandoffPrompt(false)
-      if (appMode === 'browser' && settings.autoReturnToChat) {
-        setAppMode('chat')
+      if (viewMode === 'browser' && settings.autoReturnToChat) {
+        setViewMode('chat')
         addNotification({
           type: 'info',
           title: 'Task complete',
@@ -278,7 +279,7 @@ function App() {
     }
   }, [
     isWorking,
-    appMode,
+    viewMode,
     settings.separateExecutionSurfaces,
     settings.promptToSwitchOnBrowse,
     settings.autoReturnToChat,
@@ -609,27 +610,27 @@ function App() {
     if (wasWorking && !isWorking) {
       const hadBrowserActivityThisRun = browserActivityDuringRunRef.current
       browserActivityDuringRunRef.current = false
-      if (hadBrowserActivityThisRun && appMode === 'browser') {
-        setAppMode('chat')
+      if (hadBrowserActivityThisRun && viewMode === 'browser') {
+        setViewMode('chat')
       }
     }
 
     prevBrowsingWorkingRef.current = isWorking
-  }, [isWorking, hasBrowserActivityForActiveTask, appMode])
+  }, [isWorking, hasBrowserActivityForActiveTask, viewMode])
 
   // ── Auto-switch to chat on ask_user_input while in browser mode ─────────
   // If the agent needs user input mid-task and the user is watching the
   // browser, jump them to chat so they see (and can answer) the question.
   useEffect(() => {
-    if (!enrichedLogs.length || appMode !== 'browser') return
+    if (!enrichedLogs.length || viewMode !== 'browser') return
     const last = enrichedLogs[enrichedLogs.length - 1]
     if (last?.message?.includes('[ask_user_input]') ||
         last?.message?.includes('[confirm_plan]') ||
         last?.message?.includes('[plan_steps]')) {
-      setAppMode('chat')
+      setViewMode('chat')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrichedLogs.length, appMode])
+  }, [enrichedLogs.length, viewMode])
 
   const handleSend = useCallback((instruction: string, metadata?: Record<string, unknown>) => {
     const trimmed = instruction.trim()
@@ -652,6 +653,9 @@ function App() {
         ? preferredRuntimeAction
         : 'steer')
       : null
+    if (import.meta.env.DEV && 'viewMode' in outboundMetadata) {
+      console.warn('[AegisUI] viewMode metadata detected on execution payload; execution routing must remain view-agnostic.')
+    }
     send({ action: 'config', settings: wsConfig })
 
     setSteeringFlashKey((prev) => prev + 1)
@@ -712,12 +716,19 @@ function App() {
     handleSend(instruction, metadata)
   }
 
+  const submitBrowserInstruction = useCallback(() => {
+    const trimmed = browserInstructionInput.trim()
+    if (!trimmed) return
+    dispatchPromptFromUI(trimmed)
+    setBrowserInstructionInput('')
+  }, [browserInstructionInput, dispatchPromptFromUI])
+
   const routeBrowserCommandToChatComposer = useCallback((instruction: string) => {
     const trimmed = instruction.trim()
     if (!trimmed) return
     setPendingPrompt(trimmed)
     setShowBrowseHandoffPrompt(false)
-    setAppMode('chat')
+    setViewMode('chat')
   }, [])
 
   useEffect(() => {
@@ -932,8 +943,8 @@ function App() {
                 <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Dashboard</p>
                 <div className='space-y-1'>
                   <button type='button' onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/profile' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.user({ className: 'h-3.5 w-3.5' })}<span>Profile</span></button>
-                  <button type='button' onClick={() => { navigateTo('/'); setAppMode('chat'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && appMode === 'chat' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.chat({ className: 'h-3.5 w-3.5' })}<span>Chat</span></button>
-                  <button type='button' onClick={() => { navigateTo('/'); setAppMode('browser'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && appMode === 'browser' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.workflows({ className: 'h-3.5 w-3.5' })}<span>Sessions</span></button>
+                  <button type='button' onClick={() => { navigateTo('/'); setViewMode('chat'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && viewMode === 'chat' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.chat({ className: 'h-3.5 w-3.5' })}<span>Chat</span></button>
+                  <button type='button' onClick={() => { navigateTo('/'); setViewMode('browser'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && viewMode === 'browser' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.workflows({ className: 'h-3.5 w-3.5' })}<span>Sessions</span></button>
                   <button type='button' onClick={() => { navigateTo('/settings/observability'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/observability' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.alert({ className: 'h-3.5 w-3.5' })}<span>Observability</span></button>
                 </div>
               </div>
@@ -1004,16 +1015,16 @@ function App() {
                   <div className='ml-1 flex max-w-[42vw] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[#2a2a2a] bg-[#111] p-0.5 sm:max-w-none'>
                     <button
                       type='button'
-                      onClick={() => setAppMode('browser')}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'browser' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      onClick={() => setViewMode('browser')}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${viewMode === 'browser' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
                     >
                       {Icons.globe({ className: 'h-3 w-3' })}
                       <span className='hidden xs:inline'>Browser</span>
                     </button>
                     <button
                       type='button'
-                      onClick={() => setAppMode('chat')}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${appMode === 'chat' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      onClick={() => setViewMode('chat')}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${viewMode === 'chat' ? 'bg-[#2a2a2a] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
                     >
                       {Icons.chat({ className: 'h-3 w-3' })}
                       <span className='hidden xs:inline'>Chat</span>
@@ -1033,7 +1044,7 @@ function App() {
             </div>
           </header>
 
-          {!showSettings && !showAutomations && appMode === 'browser' && (
+          {!showSettings && !showAutomations && viewMode === 'browser' && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
               <button type='button' onClick={() => routeBrowserCommandToChatComposer('go back')} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
@@ -1044,6 +1055,20 @@ function App() {
               <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>
               <input aria-label='URL address' value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitUrl()} className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm md:text-xl' />
               <button type='button' onClick={submitUrl} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 sm:px-3'>Go</button>
+            </section>
+          )}
+          {!showSettings && !showAutomations && viewMode === 'browser' && (
+            <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
+              <span className='text-xs text-zinc-400'>{Icons.chat({ className: 'h-3.5 w-3.5' })}</span>
+              <input
+                aria-label='Send instruction'
+                value={browserInstructionInput}
+                onChange={(event) => setBrowserInstructionInput(event.target.value)}
+                onKeyDown={(event) => event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && submitBrowserInstruction()}
+                placeholder='Send instruction from browser view (same execution path as chat)'
+                className='w-full rounded-md border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs outline-none focus:border-blue-500/70 sm:text-sm'
+              />
+              <button type='button' onClick={submitBrowserInstruction} className='rounded border border-[#2a2a2a] px-2 py-1 text-xs hover:bg-zinc-800 sm:px-3'>Send</button>
             </section>
           )}
 
@@ -1065,7 +1090,7 @@ function App() {
               <div className='h-full overflow-y-auto p-2'>
                 <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
               </div>
-            ) : appMode === 'chat' ? (
+            ) : viewMode === 'chat' ? (
               <ChatPanel
                 logs={enrichedLogs}
                 isWorking={isWorking}
@@ -1075,7 +1100,7 @@ function App() {
                 onDecomposePlan={handleDecomposePlan}
                 connectionStatus={connectionStatus}
                 transcripts={transcripts.map((t) => t.text)}
-                onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setAppMode('browser') }}
+                onSwitchToBrowser={() => { setShowBrowseHandoffPrompt(false); setViewMode('browser') }}
                 latestFrame={latestFrame}
                 voiceActive={voiceActive}
                 onToggleVoice={toggleVoice}
@@ -1130,16 +1155,16 @@ function App() {
                   {showWorkflow ? (
                     <WorkflowView steps={workflowSteps} />
                   ) : (
-                <ScreenView
+                    <ScreenView
                       frameSrc={latestFrame}
                       isWorking={isWorking}
                       handoffActive={handoffActive}
                       onHumanBrowserAction={(action) => send({ action: 'human_browser_action', ...action })}
+                      onHandoffContinue={handoffRequestId ? () => handleHandoffContinue(handoffRequestId) : undefined}
                       steeringFlashKey={steeringFlashKey}
                       onExampleClick={(prompt) => {
-                        console.info('[AegisUI] example_click -> pre-fill composer')
-                        setAppMode('chat')
-                        setPendingPrompt(prompt)
+                        console.info('[AegisUI] example_click -> send prompt immediately')
+                        dispatchPromptFromUI(prompt)
                       }}
                       dataTour='screen-view'
                       lastClickCoords={lastClickCoords}
