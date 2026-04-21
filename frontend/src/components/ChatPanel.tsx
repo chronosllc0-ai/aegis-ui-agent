@@ -1703,6 +1703,11 @@ export function ChatPanel({
   const [handoffClickY, setHandoffClickY] = useState('360')
   const [handoffText, setHandoffText] = useState('')
   const [handoffScrollDelta, setHandoffScrollDelta] = useState('600')
+  const parsedClickX = Number(handoffClickX)
+  const parsedClickY = Number(handoffClickY)
+  const parsedScrollDelta = Number(handoffScrollDelta)
+  const hasValidClickCoords = Number.isFinite(parsedClickX) && Number.isFinite(parsedClickY)
+  const hasValidScrollDelta = Number.isFinite(parsedScrollDelta)
 
   // ── Voice (Gemini Live + browser SR fallback) ─────────────────────────────
   type AnySR = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
@@ -1986,8 +1991,12 @@ export function ChatPanel({
               />
               <button
                 type='button'
-                onClick={() => onHumanBrowserAction?.({ kind: 'click', x: Number(handoffClickX), y: Number(handoffClickY) })}
-                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+                onClick={() => {
+                  if (!hasValidClickCoords) return
+                  onHumanBrowserAction?.({ kind: 'click', x: parsedClickX, y: parsedClickY })
+                }}
+                disabled={!hasValidClickCoords}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40'
               >
                 Send click
               </button>
@@ -2022,8 +2031,12 @@ export function ChatPanel({
               />
               <button
                 type='button'
-                onClick={() => onHumanBrowserAction?.({ kind: 'scroll', deltaY: Number(handoffScrollDelta) })}
-                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+                onClick={() => {
+                  if (!hasValidScrollDelta) return
+                  onHumanBrowserAction?.({ kind: 'scroll', deltaY: parsedScrollDelta })
+                }}
+                disabled={!hasValidScrollDelta}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40'
               >
                 Scroll
               </button>

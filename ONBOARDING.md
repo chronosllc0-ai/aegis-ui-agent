@@ -7150,3 +7150,32 @@
 - Browser screenshot tooling unavailable in this runtime.
 
 ---
+## Session 5.84 - April 21, 2026 (Review fix: handoff numeric validation hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hardening pass
+
+### What Was Done
+- Hardened manual handoff controls in `ChatPanel` to prevent invalid numeric payloads.
+- Added finite-number parsing and guards for click coordinates and scroll delta before dispatching `human_browser_action`.
+- Disabled `Send click` and `Scroll` buttons when values are invalid, with disabled styling to make invalid state explicit.
+
+### What's Working
+- Frontend build passes.
+- Websocket navigate smoke test passes.
+- Handoff controls no longer dispatch `NaN` values for click/scroll payload fields.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Screenshot artifact not captured because no `browser_container` tool is available in the runtime.
+
+### Next Steps
+1. Add a focused UI/unit test for invalid handoff numeric input button-disabled states.
+
+### Decisions Made
+- Kept chat-only + MCP/browser backend model unchanged; applied validation at the handoff control boundary to keep payload contract stable.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
