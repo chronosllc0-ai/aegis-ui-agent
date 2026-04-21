@@ -6140,3 +6140,32 @@
 - Decision: implemented ON CONFLICT protection at insert level instead of lock-based coordination.
 - Decision: kept endpoint-level explicit commit to match current repository session lifecycle (no implicit commit in `get_session`).
 - Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.34 - April 21, 2026 (Chat-centric execution control + browser/chat separation hardening)
+
+### What changed
+- Updated `frontend/src/App.tsx` so browser-surface controls no longer dispatch websocket commands directly:
+  - browser URL submit now routes to Chat composer prefill + chat mode switch,
+  - browser back/forward buttons now route to Chat composer prefill instead of sending immediately,
+  - removed browser-mode floating Stop button so task control remains in chat surface.
+- Updated `frontend/src/components/ChatPanel.tsx` to explicitly drop browser primitive action log entries when projecting logs into chat messages.
+- Updated `frontend/src/hooks/useWebSocket.ts` to emit a chat-consumable `[summarize_task]` log from `task_result.summary`, ensuring a completion summary appears in chat even when browsing details stay in Action Log.
+
+### What works / what does not
+- Works:
+  - Browser panel no longer independently starts commands; it hands intent back to the chat composer path.
+  - Browser mechanical step events are filtered from chat transcript rendering.
+  - Task terminal summaries are surfaced into chat from websocket `task_result.summary`.
+  - Frontend build and targeted websocket smoke test pass in this environment.
+- Does not / caveats:
+  - AGENTS delivery checklist caveat remains: `backend/pydantic_adk_runner.py` is still missing, so the py_compile command cannot fully pass.
+
+### Next steps
+1. Consider adding an explicit UI cue in browser mode that command controls are delegated to chat composer.
+2. Add a frontend regression test that switches threads after refresh and asserts browser primitive logs never render in chat.
+3. Add an e2e assertion that `task_result.summary` always appears exactly once in chat.
+
+### Blockers / decisions
+- Decision: enforced "chat as control center" by routing browser controls to composer prefill, not by hidden auto-send.
+- Decision: kept browser Action Log intact for observability while adding stricter chat filtering.
+- Blocker: none beyond existing missing checklist file (`backend/pydantic_adk_runner.py`).

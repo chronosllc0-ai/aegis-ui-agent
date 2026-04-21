@@ -395,8 +395,16 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         setExecutionState('completed')
         setIsWorking(false)
         setTaskActivity(createIdleActivityState())
-        // The model's actual response was already emitted as a step — don't double-print.
-        // Only surface a fallback summary if no step content came through.
+        const resultSummary = String(payload.data?.summary ?? '').trim()
+        if (resultSummary) {
+          appendLog({
+            message: `[summarize_task] ${JSON.stringify({ summary: resultSummary })}`,
+            taskId,
+            type: 'result',
+            status: 'completed',
+            rawStepType: 'task_result',
+          })
+        }
         return
       }
       if (payload.type === 'task_error') {
