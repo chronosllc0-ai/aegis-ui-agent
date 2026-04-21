@@ -712,6 +712,14 @@ function App() {
     handleSend(instruction, metadata)
   }
 
+  const routeBrowserCommandToChatComposer = useCallback((instruction: string) => {
+    const trimmed = instruction.trim()
+    if (!trimmed) return
+    setPendingPrompt(trimmed)
+    setShowBrowseHandoffPrompt(false)
+    setAppMode('chat')
+  }, [])
+
   useEffect(() => {
     if (connectionStatus !== 'connected' || !pendingNavigation) return
     handleSend(pendingNavigation.instruction, pendingNavigation.metadata)
@@ -721,11 +729,7 @@ function App() {
     const trimmed = urlInput.trim()
     if (!trimmed) return
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    handleSend(normalized, {
-      task_label_source: 'browser',
-      task_label: normalized,
-      runtime_control_action: 'interrupt',
-    })
+    routeBrowserCommandToChatComposer(normalized)
   }
 
   const handleDecomposePlan = async (prompt: string) => {
@@ -1031,10 +1035,10 @@ function App() {
 
           {!showSettings && !showAutomations && appMode === 'browser' && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>
-              <button type='button' onClick={() => send({ action: 'chat', instruction: 'go back' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
+              <button type='button' onClick={() => routeBrowserCommandToChatComposer('go back')} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Back'>
                 {Icons.back({ className: 'h-4 w-4' })}
               </button>
-              <button type='button' onClick={() => send({ action: 'chat', instruction: 'go forward' })} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Forward'>
+              <button type='button' onClick={() => routeBrowserCommandToChatComposer('go forward')} className='hidden rounded border border-[#2a2a2a] px-2 hover:bg-zinc-800 sm:block' aria-label='Forward'>
                 {Icons.chevronRight({ className: 'h-4 w-4' })}
               </button>
               <span className='text-xs text-zinc-400'>{Icons.globe({ className: 'h-3.5 w-3.5' })}</span>
@@ -1152,20 +1156,6 @@ function App() {
           </div>
 
           {/* ── Stop button - overlays the send area while agent is working ── */}
-          {!showSettings && !showAutomations && appMode === 'browser' && isWorking && (
-            <div className='flex justify-end pb-1 pr-1'>
-              <button
-                type='button'
-                onClick={() => { send({ action: 'stop_task' }) }}
-                className='flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-500/20 hover:border-red-400/60'
-                title='Stop current task'
-              >
-                <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-red-300 border-t-transparent' />
-                Stop
-              </button>
-            </div>
-          )}
-
           {!showSettings && !showAutomations && scopedSubAgents.length > 0 && (
             <div className='px-3 pb-2'>
               <SubAgentPanel
