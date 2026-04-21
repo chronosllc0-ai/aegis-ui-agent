@@ -1,4 +1,4 @@
-"""Tests for /mode slash command behavior."""
+"""Tests for slash command behavior."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import asyncio
 from importlib import import_module
 
 
-def test_mode_command_updates_runtime_mode() -> None:
-    """/mode should set and report active runtime mode."""
+def test_model_command_reports_runtime_model() -> None:
+    """/model should report active runtime model."""
     main_mod = import_module("main")
     runtime = main_mod.SessionRuntime()
     user_id = "mode-test-user"
@@ -16,7 +16,7 @@ def test_mode_command_updates_runtime_mode() -> None:
     try:
         reply = asyncio.run(
             main_mod._handle_slash_command(
-                text="/mode code",
+                text="/model",
                 owner_uid=user_id,
                 platform="telegram",
                 integration_id="tg-1",
@@ -24,20 +24,7 @@ def test_mode_command_updates_runtime_mode() -> None:
             )
         )
         assert reply
-        assert "Code" in reply
-        assert runtime.settings.get("agent_mode") == "code"
-
-        status_reply = asyncio.run(
-            main_mod._handle_slash_command(
-                text="/mode",
-                owner_uid=user_id,
-                platform="telegram",
-                integration_id="tg-1",
-                chat_id=123,
-            )
-        )
-        assert status_reply
-        assert "Code" in status_reply
+        assert "Current model" in reply
     finally:
         main_mod._user_runtimes.pop(user_id, None)
 
@@ -71,6 +58,23 @@ def test_subagent_steer_command_alias_routes_to_runtime_message_path() -> None:
         assert calls == [("sub-42", "focus on blockers first")]
     finally:
         main_mod._user_runtimes.pop(user_id, None)
+
+
+def test_mode_command_returns_deprecation_message() -> None:
+    """/mode should return a clear deprecation message for backward compatibility."""
+    main_mod = import_module("main")
+
+    reply = asyncio.run(
+        main_mod._handle_slash_command(
+            text="/mode",
+            owner_uid=None,
+            platform="telegram",
+            integration_id="tg-1",
+            chat_id=123,
+        )
+    )
+    assert reply
+    assert "has been removed" in str(reply)
 
 
 def test_subagent_steering_payload_encodes_priority_annotation() -> None:

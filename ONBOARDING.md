@@ -6758,3 +6758,103 @@
 ### Blockers / decisions
 - Decision: keep watchdog cancellation local to lifecycle handlers (`send`, `onmessage`, `onclose`, `onerror`, reset/unmount) for explicitness over abstraction.
 - Blocker: none.
+
+## Session 5.72 - April 21, 2026 (Mode feature removal pass)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 backend/frontend cleanup pass
+
+### What Was Done
+- Removed frontend runtime mode plumbing from user settings websocket payload and send metadata.
+- Removed the mode selector from chat composer controls and simplified ChatPanel/App props accordingly.
+- Disabled backend mode handling paths in `main.py`:
+  - removed `/api/modes` endpoints,
+  - removed `/mode` slash command handling,
+  - removed mode callback handling for Telegram/Slack/Discord,
+  - removed mode-policy gating around websocket task start and subagent spawn.
+- Archived mode-focused docs under `docs/archive/` (`mode-instruction-pack.md`, `modes-industry-feasibility.md`, `modes-system-node-prompts.md`).
+- Removed mode-specific tests (`tests/test_modes.py`, `tests/test_mode_instruction_precedence.py`) and replaced `/mode` command coverage with `/model` command coverage in `tests/test_mode_commands.py`.
+- Removed now-invalid websocket mode telemetry unit tests from `tests/test_main_websocket.py`.
+
+### What's Working
+- Frontend build passes with mode selector removed.
+- Websocket navigate smoke test passes.
+- Slash command test module passes after replacing mode assertion with model assertion.
+
+### What's NOT Working Yet
+- AGENTS checklist compile command still references missing `backend/pydantic_adk_runner.py`; that command fails due missing file path.
+
+### Next Steps
+1. Remove or fully deprecate remaining `agentModes` artifacts (`frontend/src/lib/agentModes.ts`, mode event parsing paths) if no longer required for orchestrator telemetry UX.
+2. Decide whether to also retire backend `backend/modes.py` and integration adapters' mode-selection helpers once downstream dependencies are cleaned.
+3. Update AGENTS delivery checklist to reflect current repo file layout.
+
+### Decisions Made
+- Prioritized disabling runtime mode behavior and user-facing controls without broad refactors to unrelated orchestrator internals.
+- Archived (not deleted) historical mode design docs for traceability.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.73 - April 21, 2026 (Review follow-up: remove mode cleanup no-ops)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted cleanup pass
+
+### What Was Done
+- Removed leftover no-op `void activeExecutionMode` pattern from `frontend/src/App.tsx`.
+- Cleaned `App` websocket state destructuring to stop pulling unused `activeExecutionMode`.
+- Renamed the activity-detail passthrough variable to a neutral name (`activityDetailText`) after mode label removal.
+- Fully removed the backend `_normalize_runtime_mode(...)` helper from `main.py` instead of keeping a placeholder that returned a constant.
+- Removed all remaining calls to `_normalize_runtime_mode(...)` in task execution, websocket receive loop, sub-agent spawn path, and pairing runtime bootstrap.
+
+### What's Working
+- Frontend build still passes.
+- `main.py` compiles.
+- Target websocket smoke test and slash-command tests continue to pass.
+
+### What's NOT Working Yet
+- AGENTS checklist path mismatch remains (`backend/pydantic_adk_runner.py` is still absent in this repo).
+
+### Next Steps
+1. Optionally remove remaining backend/frontend mode-event parser artifacts if they are no longer needed for orchestrator telemetry.
+2. Update AGENTS checklist command list to current repository file layout.
+
+### Decisions Made
+- Followed review guidance to remove no-op scaffolding entirely instead of retaining placeholder functions/calls.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.74 - April 21, 2026 (Telegram /mode menu regression fix)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted review-fix pass
+
+### What Was Done
+- Removed stale `/mode` from `TELEGRAM_SLASH_COMMANDS` so Telegram command registration no longer advertises a removed feature.
+- Added an explicit compatibility branch in `_handle_slash_command` for `cmd == "mode"` that returns a clear deprecation message and points users to `/model` and `/reasoning`.
+- Added regression coverage in `tests/test_mode_commands.py` to assert `/mode` returns the deprecation message.
+
+### What's Working
+- `main.py` compiles.
+- Updated slash-command tests pass, including new `/mode` deprecation assertion.
+
+### What's NOT Working Yet
+- AGENTS checklist still references missing `backend/pydantic_adk_runner.py` path.
+
+### Next Steps
+1. Optionally remove obsolete mode helper methods from integration adapters (e.g., legacy `extract_mode_selection`) if no longer used anywhere.
+2. Keep compatibility message for at least one release window, then decide whether to drop `/mode` alias entirely.
+
+### Decisions Made
+- Chose dual mitigation (remove menu registration + keep friendly compatibility response) to prevent user-facing regression from stale cached command menus.
+
+### Blockers
+- None.
+
+---

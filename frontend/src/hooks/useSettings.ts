@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig } from '../lib/mcp'
-import { DEFAULT_AGENT_MODE, normalizeAgentMode, type AgentModeId } from '../lib/agentModes'
 import type { SteeringMode } from './useWebSocket'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
@@ -54,10 +53,6 @@ export type AppSettings = {
   autoReturnToChat: boolean
   /** Enabled skills selected in settings; mirrored from Skills tab state. */
   enabledSkillIds: string[]
-  /** User-selected baseline mode preference. */
-  selectedMode: AgentModeId
-  /** Runtime-active mode (can temporarily diverge during orchestrator delegation). */
-  activeMode: AgentModeId
   /** Runtime steering behavior for messages sent while a task is already running. */
   steeringMode: SteeringMode
 }
@@ -90,8 +85,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   promptToSwitchOnBrowse: true,
   autoReturnToChat: true,
   enabledSkillIds: [],
-  selectedMode: DEFAULT_AGENT_MODE,
-  activeMode: DEFAULT_AGENT_MODE,
   steeringMode: 'auto',
 }
 
@@ -102,7 +95,7 @@ function loadInitialSettings(): AppSettings {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return DEFAULT_SETTINGS
   try {
-    const parsed = JSON.parse(raw) as Partial<AppSettings> & { agentMode?: AgentModeId }
+    const parsed = JSON.parse(raw) as Partial<AppSettings>
     const merged = { ...DEFAULT_SETTINGS, ...parsed }
 
     // Migration: if the stored provider is a BYOK provider but no key is stored for it,
@@ -117,8 +110,6 @@ function loadInitialSettings(): AppSettings {
 
     return {
       ...merged,
-      selectedMode: normalizeAgentMode(merged.selectedMode ?? merged.agentMode),
-      activeMode: normalizeAgentMode(merged.activeMode ?? merged.selectedMode ?? merged.agentMode),
       enabledSkillIds: Array.isArray(merged.enabledSkillIds) ? merged.enabledSkillIds.filter((id): id is string => typeof id === 'string') : [],
       integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
     }
@@ -174,7 +165,6 @@ export function useSettings() {
       enabled_skill_ids: settings.enabledSkillIds,
       enable_reasoning: settings.enableReasoning,
       reasoning_effort: settings.reasoningEffort,
-      agent_mode: settings.selectedMode,
       steering_mode: settings.steeringMode,
     }),
     [settings],
