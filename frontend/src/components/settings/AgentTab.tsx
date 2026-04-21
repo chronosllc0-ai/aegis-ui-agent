@@ -15,6 +15,9 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
   const currentProvider = providerById(settings.provider) ?? providerForModel(settings.model) ?? PROVIDERS[0]
   const currentModel = modelInfo(settings.model)
   const supportsReasoning = Boolean(currentModel?.reasoning)
+  const selectedReasoningEffort = !settings.enableReasoning
+    ? 'none'
+    : (settings.reasoningEffort === 'none' ? 'medium' : settings.reasoningEffort)
 
   return (
     <div className='space-y-6'>
@@ -142,7 +145,7 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
             </label>
             <select
               id='agent-thinking-effort'
-              value={settings.reasoningEffort}
+              value={selectedReasoningEffort}
               onChange={(event) => {
                 const effort = event.target.value as (typeof THINKING_EFFORT_LEVELS)[number]
                 onPatch({ reasoningEffort: effort, enableReasoning: effort !== 'none' })

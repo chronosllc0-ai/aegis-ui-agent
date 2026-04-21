@@ -7055,3 +7055,33 @@
 - Browser screenshot tooling unavailable in this runtime.
 
 ---
+## Session 5.81 - April 21, 2026 (Reasoning selector state derivation fix)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted review-fix pass
+
+### What Was Done
+- Addressed PR review feedback for Agent Config reasoning selector state.
+- Updated selector binding to derive visible value from both `enableReasoning` and `reasoningEffort`:
+  - show `none` whenever `enableReasoning` is false,
+  - when enabled and stale `reasoningEffort` is `none`, display `medium` as canonical fallback.
+- Kept write behavior unchanged (`onChange` still writes both fields together) to preserve canonical persistence semantics.
+
+### What's Working
+- Agent Config no longer displays misleading non-`none` effort when reasoning is disabled.
+- Frontend build passes after the change.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because the file does not exist in this repository.
+- Screenshot artifact not captured because no `browser_container` tool is available in this runtime.
+
+### Next Steps
+1. Optionally add a focused frontend unit test for selector-value derivation from mixed legacy states.
+
+### Decisions Made
+- Chose explicit UI derivation over mutating stored state on render, to avoid side effects while still presenting accurate runtime semantics.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
