@@ -96,6 +96,13 @@ async def execute_task(task_id: str) -> None:
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": status,
             "error": error,
+            "session_scope": task.session_scope or "main",
+            "wake_mode": task.wake_mode or "now",
+            "delivery_channel": task.delivery_channel or "chat",
+            "last_run_status": task.last_status,
+            "last_run_at": task.last_run_at.isoformat() if task.last_run_at else None,
+            "next_run_at": task.next_run_at.isoformat() if task.next_run_at else None,
+            "reflection_candidate": status == "failed",
         },
     )
 

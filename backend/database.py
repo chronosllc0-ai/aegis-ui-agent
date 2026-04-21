@@ -862,6 +862,9 @@ class ScheduledTask(Base):
     prompt = Column(Text, nullable=False)           # the agent instruction to run
     execution_target_type = Column(String(50), nullable=False, default="assistant_prompt")
     workflow_id = Column(String(255), nullable=True)
+    session_scope = Column(String(20), nullable=False, default="main")
+    wake_mode = Column(String(50), nullable=False, default="now")
+    delivery_channel = Column(String(50), nullable=False, default="chat")
     cron_expr = Column(String(100), nullable=False)  # e.g. "0 9 * * 1" (every Monday 9am)
     timezone = Column(String(100), default="UTC")
     enabled = Column(Boolean, default=True)
@@ -989,6 +992,9 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
             "ALTER TABLE scheduled_tasks ADD COLUMN execution_target_type VARCHAR(50) DEFAULT 'assistant_prompt'",
         ),
         ("workflow_id", "ALTER TABLE scheduled_tasks ADD COLUMN workflow_id VARCHAR(255)"),
+        ("session_scope", "ALTER TABLE scheduled_tasks ADD COLUMN session_scope VARCHAR(20) DEFAULT 'main'"),
+        ("wake_mode", "ALTER TABLE scheduled_tasks ADD COLUMN wake_mode VARCHAR(50) DEFAULT 'now'"),
+        ("delivery_channel", "ALTER TABLE scheduled_tasks ADD COLUMN delivery_channel VARCHAR(50) DEFAULT 'chat'"),
         ("last_run_at", "ALTER TABLE scheduled_tasks ADD COLUMN last_run_at TIMESTAMP WITH TIME ZONE"),
         ("next_run_at", "ALTER TABLE scheduled_tasks ADD COLUMN next_run_at TIMESTAMP WITH TIME ZONE"),
         ("last_status", "ALTER TABLE scheduled_tasks ADD COLUMN last_status VARCHAR(20) DEFAULT 'pending'"),
