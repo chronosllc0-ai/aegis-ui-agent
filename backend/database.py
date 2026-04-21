@@ -187,6 +187,23 @@ class ChatSessionMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class LegacySessionArchive(Base):
+    """Archived snapshot of legacy conversations/sessions hidden from active UI."""
+
+    __tablename__ = "legacy_session_archives"
+    __table_args__ = (UniqueConstraint("archive_key", name="uq_legacy_session_archives_key"),)
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
+    platform = Column(String(50), nullable=False, index=True)
+    archive_key = Column(String(255), nullable=False)
+    source_type = Column(String(50), nullable=False)
+    source_id = Column(String(255), nullable=False)
+    payload_json = Column(Text, nullable=False)
+    archived_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PaymentMethod(Base):
     """Stored payment method for a user."""
 

@@ -11,7 +11,7 @@ from sqlalchemy import select
 import auth
 import main
 from backend import database
-from backend.database import ChatSession, ChatSessionMessage, Conversation, ConversationMessage, User
+from backend.database import ChatSession, ChatSessionMessage, Conversation, ConversationMessage, LegacySessionArchive, User
 from config import settings
 
 
@@ -140,5 +140,59 @@ def test_system_events_are_excluded_from_session_chat_messages(tmp_path: Path) -
         asyncio.run(_insert_system_event())
         messages = client.get(f"/api/sessions/{session_id}/messages").json()["messages"]
         assert [item["role"] for item in messages] == ["user"]
+    finally:
+        _restore_main_flags(original)
+
+
+def test_list_sessions_archives_legacy_rows_and_bootstraps_main(tmp_path: Path) -> None:
+    _init_test_db(tmp_path, "archive_legacy.db")
+    asyncio.run(_seed_user("password:user@example.com", "user@example.com"))
+    original, token = _configure_main_flags()
+    try:
+        async def _seed_legacy() -> None:
+            async with database._session_factory() as session:  # type: ignore[union-attr]
+                conv = Conversation(
+                    user_id="password:user@example.com",
+                    platform="web",
+                    platform_chat_id="legacy-conv-1",
+                    title="New web conversation",
+                    status="active",
+                )
+                session.add(conv)
+                await session.flush()
+                session.add(ConversationMessage(conversation_id=conv.id, role="user", content="legacy msg", metadata_json=None))
+                legacy_session = ChatSession(
+                    user_id="password:user@example.com",
+                    platform="web",
+                    session_id="agent:main:web:legacy:conversation:legacy-conv-1",
+                    title="Legacy session",
+                    status="active",
+                )
+                session.add(legacy_session)
+                await session.flush()
+                session.add(ChatSessionMessage(session_ref_id=legacy_session.id, role="user", content="legacy session msg", metadata_json=None))
+                await session.commit()
+
+        asyncio.run(_seed_legacy())
+        client = TestClient(main.app)
+        client.cookies.set("aegis_session", token)
+        response = client.get("/api/sessions")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        session_ids = [item["session_id"] for item in payload["sessions"]]
+        assert session_ids == ["agent:main:main"]
+
+        async def _assert_archived() -> None:
+            async with database._session_factory() as session:  # type: ignore[union-attr]
+                convs = (await session.execute(select(Conversation))).scalars().all()
+                assert all(item.status == "archived" for item in convs)
+                chat_sessions = (await session.execute(select(ChatSession))).scalars().all()
+                assert any(item.session_id == "agent:main:main" and item.status == "active" for item in chat_sessions)
+                assert any(item.session_id == "agent:main:web:legacy:conversation:legacy-conv-1" and item.status == "archived" for item in chat_sessions)
+                archives = (await session.execute(select(LegacySessionArchive))).scalars().all()
+                assert len(archives) == 2
+
+        asyncio.run(_assert_archived())
     finally:
         _restore_main_flags(original)

@@ -6071,3 +6071,72 @@
 ### Blockers / decisions
 - Decision: prefer route/IA consistency by removing orphaned tabs rather than re-surfacing them in nav.
 - Blocker: none (other than known missing checklist file in repo).
+
+## Session 6.32 - April 20, 2026 (Sessions-first migration + legacy UI history retirement)
+
+### What changed
+- Added `backend/sessions_migration_service.py` to run per-user sessions-first migration:
+  - exports legacy `conversations` + `chat_sessions` (non-main) with messages into `legacy_session_archives`,
+  - marks migrated legacy rows as `archived` (hidden from active UI),
+  - bootstraps guaranteed default main session `agent:main:main`.
+- Added `LegacySessionArchive` SQLAlchemy model/table in `backend/database.py` for recoverable archive snapshots.
+- Updated `main.py`:
+  - `/api/sessions` now triggers migration and returns only active, post-migration session rows,
+  - `/api/conversations` now acts as compatibility adapter backed by sessions data,
+  - `/api/conversations/{conversation_id}/messages` now supports sessions-backed compatibility reads when sessions-v2 is enabled.
+- Added migration script `scripts/migrate_sessions_first.py` to run migration across all users.
+- Switched frontend `App.tsx` from legacy task-history/conversations consumption to sessions-first:
+  - removed localStorage-based legacy task history ingestion,
+  - uses new `useSessions` hook (`frontend/src/hooks/useSessions.ts`) and `/api/sessions` + `/api/sessions/{id}/messages`,
+  - defaults selection to persistent main session `agent:main:main`.
+- Added regression test `test_list_sessions_archives_legacy_rows_and_bootstraps_main` in `tests/test_sessions_migration.py`.
+
+### What works / what does not
+- Works:
+  - Existing users are migrated into sessions-first shape when listing sessions.
+  - Legacy task/thread rows are archived and hidden from active lists, while archive snapshots remain recoverable.
+  - Frontend session switcher now consumes sessions API rather than legacy task-history state.
+  - Main session bootstrap is enforced via migration.
+- Does not / caveats:
+  - Delivery checklist compile command still fails because `backend/pydantic_adk_runner.py` is absent in the repository.
+
+### Next steps
+1. Add an admin/read API for browsing `legacy_session_archives` recovery payloads.
+2. Add an integration test ensuring no synthetic "new web conversation" labels are rendered in session switcher data.
+3. Consider one-time migration marker/telemetry to avoid doing archival checks on every session list request.
+
+### Blockers / decisions
+- Decision: keep `/api/conversations` as compatibility adapter mapped to sessions to avoid old client/API crashes during rollout.
+- Decision: archive legacy `chat_sessions` except `agent:main:main` to enforce one persistent main session UX baseline.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.33 - April 21, 2026 (Review follow-up: migration race-safety + transaction boundary cleanup)
+
+### What changed
+- Updated `backend/sessions_migration_service.py` to remove the check-then-act archive existence race:
+  - replaced pre-check with atomic insert semantics using dialect-specific `INSERT ... ON CONFLICT DO NOTHING` for PostgreSQL/SQLite,
+  - archive insert helper now returns whether a row was newly inserted via `rowcount`,
+  - legacy rows are still marked `archived` regardless of insert collision outcome.
+- Removed the internal `db.commit()` from `migrate_user_to_sessions_first(...)` so migration helper no longer commits caller-owned work.
+- Moved explicit commits to endpoint call sites in `main.py` after migration (`/api/conversations` and `/api/sessions`) to preserve persistence while keeping clear transaction boundaries.
+- Added explicit code comments warning that full message snapshot loading is currently in-memory and should be batched for very large histories.
+- Cleaned frontend nit in `frontend/src/hooks/useSessions.ts` by removing the no-op `setSessions((prev) => prev)` in error handling.
+
+### What works / what does not
+- Works:
+  - Concurrent migration writes no longer rely on a race-prone existence check for archive rows.
+  - Migration helper is now side-effect scoped (no hidden commit), with commits handled by endpoint flow.
+  - Frontend sessions hook error path no longer performs useless state updates.
+  - Targeted migration and websocket smoke tests pass, and frontend build still passes.
+- Does not / caveats:
+  - Existing checklist caveat remains: `backend/pydantic_adk_runner.py` is still missing for the py_compile command in AGENTS checklist.
+
+### Next steps
+1. Add a concurrency regression test that fires parallel `/api/sessions` requests and asserts no `IntegrityError` responses.
+2. Consider chunked/streamed archival serialization for large message histories.
+3. Evaluate moving commit/flush policy into a consistent request-level transaction middleware pattern.
+
+### Blockers / decisions
+- Decision: implemented ON CONFLICT protection at insert level instead of lock-based coordination.
+- Decision: kept endpoint-level explicit commit to match current repository session lifecycle (no implicit commit in `get_session`).
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).

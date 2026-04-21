@@ -85,6 +85,7 @@ from backend.migration_rollout import (
     sessions_v2_enabled,
 )
 from backend.session_store import append_session_message, get_or_create_session
+from backend.sessions_migration_service import migrate_user_to_sessions_first
 from backend.session_identity import (
     SESSION_MAIN_ID,
     normalize_or_bridge_session_id,
@@ -1556,15 +1557,17 @@ async def list_conversations(
     limit: int = 50,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return all conversations for the authenticated user (most recent first)."""
+    """Legacy compatibility adapter that exposes session data as conversations."""
     user = _get_current_user(request)
     uid = user["uid"]
+    await migrate_user_to_sessions_first(db, user_id=uid, platform="web")
+    await db.commit()
     from sqlalchemy import select as sa_select, desc as sa_desc
-    from backend.database import Conversation as ConvModel
+    from backend.database import ChatSession as SessionModel
     stmt = (
-        sa_select(ConvModel)
-        .where(ConvModel.user_id == uid, ConvModel.platform == "web")
-        .order_by(sa_desc(ConvModel.updated_at))
+        sa_select(SessionModel)
+        .where(SessionModel.user_id == uid, SessionModel.platform == "web", SessionModel.status != "archived")
+        .order_by(sa_desc(SessionModel.updated_at))
         .limit(limit)
     )
     rows = (await db.execute(stmt)).scalars().all()
@@ -1572,7 +1575,7 @@ async def list_conversations(
         "ok": True,
         "conversations": [
             {
-                "id": c.id,
+                "id": c.session_id,
                 "title": c.title,
                 "status": c.status,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -1592,6 +1595,8 @@ async def list_sessions(
     """Return chat sessions from v2 storage with legacy bridge fallback."""
     user = _get_current_user(request)
     uid = user["uid"]
+    await migrate_user_to_sessions_first(db, user_id=uid, platform="web")
+    await db.commit()
     from sqlalchemy import select as sa_select, desc as sa_desc
     from backend.database import ChatSession as SessionModel, Conversation as ConvModel
     rows: list[Any]
@@ -1657,7 +1662,50 @@ async def get_conversation_messages(
     uid = user["uid"]
     import json as _json
     from sqlalchemy import select as sa_select
-    from backend.database import Conversation as ConvModel, ConversationMessage as MsgModel
+    from backend.database import (
+        ChatSession as SessionModel,
+        ChatSessionMessage as SessionMsgModel,
+        Conversation as ConvModel,
+        ConversationMessage as MsgModel,
+    )
+    if sessions_v2_enabled():
+        session_row = (
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == normalize_or_bridge_session_id(conversation_id),
+                    SessionModel.status != "archived",
+                )
+            )
+        ).scalar_one_or_none()
+        if session_row:
+            messages = (
+                await db.execute(
+                    sa_select(SessionMsgModel)
+                    .where(SessionMsgModel.session_ref_id == session_row.id, SessionMsgModel.role != "system")
+                    .order_by(SessionMsgModel.created_at)
+                    .limit(limit)
+                )
+            ).scalars().all()
+            return {
+                "ok": True,
+                "conversation": {
+                    "id": session_row.session_id,
+                    "title": session_row.title,
+                    "created_at": session_row.created_at.isoformat() if session_row.created_at else None,
+                },
+                "messages": [
+                    {
+                        "id": m.id,
+                        "role": m.role,
+                        "content": m.content,
+                        "metadata": _json.loads(m.metadata_json) if m.metadata_json else None,
+                        "created_at": m.created_at.isoformat() if m.created_at else None,
+                    }
+                    for m in messages
+                ],
+            }
     # Ownership check
     conv = (await db.execute(sa_select(ConvModel).where(ConvModel.id == conversation_id))).scalar_one_or_none()
     if not conv or conv.user_id != uid:
