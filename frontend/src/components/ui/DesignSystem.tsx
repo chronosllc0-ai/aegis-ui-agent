@@ -11,17 +11,17 @@ export function SidebarSection({ title, children, defaultCollapsed = false }: Si
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
 
   return (
-    <section className='rounded-2xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-2)]/65 p-2'>
+    <section className='space-y-1.5'>
       <button
         type='button'
         onClick={() => setCollapsed((prev) => !prev)}
-        className='flex min-h-11 w-full items-center justify-between rounded-xl px-2 text-left md:cursor-default'
+        className='flex min-h-9 w-full items-center justify-between rounded-lg px-1.5 text-left md:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--ds-surface-1)]'
         aria-expanded={!collapsed}
       >
-        <p className='text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ds-text-muted)]'>{title}</p>
+        <p className='text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ds-text-muted)]'>{title}</p>
         <span className='md:hidden'>{Icons.chevronDown({ className: `h-3.5 w-3.5 text-[var(--ds-text-muted)] transition-transform ${collapsed ? '-rotate-90' : 'rotate-0'}` })}</span>
       </button>
-      <div className={`${collapsed ? 'hidden md:block' : 'block'} space-y-1 px-1 pb-1`}>{children}</div>
+      <div className={`${collapsed ? 'hidden md:block' : 'block'} space-y-0.5`}>{children}</div>
     </section>
   )
 }
@@ -38,14 +38,14 @@ export function NavItem({ icon, label, active = false, onClick }: NavItemProps) 
     <button
       type='button'
       onClick={onClick}
-      className={`flex min-h-11 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition-colors cursor-pointer ${
+      className={`group flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm font-semibold transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--ds-surface-1)] ${
         active
-          ? 'border-[var(--ds-border-accent)] bg-[var(--ds-accent-soft)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-soft)]'
-          : 'border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)] text-[var(--ds-text-secondary)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-4)]'
+          ? 'bg-[var(--ds-accent-soft)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-soft)]'
+          : 'text-[var(--ds-text-primary)]/90 hover:bg-[var(--ds-surface-3)]/45'
       }`}
     >
-      <span className='text-[var(--ds-text-muted)]'>{icon}</span>
-      <span>{label}</span>
+      <span className={`${active ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)] group-hover:text-[var(--ds-text-primary)]'}`}>{icon}</span>
+      <span className={`border-b border-transparent leading-5 ${active ? 'border-[var(--ds-border-accent)]' : 'group-hover:border-[var(--ds-border-subtle)]/80'}`}>{label}</span>
     </button>
   )
 }
