@@ -9,6 +9,7 @@ type ScreenViewProps = {
   lastClickCoords?: { x: number; y: number } | null
   handoffActive?: boolean
   onHumanBrowserAction?: (action: { kind: 'click' | 'type_text' | 'scroll' | 'press_key'; x?: number; y?: number; text?: string; key?: string; deltaY?: number }) => void
+  onHandoffContinue?: () => void
 }
 
 const EXAMPLES = [
@@ -18,7 +19,7 @@ const EXAMPLES = [
   'Go to Wikipedia and summarize the article on quantum computing',
 ]
 
-export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour, lastClickCoords, handoffActive = false, onHumanBrowserAction }: ScreenViewProps) {
+export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleClick, dataTour, lastClickCoords, handoffActive = false, onHumanBrowserAction, onHandoffContinue }: ScreenViewProps) {
   const [displayFrame, setDisplayFrame] = useState('')
   const [clickAnim, setClickAnim] = useState<{ x: number; y: number; key: number } | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -120,8 +121,17 @@ export function ScreenView({ frameSrc, isWorking, steeringFlashKey, onExampleCli
             <img src={displayFrame} alt='Live browser stream' className='absolute inset-0 h-full w-full object-cover' />
           </div>
           {handoffActive && (
-            <div className='absolute inset-x-3 top-3 z-20 rounded-lg border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200'>
-              Manual handoff active: you can click, type, scroll, and press keys in the browser pane.
+            <div className='absolute inset-x-3 top-3 z-20 flex items-center justify-between gap-2 rounded-lg border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200'>
+              <span>Manual handoff active: you can click, type, scroll, and press keys in the browser pane.</span>
+              {onHandoffContinue && (
+                <button
+                  type='button'
+                  onClick={onHandoffContinue}
+                  className='rounded border border-amber-400/60 bg-amber-500/20 px-2 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-500/30'
+                >
+                  Continue
+                </button>
+              )}
             </div>
           )}
           {clickAnim && (
