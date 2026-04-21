@@ -173,7 +173,25 @@ const CHAT_HARD_DENY_PREFIXES = [
   'Outcome:',
   'Worker refs:',
   'Task completed',
+  'Automation queued:',
+  'Steering note added:',
+  'Queued instruction:',
+  'Removed queued instruction:',
+  'Rejected idle ',
 ]
+const CHAT_RAW_STEP_DENYLIST = new Set([
+  'queue',
+  'steer',
+  'interrupt',
+  'config',
+  'workflow_step',
+  'mode_event',
+  'mode_transition',
+  'heartbeat',
+  'task_state',
+  'task_control',
+  'websocket_lifecycle',
+])
 
 const CHAT_INTERNAL_SUMMARY_RE = /^(planner|architect|deep research|code|orchestrator) summary:/i
 
@@ -265,9 +283,22 @@ function isSystemInternalMessage(metadata: Record<string, unknown> | null | unde
   ) {
     return true
   }
-  return action === 'step' || action === 'workflow_step' || action === 'context_update'
+  if (source === 'heartbeat' || source === 'websocket' || source === 'runtime_internal' || source === 'mode_router') {
+    return true
+  }
+  return action === 'step'
+    || action === 'workflow_step'
+    || action === 'context_update'
+    || action === 'steer'
+    || action === 'queue'
+    || action === 'interrupt'
+    || action === 'dequeue'
+    || action === 'mode_event'
+    || action === 'mode_transition'
+    || action === 'websocket_lifecycle'
 }
 function isDeniedChatText(text: string, rawStepType?: string): boolean {
+  if (rawStepType && CHAT_RAW_STEP_DENYLIST.has(rawStepType.trim().toLowerCase())) return true
   // tool_start / tool_result are typed JSON events — always let them through
   if (rawStepType === 'tool_start' || rawStepType === 'tool_result') return false
   const trimmed = text.trim()

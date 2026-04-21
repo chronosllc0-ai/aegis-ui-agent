@@ -211,7 +211,10 @@ export function ObservabilityTab() {
 
         <div className='mb-2 flex items-center justify-between text-[11px] text-zinc-500'>
           <span>Event Log</span>
-          <span>{retention ? `TTL ${Math.floor(retention.ttl_seconds / 3600)}h · cap ${retention.max_events}` : 'Retention unavailable'}</span>
+          <span>
+            {retention ? `TTL ${Math.floor(retention.ttl_seconds / 3600)}h · cap ${retention.max_events}` : 'Retention unavailable'}
+            {sessionFilter.trim() ? ' · scoped by session' : ''}
+          </span>
         </div>
 
         {eventsLoading ? (
@@ -231,7 +234,7 @@ export function ObservabilityTab() {
                     <span className='text-zinc-500'>{new Date(event.created_at).toLocaleTimeString()}</span>
                   </div>
                   <p className='mt-1 text-zinc-200'>{event.message}</p>
-                  <p className='mt-1 text-zinc-500'>session_id={event.session_id ?? 'n/a'} · task_id={event.task_id ?? 'n/a'}</p>
+                  <p className='mt-1 text-zinc-500'>session_id={event.session_id ?? 'n/a'} · request_id={event.request_id ?? 'n/a'} · task_id={event.task_id ?? 'n/a'}</p>
                 </div>
               ))}
               {!events.length && <p className='text-xs text-zinc-500'>No matching internal events.</p>}

@@ -6292,3 +6292,38 @@
 ### Blockers / decisions
 - Decision: keep browser-origin task labels aligned to chat label semantics for downstream telemetry/title consistency.
 - Blocker: none beyond known missing checklist file.
+
+## Session 6.39 - April 21, 2026 (Observability routing hardening: internal events to Event Log only)
+
+### What changed
+- Updated backend runtime event storage in `backend/runtime_telemetry.py` to support optional disk persistence (`data/runtime_events.jsonl`) with rehydration on startup, while preserving TTL/max-event pruning and cursor pagination.
+- Updated `main.py` observability/event routing:
+  - configured `RuntimeEventStore` with persistence path,
+  - added strict internal chat suppression helper for system/internal metadata and denylisted actions/sources,
+  - routed heartbeat dispatch + heartbeat queue lifecycle to observability events (without persisting heartbeat instructions into chat),
+  - expanded websocket lifecycle observability events (opened, disconnected, closed),
+  - expanded runtime control observability coverage for blocked controls and dequeue outcomes,
+  - expanded mode-orchestration observability coverage to record all parsed mode runtime events.
+- Updated `frontend/src/components/ChatPanel.tsx` denylist behavior:
+  - added stricter raw step-type denylist and text-prefix denylist for internal/system/control chatter,
+  - expanded metadata-based internal message filtering for persisted session messages.
+- Updated `frontend/src/components/settings/ObservabilityTab.tsx` event list rendering to expose request IDs and indicate session-scoped pagination context.
+- Added tests in `tests/test_runtime_event_store_persistence.py` for persistence rehydration and session-scoped pagination stability.
+
+### What works / what does not
+- Works:
+  - Internal/system/control event pathways now emit into observability stream and are prevented from being persisted into chat transcript storage via `_log_web_message` guard.
+  - Event-log persistence/rehydration works in unit tests, and session-scoped pagination behavior is validated.
+  - Frontend build and websocket smoke test pass.
+- Does not / caveats:
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so the py_compile checklist command still errors on missing file.
+
+### Next steps
+1. Add API/integration tests that verify `/api/observability/events` returns websocket lifecycle + heartbeat + control events for a live session end-to-end.
+2. Add frontend tests validating strict denylist behavior for newly blocked raw step types and metadata actions.
+3. Consider migrating observability event persistence from JSONL to a DB table if long-term retention/search is required.
+
+### Blockers / decisions
+- Decision: keep chat transcript strictly narrative by dropping internal/system messages before persistence rather than relying only on frontend filtering.
+- Decision: use lightweight JSONL persistence for event log continuity without schema migration.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).

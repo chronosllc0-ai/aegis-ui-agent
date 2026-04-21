@@ -378,7 +378,11 @@ _user_runtimes: dict[str, "SessionRuntime"] = {}
 # Reverse index: session_id -> SessionRuntime for O(1) heartbeat dispatch
 _session_runtimes: dict[str, "SessionRuntime"] = {}
 runtime_telemetry = RuntimeTelemetry()
-runtime_events = RuntimeEventStore(ttl_seconds=6 * 60 * 60, max_events=10000)
+runtime_events = RuntimeEventStore(
+    ttl_seconds=6 * 60 * 60,
+    max_events=10000,
+    persistence_path=Path("data/runtime_events.jsonl"),
+)
 session_migration_counters: dict[str, int] = {
     "send_total": 0,
     "send_mismatch": 0,
@@ -406,6 +410,24 @@ _BROWSER_CHAT_POLLUTION_EXACT = {
 }
 
 _BROWSER_CHAT_POLLUTION_SUMMARY_RE = re.compile(r"^(planner|architect|deep research|code|orchestrator) summary:", re.IGNORECASE)
+_SYSTEM_CHAT_ACTION_DENYLIST = {
+    "steer",
+    "queue",
+    "dequeue",
+    "interrupt",
+    "idle_steer_rejected",
+    "idle_queue_rejected",
+    "idle_interrupt_rejected",
+    "heartbeat",
+    "heartbeat_queue",
+    "heartbeat_dispatch",
+    "websocket_lifecycle",
+    "mode_event",
+    "mode_transition",
+    "workflow_step",
+    "task_state",
+    "task_control",
+}
 
 
 def _is_browser_chat_pollution(step: dict[str, Any]) -> bool:
@@ -422,6 +444,20 @@ def _is_browser_chat_pollution(step: dict[str, Any]) -> bool:
     if normalized in _BROWSER_CHAT_POLLUTION_EXACT:
         return True
     return bool(_BROWSER_CHAT_POLLUTION_SUMMARY_RE.match(content))
+
+
+def _is_system_internal_chat_message(role: str, metadata: dict[str, Any] | None) -> bool:
+    """Return True when a persisted chat row is internal/system-only noise."""
+    if str(role or "").strip().lower() == "system":
+        return True
+    payload = metadata if isinstance(metadata, dict) else {}
+    if payload.get("observability_only") is True or payload.get("user_visible") is False:
+        return True
+    source = str(payload.get("source") or "").strip().lower()
+    action = str(payload.get("action") or "").strip().lower()
+    if source in {"heartbeat", "websocket", "runtime_internal", "mode_router"}:
+        return True
+    return action in _SYSTEM_CHAT_ACTION_DENYLIST
 
 
 def _runtime_snapshot() -> dict[str, Any]:
@@ -615,6 +651,16 @@ async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
             source="heartbeat",
             metadata={"session_id": session_id},
         )
+        _record_runtime_event(
+            category="heartbeat",
+            subsystem="heartbeat",
+            level="info",
+            message="heartbeat instruction queued",
+            session_id=session_id,
+            request_id=runtime.current_request_id,
+            task_id=runtime.current_task_id,
+            details={"instruction": instruction},
+        )
         await _send_step(
             runtime.websocket,
             {
@@ -629,13 +675,15 @@ async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
     runtime.current_request_id = f"heartbeat:{uuid4()}"
     runtime.current_task_id = str(uuid4())
     runtime.current_frontend_task_id = runtime.current_task_id
-    await _log_web_message(
-        runtime,
-        session_id,
-        "user",
-        instruction,
-        title=instruction[:200],
-        metadata={"source": "heartbeat", "action": "automation_dispatch"},
+    _record_runtime_event(
+        category="heartbeat",
+        subsystem="heartbeat",
+        level="info",
+        message="heartbeat instruction dispatch started",
+        session_id=session_id,
+        request_id=runtime.current_request_id,
+        task_id=runtime.current_task_id,
+        details={"instruction": instruction},
     )
     _start_navigation_task(runtime.websocket, runtime, session_id, instruction)
 
@@ -2092,16 +2140,16 @@ async def _send_workflow_step(
             "frontend_task_id": frontend_task_id,
         }
         await websocket.send_json({"type": "mode_event", "data": mode_event_payload})
+        _record_runtime_event(
+            category="mode_orchestration",
+            subsystem="mode_router",
+            level="info",
+            message=f"mode event: {parsed_mode_event.get('event_name', 'unknown')}",
+            session_id=session_id,
+            task_id=task_id,
+            details=dict(parsed_mode_event),
+        )
         if parsed_mode_event.get("event_name") == "mode_transition":
-            _record_runtime_event(
-                category="mode_orchestration",
-                subsystem="mode_router",
-                level="info",
-                message="mode transition",
-                session_id=session_id,
-                task_id=task_id,
-                details=parsed_mode_event.get("payload", {}),
-            )
             await websocket.send_json(
                 {
                     "type": "mode_transition",
@@ -2245,6 +2293,22 @@ async def _log_web_message(
     """Persist websocket messages with session-v2 dual-write and fallback support."""
     if not runtime.user_uid:
         return
+    if _is_system_internal_chat_message(role, metadata):
+        _record_runtime_event(
+            category="chat_filter",
+            subsystem="chat",
+            level="debug",
+            message="internal chat message dropped",
+            session_id=session_id,
+            request_id=runtime.current_request_id,
+            task_id=runtime.current_task_id,
+            details={
+                "role": role,
+                "source": str((metadata or {}).get("source") or ""),
+                "action": str((metadata or {}).get("action") or ""),
+            },
+        )
+        return
     try:
         async for db in get_session():
             wrote_session = False
@@ -2367,18 +2431,15 @@ async def _start_idle_navigation_from_control_action(
             },
         }
     )
-    await _log_web_message(
-        runtime,
-        session_id,
-        "assistant",
-        f"Rejected idle {action} action. Navigate is required to start a task.",
-        metadata={
-            "source": "websocket",
-            "action": f"idle_{action}_rejected",
-            "task_label": task_label,
-            "title_candidate": title_candidate,
-            "client": client_metadata or {},
-        },
+    _record_runtime_event(
+        category="queue_steer_runtime",
+        subsystem="runtime",
+        level="info",
+        message=f"idle {action} rejected",
+        session_id=session_id,
+        request_id=runtime.current_request_id,
+        task_id=runtime.current_task_id,
+        details={"instruction": instruction, "task_label": task_label, "client": client_metadata or {}},
     )
 
 
@@ -2780,6 +2841,14 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         _user_runtimes[runtime.user_uid] = runtime
     # O(1) reverse index for heartbeat dispatch
     _session_runtimes[session_id] = runtime
+    _record_runtime_event(
+        category="websocket_lifecycle",
+        subsystem="websocket",
+        level="info",
+        message="websocket session opened",
+        session_id=session_id,
+        details={"user_uid": runtime.user_uid},
+    )
     ensure_daily_memory_file(session_id)
 
     db_session_gen = get_session()
@@ -2835,6 +2904,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
 
             if action in {"steer", "interrupt", "queue", "dequeue"}:
                 runtime_telemetry.record_auto_mode_blocked_send()
+                _record_runtime_event(
+                    category="queue_steer_runtime",
+                    subsystem="runtime",
+                    level="warning",
+                    message="runtime control blocked",
+                    session_id=session_id,
+                    request_id=str(data.get("request_id") or "") or runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    details={"action": action, "reason": "navigate_only_policy"},
+                )
                 await _safe_ws_send(
                     websocket,
                     {
@@ -3027,13 +3106,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     runtime=runtime,
                     session_id=session_id,
                 )
-                await _log_web_message(
-                    runtime,
-                    session_id,
-                    "user",
-                    instruction,
-                    metadata={"source": "websocket", "action": "steer", "client": client_metadata},
-                )
             elif action == "interrupt":
                 if not instruction:
                     await websocket.send_json({"type": "error", "data": {"message": "interrupt: instruction is required"}})
@@ -3064,13 +3136,15 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         logger.info("Current task cancelled during interrupt for session %s", session_id)
                     except Exception:  # noqa: BLE001
                         logger.exception("Interrupted task exited with error for session %s", session_id)
-                await _log_web_message(
-                    runtime,
-                    session_id,
-                    "user",
-                    instruction,
-                    title=instruction[:200],
-                    metadata={"source": "websocket", "action": "interrupt", "client": client_metadata},
+                _record_runtime_event(
+                    category="queue_steer_runtime",
+                    subsystem="runtime",
+                    level="info",
+                    message="interrupt follow-up started",
+                    session_id=session_id,
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    details={"instruction": instruction, "source": "websocket", "client": client_metadata or {}},
                 )
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "queue":
@@ -3111,14 +3185,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     runtime=runtime,
                     session_id=session_id,
                 )
-                await _log_web_message(
-                    runtime,
-                    session_id,
-                    "user",
-                    instruction,
-                    title=instruction[:200],
-                    metadata={"source": "websocket", "action": "queue", "client": client_metadata},
-                )
             elif action == "dequeue":
                 raw_index = data.get("index", -1)
                 try:
@@ -3129,6 +3195,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
 
                 removed = runtime.queued_instructions.remove_at(index)
                 if removed is not None:
+                    _record_runtime_event(
+                        category="queue_steer_runtime",
+                        subsystem="runtime",
+                        level="info",
+                        message="queued instruction removed",
+                        session_id=session_id,
+                        request_id=runtime.current_request_id,
+                        task_id=runtime.current_task_id,
+                        details={"index": index, "instruction": removed.instruction, "lane": removed.lane},
+                    )
                     await _send_step(
                         websocket,
                         {"type": "queue", "content": f"Removed queued instruction: {removed.instruction}"},
@@ -3136,6 +3212,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                         session_id=session_id,
                     )
                 else:
+                    _record_runtime_event(
+                        category="queue_steer_runtime",
+                        subsystem="runtime",
+                        level="warning",
+                        message="dequeue rejected: invalid index",
+                        session_id=session_id,
+                        request_id=runtime.current_request_id,
+                        task_id=runtime.current_task_id,
+                        details={"index": raw_index},
+                    )
                     await websocket.send_json({"type": "error", "data": {"message": "Invalid queue index"}})
             elif action == "config":
                 candidate_settings = data.get("settings", {})
@@ -3396,6 +3482,15 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "data": {"message": f"Unknown action: {action}"}})
     except WebSocketDisconnect:
         logger.info("Websocket disconnected")
+        _record_runtime_event(
+            category="websocket_lifecycle",
+            subsystem="websocket",
+            level="info",
+            message="websocket disconnected",
+            session_id=session_id,
+            request_id=runtime.current_request_id,
+            task_id=runtime.current_task_id,
+        )
     finally:
         if runtime.current_task is not None and not runtime.current_task.done() and runtime.task_running:
             runtime.cancel_event.set()
@@ -3413,6 +3508,15 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         session_events.unregister(session_id)
         await cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
+        _record_runtime_event(
+            category="websocket_lifecycle",
+            subsystem="websocket",
+            level="info",
+            message="websocket session closed",
+            session_id=session_id,
+            request_id=runtime.current_request_id,
+            task_id=runtime.current_task_id,
+        )
 
 
 async def _log_platform_message(
