@@ -4,7 +4,19 @@ import type { SteeringMode } from './useWebSocket'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
-export type ReasoningEffort = 'medium' | 'high' | 'extended' | 'adaptive'
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export const THINKING_EFFORT_LEVELS: readonly ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+
+function normalizeReasoningEffort(value: unknown): ReasoningEffort {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'off' || normalized === '0' || normalized === 'false') return 'none'
+  if (normalized === 'on' || normalized === '1' || normalized === 'true') return 'medium'
+  if (normalized === 'extended') return 'xhigh'
+  if (normalized === 'adaptive') return 'medium'
+  if ((THINKING_EFFORT_LEVELS as readonly string[]).includes(normalized)) return normalized as ReasoningEffort
+  return 'medium'
+}
 
 export type WorkflowTemplate = {
   id: string
@@ -110,6 +122,7 @@ function loadInitialSettings(): AppSettings {
 
     return {
       ...merged,
+      reasoningEffort: normalizeReasoningEffort(merged.reasoningEffort),
       enabledSkillIds: Array.isArray(merged.enabledSkillIds) ? merged.enabledSkillIds.filter((id): id is string => typeof id === 'string') : [],
       integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
     }

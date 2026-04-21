@@ -6858,3 +6858,36 @@
 - None.
 
 ---
+## Session 5.75 - April 21, 2026 (Thinking effort selector canonicalization)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused implementation pass
+
+### What Was Done
+- Canonicalized frontend thinking effort state to six levels: `none|minimal|low|medium|high|xhigh`, with migration normalization for legacy stored values (`extended`, `adaptive`, on/off booleans).
+- Updated Agent settings reasoning selector UI to render the six canonical effort levels directly.
+- Added a brain-icon thinking effort selector to the composer control row (same compact selector footprint as provider/model controls), wired to settings patch updates.
+- Threaded `reasoningEffort` through `ChatPanel` props from `App`, ensuring persisted selection reaches websocket config payload via existing `reasoning_effort` mapping.
+- Removed legacy model-specific reasoning mode selector helper from frontend model catalog.
+- Expanded backend reasoning normalization aliases so legacy effort inputs normalize into canonical levels (`extended -> xhigh`, `adaptive -> medium`).
+
+### What's Working
+- Frontend build passes with updated selector wiring and type changes.
+- Websocket smoke test passes.
+- Reasoning effort remains part of websocket config as `reasoning_effort` and is now constrained to canonical levels.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+
+### Next Steps
+1. Optionally add/adjust frontend tests to assert the composer brain selector lists exactly six effort options and persists selection.
+2. Optionally add backend unit coverage for reasoning alias normalization (`extended`, `adaptive`) for regression safety.
+
+### Decisions Made
+- Kept the existing `reasoning_effort` websocket field name for compatibility and only canonicalized allowed values.
+- Preserved compact selector footprint and icon-based controls in composer row while replacing selector semantics with thinking effort.
+
+### Blockers
+- None.
+
+---

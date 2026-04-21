@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AppSettings } from '../../hooks/useSettings'
-import { PROVIDERS, providerById, providerForModel, modelInfo, reasoningModesForModel } from '../../lib/models'
+import { THINKING_EFFORT_LEVELS } from '../../hooks/useSettings'
+import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
 import { ToolsTab } from './ToolsTab'
 import { WorkspaceFilesTab } from './WorkspaceFilesTab'
 
@@ -14,7 +15,6 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
   const currentProvider = providerById(settings.provider) ?? providerForModel(settings.model) ?? PROVIDERS[0]
   const currentModel = modelInfo(settings.model)
   const supportsReasoning = Boolean(currentModel?.reasoning)
-  const reasoningModes = reasoningModesForModel(settings.model)
 
   return (
     <div className='space-y-6'>
@@ -132,22 +132,22 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
               </button>
             </div>
 
-            {settings.enableReasoning && reasoningModes.length > 0 && (
+            {settings.enableReasoning && (
               <div className='mt-3'>
-                <p className='mb-1 text-[11px] font-medium text-zinc-400'>Reasoning control</p>
+                <p className='mb-1 text-[11px] font-medium text-zinc-400'>Thinking effort</p>
                 <div className='flex flex-wrap gap-1.5'>
-                  {reasoningModes.map((mode) => (
+                  {THINKING_EFFORT_LEVELS.map((effort) => (
                     <button
-                      key={mode}
+                      key={effort}
                       type='button'
-                      onClick={() => onPatch({ reasoningEffort: mode })}
+                      onClick={() => onPatch({ reasoningEffort: effort })}
                       className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
-                        settings.reasoningEffort === mode
+                        settings.reasoningEffort === effort
                           ? 'bg-violet-600 text-white'
                           : 'bg-[#1a1a1a] text-zinc-400 hover:text-zinc-200'
                       }`}
                     >
-                      {mode}
+                      {effort}
                     </button>
                   ))}
                 </div>

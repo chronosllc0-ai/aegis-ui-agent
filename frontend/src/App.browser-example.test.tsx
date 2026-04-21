@@ -43,7 +43,7 @@ vi.mock('./context/useSettingsContext', () => ({
       separateExecutionSurfaces: true,
       autoReturnToChat: false,
       enableReasoning: false,
-      reasoningEffort: 'adaptive',
+      reasoningEffort: 'medium',
       workflowTemplates: [],
       integrations: [],
       displayName: 'Tester',
