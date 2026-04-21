@@ -49,8 +49,6 @@ export interface ChatPanelProps {
   onDecomposePlan: (prompt: string) => void
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   transcripts: string[]
-  onSwitchToBrowser: () => void
-  latestFrame: string | null
   voiceActive?: boolean
   onToggleVoice?: () => void
   voiceDisabled?: boolean
@@ -60,6 +58,8 @@ export interface ChatPanelProps {
   onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
+  handoffActive?: boolean
+  onHumanBrowserAction?: (action: { kind: 'click' | 'type_text' | 'scroll' | 'press_key'; x?: number; y?: number; text?: string; key?: string; deltaY?: number }) => void
   onHandoffContinue?: (requestId: string) => void
   provider: string
   model: string
@@ -78,15 +78,9 @@ export interface ChatPanelProps {
   userName?: string
   /** Mentionable sub-agent handles (used for @ picker in composer) */
   subAgentNames?: string[]
-  browseHandoffPromptVisible?: boolean
-  onDismissBrowsePrompt?: () => void
   activityStatusLabel?: string
   activityDetail?: string
   isActivityVisible?: boolean
-  /** Pre-fill the composer with this prompt (e.g. from an example click). Consumed on first render. */
-  pendingPrompt?: string | null
-  /** Called once the pending prompt has been loaded into the composer */
-  onPendingPromptConsumed?: () => void
   sessions?: SessionSwitcherItem[]
   selectedSessionId?: string | null
   onSessionSwitch?: (sessionId: string) => void
@@ -1479,7 +1473,13 @@ function InputBarCursor({
 
         {isExpanded && (
           <div className='space-y-1.5 border-t border-[#242424] px-2.5 py-2'>
-            <SuggestionChips onSelectSuggestion={onSelectSuggestion} onOpenGallery={onOpenGallery} />
+            <SuggestionChips
+              onSelectSuggestion={onSelectSuggestion}
+              onOpenGallery={onOpenGallery}
+              onRequestWebScreenshot={() => {
+                onSelectSuggestion('__request_web_screenshot__')
+              }}
+            />
           </div>
         )}
 
@@ -1583,8 +1583,6 @@ export function ChatPanel({
   onSteeringModeChange = () => undefined,
   onDecomposePlan,
   connectionStatus,
-  onSwitchToBrowser,
-  latestFrame,
   transcripts = [],
   voiceActive = false,
   onToggleVoice,
@@ -1595,6 +1593,8 @@ export function ChatPanel({
   onUserInputResponse,
   onPlanConfirm,
   onPlanReject,
+  handoffActive = false,
+  onHumanBrowserAction,
   onHandoffContinue,
   provider,
   model,
@@ -1605,13 +1605,9 @@ export function ChatPanel({
   contextSnapshot,
   userName,
   subAgentNames = [],
-  browseHandoffPromptVisible = false,
-  onDismissBrowsePrompt,
   activityStatusLabel = 'Aegis is working…',
   activityDetail,
   isActivityVisible = false,
-  pendingPrompt,
-  onPendingPromptConsumed,
   sessions = [],
   selectedSessionId,
   onSessionSwitch,
@@ -1703,6 +1699,15 @@ export function ChatPanel({
   const [approvedIds, setApprovedIds]   = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds]   = useState<Set<string>>(new Set())
   const [activityExpanded, setActivityExpanded] = useState(false)
+  const [handoffClickX, setHandoffClickX] = useState('640')
+  const [handoffClickY, setHandoffClickY] = useState('360')
+  const [handoffText, setHandoffText] = useState('')
+  const [handoffScrollDelta, setHandoffScrollDelta] = useState('600')
+  const parsedClickX = Number(handoffClickX)
+  const parsedClickY = Number(handoffClickY)
+  const parsedScrollDelta = Number(handoffScrollDelta)
+  const hasValidClickCoords = Number.isFinite(parsedClickX) && Number.isFinite(parsedClickY)
+  const hasValidScrollDelta = Number.isFinite(parsedScrollDelta)
 
   // ── Voice (Gemini Live + browser SR fallback) ─────────────────────────────
   type AnySR = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
@@ -1755,22 +1760,6 @@ export function ChatPanel({
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
   const fileInputRef   = useRef<HTMLInputElement>(null)
 
-  // Pre-fill composer when a pending prompt arrives (e.g. from example click in browser panel)
-  useEffect(() => {
-    if (!pendingPrompt) return
-    setInput(pendingPrompt)
-    const t = window.setTimeout(() => {
-      textareaRef.current?.focus()
-      // Auto-resize
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-      }
-    }, 0)
-    onPendingPromptConsumed?.()
-    return () => window.clearTimeout(t)
-  }, [pendingPrompt, onPendingPromptConsumed])
-
   const baseMessages = useMemo(() => logsToMessages(logs), [logs])
 
   useEffect(() => {
@@ -1793,8 +1782,6 @@ export function ChatPanel({
     if (allMessages.length > 0) saveMsgs(activeTaskId, allMessages)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allMessages.length, activeTaskId])
-
-  const showBrowsePill = browseHandoffPromptVisible && isWorking && latestFrame
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1874,6 +1861,11 @@ export function ChatPanel({
   }
 
   const handleSuggestionSelect = async (templateId: string) => {
+    if (templateId === '__request_web_screenshot__') {
+      setInput('Request web screenshot of ')
+      window.setTimeout(() => textareaRef.current?.focus(), 0)
+      return
+    }
     try {
       const response = await fetch(apiUrl(`/api/gallery/${templateId}`), { credentials: 'include' })
       const data = await response.json()
@@ -1978,27 +1970,84 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Browsing pill */}
-      {showBrowsePill && (
-        <div className='flex justify-center pt-2 px-4'>
-          <div className='flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 shadow-md'>
-            <button
-              type='button'
-              onClick={onSwitchToBrowser}
-              className='flex items-center gap-2 rounded-full px-1 py-0.5 text-xs font-medium text-blue-300 hover:text-blue-100 transition-colors'
-            >
-              <IcoGlobe className='h-3.5 w-3.5' />
-              Agent is browsing — Switch to Browser
-            </button>
-            <button
-              type='button'
-              onClick={onDismissBrowsePrompt}
-              className='rounded-full border border-blue-400/30 px-1.5 py-0.5 text-[10px] text-blue-200/80 hover:text-blue-100'
-              title='Dismiss'
-              aria-label='Dismiss browse switch prompt'
-            >
-              Dismiss
-            </button>
+      {handoffActive && (
+        <div className='border-b border-amber-500/30 bg-amber-500/10 px-3 py-2'>
+          <p className='text-xs font-medium text-amber-200'>Manual handoff active</p>
+          <div className='mt-2 grid gap-2 md:grid-cols-2'>
+            <div className='flex items-center gap-1'>
+              <input
+                value={handoffClickX}
+                onChange={(event) => setHandoffClickX(event.target.value)}
+                className='w-20 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='x'
+                aria-label='Click X'
+              />
+              <input
+                value={handoffClickY}
+                onChange={(event) => setHandoffClickY(event.target.value)}
+                className='w-20 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='y'
+                aria-label='Click Y'
+              />
+              <button
+                type='button'
+                onClick={() => {
+                  if (!hasValidClickCoords) return
+                  onHumanBrowserAction?.({ kind: 'click', x: parsedClickX, y: parsedClickY })
+                }}
+                disabled={!hasValidClickCoords}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40'
+              >
+                Send click
+              </button>
+            </div>
+            <div className='flex items-center gap-1'>
+              <input
+                value={handoffText}
+                onChange={(event) => setHandoffText(event.target.value)}
+                className='flex-1 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='Type text'
+                aria-label='Type text'
+              />
+              <button
+                type='button'
+                onClick={() => {
+                  if (!handoffText.trim()) return
+                  onHumanBrowserAction?.({ kind: 'type_text', text: handoffText })
+                  setHandoffText('')
+                }}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+              >
+                Type
+              </button>
+            </div>
+            <div className='flex items-center gap-1'>
+              <input
+                value={handoffScrollDelta}
+                onChange={(event) => setHandoffScrollDelta(event.target.value)}
+                className='w-24 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
+                placeholder='deltaY'
+                aria-label='Scroll delta'
+              />
+              <button
+                type='button'
+                onClick={() => {
+                  if (!hasValidScrollDelta) return
+                  onHumanBrowserAction?.({ kind: 'scroll', deltaY: parsedScrollDelta })
+                }}
+                disabled={!hasValidScrollDelta}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40'
+              >
+                Scroll
+              </button>
+              <button
+                type='button'
+                onClick={() => onHumanBrowserAction?.({ kind: 'press_key', key: 'Enter' })}
+                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
+              >
+                Enter
+              </button>
+            </div>
           </div>
         </div>
       )}

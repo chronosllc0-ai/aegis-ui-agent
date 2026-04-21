@@ -7085,3 +7085,97 @@
 - Browser screenshot tooling unavailable in this runtime.
 
 ---
+## Session 5.82 - April 21, 2026 (Chat-only shell + web screenshot CTA)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Removed the browser-panel render path from `App.tsx`, including the chat/browser mode switcher and browser-only top controls.
+- Simplified main shell routing so the authenticated workspace surface always renders chat (unless settings, automations, or task-plan view are open).
+- Kept internal tool execution intact by preserving websocket task dispatch and logs flow while removing browser viewport UI coupling.
+- Added an explicit `Request web screenshot` CTA chip in chat suggestions that prefills the composer with a screenshot request prompt.
+- Retained chat transcript filtering that excludes low-level browser/tool primitive noise.
+
+### What's Working
+- Frontend build passes with chat-only app shell.
+- Websocket navigate smoke test passes.
+- Browser toggle/switch is no longer visible in sidebar/header UI.
+- Chat composer now exposes a direct `Request web screenshot` action.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Screenshot artifact not captured because no `browser_container` tool is available in the runtime.
+
+### Next Steps
+1. Add/update frontend tests that previously asserted browser/chat shell switching behavior.
+2. Add a focused test for the new screenshot CTA prefill behavior.
+
+### Decisions Made
+- Chat was made the single operation center in the shell while preserving backend browser/tool capability through existing execution plumbing.
+- Kept browser-step suppression in chat transcript logic unchanged to avoid leaking execution noise.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
+## Session 5.83 - April 21, 2026 (Review fixes: handoff action path + screenshot CTA persistence)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused fix pass
+
+### What Was Done
+- Restored a user-facing path to emit `human_browser_action` events during manual handoff by adding a compact handoff control strip to `ChatPanel` (click coordinates, text typing, scroll delta, Enter key).
+- Wired `App.tsx` to pass `handoffActive` and a live `onHumanBrowserAction` callback (`send({ action: 'human_browser_action', ...action })`) into `ChatPanel`.
+- Updated `SuggestionChips` so the `Request web screenshot` CTA always renders, even when gallery suggestions are empty or suggestion fetch fails.
+
+### What's Working
+- Frontend build passes with the review fixes.
+- Websocket navigate smoke test passes.
+- Manual handoff mode now has an explicit chat-surface control path for browser actions.
+- Screenshot CTA remains discoverable independent of suggestion availability.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Screenshot artifact not captured because no `browser_container` tool is available in the runtime.
+
+### Next Steps
+1. Add targeted frontend tests for `handoffActive` control-strip action dispatch payloads.
+2. Add a focused UI test proving screenshot CTA renders when suggestions list is empty.
+
+### Decisions Made
+- Kept chat-only shell architecture while restoring minimum viable manual-handoff interaction controls in chat to preserve execution reliability.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
+## Session 5.84 - April 21, 2026 (Review fix: handoff numeric validation hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused hardening pass
+
+### What Was Done
+- Hardened manual handoff controls in `ChatPanel` to prevent invalid numeric payloads.
+- Added finite-number parsing and guards for click coordinates and scroll delta before dispatching `human_browser_action`.
+- Disabled `Send click` and `Scroll` buttons when values are invalid, with disabled styling to make invalid state explicit.
+
+### What's Working
+- Frontend build passes.
+- Websocket navigate smoke test passes.
+- Handoff controls no longer dispatch `NaN` values for click/scroll payload fields.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Screenshot artifact not captured because no `browser_container` tool is available in the runtime.
+
+### Next Steps
+1. Add a focused UI/unit test for invalid handoff numeric input button-disabled states.
+
+### Decisions Made
+- Kept chat-only + MCP/browser backend model unchanged; applied validation at the handoff control boundary to keep payload contract stable.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
+---
