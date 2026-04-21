@@ -6177,3 +6177,35 @@
 - Decision: keep POST/PATCH API body in existing backend shape to avoid contract breakage.
 - Decision: source workflow-mode `prompt` from selected saved workflow instruction for runtime compatibility.
 - Blocker: none.
+
+## Session 6.35 - April 21, 2026 (PR review fixes: execution mode UX + draft safety)
+
+### What changed
+- Addressed review feedback in `frontend/src/components/AutomationsPage.tsx`:
+  - Changed execution mode dropdown labels from raw enum keys to user-facing labels (`Assistant prompt`, `Saved workflow`) while preserving enum values in submit payload.
+  - Fixed wizard reset behavior so changing mode preference no longer wipes in-progress draft fields.
+  - Adjusted edit initialization logic to avoid forcing last-used mode onto existing tasks:
+    - new jobs default to persisted last mode,
+    - edit jobs infer workflow mode only when current task prompt matches a saved workflow instruction; otherwise use assistant prompt mode.
+  - Strengthened workflow-mode validation to require that the selected workflow ID resolves to an existing workflow object.
+  - Hardened API payload mapping (`toTaskApiPayload`) to throw an explicit error if workflow mode references a missing/deleted workflow, instead of silently sending an empty prompt.
+  - Added submit error handling in wizard to surface mapping/save failures as inline form errors.
+
+### What works / what does not
+- Works:
+  - Human-readable mode labels in UI.
+  - No full form reset when toggling execution mode preference.
+  - Edit flow no longer overrides task mode with last-used mode.
+  - Missing/deleted workflow edge cases now fail with clear error messages instead of creating empty-prompt tasks.
+- Does not / caveats:
+  - Workflow-mode inference during edit remains heuristic (prompt text match to workflow instruction) until backend stores explicit execution metadata.
+
+### Next steps
+1. Add explicit backend fields for `execution_mode` and workflow linkage to remove heuristic inference in edit flow.
+2. Add component tests that assert mode toggles do not reset unrelated draft fields.
+3. Add validation test coverage for deleted-workflow race conditions.
+
+### Blockers / decisions
+- Decision: keep backend payload contract unchanged while preventing empty prompt submissions for workflow mode.
+- Decision: preserve existing form data when mode preference changes to avoid destructive UX regressions.
+- Blocker: none.

@@ -214,8 +214,19 @@ function AutomationWizard({
     })
     setCustomCron(initial?.cron_expr ?? '')
     setTimezone(initial?.timezone ?? 'UTC')
-    setExecutionMode(lastExecutionMode)
-    setSelectedWorkflowId('')
+    if (!initial) {
+      setExecutionMode(lastExecutionMode)
+      setSelectedWorkflowId('')
+    } else {
+      const matchedWorkflow = workflows.find((workflow) => workflow.instruction === initial.prompt)
+      if (matchedWorkflow) {
+        setExecutionMode('run_saved_workflow')
+        setSelectedWorkflowId(matchedWorkflow.id)
+      } else {
+        setExecutionMode('run_assistant_prompt')
+        setSelectedWorkflowId('')
+      }
+    }
     setWorkflowVersionPin('')
     setError(null)
   }, [initial, lastExecutionMode])
@@ -257,17 +268,30 @@ function AutomationWizard({
       return
     }
 
-    await onSubmit({
-      name: name.trim(),
-      description: description.trim(),
-      execution_mode: executionMode,
-      assistant_task_prompt: executionMode === 'run_assistant_prompt' ? prompt.trim() : undefined,
-      workflow_id: executionMode === 'run_saved_workflow' ? selectedWorkflowId : undefined,
-      workflow_version: executionMode === 'run_saved_workflow' && workflowVersionPin.trim() ? workflowVersionPin.trim() : undefined,
-      cron_expr: cronExpr.trim(),
-      timezone,
-      enabled,
-    })
+    if (executionMode === 'run_saved_workflow') {
+      const workflow = workflows.find((wf) => wf.id === selectedWorkflowId)
+      if (!workflow) {
+        setError('Selected workflow no longer exists. Please pick another workflow.')
+        return
+      }
+    }
+
+    try {
+      await onSubmit({
+        name: name.trim(),
+        description: description.trim(),
+        execution_mode: executionMode,
+        assistant_task_prompt: executionMode === 'run_assistant_prompt' ? prompt.trim() : undefined,
+        workflow_id: executionMode === 'run_saved_workflow' ? selectedWorkflowId : undefined,
+        workflow_version: executionMode === 'run_saved_workflow' && workflowVersionPin.trim() ? workflowVersionPin.trim() : undefined,
+        cron_expr: cronExpr.trim(),
+        timezone,
+        enabled,
+      })
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save automation job')
+      return
+    }
 
     if (!initial?.id) {
       setName('')
@@ -366,13 +390,13 @@ function AutomationWizard({
               }}
               className='min-h-11 w-full rounded-lg border border-[#2a334a] bg-[#0b1220] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500/60'
             >
-              <option value='run_assistant_prompt'>run_assistant_prompt</option>
-              <option value='run_saved_workflow'>run_saved_workflow</option>
+              <option value='run_assistant_prompt'>Assistant prompt</option>
+              <option value='run_saved_workflow'>Saved workflow</option>
             </select>
           </div>
           {executionMode === 'run_assistant_prompt' ? (
             <div>
-              <FieldLabel label='assistant_task_prompt' required />
+              <FieldLabel label='Assistant task prompt' required />
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
@@ -509,10 +533,14 @@ export function AutomationsPage() {
   }, [lastExecutionMode])
 
   const toTaskApiPayload = useCallback((data: TaskMutationPayload): TaskApiPayload => {
-    const selectedWorkflow = workflows.find((workflow) => workflow.id === data.workflow_id)
-    const prompt = data.execution_mode === 'run_saved_workflow'
-      ? selectedWorkflow?.instruction ?? ''
-      : data.assistant_task_prompt ?? ''
+    let prompt = data.assistant_task_prompt ?? ''
+    if (data.execution_mode === 'run_saved_workflow') {
+      const selectedWorkflow = workflows.find((workflow) => workflow.id === data.workflow_id)
+      if (!selectedWorkflow) {
+        throw new Error('Selected workflow no longer exists. Please pick another workflow.')
+      }
+      prompt = selectedWorkflow.instruction
+    }
 
     return {
       name: data.name,
