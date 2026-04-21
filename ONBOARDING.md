@@ -7307,6 +7307,67 @@
 - No browser screenshot tool available in this environment.
 
 ---
+## Session 5.91 - April 21, 2026 (Review follow-up: smoother utility fade + no-hover layout shift)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick review-fix pass
+
+### What Was Done
+- Updated sidebar bottom utility area gradient in `frontend/src/App.tsx` from a hard 24% stop to a full-range fade (`100%`) for a smoother visual transition.
+- Replaced nav label underline border treatment in `frontend/src/components/ui/DesignSystem.tsx` with inset `box-shadow` utilities to avoid 1px hover layout shift while preserving active/hover emphasis.
+
+### What's Working
+- Bottom usage/account area now transitions more naturally without an abrupt visual cutoff.
+- Sidebar nav hover/active label emphasis no longer changes element height, preventing wobble/shift on hover.
+- Existing keyboard-focus styles remain intact.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` remains inapplicable because that file does not exist in this repository.
+- Browser screenshot capture is still unavailable in this runtime.
+
+### Next Steps
+1. Validate hover behavior visually across Chrome/Safari/Firefox once browser tooling is available.
+2. If desired, centralize underline/accent effects into shared utility classes for consistent nav behavior.
+
+### Decisions Made
+- Used inset shadow underline instead of border-based underline to keep layout stable under hover.
+- Accepted review suggestion for a full-length gradient fade in the sidebar utility section.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---
+## Session 5.90 - April 21, 2026 (Sidebar nav visual cleanup: text-first inactive, chip-only active)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend styling pass
+
+### What Was Done
+- Updated `frontend/src/components/ui/DesignSystem.tsx` sidebar section and nav item styling so inactive nav rows are text-first (no chip-like border/background), hover is subtle, and active rows retain a single highlighted chip treatment.
+- Increased nav label emphasis/contrast and added clearer focus-visible ring styles for keyboard accessibility.
+- Tightened sidebar group heading sizing/spacing for a compact but readable section header rhythm.
+- Updated the sidebar bottom utility area wrapper in `frontend/src/App.tsx` to strengthen visual separation from primary navigation content.
+
+### What's Working
+- Inactive sidebar tabs now render as clean rows without chip containers.
+- Active tab stands out via accent background + subtle shadow and stronger icon/label treatment.
+- Focus visibility is preserved with explicit `focus-visible` ring styling on section toggles and nav buttons.
+- Usage/account area remains visually separated with a stronger top divider and subtle gradient backdrop.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` remains inapplicable because that file does not exist in this repository.
+- Browser screenshot capture is still unavailable in this runtime.
+
+### Next Steps
+1. Validate the revised sidebar feel in-browser across mobile + desktop breakpoints once screenshot/browser tooling is available.
+2. If desired, tune active-state accent intensity via design-token updates (`--ds-accent-soft`, `--ds-border-accent`) rather than per-component overrides.
+
+### Decisions Made
+- Kept only the active nav item in a chip-like container while converting inactive items to a text-led treatment to match the requested OpenClaw feel.
+- Used underline-on-hover/active for label emphasis to reduce visual fragmentation.
+
+### Blockers
+- No browser screenshot tool available in this environment.
 ## Session 5.89 - April 21, 2026 (TopBar review fixes: mobile close behavior + icon/accessibility + formatting)
 
 **Agent:** GPT-5.3-Codex  
