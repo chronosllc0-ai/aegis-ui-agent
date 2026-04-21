@@ -46,8 +46,27 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
           <section className='space-y-3'>
             <h3 className='text-sm font-semibold'>Runtime Prompting</h3>
             <p className='text-xs text-zinc-500'>
-              System instructions now come from workspace files. Hidden safety baseline policy is always enforced server-side.
+              Prompt assembly order: Global policy → Workspace files → User system instruction. Hidden safety baseline policy is always enforced server-side.
             </p>
+            <div className='space-y-2 rounded-xl border border-[#2a2a2a] bg-[#111] p-3'>
+              <label htmlFor='user-system-instruction' className='text-xs font-medium text-zinc-300'>
+                User System Instruction
+              </label>
+              <p className='text-[11px] text-zinc-500'>
+                CTA: This instruction applies to your runtime only. Do not paste secrets or third-party private data you are not authorized to process.
+              </p>
+              <textarea
+                id='user-system-instruction'
+                value={settings.systemInstruction}
+                onChange={(event) => onPatch({ systemInstruction: event.target.value })}
+                rows={5}
+                className='w-full rounded border border-[#2a2a2a] bg-[#0c0c0c] px-3 py-2 text-xs text-zinc-100'
+                placeholder='Add personal operating preferences and constraints for your agent.'
+              />
+              {!settings.systemInstruction.trim() && (
+                <p className='text-[11px] text-amber-300'>Warning: User system instruction is empty.</p>
+              )}
+            </div>
             <label htmlFor='agent-temperature' className='text-xs font-medium text-zinc-400'>
               Temperature
             </label>

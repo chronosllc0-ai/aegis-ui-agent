@@ -6953,3 +6953,39 @@
 - None.
 
 ---
+---
+## Session 5.78 - April 21, 2026 (Instruction surfaces restored)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 implementation pass
+
+### What Was Done
+- Restored editable **Global System Instruction** in Admin → Agent Config with API load/save wiring to `/api/admin/platform-settings`.
+- Added admin helper text clarifying intent (tool-use/safety policy only) and warnings for empty policy or missing workspace-file directive language.
+- Restored editable **User System Instruction** in Settings → Agent → General with explicit CTA/privacy text and non-empty warning.
+- Updated runtime prompt assembly in `universal_navigator.py` (v2 mode) so deterministic order is now:
+  1) global policy instruction,
+  2) workspace-file context,
+  3) user instruction.
+
+### What's Working
+- Frontend build passes.
+- Python compile passes for touched runtime modules.
+- Websocket smoke test passes.
+- Both instruction surfaces are visible in UI code paths and persist through existing settings/platform APIs.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+- Screenshot artifact not captured in this run because no `browser_container` tool is available in the current environment.
+
+### Next Steps
+1. Optionally add frontend tests for admin/user instruction editor visibility and warning states.
+2. Optionally add prompt-builder unit assertions for strict v2 block ordering.
+
+### Decisions Made
+- Kept `system_instruction` wire format for user instruction to preserve backwards compatibility.
+- Applied validation as non-blocking warnings (not hard errors) to reduce admin/user friction.
+
+### Blockers
+- Browser screenshot tooling unavailable in this runtime.
+
