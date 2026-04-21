@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -854,6 +855,7 @@ class ScheduledTask(Base):
     """A user-defined cron job that runs an agent prompt on a schedule."""
 
     __tablename__ = "scheduled_tasks"
+    __table_args__ = (Index("idx_scheduled_tasks_deleted_at", "deleted_at"),)
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String(255), ForeignKey("users.uid"), nullable=False, index=True)
@@ -983,6 +985,7 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
         return  # table was just created by create_all; nothing to migrate
 
     existing = {col["name"] for col in inspector.get_columns("scheduled_tasks")}
+    existing_indexes = {idx.get("name") for idx in inspector.get_indexes("scheduled_tasks")}
 
     migrations = [
         ("description", "ALTER TABLE scheduled_tasks ADD COLUMN description TEXT"),
@@ -1012,6 +1015,12 @@ def _ensure_scheduled_tasks_table(sync_conn) -> None:
                 logger.warning(
                     "Skipping scheduled_tasks.%s sync; assuming already exists: %s", col_name, exc
                 )
+
+    if "idx_scheduled_tasks_deleted_at" not in existing_indexes:
+        try:
+            sync_conn.execute(text("CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_deleted_at ON scheduled_tasks (deleted_at)"))
+        except Exception as exc:
+            logger.warning("Skipping scheduled_tasks deleted_at index sync; assuming already exists: %s", exc)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

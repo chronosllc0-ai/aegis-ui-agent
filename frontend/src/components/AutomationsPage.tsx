@@ -527,6 +527,7 @@ export function AutomationsPage() {
   const [runHistoryByTask, setRunHistoryByTask] = useState<Record<string, TaskRun[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [runHistoryLoading, setRunHistoryLoading] = useState(false)
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
@@ -608,6 +609,7 @@ export function AutomationsPage() {
   const fetchTasks = useCallback(async () => {
     try {
       setError(null)
+      setInfo(null)
       const response = await fetch(apiUrl('/api/automation/tasks'), { credentials: 'include' })
       if (!response.ok) throw new Error(`Failed to load automations (${response.status})`)
       const body = await response.json()
@@ -728,9 +730,10 @@ export function AutomationsPage() {
   }
 
   const handleRun = async (taskId: string) => {
+    const previousTasks = tasks
     setRunningIds((previous) => new Set(previous).add(taskId))
     try {
-      const previousTasks = tasks
+      setInfo(null)
       setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, last_status: 'running' } : task)))
       const response = await fetch(apiUrl(`/api/automation/tasks/${taskId}/run`), {
         method: 'POST',
@@ -747,6 +750,7 @@ export function AutomationsPage() {
         void fetchTasks()
       }, 1200)
     } catch (err: unknown) {
+      setTasks(previousTasks)
       setError(err instanceof Error ? err.message : 'Failed to trigger run')
     } finally {
       setRunningIds((previous) => {
@@ -760,6 +764,7 @@ export function AutomationsPage() {
   const handleRunIfDue = async (task: ScheduledTask) => {
     const previousTasks = tasks
     setRunningIds((previous) => new Set(previous).add(task.id))
+    setInfo(null)
     setTasks((current) => current.map((row) => (row.id === task.id ? { ...row, last_status: 'running' } : row)))
     try {
       const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/run-if-due`), {
@@ -770,7 +775,7 @@ export function AutomationsPage() {
       if (!response.ok) throw new Error(body?.detail ?? `Error ${response.status}`)
       if (!body?.triggered) {
         setTasks(previousTasks)
-        setError(`"${task.name}" is not due yet.`)
+        setInfo(`"${task.name}" is not due yet.`)
         return
       }
       setTimeout(() => {
@@ -790,7 +795,9 @@ export function AutomationsPage() {
   }
 
   const handleClone = async (task: ScheduledTask) => {
+    setRunningIds((previous) => new Set(previous).add(task.id))
     try {
+      setInfo(null)
       const response = await fetch(apiUrl(`/api/automation/tasks/${task.id}/clone`), {
         method: 'POST',
         credentials: 'include',
@@ -802,6 +809,12 @@ export function AutomationsPage() {
       setTasks((current) => [clonedTask, ...current])
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to clone job')
+    } finally {
+      setRunningIds((previous) => {
+        const next = new Set(previous)
+        next.delete(task.id)
+        return next
+      })
     }
   }
 
@@ -989,6 +1002,7 @@ export function AutomationsPage() {
                       <button
                         type='button'
                         onClick={() => void handleClone(task)}
+                        disabled={runningIds.has(task.id)}
                         className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
                       >
                         Clone
@@ -1003,6 +1017,7 @@ export function AutomationsPage() {
                       <button
                         type='button'
                         onClick={() => void handleRun(task.id)}
+                        disabled={runningIds.has(task.id)}
                         className='min-h-11 rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10'
                       >
                         Run now
@@ -1010,6 +1025,7 @@ export function AutomationsPage() {
                       <button
                         type='button'
                         onClick={() => void handleRunIfDue(task)}
+                        disabled={runningIds.has(task.id)}
                         className='min-h-11 rounded-lg border border-cyan-500/30 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10'
                       >
                         Run if due
@@ -1165,6 +1181,7 @@ export function AutomationsPage() {
           </div>
         </section>
 
+        {info && <div className='rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200'>{info}</div>}
         {error && <div className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300'>{error}</div>}
       </div>
     </div>

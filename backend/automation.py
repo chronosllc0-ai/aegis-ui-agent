@@ -409,7 +409,8 @@ async def trigger_run_if_due(
         raise HTTPException(status_code=404, detail="Task not found")
 
     now = datetime.now(timezone.utc)
-    due_now = bool(task.enabled and task.next_run_at and task.next_run_at <= now and task.last_status != "running")
+    normalized_next_run = _normalize_datetime(task.next_run_at) if task.next_run_at is not None else None
+    due_now = bool(task.enabled and normalized_next_run and normalized_next_run <= now and task.last_status != "running")
     if not due_now:
         return {"ok": True, "triggered": False, "reason": "not_due"}
 

@@ -6612,3 +6612,39 @@
 
 ### Blockers
 - None.
+
+## Session 5.73 - April 21, 2026 (PR review fixes: indexing + UX/status polish)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review-fix pass
+
+### What Was Done
+- Added a `scheduled_tasks.deleted_at` index at both model and migration-sync levels in `backend/database.py`:
+  - model `__table_args__` now includes `Index("idx_scheduled_tasks_deleted_at", "deleted_at")`
+  - schema sync now creates index if missing via `CREATE INDEX IF NOT EXISTS ...`.
+- Fixed `run-if-due` due-time guard in `backend/automation.py` to normalize `next_run_at` to timezone-aware UTC before comparison, preventing naive-vs-aware datetime comparison errors in SQLite-like environments.
+- Updated `frontend/src/components/AutomationsPage.tsx` review UX items:
+  - Added non-error `info` state and used it for expected `run-if-due` no-op (`not due yet`) outcome.
+  - Added clone in-flight state via `runningIds` and disabled clone/run/run-if-due buttons while in flight for the row.
+  - Fixed optimistic run rollback path to restore previous task snapshot on failure.
+
+### What's Working
+- Soft-delete query filter now has an index-backed path.
+- `run-if-due` guard handles timezone normalization safely.
+- UI no longer surfaces expected not-due behavior as an error.
+- Run failure now correctly restores optimistic row state.
+
+### What's NOT Working Yet
+- Browser screenshot tooling remains unavailable in this execution environment.
+
+### Next Steps
+1. Add backend tests that validate `run-if-due` behavior with naive datetime fixtures.
+2. Add frontend tests asserting clone/run button disabled states during in-flight requests.
+3. Consider consolidating `error/info` banners into a reusable notification component.
+
+### Decisions Made
+- Used `CREATE INDEX IF NOT EXISTS` for portability across environments, avoiding PostgreSQL-only `CONCURRENTLY` semantics in transactional startup flows.
+- Kept `runningIds` as the single in-flight map for row action disablement.
+
+### Blockers
+- None.
