@@ -21,7 +21,7 @@ _REASONING_LABELS: dict[ReasoningLevel, str] = {
     "low": "Low",
     "medium": "Medium",
     "high": "High",
-    "xhigh": "XHigh",
+    "xhigh": "Extra High",
 }
 
 _REASONING_ALIASES: dict[str, ReasoningLevel] = {

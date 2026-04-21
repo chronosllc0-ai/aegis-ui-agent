@@ -107,7 +107,7 @@ def test_reasoning_slash_command_and_legacy_reason_alias() -> None:
             )
         )
         assert response
-        assert "XHigh" in str(response)
+        assert "Extra High" in str(response)
         assert runtime_reasoning_level(runtime.settings) == "xhigh"
 
         legacy = asyncio.run(
@@ -211,7 +211,7 @@ def test_slack_reasoning_slash_and_interactive_flow() -> None:
                         "action_id": "reasoning_select",
                         "selected_option": {
                             "value": "reasoning:xhigh",
-                            "text": {"type": "plain_text", "text": "XHigh"},
+                            "text": {"type": "plain_text", "text": "Extra High"},
                         },
                     }
                 ],
@@ -233,7 +233,7 @@ def test_slack_reasoning_slash_and_interactive_flow() -> None:
         )
         assert updated.status_code == 200
         assert runtime_reasoning_level(runtime.settings) == "xhigh"
-        assert adapter.sent[-1][1] == "Reasoning set to XHigh"
+        assert adapter.sent[-1][1] == "Reasoning set to Extra High"
     finally:
         main_mod._log_platform_message = original_log
         main_mod._user_runtimes.pop(owner_uid, None)
