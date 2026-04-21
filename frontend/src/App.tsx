@@ -20,6 +20,7 @@ import type { SessionSwitcherItem } from './components/SessionSwitcher'
 import { SubAgentPanel } from './components/SubAgentPanel'
 import { UseCasePage } from './components/UseCasePage'
 import { SettingsPage } from './components/settings/SettingsPage'
+import { StandaloneSettingsPage } from './components/settings/StandaloneSettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
 import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
@@ -70,6 +71,19 @@ const SETTINGS_ROUTE_MAP: Record<string, SettingsTab> = {
   admin: 'Admin',
 }
 const settingsSlugForTab = (tab: SettingsTab): string => tab.toLowerCase().replace(/\s+/g, '-')
+
+
+const STANDALONE_SETTINGS_TABS = new Set<SettingsTab>([
+  'Agent Configuration',
+  'API Keys',
+  'Billing',
+  'Connections',
+  'Memory',
+  'Observability',
+  'Skills',
+  'Support',
+  'Admin',
+])
 
 // Rough token estimate for context tracking (≈4 chars per token)
 function estimateTokens(text: string): number {
@@ -136,6 +150,7 @@ function App() {
   const isImpersonating = authUser?.impersonating === true
   const isAdminPath = isAdmin && pathname.startsWith('/admin')
   const isSettingsPath = pathname.startsWith('/settings')
+  const activeSettingsTab: SettingsTab | undefined = isAdminPath ? 'Admin' : settingsInitialTab
   const isAutomationsPath = pathname === '/automations'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
@@ -816,16 +831,26 @@ function App() {
 
           <div className='min-h-0 flex-1'>
             {showSettings || isAdminPath ? (
-              <SettingsPage
-                onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
-                initialTab={isAdminPath ? 'Admin' : settingsInitialTab}
-                isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
-                authRole={authUser?.role}
-                onTabChange={(tab) => {
-                  const base = isAdminPath ? '/admin' : '/settings'
-                  navigateTo(`${base}/${settingsSlugForTab(tab)}`)
-                }}
-              />
+              activeSettingsTab && STANDALONE_SETTINGS_TABS.has(activeSettingsTab) ? (
+                <StandaloneSettingsPage
+                  tab={activeSettingsTab}
+                  settings={settings}
+                  onPatch={patchSettings}
+                  isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+                  authRole={authUser?.role}
+                />
+              ) : (
+                <SettingsPage
+                  onBack={() => { setShowSettings(false); setSettingsInitialTab(undefined); navigateTo('/') }}
+                  initialTab={activeSettingsTab}
+                  isAdmin={authUser?.role === 'admin' || authUser?.role === 'superadmin'}
+                  authRole={authUser?.role}
+                  onTabChange={(tab) => {
+                    const base = isAdminPath ? '/admin' : '/settings'
+                    navigateTo(`${base}/${settingsSlugForTab(tab)}`)
+                  }}
+                />
+              )
             ) : showAutomations ? (
               <AutomationsPage />
             ) : activePlanId ? (

@@ -7213,3 +7213,33 @@
 - None for the current requested regression scope.
 
 ---
+
+---
+## Session 5.86 - April 21, 2026 (Standalone headers for moved settings tabs/pages)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend layout pass
+
+### What Was Done
+- Added a new standalone settings-route renderer in `frontend/src/components/settings/StandaloneSettingsPage.tsx` that provides a top-level `HeaderBar` contract (title + optional subtitle + optional right-side actions) and renders moved pages without the legacy settings-shell container.
+- Updated `frontend/src/App.tsx` routing/render logic to route moved tabs (`Agent Configuration`, `API Keys`, `Billing`, `Connections`, `Memory`, `Observability`, `Skills`, `Support`, `Admin`) through the standalone page shell instead of `SettingsPage`.
+- Kept legacy `SettingsPage` behavior for non-moved settings contexts (e.g., profile/root settings), while ensuring moved pages no longer inherit “back to settings” shell affordances.
+
+### What's Working
+- Frontend build passes with the new standalone route rendering.
+- Websocket navigate smoke test still passes.
+- Moved settings routes now render as top-level pages (no nested settings card shell around page content).
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Browser screenshot capture could not be produced because no browser screenshot tool was available in this runtime.
+
+### Next Steps
+1. Add a small frontend route-level test asserting moved settings slugs render the standalone shell (and not `SettingsPage`).
+2. Consider moving `Profile` to the same standalone contract for full settings-surface consistency.
+
+### Decisions Made
+- Implemented route-level shell swap in `App.tsx` rather than refactoring each tab component individually, minimizing risk while meeting acceptance criteria for moved pages.
+
+### Blockers
+- No browser screenshot tooling was available in the current agent runtime.
