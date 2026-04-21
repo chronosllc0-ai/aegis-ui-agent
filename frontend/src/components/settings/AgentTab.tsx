@@ -133,51 +133,28 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
 
         {supportsReasoning && (
           <div className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-3'>
-            <div className='flex items-center justify-between gap-3'>
-              <div>
-                <p className='text-xs font-semibold text-zinc-200'>Enable reasoning</p>
-                <p className='text-[11px] text-zinc-500'>Use model thinking for deeper multi-step planning.</p>
-              </div>
-              <button
-                type='button'
-                onClick={() => {
-                  if (settings.enableReasoning) {
-                    onPatch({ enableReasoning: false, reasoningEffort: 'none' })
-                    return
-                  }
-                  onPatch({ enableReasoning: true, reasoningEffort: settings.reasoningEffort === 'none' ? 'medium' : settings.reasoningEffort })
-                }}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                  settings.enableReasoning
-                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                    : 'border-[#2a2a2a] bg-[#181818] text-zinc-500'
-                }`}
-              >
-                {settings.enableReasoning ? 'On' : 'Off'}
-              </button>
+            <div>
+              <p className='text-xs font-semibold text-zinc-200'>Thinking effort</p>
+              <p className='text-[11px] text-zinc-500'>Choose the same six-level reasoning scale used in the composer.</p>
             </div>
-
-            {settings.enableReasoning && (
-              <div className='mt-3'>
-                <p className='mb-1 text-[11px] font-medium text-zinc-400'>Thinking effort</p>
-                <div className='flex flex-wrap gap-1.5'>
-                  {THINKING_EFFORT_LEVELS.filter((effort) => effort !== 'none').map((effort) => (
-                    <button
-                      key={effort}
-                      type='button'
-                      onClick={() => onPatch({ reasoningEffort: effort, enableReasoning: true })}
-                      className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
-                        settings.reasoningEffort === effort
-                          ? 'bg-violet-600 text-white'
-                          : 'bg-[#1a1a1a] text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      {THINKING_EFFORT_LABELS[effort]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <label htmlFor='agent-thinking-effort' className='sr-only'>
+              Thinking effort
+            </label>
+            <select
+              id='agent-thinking-effort'
+              value={settings.reasoningEffort}
+              onChange={(event) => {
+                const effort = event.target.value as (typeof THINKING_EFFORT_LEVELS)[number]
+                onPatch({ reasoningEffort: effort, enableReasoning: effort !== 'none' })
+              }}
+              className='mt-3 w-full rounded border border-[#2a2a2a] bg-[#111] px-3 py-2 text-xs text-zinc-100'
+            >
+              {THINKING_EFFORT_LEVELS.map((effort) => (
+                <option key={effort} value={effort} className='bg-[#111] text-zinc-100'>
+                  {THINKING_EFFORT_LABELS[effort]}
+                </option>
+              ))}
+            </select>
           </div>
         )}
           </section>

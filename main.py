@@ -4865,12 +4865,13 @@ async def _handle_slash_command(
     if cmd == "config":
         if not runtime:
             return "⚪ No active session."
+        reasoning_status = runtime_reasoning_status(runtime.settings)
         return (
             "⚙️ Runtime config\n"
             f"- provider: `{runtime.settings.get('provider', '')}`\n"
             f"- model: `{runtime.settings.get('model', '')}`\n"
-            f"- reasoning: `{'on' if runtime_reasoning_level(runtime.settings) != 'none' else 'off'}`\n"
-            f"- reasoning_effort: `{runtime_reasoning_status(runtime.settings)['label']}`"
+            f"- reasoning: `{'enabled' if reasoning_status['enabled'] else 'disabled'}`\n"
+            f"- reasoning_effort: `{reasoning_status['label']}`"
         )
 
     if cmd == "pair":
