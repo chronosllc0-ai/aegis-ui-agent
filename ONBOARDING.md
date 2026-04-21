@@ -6648,3 +6648,61 @@
 
 ### Blockers
 - None.
+
+## Session 6.46 - April 21, 2026 (Wizard parity test coverage + automation endpoint filters/actions)
+
+### What changed
+- Added frontend onboarding wizard tests in `frontend/src/components/OnboardingWizard.test.tsx` covering:
+  - initial wizard render,
+  - step/flow switching behavior (including back-navigation),
+  - validation gates for use-case selection, profile display name, and API key connect state,
+  - provider-mode switching in the API key step with placeholder updates.
+- Added backend automation endpoint tests in `tests/test_automation_endpoints.py` covering:
+  - job row actions (`clone`, `run`, `disable`, `remove`) against `/api/automation/tasks/*`,
+  - run-history filtered responses (status/scope/delivery channel/date range).
+- Expanded schema validation coverage in `tests/test_automation_schemas.py` for execution target type transitions:
+  - saved-workflow update requires `workflow_id`,
+  - saved-workflow create path clears legacy prompt fields.
+
+### What works / what does not
+- Works:
+  - Wizard parity items now covered by tests for render flow, mode switching, and validation behavior.
+  - Automation endpoint action paths and run-history filter responses now have explicit API test coverage.
+  - Execution target type validation coverage now includes additional create/update edge cases.
+- Does not / caveats:
+  - Mobile layout screenshot verification could not be completed in this run because a browser screenshot tool was not available in the current execution environment.
+
+### Remaining differences from reference screenshots
+- Still unverified in this pass due to screenshot tooling limitation:
+  - exact mobile section ordering parity,
+  - touch target sizing/spacing parity,
+  - overflow/spacing breakage checks at narrow breakpoints.
+
+### Next steps
+1. Next pass: implement self-reflection UX flow and add focused tests for visibility state, persistence, and completion CTA behavior.
+2. Capture mobile screenshots with a working browser artifact pipeline and verify against reference ordering/spacing checklist.
+3. Add a wizard mobile visual-regression snapshot pass once screenshot tooling is available in CI/dev.
+
+### Blockers / decisions
+- Decision: prioritize automated behavior coverage first (wizard + automation APIs) while deferring mobile visual verification until screenshot tooling is available.
+- Blocker: no browser screenshot tool accessible in this environment during this pass.
+
+## Session 6.47 - April 21, 2026 (Review follow-up: automation endpoint test isolation)
+
+### What changed
+- Fixed `tests/test_automation_endpoints.py::test_create_and_update_saved_workflow_validation_errors` to initialize its own DB and seed user state (`_init_test_db(tmp_path)` + `_seed_user()`), removing hidden order dependence on previous tests.
+
+### What works / what does not
+- Works:
+  - Running the test in isolation now passes without requiring prior test-side `init_db` setup.
+  - Full `tests/test_automation_endpoints.py` continues to pass.
+- Does not / caveats:
+  - Existing upstream dependency warning (`authlib.jose` deprecation) remains unchanged.
+
+### Next steps
+1. Keep endpoint tests self-contained as new cases are added (always include local DB bootstrap for each test).
+2. Consider adding a tiny fixture to centralize automation test DB/user setup and reduce duplication.
+
+### Blockers / decisions
+- Decision: prioritize explicit per-test setup over shared implicit state to avoid flaky selection/reordering behavior.
+- Blocker: none.
