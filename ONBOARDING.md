@@ -6196,3 +6196,35 @@
 - Decision: use payload task_id as source of truth for terminal summary threading.
 - Decision: only emit synthetic summary for succeeded tasks to avoid contradictory UI messaging.
 - Blocker: none beyond known missing checklist file.
+
+## Session 6.36 - April 21, 2026 (View-only mode switch + handoff-safe browser controls)
+
+### What changed
+- Updated `frontend/src/App.tsx` to make view switching explicitly presentational:
+  - renamed app surface state to `viewMode: 'chat' | 'browser'`,
+  - ensured all user instruction dispatches still route through `dispatchPromptFromUI`/`handleSend`,
+  - added browser-view instruction composer that sends through the same canonical chat dispatch path,
+  - wired browser handoff continue control through existing websocket `handoff_continue` action using `handoffRequestId`,
+  - kept browser URL/back/forward controls as chat composer prefill (no direct execution dispatch from view controls),
+  - added development guard logging if `viewMode` metadata leaks into execution payload metadata.
+- Updated `frontend/src/components/ScreenView.tsx`:
+  - added optional `Continue` control in handoff overlay so HITL can resume directly from browser view while handoff is active.
+
+### What works / what does not
+- Works:
+  - Browser/Chat switch only changes visible panel and does not alter websocket execution action routing.
+  - Prompt sending now works from browser view and chat view via the same dispatch function.
+  - Handoff remains interactive in browser view and can be resumed via overlay `Continue`.
+  - Frontend build passes and websocket navigate smoke test passes.
+- Does not / caveats:
+  - AGENTS checklist caveat remains: `backend/pydantic_adk_runner.py` is absent, so py_compile checklist command still errors on missing file.
+
+### Next steps
+1. Add UI tests to assert identical websocket payload action selection when sending from chat vs browser view composer.
+2. Add a regression test for handoff resume from browser overlay ensuring exactly one `handoff_continue` emit per click.
+3. Evaluate consolidating browser URL/intention controls into a reusable "view-only command relay" component.
+
+### Blockers / decisions
+- Decision: keep execution source-of-truth in runtime state (`isWorking`, `handoffActive`, task/session IDs), not view state.
+- Decision: preserve browse noise filtering in chat while maintaining summary/handoff visibility.
+- Blocker: none beyond known missing checklist file (`backend/pydantic_adk_runner.py`).
