@@ -1,3 +1,48 @@
+## Session 5.71 - April 21, 2026 (Design-system uplift pass: OpenClaw-inspired dark UI shell)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused frontend design-system refactor pass
+
+### What Was Done
+- Applied the `ui-ux-pro-max` skill workflow and generated a dark dashboard design system baseline before implementation.
+- Added a reusable UI design-system primitives module at `frontend/src/components/ui/DesignSystem.tsx` with:
+  - `SidebarSection` (mobile-collapse behavior),
+  - `NavItem` (standardized nav interaction states),
+  - `PanelCard` (shared shell for elevated cards),
+  - `StatusBadge` (consistent status chip styles),
+  - `HeaderBar` (sticky top control/header shell with mobile-first touch sizing).
+- Extended global theme tokens in `frontend/src/index.css`:
+  - color roles,
+  - surface/elevation shadows,
+  - spacing and typography token scale,
+  - refreshed dark canvas background treatment.
+- Refactored `frontend/src/App.tsx` sidebar and top shell to use shared design-system components while keeping existing routing/actions unchanged.
+- Updated sessions/observability-facing surfaces:
+  - `frontend/src/components/SessionSwitcher.tsx` now uses shared `PanelCard` + `StatusBadge`.
+  - `frontend/src/components/settings/ObservabilityTab.tsx` now uses shared `HeaderBar`, `PanelCard`, and `StatusBadge`, plus 44px minimum action controls for mobile touch targets.
+
+### What's Working
+- Frontend production build succeeds after design-system refactor.
+- Existing backend smoke websocket test still passes.
+- Python bytecode compile for `main.py` succeeds.
+
+### What's NOT Working Yet
+- Legacy checklist path `backend/pydantic_adk_runner.py` does not exist in this repo, so that exact compile command cannot run as written.
+- No browser screenshot artifact was captured in this environment because a browser screenshot tool is not available in this run context.
+
+### Next Steps
+1. Add optional visual regression snapshots for sidebar/header states (desktop + mobile) to guard style consistency.
+2. Consider gradually migrating additional settings tabs to `PanelCard` and `StatusBadge` for complete shell consistency.
+3. If backend runner path changed intentionally, update AGENTS checklist command to current file locations.
+
+### Decisions Made
+- Kept behavior contracts intact by preserving existing click handlers/routing and only swapping visual shells/classes/components.
+- Scoped section collapsing to mobile-first behavior while preserving desktop discoverability.
+
+### Blockers
+- None.
+
+---
 ## Session 5.70 - April 11, 2026 (Follow-up review fix: async-safe tool step cap)
 
 **Agent:** GPT-5.3-Codex
