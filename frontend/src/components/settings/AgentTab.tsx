@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { AppSettings } from '../../hooks/useSettings'
-import { THINKING_EFFORT_LEVELS } from '../../hooks/useSettings'
+import { THINKING_EFFORT_LABELS, THINKING_EFFORT_LEVELS } from '../../hooks/useSettings'
 import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
 import { ToolsTab } from './ToolsTab'
 import { WorkspaceFilesTab } from './WorkspaceFilesTab'
@@ -121,7 +121,13 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
               </div>
               <button
                 type='button'
-                onClick={() => onPatch({ enableReasoning: !settings.enableReasoning })}
+                onClick={() => {
+                  if (settings.enableReasoning) {
+                    onPatch({ enableReasoning: false, reasoningEffort: 'none' })
+                    return
+                  }
+                  onPatch({ enableReasoning: true, reasoningEffort: settings.reasoningEffort === 'none' ? 'medium' : settings.reasoningEffort })
+                }}
                 className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                   settings.enableReasoning
                     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
@@ -140,14 +146,14 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
                     <button
                       key={effort}
                       type='button'
-                      onClick={() => onPatch({ reasoningEffort: effort })}
+                      onClick={() => onPatch({ reasoningEffort: effort, enableReasoning: effort !== 'none' })}
                       className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
                         settings.reasoningEffort === effort
                           ? 'bg-violet-600 text-white'
                           : 'bg-[#1a1a1a] text-zinc-400 hover:text-zinc-200'
                       }`}
                     >
-                      {effort}
+                      {THINKING_EFFORT_LABELS[effort]}
                     </button>
                   ))}
                 </div>

@@ -14,7 +14,7 @@ import { SteeringControl } from './SteeringControl'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
 import { FaBrain } from 'react-icons/fa6'
 import type { SteeringMode } from '../hooks/useWebSocket'
-import { THINKING_EFFORT_LEVELS, type ReasoningEffort } from '../hooks/useSettings'
+import { THINKING_EFFORT_LABELS, THINKING_EFFORT_LEVELS, type ReasoningEffort } from '../hooks/useSettings'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -1534,7 +1534,7 @@ function InputBarCursor({
             >
               {THINKING_EFFORT_LEVELS.map((effort) => (
                 <option key={effort} value={effort} className='bg-[#0f0f0f] text-zinc-100'>
-                  {effort}
+                  {THINKING_EFFORT_LABELS[effort]}
                 </option>
               ))}
             </select>

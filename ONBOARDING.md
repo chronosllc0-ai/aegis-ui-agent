@@ -6891,3 +6891,38 @@
 - None.
 
 ---
+## Session 5.76 - April 21, 2026 (PR review follow-up: effort sync + labels)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 review-fix pass
+
+### What Was Done
+- Fixed frontend normalization parity by adding `x-high` and `extra_high` aliases to `normalizeReasoningEffort`.
+- Added shared human-readable thinking effort labels (`Off`, `Minimal`, `Low`, `Medium`, `High`, `Extra High`) and applied them in both the composer brain selector and Agent settings buttons.
+- Synced reasoning enablement with effort selection in chat composer callback (`none` now forces `enableReasoning=false`; other levels enable reasoning).
+- Improved Agent settings toggle behavior so turning reasoning off sets effort `none`, and turning it back on from `none` restores `medium`.
+- Expanded backend provider/runtime effort mappings so canonical levels are explicitly honored:
+  - OpenAI/xAI normalize `minimal -> low`, `xhigh -> high` (plus aliases).
+  - Google thinking budgets now include canonical levels.
+  - Universal navigator reasoning budgets now include canonical levels.
+
+### What's Working
+- Frontend build passes.
+- Python compilation passes for all touched backend modules.
+- Websocket smoke test passes.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because file does not exist in repo.
+
+### Next Steps
+1. Optionally add unit tests for `normalizeReasoningEffort` alias coverage (`x-high`, `extra_high`) and reasoning toggle/effort sync behavior.
+2. Optionally add provider-level tests asserting canonical efforts map to expected request params/budgets.
+
+### Decisions Made
+- Used one shared frontend label map to keep wording consistent across selector surfaces.
+- Kept provider-specific normalization conservative while guaranteeing deterministic handling of all six canonical frontend levels.
+
+### Blockers
+- None.
+
+---
