@@ -6734,3 +6734,27 @@
 - Decision: kept watchdog default at 3000ms to satisfy fast explicit failure, configurable through env for slower deployments.
 - Decision: limited idle auto-start fallback to `steer` only (not `queue`/`interrupt`) to match requested scope and preserve current runtime semantics.
 - Blocker: none.
+
+## Session 6.49 - April 21, 2026 (Review fixes: watchdog race + idle-steer frontend task scoping)
+
+### What changed
+- Fixed a frontend watchdog race in `useWebSocket.send()` by clearing any existing backend-activity timeout before registering a new `navigate_start` watchdog.
+- Fixed stale watchdog behavior on transport changes by clearing backend-activity timeout in websocket `onclose` and `onerror` handlers.
+- Fixed idle-steer autostart task scoping by setting `runtime.current_frontend_task_id = task_id` when synthesizing idle steer starts.
+
+### What works / what does not
+- Works:
+  - Rapid repeated start sends no longer leave old watchdog timers that can fail later tasks.
+  - Disconnect/error paths now cancel pending backend-activity watchdogs, reducing false `E_START_TIMEOUT` noise during reconnect churn.
+  - Idle-steer-started tasks now have deterministic frontend task scoping for sub-agent/workflow attribution.
+- Does not / caveats:
+  - Browser screenshot artifact tooling remains unavailable in this environment.
+
+### Next steps
+1. Add a frontend hook test that simulates two quick sends and asserts only the latest watchdog can fire.
+2. Add a websocket integration test for disconnect-before-ack to ensure timeout watchdog is cancelled.
+3. Add backend assertion coverage for `current_frontend_task_id` on idle steer autostart.
+
+### Blockers / decisions
+- Decision: keep watchdog cancellation local to lifecycle handlers (`send`, `onmessage`, `onclose`, `onerror`, reset/unmount) for explicitness over abstraction.
+- Blocker: none.

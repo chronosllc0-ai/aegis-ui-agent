@@ -304,6 +304,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         window.clearInterval(pingIntervalRef.current)
         pingIntervalRef.current = null
       }
+      if (pendingBackendActivityTimeoutRef.current !== null) {
+        window.clearTimeout(pendingBackendActivityTimeoutRef.current)
+        pendingBackendActivityTimeoutRef.current = null
+      }
       setConnectionStatus('disconnected')
       setIsWorking(false)
       if (shouldReconnectRef.current) {
@@ -317,6 +321,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       if (pingIntervalRef.current !== null) {
         window.clearInterval(pingIntervalRef.current)
         pingIntervalRef.current = null
+      }
+      if (pendingBackendActivityTimeoutRef.current !== null) {
+        window.clearTimeout(pendingBackendActivityTimeoutRef.current)
+        pendingBackendActivityTimeoutRef.current = null
       }
       setConnectionStatus('disconnected')
     }
@@ -1016,6 +1024,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           pendingStartRef.current = { requestId, timer, instruction: String(message.instruction ?? '') }
           console.info('[AegisUI] trace_phase=frontend_dispatch request_id=%s client_request_id=%s action=navigate_start', requestId, clientRequestId)
           const sendAt = Date.now()
+          if (pendingBackendActivityTimeoutRef.current !== null) {
+            window.clearTimeout(pendingBackendActivityTimeoutRef.current)
+          }
           pendingBackendActivityTimeoutRef.current = window.setTimeout(() => {
             if (lastBackendActivityAtRef.current >= sendAt) {
               pendingBackendActivityTimeoutRef.current = null

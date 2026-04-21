@@ -2428,6 +2428,7 @@ async def _start_idle_navigation_from_control_action(
         task_id = str(uuid4())
         runtime.current_request_id = request_id
         runtime.current_task_id = task_id
+        runtime.current_frontend_task_id = task_id
         _record_runtime_event(
             category="queue_steer_runtime",
             subsystem="runtime",
