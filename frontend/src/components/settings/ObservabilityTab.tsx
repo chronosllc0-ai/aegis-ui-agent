@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../../lib/api'
+import { HeaderBar, PanelCard, StatusBadge } from '../ui/DesignSystem'
 
 type AgentTask = {
   id: string
@@ -48,10 +49,10 @@ type RuntimeEventResponse = {
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className='rounded-lg border border-[#2a2a2a] bg-[#111] p-3'>
+    <PanelCard className='p-3'>
       <p className='text-[11px] text-zinc-500'>{label}</p>
       <p className='mt-1 text-lg font-semibold text-zinc-100'>{value}</p>
-    </div>
+    </PanelCard>
   )
 }
 
@@ -154,10 +155,14 @@ export function ObservabilityTab() {
 
   return (
     <div className='space-y-5'>
-      <div>
-        <h3 className='text-base font-semibold text-white'>Observability</h3>
-        <p className='text-xs text-zinc-400'>Per-user runtime telemetry for agent tasks, tool calls, and failure reasons.</p>
-      </div>
+      <HeaderBar
+        left={(
+          <div>
+            <h3 className='text-base font-semibold text-white'>Observability</h3>
+            <p className='text-xs text-zinc-400'>Per-user runtime telemetry for agent tasks, tool calls, and failure reasons.</p>
+          </div>
+        )}
+      />
 
       <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
         <Stat label='Total tasks' value={tasks.length} />
@@ -166,7 +171,7 @@ export function ObservabilityTab() {
         <Stat label='Credits used' value={stats.totalCredits.toLocaleString()} />
       </div>
 
-      <section className='rounded-xl border border-[#2a2a2a] bg-[#111] p-3'>
+      <PanelCard className='p-3'>
         <div className='mb-3 flex flex-wrap items-end gap-2'>
           <div className='min-w-[180px]'>
             <label className='mb-1 block text-[11px] text-zinc-400'>Session ID</label>
@@ -205,8 +210,8 @@ export function ObservabilityTab() {
             <label className='mb-1 block text-[11px] text-zinc-400'>Status</label>
             <input value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} placeholder='approved / blocked / denied' className='w-full rounded border border-zinc-700 bg-[#0d0d0d] px-2 py-1.5 text-xs text-zinc-200' />
           </div>
-          <button type='button' onClick={() => void loadEvents(0)} className='rounded border border-zinc-600 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800'>Apply filters</button>
-          <button type='button' onClick={() => { setSessionFilter(''); setSubsystemFilter(''); setLevelFilter(''); setPlatformFilter(''); setIntegrationFilter(''); setUserFilter(''); setStatusFilter(''); void loadEvents(0) }} className='rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800'>Reset</button>
+          <button type='button' onClick={() => void loadEvents(0)} className='min-h-11 rounded border border-zinc-600 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800'>Apply filters</button>
+          <button type='button' onClick={() => { setSessionFilter(''); setSubsystemFilter(''); setLevelFilter(''); setPlatformFilter(''); setIntegrationFilter(''); setUserFilter(''); setStatusFilter(''); void loadEvents(0) }} className='min-h-11 rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800'>Reset</button>
         </div>
 
         <div className='mb-2 flex items-center justify-between text-[11px] text-zinc-500'>
@@ -226,7 +231,7 @@ export function ObservabilityTab() {
                 <div key={event.id} className='rounded border border-zinc-800 bg-[#0d0d0d] px-2 py-2 text-[11px]'>
                   <div className='flex flex-wrap items-center justify-between gap-2'>
                     <div className='flex items-center gap-1.5'>
-                      <span className='rounded border border-zinc-700 px-1 py-0.5 uppercase text-[10px] text-zinc-300'>{event.level}</span>
+                      <StatusBadge label={event.level} tone={event.level === 'error' ? 'danger' : event.level === 'warning' ? 'warning' : event.level === 'info' ? 'info' : 'default'} />
                       <span className='text-zinc-400'>{event.subsystem}</span>
                       <span className='text-zinc-600'>/</span>
                       <span className='text-zinc-500'>{event.category}</span>
@@ -269,7 +274,7 @@ export function ObservabilityTab() {
             </div>
           </>
         )}
-      </section>
+      </PanelCard>
 
       {loading ? (
         <p className='text-xs text-zinc-500'>Loading telemetry...</p>
@@ -279,10 +284,10 @@ export function ObservabilityTab() {
             const detail = details[task.id]
             const expanded = expandedTaskId === task.id
             return (
-              <div key={task.id} className='rounded-lg border border-[#2a2a2a] bg-[#111] p-3'>
+              <PanelCard key={task.id} className='p-3'>
                 <button
                   type='button'
-                  className='w-full text-left'
+                  className='w-full min-h-11 text-left'
                   onClick={() => {
                     const next = expanded ? null : task.id
                     setExpandedTaskId(next)
@@ -291,7 +296,7 @@ export function ObservabilityTab() {
                 >
                   <div className='flex items-center justify-between gap-2'>
                     <p className='truncate text-sm font-medium text-zinc-200'>{task.instruction}</p>
-                    <span className='rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400'>{task.status}</span>
+                    <StatusBadge label={task.status} tone={task.status === 'failed' ? 'danger' : task.status === 'completed' ? 'success' : 'default'} />
                   </div>
                   <p className='mt-1 text-[11px] text-zinc-500'>{task.provider ?? 'n/a'} · {task.model ?? 'n/a'} · {task.created_at ? new Date(task.created_at).toLocaleString() : 'n/a'}</p>
                 </button>
@@ -309,7 +314,7 @@ export function ObservabilityTab() {
                     </div>
                   </div>
                 )}
-              </div>
+              </PanelCard>
             )
           })}
           {!tasks.length && <p className='text-xs text-zinc-500'>No agent activity yet.</p>}

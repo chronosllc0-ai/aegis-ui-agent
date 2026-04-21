@@ -18,6 +18,7 @@ import { WorkflowView } from './components/WorkflowView'
 import { TaskPlanView } from './components/TaskPlanView'
 import { Icons } from './components/icons'
 import { ChatPanel } from './components/ChatPanel'
+import { HeaderBar, NavItem, SidebarSection } from './components/ui/DesignSystem'
 import type { SessionSwitcherItem } from './components/SessionSwitcher'
 import { SubAgentPanel } from './components/SubAgentPanel'
 import { UseCasePage } from './components/UseCasePage'
@@ -951,49 +952,40 @@ function App() {
         {sidebarOpen && (
           <div className='fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden' onClick={() => setSidebarOpen(false)} />
         )}
-        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[#2a2a2a] bg-gradient-to-b from-[#1a1f2d] via-[#191b26] to-[#171717] p-3 transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
-          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false); setSidebarOpen(false); navigateTo('/') }} className='mb-3 w-full rounded-lg border border-[#2a2a2a] bg-[#111]/60 px-3 py-2 text-left text-sm text-zinc-200'>
-            ⌁ New Session
+        <aside data-tour='sidebar' className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-[110%] lg:translate-x-0'} fixed inset-y-1.5 left-1.5 z-30 w-[260px] rounded-2xl border border-[var(--ds-border-subtle)] bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.14),_transparent_52%),linear-gradient(180deg,var(--ds-surface-2)_0%,var(--ds-surface-1)_100%)] p-3 shadow-[var(--ds-shadow-elevated)] transition sm:inset-y-2 sm:left-2 sm:w-[280px] lg:static lg:inset-y-3 lg:left-3 lg:translate-x-0 flex min-h-0 flex-col`}>
+          <button type='button' onClick={() => { newSession(); setShowAutomations(false); setShowSettings(false); setSidebarOpen(false); navigateTo('/') }} className='mb-3 flex min-h-11 w-full items-center justify-center rounded-xl border border-[var(--ds-border-accent)] bg-[var(--ds-accent-soft)] px-3 text-sm font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-accent-soft-hover)] cursor-pointer'>
+            New Session
           </button>
 
           <div className='min-h-0 flex-1 overflow-y-auto scrollbar-thin'>
             <div className='space-y-4 pr-1'>
-              <div>
-                <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Dashboard</p>
-                <div className='space-y-1'>
-                  <button type='button' onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/profile' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.user({ className: 'h-3.5 w-3.5' })}<span>Profile</span></button>
-                  <button type='button' onClick={() => { navigateTo('/'); setViewMode('chat'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && viewMode === 'chat' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.chat({ className: 'h-3.5 w-3.5' })}<span>Chat</span></button>
-                  <button type='button' onClick={() => { navigateTo('/'); setViewMode('browser'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/' && viewMode === 'browser' && !showSettings && !showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.workflows({ className: 'h-3.5 w-3.5' })}<span>Sessions</span></button>
-                  <button type='button' onClick={() => { navigateTo('/settings/observability'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/observability' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.alert({ className: 'h-3.5 w-3.5' })}<span>Observability</span></button>
-                </div>
-              </div>
+              <SidebarSection title='Dashboard'>
+                <NavItem icon={Icons.user({ className: 'h-3.5 w-3.5' })} label='Profile' active={pathname === '/settings/profile'} onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.chat({ className: 'h-3.5 w-3.5' })} label='Chat' active={pathname === '/' && viewMode === 'chat' && !showSettings && !showAutomations} onClick={() => { navigateTo('/'); setViewMode('chat'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.workflows({ className: 'h-3.5 w-3.5' })} label='Sessions' active={pathname === '/' && viewMode === 'browser' && !showSettings && !showAutomations} onClick={() => { navigateTo('/'); setViewMode('browser'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.alert({ className: 'h-3.5 w-3.5' })} label='Observability' active={pathname === '/settings/observability'} onClick={() => { navigateTo('/settings/observability'); setSidebarOpen(false) }} />
+              </SidebarSection>
 
-              <div>
-                <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Agent & AI</p>
-                <div className='space-y-1'>
-                  <button type='button' onClick={() => { navigateTo('/automations'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${showAutomations ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.clock({ className: 'h-3.5 w-3.5' })}<span>Automations</span></button>
-                  <button type='button' onClick={() => { navigateTo('/settings/connections'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/connections' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.globe({ className: 'h-3.5 w-3.5' })}<span>Connections</span></button>
-                  <button type='button' onClick={() => { navigateTo('/settings/memory'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/memory' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.folder({ className: 'h-3.5 w-3.5' })}<span>Memory</span></button>
-                  <button type='button' onClick={() => { navigateTo('/settings/agent-configuration'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/agent-configuration' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.settings({ className: 'h-3.5 w-3.5' })}<span>Agent Configuration</span></button>
-                  <button type='button' onClick={() => { navigateTo('/settings/skills'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/skills' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.star({ className: 'h-3.5 w-3.5' })}<span>Skills</span></button>
-                </div>
-              </div>
+              <SidebarSection title='Agent & AI' defaultCollapsed>
+                <NavItem icon={Icons.clock({ className: 'h-3.5 w-3.5' })} label='Automations' active={showAutomations} onClick={() => { navigateTo('/automations'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.globe({ className: 'h-3.5 w-3.5' })} label='Connections' active={pathname === '/settings/connections'} onClick={() => { navigateTo('/settings/connections'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.folder({ className: 'h-3.5 w-3.5' })} label='Memory' active={pathname === '/settings/memory'} onClick={() => { navigateTo('/settings/memory'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.settings({ className: 'h-3.5 w-3.5' })} label='Agent Configuration' active={pathname === '/settings/agent-configuration'} onClick={() => { navigateTo('/settings/agent-configuration'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.star({ className: 'h-3.5 w-3.5' })} label='Skills' active={pathname === '/settings/skills'} onClick={() => { navigateTo('/settings/skills'); setSidebarOpen(false) }} />
+              </SidebarSection>
 
-              <div>
-                <p className='mb-2 px-1 text-[11px] uppercase tracking-wide text-zinc-500'>Settings</p>
-                <div className='space-y-1'>
-                  <button type='button' onClick={() => { navigateTo('/settings/api-keys'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/api-keys' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.lock({ className: 'h-3.5 w-3.5' })}<span>API Keys</span></button>
-                  <button type='button' onClick={() => { navigateTo('/settings/support'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/support' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.chat({ className: 'h-3.5 w-3.5' })}<span>Support</span></button>
-                  {isAdmin && (
-                    <button type='button' onClick={() => { navigateTo('/admin'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${isAdminPath ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}><LuShield className='h-3.5 w-3.5' /><span>Admin</span></button>
-                  )}
-                  <button type='button' onClick={() => { navigateTo('/settings/billing'); setSidebarOpen(false) }} className={`flex w-full items-center gap-2 rounded border px-2 py-2 text-left text-sm ${pathname === '/settings/credits' || pathname === '/settings/invoices' || pathname === '/settings/billing' ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300' : 'border-[#2a2a2a] text-zinc-200 hover:bg-zinc-800'}`}>{Icons.settings({ className: 'h-3.5 w-3.5' })}<span>Billing</span></button>
-                </div>
-              </div>
+              <SidebarSection title='Settings' defaultCollapsed>
+                <NavItem icon={Icons.lock({ className: 'h-3.5 w-3.5' })} label='API Keys' active={pathname === '/settings/api-keys'} onClick={() => { navigateTo('/settings/api-keys'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.chat({ className: 'h-3.5 w-3.5' })} label='Support' active={pathname === '/settings/support'} onClick={() => { navigateTo('/settings/support'); setSidebarOpen(false) }} />
+                {isAdmin && (
+                  <NavItem icon={<LuShield className='h-3.5 w-3.5' />} label='Admin' active={isAdminPath} onClick={() => { navigateTo('/admin'); setSidebarOpen(false) }} />
+                )}
+                <NavItem icon={Icons.settings({ className: 'h-3.5 w-3.5' })} label='Billing' active={pathname === '/settings/credits' || pathname === '/settings/invoices' || pathname === '/settings/billing'} onClick={() => { navigateTo('/settings/billing'); setSidebarOpen(false) }} />
+              </SidebarSection>
             </div>
           </div>
 
-          <div className='mt-3 space-y-2 border-t border-[#2a2a2a] pt-3 text-xs'>
+          <div className='mt-3 space-y-2 border-t border-[var(--ds-border-subtle)] pt-3 text-xs'>
             <UsageDropdown
               balance={balance}
               context={{
@@ -1021,8 +1013,9 @@ function App() {
 
         {/* ───────────── Main content ───────────── */}
         <section className='flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-x-hidden sm:gap-2 lg:gap-3'>
-          <header className='space-y-1.5 sm:space-y-2'>
-            <div className='flex items-center justify-between gap-2 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:rounded-2xl sm:px-4 sm:py-2'>
+          <div className='space-y-1.5 sm:space-y-2'>
+            <HeaderBar
+              left={(
               <div className='flex min-w-0 items-center gap-1.5 sm:gap-2'>
                 <button type='button' onClick={() => setSidebarOpen((prev) => !prev)} className='rounded border border-[#2a2a2a] p-1.5 text-xs lg:hidden' aria-label='Toggle sidebar'>
                   {Icons.menu({ className: 'h-4 w-4' })}
@@ -1051,6 +1044,8 @@ function App() {
                   </div>
                 )}
               </div>
+              )}
+              right={(
               <div className='flex shrink-0 items-center gap-1.5 text-[10px] text-zinc-300 sm:gap-3 sm:text-xs'>
                 <span className='inline-flex items-center gap-1 rounded-full border border-[#2a2a2a] px-1.5 py-0.5 sm:px-2 sm:py-1'>
                   <span className={`h-2 w-2 rounded-full sm:h-2.5 sm:w-2.5 ${connectionLabel.cls}`} /> <span className='hidden xs:inline'>{connectionLabel.label}</span>
@@ -1060,8 +1055,9 @@ function App() {
                 <span className='hidden text-[10px] text-zinc-600 sm:inline'>v{appVersion}</span>
                 <button type='button' onClick={newSession} className='rounded-md border border-[#2a2a2a] px-2 py-1 hover:border-blue-500/60 hover:bg-zinc-900 sm:px-3 sm:py-1.5'>New</button>
               </div>
-            </div>
-          </header>
+              )}
+            />
+          </div>
 
           {!showSettings && !showAutomations && viewMode === 'browser' && (
             <section className='flex items-center gap-1 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2'>

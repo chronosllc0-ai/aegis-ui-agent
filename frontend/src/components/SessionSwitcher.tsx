@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FiCheck, FiChevronDown, FiMonitor, FiSearch, FiSmartphone, FiX } from 'react-icons/fi'
+import { PanelCard, StatusBadge } from './ui/DesignSystem'
 
 type SessionChannel = 'chat' | 'browser' | 'system'
 type SessionStatus = 'active' | 'idle'
@@ -15,12 +16,6 @@ interface SessionSwitcherProps {
   sessions: SessionSwitcherItem[]
   selectedSessionId: string | null | undefined
   onSelect: (sessionId: string) => void
-}
-
-const channelBadgeClass: Record<SessionChannel, string> = {
-  chat: 'border-blue-500/30 bg-blue-500/15 text-blue-300',
-  browser: 'border-purple-500/30 bg-purple-500/15 text-purple-300',
-  system: 'border-zinc-500/30 bg-zinc-500/15 text-zinc-300',
 }
 
 const channelLabel: Record<SessionChannel, string> = {
@@ -53,9 +48,7 @@ function SessionRow({
         <p className='truncate text-sm text-zinc-100'>{item.label}</p>
         <p className='truncate text-[11px] text-zinc-500'>ID: {item.id}</p>
       </div>
-      <span className={`rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${channelBadgeClass[item.channel]}`}>
-        {channelLabel[item.channel]}
-      </span>
+      <StatusBadge label={channelLabel[item.channel]} tone={item.channel === 'chat' ? 'info' : item.channel === 'browser' ? 'warning' : 'default'} />
       {selected && <FiCheck className='h-3.5 w-3.5 text-cyan-300' aria-hidden='true' />}
     </button>
   )
@@ -104,7 +97,7 @@ export function SessionSwitcher({ sessions, selectedSessionId, onSelect }: Sessi
   if (sessions.length === 0 || !selectedSession) return null
 
   const listBody = (
-    <div className='rounded-xl border border-[#2a2a2a] bg-[#101010] p-2 shadow-2xl'>
+    <PanelCard className='p-2 shadow-[var(--ds-shadow-elevated)]'>
       <div className='mb-2 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#141414] px-2 py-1.5'>
         <FiSearch className='h-3.5 w-3.5 text-zinc-500' aria-hidden='true' />
         <input
@@ -132,7 +125,7 @@ export function SessionSwitcher({ sessions, selectedSessionId, onSelect }: Sessi
           <p className='rounded-lg bg-[#141414] px-2.5 py-3 text-xs text-zinc-500'>No matching sessions.</p>
         )}
       </div>
-    </div>
+    </PanelCard>
   )
 
   return (
@@ -154,9 +147,7 @@ export function SessionSwitcher({ sessions, selectedSessionId, onSelect }: Sessi
             <p className='truncate text-xs text-zinc-100'>{selectedSession.label}</p>
             <p className='truncate text-[10px] text-zinc-500'>{selectedSession.id}</p>
           </div>
-          <span className={`rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${channelBadgeClass[selectedSession.channel]}`}>
-            {channelLabel[selectedSession.channel]}
-          </span>
+          <StatusBadge label={channelLabel[selectedSession.channel]} tone={selectedSession.channel === 'chat' ? 'info' : selectedSession.channel === 'browser' ? 'warning' : 'default'} />
           <FiChevronDown className={`h-3.5 w-3.5 text-zinc-500 transition-transform ${openDesktop ? 'rotate-180' : ''}`} aria-hidden='true' />
         </button>
 
