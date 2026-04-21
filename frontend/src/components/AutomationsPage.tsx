@@ -400,7 +400,7 @@ function AutomationWizard({
           </div>
           {executionMode === 'run_assistant_prompt' ? (
             <div>
-              <FieldLabel label='assistant_task_prompt' required />
+              <FieldLabel label='Assistant task prompt' required />
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
