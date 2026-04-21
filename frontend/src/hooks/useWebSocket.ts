@@ -221,6 +221,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const connectRef = useRef<() => void>(() => undefined)
   const pendingStartRef = useRef<{ requestId: string; timer: number | null; instruction: string } | null>(null)
   const pendingQueuedStateTimeoutRef = useRef<number | null>(null)
+  const terminalTaskStateRef = useRef<Record<string, string>>({})
   const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
   const queuedTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_QUEUED_TIMEOUT_MS ?? 20000)
 
@@ -358,6 +359,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'task_state') {
+        const payloadTaskId = String(payload.data?.task_id ?? '').trim() || activeTaskIdRef.current
         const state = String(payload.data?.state ?? '')
         if (state === 'running' || state === 'tool_call' || state === 'queued' || state === 'waiting_input') {
           setExecutionState(state === 'queued' ? 'starting' : 'running')
@@ -376,12 +378,15 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             pendingQueuedStateTimeoutRef.current = null
           }
         } else if (state === 'succeeded') {
+          terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('completed')
           setIsWorking(false)
         } else if (state === 'failed') {
+          terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('failed')
           setIsWorking(false)
         } else if (state === 'cancelled') {
+          terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('cancelled')
           setIsWorking(false)
         }
@@ -392,14 +397,18 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           window.clearTimeout(pendingQueuedStateTimeoutRef.current)
           pendingQueuedStateTimeoutRef.current = null
         }
-        setExecutionState('completed')
+        const payloadTaskId = String(payload.data?.task_id ?? '').trim() || taskId
+        const terminalState = terminalTaskStateRef.current[payloadTaskId]
+        if (terminalState === 'failed') setExecutionState('failed')
+        else if (terminalState === 'cancelled') setExecutionState('cancelled')
+        else setExecutionState('completed')
         setIsWorking(false)
         setTaskActivity(createIdleActivityState())
         const resultSummary = String(payload.data?.summary ?? '').trim()
-        if (resultSummary) {
+        if (resultSummary && terminalState === 'succeeded') {
           appendLog({
             message: `[summarize_task] ${JSON.stringify({ summary: resultSummary })}`,
-            taskId,
+            taskId: payloadTaskId,
             type: 'result',
             status: 'completed',
             rawStepType: 'task_result',

@@ -6169,3 +6169,30 @@
 - Decision: enforced "chat as control center" by routing browser controls to composer prefill, not by hidden auto-send.
 - Decision: kept browser Action Log intact for observability while adding stricter chat filtering.
 - Blocker: none beyond existing missing checklist file (`backend/pydantic_adk_runner.py`).
+
+## Session 6.35 - April 21, 2026 (PR review fix: task_result summary scoping + terminal-state gating)
+
+### What changed
+- Updated `frontend/src/hooks/useWebSocket.ts` task terminal tracking:
+  - record terminal `task_state` by `data.task_id` in a local ref map,
+  - consume `task_result.data.task_id` when appending synthetic summary logs so summaries are written to the correct task/thread.
+- Changed `task_result` handling to avoid forcing execution state to completed for every terminal result:
+  - now maps to failed/cancelled/completed using the recorded terminal task state.
+- Gated synthetic `[summarize_task]` append to successful (`succeeded`) terminal tasks only.
+
+### What works / what does not
+- Works:
+  - Prevents cross-thread summary assignment when task pointer advances before late `task_result` arrival.
+  - Prevents success-style summary emission for failed/cancelled tasks.
+  - Keeps successful-task summary behavior intact.
+- Does not / caveats:
+  - AGENTS checklist caveat remains unchanged: `backend/pydantic_adk_runner.py` is not present, so py_compile checklist command remains partially failing.
+
+### Next steps
+1. Add a frontend test that simulates out-of-order terminal events across two task IDs and asserts summary lands on payload task only.
+2. Consider including terminal `status` in backend `task_result` payload to remove frontend inference.
+
+### Blockers / decisions
+- Decision: use payload task_id as source of truth for terminal summary threading.
+- Decision: only emit synthetic summary for succeeded tasks to avoid contradictory UI messaging.
+- Blocker: none beyond known missing checklist file.
