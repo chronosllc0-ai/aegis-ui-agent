@@ -251,6 +251,7 @@ class AgentOrchestrator:
         on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
         on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
         on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+        on_first_model_call: Callable[[str, str], Awaitable[None]] | None = None,
         is_subagent: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -312,6 +313,7 @@ class AgentOrchestrator:
                 on_reasoning_delta=on_reasoning_delta,
                 on_spawn_subagent=on_spawn_subagent,
                 on_message_subagent=on_message_subagent,
+                on_first_model_call=on_first_model_call,
                 is_subagent=is_subagent,
             )
 
@@ -344,6 +346,8 @@ class AgentOrchestrator:
         parent_step_id: str | None = None
 
         try:
+            if on_first_model_call is not None:
+                await on_first_model_call(model_id or "gemini-2.5-pro", "google")
             async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=instruction):
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info("Task cancelled for session %s", session_id)

@@ -257,22 +257,22 @@ def test_websocket_dequeue_invalid_index_payload_does_not_disconnect() -> None:
     assert queue_ack["type"] == "pong"
 
 
-def test_idle_steer_requires_navigate_when_no_task_is_running() -> None:
-    """Steer action should be rejected while idle; navigate is the sole start action."""
+def test_idle_steer_auto_starts_task_when_no_task_is_running() -> None:
+    """Steer action should auto-start task execution while idle."""
     main.orchestrator = _StubOrchestrator()
     client = TestClient(main.app)
 
     with client.websocket_connect("/ws/navigate") as ws:
         _ = ws.receive_json()
         ws.send_json({"action": "steer", "instruction": "open example.com"})
-        error = ws.receive_json()
-        ws.send_json({"action": "navigate", "instruction": "open example.com"})
-        step = ws.receive_json()
+        ack = _recv_until_type(ws, "navigate_ack")
+        step = _recv_until_type(ws, "step")
         ws.send_json({"action": "stop"})
 
-    assert error["type"] == "task_error"
-    assert "disabled" in error["data"]["message"].lower()
-    assert step["type"] in {"navigate_ack", "task_state", "step"}
+    assert ack["type"] == "navigate_ack"
+    assert ack["data"]["accepted"] is True
+    assert step["type"] == "step"
+    assert step["data"]["content"] == "stub:open example.com"
 
 
 def test_idle_queue_requires_navigate_when_no_task_is_running() -> None:

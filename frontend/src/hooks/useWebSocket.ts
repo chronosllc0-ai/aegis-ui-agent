@@ -220,10 +220,13 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const lastNotConnectedAtRef = useRef(0)
   const connectRef = useRef<() => void>(() => undefined)
   const pendingStartRef = useRef<{ requestId: string; timer: number | null; instruction: string } | null>(null)
+  const pendingBackendActivityTimeoutRef = useRef<number | null>(null)
+  const lastBackendActivityAtRef = useRef(0)
   const pendingQueuedStateTimeoutRef = useRef<number | null>(null)
   const terminalTaskStateRef = useRef<Record<string, string>>({})
   const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
   const queuedTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_QUEUED_TIMEOUT_MS ?? 20000)
+  const backendActivityTimeoutMs = Number(import.meta.env.VITE_BACKEND_ACTIVITY_TIMEOUT_MS ?? 3000)
 
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
@@ -318,6 +321,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       setConnectionStatus('disconnected')
     }
     ws.onmessage = (event: MessageEvent<string>) => {
+      lastBackendActivityAtRef.current = Date.now()
+      if (pendingBackendActivityTimeoutRef.current !== null) {
+        window.clearTimeout(pendingBackendActivityTimeoutRef.current)
+        pendingBackendActivityTimeoutRef.current = null
+      }
       let payload: WebSocketPayload
       try {
         payload = JSON.parse(event.data) as WebSocketPayload
@@ -956,6 +964,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         window.clearInterval(pingIntervalRef.current)
         pingIntervalRef.current = null
       }
+      if (pendingBackendActivityTimeoutRef.current !== null) {
+        window.clearTimeout(pendingBackendActivityTimeoutRef.current)
+        pendingBackendActivityTimeoutRef.current = null
+      }
       if (wsRef.current) {
         wsRef.current.onclose = null
         wsRef.current.close()
@@ -966,6 +978,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const send = useCallback(
     (message: Record<string, unknown>) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
+        const clientRequestId = String(message.client_request_id ?? crypto.randomUUID())
+        const outboundMessage = {
+          ...message,
+          client_request_id: clientRequestId,
+        }
         if (message.action === 'navigate' || message.action === 'task' || message.action === 'chat' || message.action === 'message') {
           const nextTaskId = crypto.randomUUID()
           const requestId = crypto.randomUUID()
@@ -997,10 +1014,33 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             pendingStartRef.current = null
           }, ackTimeoutMs)
           pendingStartRef.current = { requestId, timer, instruction: String(message.instruction ?? '') }
-          wsRef.current.send(JSON.stringify({ action: 'navigate_start', request_id: requestId, instruction: message.instruction, metadata: { ...existingMeta, frontend_task_id: nextTaskId } }))
+          console.info('[AegisUI] trace_phase=frontend_dispatch request_id=%s client_request_id=%s action=navigate_start', requestId, clientRequestId)
+          const sendAt = Date.now()
+          pendingBackendActivityTimeoutRef.current = window.setTimeout(() => {
+            if (lastBackendActivityAtRef.current >= sendAt) {
+              pendingBackendActivityTimeoutRef.current = null
+              return
+            }
+            setExecutionState('failed')
+            setIsWorking(false)
+            appendLog({
+              message: 'No backend activity detected after send (E_START_TIMEOUT). Check connection/server logs and retry.',
+              taskId: nextTaskId,
+              type: 'error',
+              status: 'failed',
+            })
+            pendingBackendActivityTimeoutRef.current = null
+          }, backendActivityTimeoutMs)
+          wsRef.current.send(JSON.stringify({
+            action: 'navigate_start',
+            request_id: requestId,
+            client_request_id: clientRequestId,
+            instruction: message.instruction,
+            metadata: { ...existingMeta, frontend_task_id: nextTaskId },
+          }))
           return true
         }
-        wsRef.current.send(JSON.stringify(message))
+        wsRef.current.send(JSON.stringify(outboundMessage))
         return true
       }
       if (message.action === 'config') return false
@@ -1017,7 +1057,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       return false
     },
-    [ackTimeoutMs, appendLog, queuedTimeoutMs],
+    [ackTimeoutMs, appendLog, backendActivityTimeoutMs, queuedTimeoutMs],
   )
 
   const sendAudioChunk = useCallback((audio: string) => {
@@ -1042,6 +1082,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setActiveExecutionMode('orchestrator')
     setHandoffActive(false)
     setHandoffRequestId(null)
+    if (pendingBackendActivityTimeoutRef.current !== null) {
+      window.clearTimeout(pendingBackendActivityTimeoutRef.current)
+      pendingBackendActivityTimeoutRef.current = null
+    }
     reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
   }, [])

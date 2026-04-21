@@ -6706,3 +6706,31 @@
 ### Blockers / decisions
 - Decision: prioritize explicit per-test setup over shared implicit state to avoid flaky selection/reordering behavior.
 - Blocker: none.
+
+## Session 6.48 - April 21, 2026 (No-silent-failure trace chain + idle-steer autostart)
+
+### What changed
+- Added frontend `client_request_id` propagation in `useWebSocket.send()` for outbound websocket sends, including explicit `client_request_id` on `navigate_start`.
+- Added frontend dispatch trace logging and backend-activity watchdog (default 3000ms via `VITE_BACKEND_ACTIVITY_TIMEOUT_MS`) that surfaces a user-facing explicit timeout error when no backend activity arrives after send.
+- Added backend lifecycle tracing logs for `navigate_start` receive, task-start dispatch, orchestrator start, first model call, and first step/result/error emission.
+- Added orchestrator/universal navigator callback plumbing for first model-call instrumentation (`on_first_model_call`).
+- Implemented idle fallback behavior: `steer` while idle now auto-starts a task instead of rejecting; queue/interrupt idle behavior remains explicit rejection.
+- Updated websocket test coverage to assert idle `steer` auto-start behavior.
+
+### What works / what does not
+- Works:
+  - Sends now carry client correlation ID and produce a traceable lifecycle chain in logs.
+  - Silent-start gaps now surface explicit frontend timeout failure instead of hanging.
+  - Idle steer path now reliably starts execution and returns protocol ack/state updates.
+- Does not / caveats:
+  - Browser screenshot artifact tooling is not available in this environment, so no UI screenshot was captured.
+
+### Next steps
+1. Add explicit UI surfacing for `client_request_id`/`request_id` in the action log rows for end-user troubleshooting.
+2. Add a backend integration test asserting trace markers are emitted in expected order for a successful run.
+3. Consider adding a dedicated `task_start_trace` websocket event for first-class frontend observability instead of relying on logs only.
+
+### Blockers / decisions
+- Decision: kept watchdog default at 3000ms to satisfy fast explicit failure, configurable through env for slower deployments.
+- Decision: limited idle auto-start fallback to `steer` only (not `queue`/`interrupt`) to match requested scope and preserve current runtime semantics.
+- Blocker: none.
