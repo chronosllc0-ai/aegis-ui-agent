@@ -135,3 +135,30 @@ def test_validate_target_update_uses_legacy_prompt_when_assistant_field_blank() 
     assert target_type == "assistant_prompt"
     assert normalized_prompt == "legacy fallback"
     assert workflow_id is None
+
+
+def test_validate_target_update_requires_workflow_id_when_switching_to_saved_workflow() -> None:
+    task = _TaskStub(execution_target_type="assistant_prompt", prompt="legacy", workflow_id=None)
+
+    with pytest.raises(HTTPException) as exc:
+        _validate_target_update(
+            task,
+            TaskUpdate(execution_target_type="saved_workflow", workflow_id="  "),
+        )
+
+    assert exc.value.status_code == 422
+    assert "workflow_id is required" in str(exc.value.detail)
+
+
+def test_task_create_saved_workflow_clears_legacy_prompt_fields() -> None:
+    body = TaskCreate(
+        name="Workflow",
+        execution_target_type="saved_workflow",
+        workflow_id=" wf-123 ",
+        prompt="legacy",
+        cron_expr="0 9 * * 1",
+    )
+
+    assert body.workflow_id == "wf-123"
+    assert body.assistant_task_prompt is None
+    assert body.prompt is None
