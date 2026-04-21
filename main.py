@@ -2422,7 +2422,42 @@ async def _start_idle_navigation_from_control_action(
     title_candidate: str,
     client_metadata: dict[str, Any] | None,
 ) -> None:
-    """Reject control actions while idle; only navigate can start a new run."""
+    """Handle idle control actions; steer auto-starts while queue/interrupt remain rejected."""
+    if action == "steer":
+        request_id = str(uuid4())
+        task_id = str(uuid4())
+        runtime.current_request_id = request_id
+        runtime.current_task_id = task_id
+        runtime.current_frontend_task_id = task_id
+        _record_runtime_event(
+            category="queue_steer_runtime",
+            subsystem="runtime",
+            level="info",
+            message="idle steer auto-start accepted",
+            session_id=session_id,
+            request_id=request_id,
+            task_id=task_id,
+            details={"instruction": instruction, "task_label": task_label, "client": client_metadata or {}},
+        )
+        await _safe_ws_send(
+            websocket,
+            {"type": "navigate_ack", "data": {"request_id": request_id, "task_id": task_id, "accepted": True}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="idle_steer_autostart_ack",
+        )
+        await _safe_ws_send(
+            websocket,
+            {"type": "task_state", "data": {"task_id": task_id, "state": "queued", "timestamp": _time.time()}},
+            request_id=request_id,
+            task_id=task_id,
+            ws_session_id=session_id,
+            phase="idle_steer_autostart_queued",
+        )
+        _start_navigation_task(websocket, runtime, session_id, instruction)
+        return
+
     await websocket.send_json(
         {
             "type": "error",
@@ -2487,6 +2522,7 @@ async def _run_navigation_task(
 ) -> None:
     """Execute a single navigation task and optionally schedule one queued follow-up."""
     terminal_event_sent = False
+    first_emit_logged = False
 
     async def _emit_terminal_result(*, summary: str, status: str) -> None:
         nonlocal terminal_event_sent
@@ -2511,8 +2547,18 @@ async def _run_navigation_task(
         )
 
     async def callback(step: dict[str, Any]) -> None:
+        nonlocal first_emit_logged
         await _send_step(websocket, step, runtime=runtime, session_id=session_id)
         step_type = str(step.get("type") or "").lower()
+        if not first_emit_logged:
+            first_emit_logged = True
+            logger.info(
+                "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_step_emit step_type=%s",
+                request_id,
+                task_id,
+                session_id,
+                step_type or "unknown",
+            )
         if step_type in {"tool_start", "tool_result", "tool-call", "tool_call"}:
             _record_runtime_event(
                 category="tool_lifecycle",
@@ -2657,6 +2703,26 @@ async def _run_navigation_task(
     async def _on_message_subagent(sub_id: str, message: str) -> bool:
         return await runtime.subagent_manager.send_message(sub_id, message)
 
+    async def _on_first_model_call(model_name: str, provider_name: str) -> None:
+        logger.info(
+            "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_model_call provider=%s model=%s",
+            request_id,
+            task_id,
+            session_id,
+            provider_name,
+            model_name,
+        )
+        _record_runtime_event(
+            category="task_start",
+            subsystem="orchestrator",
+            level="info",
+            message="first model call",
+            session_id=session_id,
+            request_id=request_id,
+            task_id=task_id,
+            details={"model": model_name, "provider": provider_name},
+        )
+
     try:
         max_duration_seconds = int(runtime.settings.get("model_timeout_seconds") or settings.NAVIGATION_TASK_TIMEOUT_SECONDS)
         max_tool_calls = int(runtime.settings.get("max_tool_calls") or settings.NAVIGATION_MAX_TOOL_CALLS)
@@ -2665,6 +2731,12 @@ async def _run_navigation_task(
             "model_timeout_seconds": max_duration_seconds,
             **runtime.settings,
         }
+        logger.info(
+            "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=orchestrator_start",
+            request_id,
+            task_id,
+            session_id,
+        )
         result = await asyncio.wait_for(
             _get_orchestrator().execute_task(
             session_id=session_id,
@@ -2687,6 +2759,7 @@ async def _run_navigation_task(
             on_reasoning_delta=_on_reasoning_delta,
             on_spawn_subagent=_on_spawn_subagent,
             on_message_subagent=_on_message_subagent,
+            on_first_model_call=_on_first_model_call,
             settings=effective_runtime_settings,
         ),
             timeout=max_duration_seconds,
@@ -2742,6 +2815,14 @@ async def _run_navigation_task(
                 phase="task_error",
             )
             if not error_already_emitted:
+                if not first_emit_logged:
+                    first_emit_logged = True
+                    logger.info(
+                        "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_error_emit",
+                        request_id,
+                        task_id,
+                        session_id,
+                    )
                 await _safe_ws_send(
                     websocket,
                     {"type": "error", "data": {"message": error_msg}},
@@ -2767,6 +2848,14 @@ async def _run_navigation_task(
             summary=str((result or {}).get("summary") or (result or {}).get("error") or result_status),
             status=terminal_state,
         )
+        if not first_emit_logged:
+            first_emit_logged = True
+            logger.info(
+                "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_result_emit",
+                request_id,
+                task_id,
+                session_id,
+            )
         await _safe_ws_send(websocket, {"type": "result", "data": result}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result")
     except asyncio.CancelledError:
         logger.info("Navigation task cancelled for session %s", session_id)
@@ -2904,8 +2993,16 @@ async def websocket_navigate(websocket: WebSocket) -> None:
 
             if action == "navigate_start":
                 request_id = str(data.get("request_id") or "").strip()
+                client_request_id = str(data.get("client_request_id") or "").strip()
                 if not request_id:
                     request_id = str(uuid4())
+                logger.info(
+                    "navigate_start_receive request_id=%s client_request_id=%s ws_session_id=%s action=%s",
+                    request_id,
+                    client_request_id,
+                    session_id,
+                    action,
+                )
                 if not instruction:
                     logger.info(
                         "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=validate outcome=rejected error_code=E_BAD_PAYLOAD",
@@ -2970,8 +3067,9 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 runtime.current_request_id = request_id
                 runtime.current_task_id = task_id
                 logger.info(
-                    "navigate_start request_id=%s task_id=%s ws_session_id=%s phase=ack outcome=accepted",
+                    "navigate_start request_id=%s client_request_id=%s task_id=%s ws_session_id=%s phase=ack outcome=accepted",
                     request_id,
+                    client_request_id,
                     task_id,
                     session_id,
                 )
@@ -3019,6 +3117,13 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 )
                 if runtime.conversation_id:
                     await websocket.send_json({"type": "conversation_id", "data": {"conversation_id": runtime.conversation_id}})
+                logger.info(
+                    "navigate_start_dispatch request_id=%s client_request_id=%s task_id=%s ws_session_id=%s phase=task_start_call",
+                    request_id,
+                    client_request_id,
+                    task_id,
+                    session_id,
+                )
                 _start_navigation_task(websocket, runtime, session_id, instruction)
             elif action == "stop_task":
                 requested_task_id = str(data.get("task_id") or "").strip()

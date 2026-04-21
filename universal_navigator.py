@@ -2032,6 +2032,7 @@ async def run_universal_navigation(
     on_reasoning_delta: Callable[[str, str], Awaitable[None]] | None = None,
     on_spawn_subagent: Callable[[str, str], Awaitable[str]] | None = None,
     on_message_subagent: Callable[[str, str], Awaitable[bool]] | None = None,
+    on_first_model_call: Callable[[str, str], Awaitable[None]] | None = None,
     is_subagent: bool = False,
 ) -> dict[str, Any]:
     """Run a vision+tool-calling navigation loop with any BaseProvider."""
@@ -2095,6 +2096,7 @@ async def run_universal_navigation(
                     on_reasoning_delta=on_reasoning_delta,
                     on_spawn_subagent=on_spawn_subagent,
                     on_message_subagent=on_message_subagent,
+                    on_first_model_call=on_first_model_call,
                     is_subagent=is_subagent,
                 ),
                 timeout=delegate_timeout,
@@ -2156,6 +2158,7 @@ async def run_universal_navigation(
                     on_reasoning_delta=on_reasoning_delta,
                     on_spawn_subagent=on_spawn_subagent,
                     on_message_subagent=on_message_subagent,
+                    on_first_model_call=on_first_model_call,
                     is_subagent=is_subagent,
                 )
                 primary_result = delegated_fallback_result
@@ -2374,6 +2377,8 @@ async def run_universal_navigation(
             }
             if not enable_reasoning:
                 stream_kwargs["temperature"] = 0.2
+            if on_first_model_call is not None and step_num == 0:
+                await on_first_model_call(model, str(getattr(provider, "name", "unknown")))
             message_id = str(uuid4())[:8]
             async for chunk in provider.stream(messages, **stream_kwargs):
                 if cancel_event and cancel_event.is_set():
