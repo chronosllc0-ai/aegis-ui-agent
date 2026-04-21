@@ -6209,3 +6209,28 @@
 - Decision: keep backend payload contract unchanged while preventing empty prompt submissions for workflow mode.
 - Decision: preserve existing form data when mode preference changes to avoid destructive UX regressions.
 - Blocker: none.
+
+## Session 6.36 - April 21, 2026 (PR follow-up: prevent empty workflow instruction automations)
+
+### What changed
+- Updated `frontend/src/components/AutomationsPage.tsx` workflow-mode validation and payload mapping safeguards:
+  - In wizard submit validation, workflow mode now rejects selected workflows whose `instruction` is empty/whitespace.
+  - In `toTaskApiPayload`, workflow mode now throws a descriptive error when selected workflow instruction is empty/whitespace (defensive guard).
+- This closes the gap where workflow existence was validated but blank workflow instructions could still map to empty backend `prompt` payloads.
+
+### What works / what does not
+- Works:
+  - Saved-workflow mode now enforces non-empty workflow instruction before create/update.
+  - Inline form error is shown for empty workflow instruction in submit path.
+  - Mapper guard prevents accidental `prompt: ""` payload in workflow mode.
+- Does not / caveats:
+  - Empty instructions are still currently possible at workflow-template edit time in settings; this change blocks bad scheduling submission but does not yet enforce non-empty workflow instructions at template edit source.
+
+### Next steps
+1. Add validation in workflow template editor (`WorkflowsTab`) to prevent saving empty instruction values.
+2. Add frontend tests for empty-workflow-instruction validation in automation wizard submit path.
+3. Consider backend-side validation for empty automation prompt to provide contract-level safety.
+
+### Blockers / decisions
+- Decision: enforce at both UI submit validation and mapper guard for defense in depth.
+- Blocker: none.

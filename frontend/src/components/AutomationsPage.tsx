@@ -229,7 +229,7 @@ function AutomationWizard({
     }
     setWorkflowVersionPin('')
     setError(null)
-  }, [initial, lastExecutionMode])
+  }, [initial, lastExecutionMode, workflows])
 
   const cronExpr = preset === '__custom__' ? customCron : preset
 
@@ -272,6 +272,10 @@ function AutomationWizard({
       const workflow = workflows.find((wf) => wf.id === selectedWorkflowId)
       if (!workflow) {
         setError('Selected workflow no longer exists. Please pick another workflow.')
+        return
+      }
+      if (!workflow.instruction.trim()) {
+        setError('Selected workflow has an empty instruction. Please update the workflow or choose another one.')
         return
       }
     }
@@ -538,6 +542,9 @@ export function AutomationsPage() {
       const selectedWorkflow = workflows.find((workflow) => workflow.id === data.workflow_id)
       if (!selectedWorkflow) {
         throw new Error('Selected workflow no longer exists. Please pick another workflow.')
+      }
+      if (!selectedWorkflow.instruction.trim()) {
+        throw new Error('Selected workflow has an empty instruction. Please update the workflow or choose another one.')
       }
       prompt = selectedWorkflow.instruction
     }
