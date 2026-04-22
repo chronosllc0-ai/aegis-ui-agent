@@ -2359,12 +2359,25 @@ async def _runtime_supervisor_dispatch_chat(
     owner_uid = runtime.user_uid or session_id
     try:
         supervisor = await registry.get(owner_uid)
+        # Forward the per-runtime settings snapshot and memory_mode so the
+        # dispatch hook's ToolContext mirrors what the legacy path would
+        # have seen (configured integrations, reasoning level, memory
+        # backend). Without this, ToolContext silently collapses to an
+        # empty settings dict + "files" memory, dropping every stored
+        # integration token for flag-enabled sessions.
+        runtime_settings = dict(getattr(runtime, "settings", {}) or {})
+        memory_mode = str(runtime_settings.get("memory_mode") or "files")
         await supervisor.enqueue(
             _RuntimeAgentEvent(
                 owner_uid=owner_uid,
                 channel="web",
                 kind=_RuntimeEventKind.CHAT_MESSAGE,
-                payload={"text": instruction, "ws_session_id": session_id},
+                payload={
+                    "text": instruction,
+                    "ws_session_id": session_id,
+                    "settings": runtime_settings,
+                    "memory_mode": memory_mode,
+                },
             )
         )
     except Exception:  # noqa: BLE001

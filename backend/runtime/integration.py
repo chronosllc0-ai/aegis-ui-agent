@@ -75,21 +75,38 @@ async def ensure_runtime_started() -> None:
     if _registry is not None:
         return
 
-    from backend.database import _session_factory  # late import: DB may not be ready yet
-
     _registry = SupervisorRegistry()
     _fanout_registry = FanOutRegistry()
 
     def _session_ctx():
-        if _session_factory is None:
+        """Late-bound DB session context.
+
+        Runtime startup runs before DB init on some paths (DB init is
+        kicked off as a background task). Reading
+        ``backend.database._session_factory`` at install time would
+        bake ``None`` into the dispatch config forever, silently
+        disabling :data:`runtime_runs` persistence for the whole
+        process. Resolving the factory lazily every run lets
+        persistence turn on the instant the DB is ready.
+        """
+        # Import inside the factory so a not-yet-initialised database
+        # module does not cache an early ``None`` binding.
+        from backend import database as _db  # noqa: WPS433 (late import is intentional)
+
+        factory = getattr(_db, "_session_factory", None)
+        if factory is None:
             raise RuntimeError("Database session factory is not initialised")
-        return _session_factory()
+        return factory()
 
     install_supervisor_dispatch(
         _registry,
         DispatchConfig(
             fanout_registry=_fanout_registry,
-            session_factory=_session_ctx if _session_factory is not None else None,
+            # Always pass the lazy accessor. The dispatch hook already
+            # catches persistence errors and logs them, so an "early"
+            # event before DB init just records no run row; once the DB
+            # is up every subsequent run persists normally.
+            session_factory=_session_ctx,
         ),
     )
     logger.info("always-on runtime: supervisor + dispatch hook installed")

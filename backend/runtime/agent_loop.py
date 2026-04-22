@@ -42,7 +42,7 @@ from backend.runtime.persistence import (
 from backend.runtime.session import ChannelSession
 from backend.runtime.supervisor import DispatchHook, SessionSupervisor, SupervisorRegistry
 from backend.runtime.tools.context import ToolContext
-from backend.runtime.tools.native import NATIVE_TOOLS
+from backend.runtime.tools.native import NATIVE_TOOLS, get_enabled_native_tools
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ def build_agent(
     return Agent(
         name=f"aegis-{session.channel}",
         instructions=instructions or DEFAULT_INSTRUCTIONS,
-        tools=list(tools) if tools is not None else list(NATIVE_TOOLS),
+        tools=list(tools) if tools is not None else get_enabled_native_tools(),
         model=resolved_model,
     )
 
@@ -297,6 +297,14 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             final_text = str(result.final_output) if result.final_output is not None else ""
             await emit("final_message", {"text": final_text})
         except Exception as exc:  # noqa: BLE001
+            # Critical: do NOT re-raise. The supervisor worker serves
+            # every channel session for this user — propagating the
+            # exception would make a single bad run silently degrade
+            # the entire per-user loop (the supervisor catches it, but
+            # tool errors would bubble past persistence/fan-out).
+            # Instead we fully own the error here: record it on the run
+            # row, stream it to subscribers, and let the worker pick up
+            # the next event.
             status = "error"
             error_text = f"{type(exc).__name__}: {exc}"
             logger.exception(
@@ -305,7 +313,6 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                 session.session_id,
             )
             await emit("error", {"message": error_text})
-            raise
         finally:
             await emit("run_completed", {"status": status})
             if cfg.session_factory is not None:

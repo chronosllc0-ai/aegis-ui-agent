@@ -85,6 +85,58 @@ EXEC_ENV_BLOCKED_PREFIXES = (
     "CREDENTIAL",
 )
 
+# Pattern-level denylist for ``exec_shell``. This is defense-in-depth
+# (not a substitute for proper sandboxing), matching patterns we never
+# want an agent to run against the host regardless of cwd. The legacy
+# tool in main.py has no such guard — this is a net improvement.
+EXEC_SHELL_DENY_PATTERNS = (
+    re.compile(r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f?[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+/(?:\s|$)"),
+    re.compile(r"\brm\s+(?:-[a-zA-Z]*\s+)*/\*"),
+    re.compile(r"\bmkfs\b"),
+    re.compile(r"\bdd\s+[^|;&]*of=/dev/(?:sd|nvme|vd|xvd|hd)"),
+    re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"),  # fork bomb
+    re.compile(r"\bchmod\s+-R?\s*7[0-7]{2}\s+/(?:\s|$)"),
+    re.compile(r"\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b|\bsystemctl\s+(?:reboot|poweroff|halt)"),
+    re.compile(r">\s*/dev/(?:sd|nvme|vd|xvd|hd)"),
+    re.compile(r"\bsudo\b"),
+    re.compile(r"/etc/(?:passwd|shadow|sudoers)\b"),
+)
+
+
+def _exec_shell_sandbox_mode() -> str:
+    """Return the effective shell sandbox mode.
+
+    Values:
+    * ``"bwrap"`` — wrap the command in ``bwrap --unshare-all --ro-bind /
+      / --bind {workdir} {workdir}``. Used automatically when
+      ``bwrap`` is on ``PATH``.
+    * ``"off"`` — legacy parity, no sandbox. Requires
+      ``RUNTIME_EXEC_SHELL_SANDBOX=off`` (or missing ``bwrap``).
+
+    Set ``RUNTIME_EXEC_SHELL_SANDBOX=bwrap|off|auto`` to override. Default
+    is ``auto`` (bwrap if available, else off).
+    """
+    mode = (os.environ.get("RUNTIME_EXEC_SHELL_SANDBOX", "auto") or "auto").strip().lower()
+    if mode == "off":
+        return "off"
+    if mode == "bwrap":
+        return "bwrap"
+    # auto
+    from shutil import which
+
+    return "bwrap" if which("bwrap") else "off"
+
+
+def _exec_shell_enabled() -> bool:
+    """Return ``True`` when the shell tool is registered.
+
+    Set ``RUNTIME_EXEC_SHELL_ENABLED=false`` to drop the tool entirely
+    (supervisor loop continues without it). Default ``true`` for legacy
+    parity.
+    """
+    raw = os.environ.get("RUNTIME_EXEC_SHELL_ENABLED", "true").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
 
 def _truncate(text: str, limit: int = RESULT_CHAR_LIMIT) -> str:
     if len(text) <= limit:
@@ -450,10 +502,34 @@ async def exec_shell(
     cwd: str = ".",
     timeout_seconds: int = 60,
 ) -> str:
-    """Run a shell command inside the current session workspace sandbox."""
+    """Run a shell command inside the current session workspace sandbox.
+
+    Hardening (vs. the legacy main.py tool this replaces):
+    * Pattern denylist rejects obviously destructive commands
+      (``rm -rf /``, ``mkfs``, ``dd of=/dev/sdX``, fork bomb, reboot,
+      reads of ``/etc/passwd`` etc.).
+    * Workspace cwd is locked via :func:`resolve_session_path` — cannot
+      escape the session workspace.
+    * Runs under ``bwrap`` (bubblewrap) when available, giving the
+      command a throwaway user namespace with read-only access to ``/``
+      and read-write access only to the session workdir.
+    * Sensitive env vars (API_*, TOKEN*, SECRET*, CREDENTIAL*, …)
+      stripped before exec.
+    * Tool can be disabled entirely with
+      ``RUNTIME_EXEC_SHELL_ENABLED=false``.
+    """
     command = command.strip()
     if not command:
         return "exec_shell error: command is required."
+    for pat in EXEC_SHELL_DENY_PATTERNS:
+        if pat.search(command):
+            return _json_result(
+                {
+                    "ok": False,
+                    "error": "exec_shell refused: command matched destructive-pattern denylist",
+                    "command": command,
+                }
+            )
     session_id = ctx.context.session_id
     cwd_str = cwd.strip() or "."
     cwd_path = resolve_session_path(session_id, cwd_str)
@@ -465,20 +541,58 @@ async def exec_shell(
         for key, value in os.environ.items()
         if not any(key.upper().startswith(prefix) for prefix in EXEC_ENV_BLOCKED_PREFIXES)
     }
-    env.setdefault("HOME", str(get_session_workspace_root(session_id)))
+    workspace_root = get_session_workspace_root(session_id)
+    env.setdefault("HOME", str(workspace_root))
     env.setdefault("CI", "1")
-    process = await asyncio.create_subprocess_exec(
-        "bash",
-        "-c",
-        command,
-        cwd=str(workdir),
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+
+    sandbox_mode = _exec_shell_sandbox_mode()
+    if sandbox_mode == "bwrap":
+        argv = [
+            "bwrap",
+            "--die-with-parent",
+            "--unshare-user",
+            "--unshare-ipc",
+            "--unshare-pid",
+            "--unshare-uts",
+            "--unshare-cgroup-try",
+            "--new-session",
+            "--clearenv",
+            "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/bin", "/bin",
+            "--ro-bind", "/lib", "/lib",
+            "--ro-bind-try", "/lib64", "/lib64",
+            "--ro-bind-try", "/etc/alternatives", "/etc/alternatives",
+            "--ro-bind-try", "/etc/ssl", "/etc/ssl",
+            "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
+            "--proc", "/proc",
+            "--dev", "/dev",
+            "--tmpfs", "/tmp",
+            "--bind", str(workspace_root), str(workspace_root),
+            "--chdir", str(workdir),
+            "--setenv", "HOME", env["HOME"],
+            "--setenv", "CI", env.get("CI", "1"),
+            "--setenv", "PATH", env.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "bash", "-c", command,
+        ]
+        spawn = asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    else:
+        spawn = asyncio.create_subprocess_exec(
+            "bash",
+            "-c",
+            command,
+            cwd=str(workdir),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    process = await spawn
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except TimeoutError as exc:
+    except (asyncio.TimeoutError, TimeoutError):
         process.kill()
         await process.communicate()
         return _json_result(
@@ -489,6 +603,7 @@ async def exec_shell(
             "ok": process.returncode == 0,
             "cwd": str(workdir),
             "command": command,
+            "sandbox": sandbox_mode,
             "return_code": process.returncode,
             "stdout": _truncate(stdout.decode("utf-8", errors="replace"), CODE_OUTPUT_LIMIT),
             "stderr": _truncate(stderr.decode("utf-8", errors="replace"), CODE_OUTPUT_LIMIT),
@@ -1316,8 +1431,24 @@ NATIVE_TOOLS = [
 NATIVE_TOOL_NAMES: frozenset[str] = frozenset(t.name for t in NATIVE_TOOLS)
 """Name lookup for tests / integration wiring."""
 
+
+def get_enabled_native_tools() -> list:
+    """Return the subset of :data:`NATIVE_TOOLS` with runtime opt-outs applied.
+
+    Currently the only knob is ``RUNTIME_EXEC_SHELL_ENABLED``; when set
+    to ``false`` the ``exec_shell`` tool is omitted from the agent's
+    toolbox for the rest of the process lifetime. Everything else is
+    always on to keep parity with the legacy orchestrator.
+    """
+    tools = list(NATIVE_TOOLS)
+    if not _exec_shell_enabled():
+        tools = [t for t in tools if getattr(t, "name", None) != "exec_shell"]
+    return tools
+
+
 __all__ = [
     "NATIVE_TOOLS",
     "NATIVE_TOOL_NAMES",
+    "get_enabled_native_tools",
     "ToolContext",
 ]
