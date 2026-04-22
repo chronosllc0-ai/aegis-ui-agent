@@ -7649,3 +7649,125 @@
 
 ### Blockers
 - No hard blockers.
+## Session 5.72 - April 22, 2026 (Startup reliability + ownership hardening)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 backend/frontend reliability pass
+
+### What Was Done
+- Removed eager browser startup from websocket connect path to prevent silent handshake failures.
+- Added explicit websocket startup error frame (`RUNTIME_STARTUP_FAILED`) and health degradation signals (`orchestrator_ready`, `browser_ready`).
+- Added heartbeat runtime status API (`/api/heartbeat/status`) and scheduler status snapshot fields.
+- Hardened Telegram/Slack/Discord register endpoints to require authenticated user ownership via `_get_current_user(request)`.
+- Added structured integration error codes (`INTEGRATION_NOT_AUTHENTICATED`, `INTEGRATION_OWNER_MISSING`, `INVALID_BOT_TOKEN`) for registration/ownership failures.
+- Updated ConnectionsTab API error mapping to render backend detail message + error code.
+- Removed browser-behavior toggles from Agent Configuration to reduce unstable surface during recovery mode.
+- Updated README branding/positioning to chat-first always-on coworker with runtime truth table and heartbeat caveat.
+
+### What's Working
+- Websocket no longer depends on browser initialization at connect time.
+- Integration registration now binds owner to authenticated user identity.
+- Heartbeat scheduler exposes explicit runtime status fields for UI/docs.
+
+### What's NOT Working Yet
+- Full phase coverage (legacy mode path removals + extra watchdog UI surface + expanded pairing policy matrix UI) still requires follow-up passes.
+
+### Next Steps
+1. Add/expand targeted regression tests for websocket startup-failure framing and unauthenticated integration registration.
+2. Wire heartbeat status endpoint into a visible UI badge and hide “always-on” claim when disabled.
+3. Complete legacy mode path removal and tighten DM policy naming (`allowlist_only`) end-to-end in frontend/backend.
+
+### Decisions Made
+- Prioritized startup determinism and explicit error surfacing before feature restoration.
+- Preserved existing command behavior where possible while introducing structured integration API errors.
+
+### Blockers
+- None.
+
+---
+## Session 5.74 - April 22, 2026 (Follow-up test-fix pass for startup reliability PR)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused regression-fix pass
+
+### What Was Done
+- Fixed Slack/Discord channel adapters to support legacy test doubles that do not implement `send_text(...)` by adding a fallback to `execute_tool(...)` message send paths.
+- Restored websocket bootstrap initial-frame send (`_send_initial_frame`) without reintroducing eager `ensure_browser()`.
+- Re-ran previously failing test targets and confirmed green for conversation persistence + websocket smoke.
+
+### What's Working
+- `tests/test_conversation_persistence.py::test_integration_registration_captures_owner_and_send_message_persists_conversation` now passes.
+- `tests/test_main_websocket.py::test_websocket_navigate_smoke` now passes.
+- Frontend build and backend compile checks still succeed.
+
+### What's NOT Working Yet
+- Broader phase-level acceptance tests beyond targeted regressions were not expanded in this follow-up pass.
+
+### Next Steps
+1. Add explicit unit tests for adapter fallback behavior (`send_text` missing -> `execute_tool` fallback).
+2. Add websocket startup-failure integration test asserting `RUNTIME_STARTUP_FAILED` framing contract.
+
+### Decisions Made
+- Chose compatibility fallback in adapters to preserve behavior with existing stubs/integration wrappers while keeping new structured ownership/auth flow intact.
+
+### Blockers
+- None.
+
+---
+## Session 5.75 - April 22, 2026 (Review follow-up: deterministic WS first event + real heartbeat toggle)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted review-fix pass
+
+### What Was Done
+- Updated websocket initial-frame helper to always emit a deterministic first `frame` event on connect, including fallback 1x1 PNG when browser/page is blank or screenshot capture fails.
+- Added `HEARTBEAT_SESSION_ENABLED` to typed runtime settings in `config.py` so heartbeat enable/disable can be controlled via environment configuration.
+- Added heartbeat environment variables to `.env.example` (`HEARTBEAT_SESSION_ENABLED`, `HEARTBEAT_SESSION_INTERVAL_SECONDS`).
+- Re-ran websocket + conversation persistence + heartbeat unit tests to validate review concerns.
+
+### What's Working
+- Initial websocket protocol now emits a first event deterministically, preserving existing client/test expectation to read immediately after connect.
+- Heartbeat enable/disable switch is now a real settings field instead of implicit `getattr(..., True)` fallback-only behavior.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add a narrow test asserting fallback-frame behavior when screenshot capture raises.
+2. Surface `HEARTBEAT_SESSION_ENABLED` in operator docs/dashboard controls explicitly.
+
+### Decisions Made
+- Chose to preserve existing `frame` first-event contract (instead of introducing a new `ready` event type) for compatibility.
+
+### Blockers
+- None.
+
+---
+## Session 5.76 - April 22, 2026 (Review roast follow-up: WS bad-payload resilience + heartbeat error sanitization)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted hardening pass
+
+### What Was Done
+- Added per-message websocket payload guard: `receive_json()` failures now emit structured `E_BAD_PAYLOAD` error frames and continue the connection loop instead of dropping the session.
+- Sanitized heartbeat scheduler public status output by changing `last_result` failure state to generic `"error"` instead of embedding raw exception text.
+- Re-ran websocket smoke + heartbeat tests and compile checks.
+
+### What's Working
+- Malformed websocket payloads no longer force immediate connection teardown from receive parsing errors.
+- Heartbeat status endpoint no longer risks leaking raw exception details through `last_result`.
+
+### What's NOT Working Yet
+- Full per-action exception isolation inside the websocket dispatch branch remains a potential future refinement.
+
+### Next Steps
+1. Extract action handling into a dedicated per-message handler function and wrap with message-scoped try/except to fully isolate action-level exceptions.
+2. Add targeted websocket test for malformed JSON payload continuity.
+
+### Decisions Made
+- Applied the minimum safe patch that preserves existing behavior while preventing the specific bad-payload disconnect class and exception-detail leakage.
+
+### Blockers
+- None.
+
+---

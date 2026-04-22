@@ -301,7 +301,15 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
   const postJson = async (path: string, payload: Record<string, unknown>) => {
     const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     const data = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : 'Request failed')
+    if (!response.ok) {
+      const detail = data?.detail
+      if (detail && typeof detail === 'object') {
+        const code = String((detail as { code?: unknown }).code ?? '').trim()
+        const message = String((detail as { message?: unknown }).message ?? '').trim() || 'Request failed'
+        throw new Error(code ? `${message} (${code})` : message)
+      }
+      throw new Error(typeof detail === 'string' ? detail : 'Request failed')
+    }
     return data
   }
 
