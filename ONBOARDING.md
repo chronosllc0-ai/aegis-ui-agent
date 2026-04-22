@@ -7496,3 +7496,35 @@
 - No browser screenshot tool available in this environment.
 
 ---
+
+---
+## Session 5.72 - April 22, 2026 (UI regression guardrails for visual-overhaul safety)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend regression pass
+
+### What Changed
+- Added a dedicated UI regression suite at `frontend/src/App.ui-regression.test.tsx` to guard:
+  - moved settings-tab header routing via standalone tabs (ensures Connections/Observability render through standalone shell),
+  - sidebar active/inactive visual class rules,
+  - topbar single-row shell structure,
+  - mobile-route rendering checks for Sessions (`/`), Automations (`/automations`), Connections (`/settings/connections`), and Observability (`/settings/observability`).
+- Re-ran frontend build and targeted UI tests for this pass.
+
+### Known Deltas vs Reference
+- Mobile visual validation in this run is DOM-based route/shell regression testing (test assertions), not pixel-diff screenshots.
+- Browser screenshot tooling (`browser_container`) is not available in this execution environment, so no image artifacts were generated in this pass.
+- Running `App.ui-regression` and `App.browser-example` in the same Vitest invocation causes cross-file mock interference; each test file passes when run individually in targeted mode.
+
+### What Works / What Does Not
+- **Works:** Frontend build passes; targeted UI regression checks pass; existing targeted Connections settings tests pass.
+- **Does not (in combined run):** Mixed invocation of `src/App.ui-regression.test.tsx` + `src/App.browser-example.test.tsx` fails due shared mock scope collision.
+
+### Next UI Polish Backlog
+1. Add isolated visual snapshot harness (or Playwright screenshot flow) for mobile views once browser screenshot tooling is available in CI/agent runtime.
+2. Strengthen route-level navigation assertions with explicit no-regression checks around settings→chat transitions.
+3. Deconflict App-level test mocks across files (shared factory utility + isolated module boundaries) so combined targeted runs are stable.
+
+### Blockers / Decisions
+- **Blocker:** No browser screenshot tool available in this environment for image capture.
+- **Decision:** Prioritized deterministic UI regression tests and mobile-route coverage over non-deterministic manual visual capture for this pass.
