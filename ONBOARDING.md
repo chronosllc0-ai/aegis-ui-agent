@@ -7465,3 +7465,34 @@
 - No browser screenshot tool available in this environment.
 
 ---
+## Session 5.92 - April 22, 2026 (Automations wizard/list/history visual cohesion + mobile action wrapping)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend refinement pass
+
+### What Was Done
+- Updated `frontend/src/components/AutomationsPage.tsx` to align key sections (status summary, new job wizard, jobs list, run history) with the unified `SurfaceCard` shell without bespoke hardcoded wrapper colors.
+- Tightened vertical rhythm in the wizard by reducing section/form spacing and compacting advanced panel spacing.
+- Preserved the execution switch behavior between **Assistant prompt** and **Saved workflow** while keeping existing logic and payload mapping unchanged.
+- Reworked action-button layouts (wizard submit row, per-job action row, history pagination row) to use `flex-wrap` + min widths so controls remain readable and non-overflowing on mobile.
+
+### What's Working
+- Automations surfaces now read as a cohesive page under the newer shell/card system.
+- Core functional blocks and task flow remain intact.
+- Mobile action rows now wrap cleanly instead of compressing into overly narrow controls.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Browser screenshot capture remains unavailable in this runtime.
+
+### Next Steps
+1. Optionally normalize remaining input/select border/background utility classes onto shared form-control tokens.
+2. Add a visual regression snapshot for the Automations mobile breakpoint to lock in wrapping behavior.
+
+### Decisions Made
+- Kept behavior changes to zero and limited this pass strictly to layout/styling polish and responsive action-row resilience.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---
