@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../lib/api'
 import { useSettingsContext } from '../context/useSettingsContext'
+import { PageSection, SurfaceCard } from './ui/DesignSystem'
 import { TopBar } from './ui/TopBar'
 
 type TaskStatus = 'pending' | 'running' | 'success' | 'failed'
@@ -164,11 +165,11 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 
 function SectionShell({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <section className='rounded-xl border border-[#232734] bg-[#111827]/65 p-4 sm:p-5'>
+    <SurfaceCard className='bg-[#111827]/65'>
       <h4 className='text-sm font-semibold text-zinc-100'>{title}</h4>
       <p className='mt-1 text-xs text-zinc-400'>{description}</p>
       <div className='mt-3.5 space-y-3'>{children}</div>
-    </section>
+    </SurfaceCard>
   )
 }
 
@@ -328,7 +329,7 @@ function AutomationWizard({
   }
 
   return (
-    <section className='rounded-2xl border border-[#273044] bg-[#0e1422] p-4 sm:p-5'>
+    <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
       <div className='mb-4'>
         <h3 className='text-base font-semibold text-zinc-100'>{initial?.id ? 'Edit job' : 'New Job'}</h3>
         <p className='mt-1 text-xs text-zinc-400'>Create a scheduled wakeup or agent run.</p>
@@ -517,7 +518,7 @@ function AutomationWizard({
           </div>
         </div>
       </form>
-    </section>
+    </SurfaceCard></PageSection>
   )
 }
 
@@ -882,8 +883,8 @@ export function AutomationsPage() {
   }
 
   return (
-    <div className='h-full overflow-y-auto bg-[#0a0f1d] p-3 sm:p-5'>
-      <div className='space-y-4'>
+    <div className='page-flow h-full overflow-y-auto bg-[#0a0f1d]'>
+      <div className='page-sections'>
         <TopBar
           title='Automations'
           status={<span className='rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-200'>{enabledCount} enabled</span>}
@@ -901,7 +902,7 @@ export function AutomationsPage() {
           )}
         />
 
-        <section className='rounded-2xl border border-[#273044] bg-[#0e1422] p-4 sm:p-5'>
+        <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
             <div className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3'>
               <p className='text-[11px] uppercase tracking-wide text-zinc-500'>Enabled</p>
@@ -927,18 +928,18 @@ export function AutomationsPage() {
               </button>
             </div>
           </div>
-        </section>
+        </SurfaceCard></PageSection>
 
-        <AutomationWizard
+        <PageSection><AutomationWizard
           initial={editingTask}
           saving={saving}
           lastExecutionMode={lastExecutionMode}
           onLastExecutionModeChange={setLastExecutionMode}
           onSubmit={editingTask ? handleUpdate : handleCreate}
           onCancelEdit={() => setEditingTask(undefined)}
-        />
+        /></PageSection>
 
-        <section className='rounded-2xl border border-[#273044] bg-[#0e1422] p-4 sm:p-5'>
+        <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
           <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between'>
             <div>
               <h3 className='text-base font-semibold text-zinc-100'>Jobs</h3>
@@ -1058,9 +1059,9 @@ export function AutomationsPage() {
               )
             })}
           </div>
-        </section>
+        </SurfaceCard></PageSection>
 
-        <section className='rounded-2xl border border-[#273044] bg-[#0e1422] p-4 sm:p-5'>
+        <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
           <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between'>
             <div>
               <h3 className='text-base font-semibold text-zinc-100'>Run history</h3>
@@ -1187,7 +1188,7 @@ export function AutomationsPage() {
               </button>
             </div>
           </div>
-        </section>
+        </SurfaceCard></PageSection>
 
         {info && <div className='rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200'>{info}</div>}
         {error && <div className='rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300'>{error}</div>}

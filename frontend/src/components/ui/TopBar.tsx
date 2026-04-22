@@ -50,7 +50,7 @@ export function TopBar({
   }, [mobileActionsOpen])
 
   return (
-    <header className={`sticky top-1 z-20 rounded-2xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-1)]/95 px-3 py-2 backdrop-blur ${className}`}>
+    <header className={`sticky top-1 z-20 min-h-[var(--ds-layout-header-height)] rounded-[var(--ds-layout-card-radius)] border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-1)]/95 px-3 py-2 backdrop-blur ${className}`}>
       <div className='flex min-h-10 items-center gap-2'>
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>

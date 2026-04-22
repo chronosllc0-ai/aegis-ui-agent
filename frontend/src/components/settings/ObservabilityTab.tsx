@@ -154,7 +154,7 @@ export function ObservabilityTab() {
   }
 
   return (
-    <div className='space-y-5'>
+    <div className='page-sections'>
       <HeaderBar
         left={(
           <div>
