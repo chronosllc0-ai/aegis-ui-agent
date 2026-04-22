@@ -74,7 +74,7 @@ export function StandaloneSettingsPage({ tab, settings, onPatch, authRole, isAdm
 
   return (
     <div className='h-full min-h-0 overflow-y-auto'>
-      <div className='space-y-4 p-2 sm:p-3'>
+      <div className='page-flow page-sections'>
         <TopBar
           title={headerMeta.title}
           status={headerMeta.status}
@@ -82,7 +82,7 @@ export function StandaloneSettingsPage({ tab, settings, onPatch, authRole, isAdm
           actions={headerMeta.actions}
         />
 
-        <div className='space-y-6'>
+        <div className='page-sections'>
           {tab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
           {tab === 'API Keys' && <APIKeysTab />}
           {tab === 'Billing' && (

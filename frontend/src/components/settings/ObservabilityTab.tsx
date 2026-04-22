@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../../lib/api'
-import { HeaderBar, PanelCard, StatusBadge } from '../ui/DesignSystem'
+import { HeaderBar, PageSection, PanelCard, StatusBadge, SurfaceCard } from '../ui/DesignSystem'
 
 type AgentTask = {
   id: string
@@ -49,10 +49,10 @@ type RuntimeEventResponse = {
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <PanelCard className='p-3'>
+    <PageSection><SurfaceCard className='p-3'>
       <p className='text-[11px] text-zinc-500'>{label}</p>
       <p className='mt-1 text-lg font-semibold text-zinc-100'>{value}</p>
-    </PanelCard>
+    </SurfaceCard></PageSection>
   )
 }
 
@@ -154,7 +154,7 @@ export function ObservabilityTab() {
   }
 
   return (
-    <div className='space-y-5'>
+    <div className='page-sections'>
       <HeaderBar
         left={(
           <div>

@@ -7398,3 +7398,41 @@
 - No browser screenshot tool available in this environment.
 
 ---
+## Session 5.90 - April 21, 2026 (Unified page-flow system for Sessions/Automations/Connections/Observability)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend layout systems pass
+
+### What Was Done
+- Added global layout tokens in `frontend/src/index.css` for header height, content gutters, card radius, and vertical rhythm.
+- Introduced flow utility classes (`.page-flow`, `.page-sections`, `.page-section`) to standardize page spacing and section transitions.
+- Added reusable `PageSection` and `SurfaceCard` primitives in `frontend/src/components/ui/DesignSystem.tsx` and aligned `PanelCard`/header surfaces with the new radius/height tokens.
+- Updated `TopBar` to consume unified header and radius tokens.
+- Refactored `AutomationsPage` to use a consistent `PageSection` + `SurfaceCard` shell pattern and removed mixed outer container spacing.
+- Refactored `ConnectionsTab` to wrap major blocks (OAuth, Bot Integrations, Built-in Tools, MCP, Custom MCP) with the same section/card system.
+- Refactored `ObservabilityTab` to use unified page section flow and consistent surface shell for filters/log list.
+- Updated `StandaloneSettingsPage` to use shared flow classes so Connections/Observability inherit unified spacing and transitions.
+
+### What's Working
+- Key target pages now follow a single section shell strategy with consistent spacing rhythm.
+- Shared layout tokens are now centralized and can be tuned globally.
+- Frontend production build passes after refactor.
+- Websocket smoke test passes.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file is not present in this repository.
+- Browser screenshot capture remains unavailable in this runtime.
+
+### Next Steps
+1. Extend `PageSection` + `SurfaceCard` to additional settings tabs (e.g. Memory, Support, Skills) to complete full settings shell consistency.
+2. Optionally add a dedicated `SectionDivider` helper for labeled transitions where needed.
+3. Add snapshot/UI tests to guard section-shell regressions.
+
+### Decisions Made
+- Chose tokenized, low-risk shell unification first (without deep redesign of inner content widgets) to reduce “box-inside-box” fracture while preserving page structure.
+- Applied system to requested key pages before broader rollout.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---

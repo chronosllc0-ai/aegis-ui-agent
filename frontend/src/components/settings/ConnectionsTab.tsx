@@ -3,6 +3,7 @@ import { apiUrl } from '../../lib/api'
 import { type ChatPolicyMode } from '../../lib/botAccessPairing'
 import { useBotAccessPairing } from '../../hooks/useBotAccessPairing'
 import { GITHUB_PAT_INTEGRATION_ID, maskSecret, type AuthType, type CustomServerForm, type IntegrationConfig } from '../../lib/mcp'
+import { PageSection, SurfaceCard } from '../ui/DesignSystem'
 
 // ── Props ────────────────────────────────────────────────────────────
 
@@ -476,7 +477,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="space-y-8">
+    <div className="page-sections">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -505,7 +506,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
       )}
 
       {/* ─── OAuth Apps ─────────────────────────────────────────── */}
-      <section>
+      <PageSection><SurfaceCard>
         <div className="mb-3 flex items-center gap-2">
           <h4 className="text-sm font-semibold text-zinc-300">OAuth Apps</h4>
           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Secure redirect</span>
@@ -656,10 +657,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
             })}
           </div>
         )}
-      </section>
+      </SurfaceCard></PageSection>
 
       {/* ─── Bot Integrations ───────────────────────────────────── */}
-      <section>
+      <PageSection><SurfaceCard>
         <div className="mb-3 flex items-center gap-2">
           <h4 className="text-sm font-semibold text-zinc-300">Bot Integrations</h4>
           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Token-based</span>
@@ -757,11 +758,11 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
             )
           })}
         </div>
-      </section>
+      </SurfaceCard></PageSection>
 
       {/* ─── Built-in Tools ─────────────────────────────────────── */}
       {builtInIntegrations.length > 0 && (
-        <section>
+        <PageSection><SurfaceCard>
           <div className="mb-3 flex items-center gap-2">
             <h4 className="text-sm font-semibold text-zinc-300">Built-in Tools</h4>
             <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">No setup required</span>
@@ -792,11 +793,11 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
               File System is <span className='font-semibold'>off by default</span>. Enabling it requires explicit consent because it can expose local data.
             </div>
           </div>
-        </section>
+        </SurfaceCard></PageSection>
       )}
 
       {/* ─── MCP Presets + Instances ───────────────────────────── */}
-      <section>
+      <PageSection><SurfaceCard>
         <div className="mb-3 flex items-center gap-2">
           <h4 className="text-sm font-semibold text-zinc-300">MCP</h4>
           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Presets + custom</span>
@@ -842,10 +843,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
             )
           })}
         </div>
-      </section>
+      </SurfaceCard></PageSection>
 
       {/* ─── Custom MCP Server ──────────────────────────────────── */}
-      <section>
+      <PageSection><SurfaceCard>
         <button
           type="button"
           onClick={() => setShowCustom(!showCustom)}
@@ -873,10 +874,10 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
             </div>
           </div>
         )}
-      </section>
+      </SurfaceCard></PageSection>
 
       {isAdmin && (
-        <section className="border-t border-zinc-800 pt-6">
+        <PageSection className="border-t border-[var(--ds-border-subtle)] pt-6">
           <button
             type="button"
             onClick={() => setShowNewConnectionWizard(true)}
@@ -884,7 +885,7 @@ export function ConnectionsTab({ integrations, onChange, isAdmin = false }: Conn
           >
             + New Connection
           </button>
-        </section>
+        </PageSection>
       )}
 
       {showNewConnectionWizard && <NewConnectionWizard onClose={() => setShowNewConnectionWizard(false)} onSaved={() => { void fetchMcpData(); setShowNewConnectionWizard(false) }} onAsyncError={handleWizardContinueClick} />}

@@ -58,7 +58,25 @@ type PanelCardProps = {
 }
 
 export function PanelCard({ children, className = '' }: PanelCardProps) {
-  return <section className={`rounded-2xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-2)] p-3 sm:p-4 ${className}`}>{children}</section>
+  return <section className={`rounded-[var(--ds-layout-card-radius)] border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-2)] p-3 sm:p-4 ${className}`}>{children}</section>
+}
+
+type PageSectionProps = {
+  children: ReactNode
+  className?: string
+}
+
+export function PageSection({ children, className = '' }: PageSectionProps) {
+  return <section className={`page-section ${className}`}>{children}</section>
+}
+
+type SurfaceCardProps = {
+  children: ReactNode
+  className?: string
+}
+
+export function SurfaceCard({ children, className = '' }: SurfaceCardProps) {
+  return <div className={`rounded-[var(--ds-layout-card-radius)] border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-2)] p-4 sm:p-5 ${className}`}>{children}</div>
 }
 
 type StatusBadgeProps = {
@@ -86,7 +104,7 @@ type HeaderBarProps = {
 
 export function HeaderBar({ left, right, className = '' }: HeaderBarProps) {
   return (
-    <header className={`sticky top-1 z-20 rounded-2xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-1)]/95 px-3 py-2 backdrop-blur ${className}`}>
+    <header className={`sticky top-1 z-20 min-h-[var(--ds-layout-header-height)] rounded-[var(--ds-layout-card-radius)] border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-1)]/95 px-3 py-2 backdrop-blur ${className}`}>
       <div className='flex min-h-11 items-center justify-between gap-2'>
         <div className='min-w-0'>{left}</div>
         {right && <div className='shrink-0'>{right}</div>}
