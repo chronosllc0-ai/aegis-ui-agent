@@ -162,15 +162,11 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
         )}
           </section>
 
-          <section className='space-y-2'>
+      <section className='space-y-2'>
         <h3 className='text-sm font-semibold'>Behavior</h3>
-        <Toggle label='Auto-screenshot' checked={settings.autoScreenshot} onToggle={(value) => onPatch({ autoScreenshot: value })} />
         <Toggle label='Verbose logging' checked={settings.verboseLogging} onToggle={(value) => onPatch({ verboseLogging: value })} />
         <Toggle label='Confirm destructive actions' checked={settings.confirmDestructiveActions} onToggle={(value) => onPatch({ confirmDestructiveActions: value })} />
-        <Toggle label='Split chat/browser surfaces (beta)' checked={settings.separateExecutionSurfaces} onToggle={(value) => onPatch({ separateExecutionSurfaces: value })} />
-        <Toggle label='Prompt to switch when browsing starts' checked={settings.promptToSwitchOnBrowse} onToggle={(value) => onPatch({ promptToSwitchOnBrowse: value })} />
-        <Toggle label='Auto-return to chat on completion' checked={settings.autoReturnToChat} onToggle={(value) => onPatch({ autoReturnToChat: value })} />
-          </section>
+      </section>
 
           <section className='space-y-3'>
         <div>

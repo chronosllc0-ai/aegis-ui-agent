@@ -1,7 +1,7 @@
-# Aegis — AI-Powered Universal UI Agent
+# Aegis — Always-on AI Coworker (Chat-first)
 
-**Aegis** by Chronos is an autonomous agent that sees your screen, understands intent, and
-interacts with any web UI using multimodal vision and real-time browser automation.
+**Aegis** by Chronos is a chat-first, always-on AI coworker for autonomous execution across tools.
+The browser surface is an internal execution viewport, not the primary control plane.
 
 > Production-ready at **[mohex.org](https://mohex.org)** · Docs coming soon
 
@@ -29,16 +29,22 @@ interacts with any web UI using multimodal vision and real-time browser automati
 - **LLM SDK**: `openai`, `anthropic`, `google-genai`, `mistralai`, `groq`
 - **Deploy**: Docker, Railway, Netlify, docker-compose
 
+## Runtime Truth Table
+
+| Runtime signal | Value | Meaning |
+|---|---|---|
+| Startup status | `ok` / `degraded` | Returned by `/health`; degraded means startup dependencies failed and chat should surface explicit errors. |
+| Heartbeat status | `enabled` / `disabled` | Returned by `/api/heartbeat/status`; only claim “always-on” when enabled. |
+| Integration owner status | configured / missing | Integration registration binds owner to authenticated user; missing owner blocks connect. |
+| Pairing status | required / optional | DM policy + pairing enforcement controls first-message behavior before command execution. |
+
 ## UX Notes
 
 - Task labels are source-owned at creation:
   - Tasks started from the browser panel keep the browser-provided label.
   - Tasks started from chat keep the chat-provided label.
   - Other panels do not overwrite an existing task label.
-- Split-surface navigation controls are feature-flagged in Agent settings:
-  - Prompt to switch to browser when browsing starts.
-  - Auto-return to chat after task completion.
-  - Master toggle for split chat/browser surfaces rollout.
+- Agent settings prioritize stable chat-first execution controls during recovery mode.
 
 ---
 

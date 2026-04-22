@@ -25,6 +25,10 @@ DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 180
 class HeartbeatRuntimeState:
     running: bool = False
     retries: int = 0
+    enabled: bool = True
+    last_run_at_utc: str | None = None
+    next_run_at_utc: str | None = None
+    last_result: str = "never_run"
 
 
 HeartbeatDispatcher = Callable[[str, str], Awaitable[None]]
@@ -66,10 +70,17 @@ class HeartbeatSessionScheduler:
         self._timeout_seconds = max(5, timeout_seconds)
         self._state = HeartbeatRuntimeState()
         self._task: asyncio.Task[None] | None = None
+        self._state.enabled = bool(getattr(settings, "HEARTBEAT_SESSION_ENABLED", True))
 
     def start(self) -> None:
+        if not self._state.enabled:
+            logger.info("HeartbeatSessionScheduler is disabled by configuration")
+            self._state.last_result = "disabled"
+            return
         if self._task is not None and not self._task.done():
             return
+        now = datetime.now(timezone.utc)
+        self._state.next_run_at_utc = now.isoformat()
         self._task = asyncio.create_task(self._loop())
         logger.info("HeartbeatSessionScheduler started (interval=%ss)", self._interval)
 
@@ -83,6 +94,9 @@ class HeartbeatSessionScheduler:
             await asyncio.sleep(self._interval)
 
     async def run_once(self) -> None:
+        if not self._state.enabled:
+            self._state.last_result = "disabled"
+            return
         if self._state.running:
             logger.info("Skipping heartbeat tick: previous run still active")
             return
@@ -93,6 +107,8 @@ class HeartbeatSessionScheduler:
             from backend.session_store import append_session_message, get_or_create_session
 
             self._state.running = True
+            started_at = datetime.now(timezone.utc)
+            self._state.last_run_at_utc = started_at.isoformat()
             try:
                 async for db in get_session():
                     dispatch_queue: list[tuple[str, str]] = []
@@ -128,15 +144,29 @@ class HeartbeatSessionScheduler:
                     await db.commit()
                     for dispatch_session_id, dispatch_prompt in dispatch_queue:
                         await self._dispatch(dispatch_session_id, dispatch_prompt)
+                    self._state.last_result = "ok"
             finally:
                 self._state.running = False
 
         try:
             await asyncio.wait_for(_execute(), timeout=self._timeout_seconds)
             self._state.retries = 0
+            self._state.next_run_at_utc = (datetime.now(timezone.utc)).isoformat()
         except Exception as exc:
             self._state.retries += 1
+            self._state.last_result = f"error:{exc}"
             logger.warning("Heartbeat session run failed (attempt=%s): %s", self._state.retries, exc)
             if self._state.retries <= self._retry_cap:
                 await asyncio.sleep(1)
                 await self.run_once()
+
+    def status_snapshot(self) -> dict[str, str | bool | int | None]:
+        """Return a serializable runtime status for UI and health endpoints."""
+        return {
+            "enabled": self._state.enabled,
+            "running": self._state.running,
+            "retries": self._state.retries,
+            "last_run_at": self._state.last_run_at_utc,
+            "next_run_at": self._state.next_run_at_utc,
+            "last_result": self._state.last_result,
+        }

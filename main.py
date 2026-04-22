@@ -310,6 +310,11 @@ def _get_current_user(request: Request) -> dict[str, Any]:
     return payload
 
 
+def _integration_error(status_code: int, code: str, message: str) -> HTTPException:
+    """Return structured integration API errors."""
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
 # ── Integration registries ────────────────────────────────────────────
 
 
@@ -974,6 +979,8 @@ async def _enforce_ingress_policy(
 
         bot_cfg = _get_effective_bot_config(platform, integration_id)
         dm_mode = str(bot_cfg.get("dm_policy_mode") or "allow_all").strip().lower()
+        if dm_mode == "allowlist_only":
+            dm_mode = "allowlist"
         group_mode = str(bot_cfg.get("group_policy_mode") or "allow_all").strip().lower()
         dm_allow_from = {str(x).strip() for x in (bot_cfg.get("dm_allow_from") or []) if str(x).strip()}
         group_allow_from = {str(x).strip() for x in (bot_cfg.get("group_allow_from") or []) if str(x).strip()}
@@ -1482,14 +1489,29 @@ async def reply_support_thread(
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, Any]:
     """Return service health status without failing while dependencies warm up."""
+    orchestrator_ready = True
+    browser_ready = "deferred"
+    try:
+        _get_orchestrator()
+    except Exception:
+        orchestrator_ready = False
+        browser_ready = "degraded"
     return {
-        "status": "ok",
+        "status": "ok" if orchestrator_ready else "degraded",
         "version": "1.0.0",
         "database": "ready" if db_ready else "initializing",
         "database_error": db_init_error or "",
+        "orchestrator_ready": "ready" if orchestrator_ready else "degraded",
+        "browser_ready": browser_ready,
     }
+
+
+@app.get("/api/heartbeat/status")
+async def heartbeat_status() -> dict[str, Any]:
+    """Expose heartbeat scheduler state for UI and docs truth table."""
+    return {"ok": True, "status": _heartbeat_session_scheduler.status_snapshot()}
 
 
 # ── Conversation persistence API ─────────────────────────────────────
@@ -2851,8 +2873,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await db_session_gen.aclose()
 
     try:
-        await _get_orchestrator().executor.ensure_browser()
-        await _send_initial_frame(websocket)
+        _get_orchestrator()
 
         while True:
             data = await websocket.receive_json()
@@ -3434,6 +3455,20 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             request_id=runtime.current_request_id,
             task_id=runtime.current_task_id,
         )
+    except Exception as exc:
+        await _safe_ws_send(
+            websocket,
+            {
+                "type": "error",
+                "data": {
+                    "message": f"Runtime startup failed: {exc}",
+                    "code": "RUNTIME_STARTUP_FAILED",
+                },
+            },
+            ws_session_id=session_id,
+            phase="runtime_startup_failed",
+        )
+        logger.exception("Websocket runtime startup failed for session %s", session_id)
     finally:
         if runtime.current_task is not None and not runtime.current_task.done() and runtime.task_running:
             runtime.cancel_event.set()
@@ -3657,16 +3692,10 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
 
 @app.post("/api/integrations/telegram/register/{integration_id}")
 async def register_telegram_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
-    session_owner_user_id = _extract_session_user_uid(request.cookies.get("aegis_session"))
-    payload_owner_user_id = str(payload.get("owner_user_id", "")).strip() or None
-    if session_owner_user_id and payload_owner_user_id and payload_owner_user_id != session_owner_user_id:
-        raise HTTPException(status_code=403, detail="owner_user_id does not match authenticated session")
-    owner_user_id = session_owner_user_id or payload_owner_user_id
+    user_payload = _get_current_user(request)
+    owner_user_id = str(user_payload.get("uid") or "").strip()
     if not owner_user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="owner_user_id is required (authenticate via aegis_session or provide owner_user_id in payload)",
-        )
+        raise _integration_error(401, "INTEGRATION_NOT_AUTHENTICATED", "Authenticated user is required before registering integrations.")
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "delivery_mode": str(payload.get("delivery_mode", "polling")).strip(),
@@ -3674,8 +3703,13 @@ async def register_telegram_integration(integration_id: str, payload: dict[str, 
         "webhook_secret": str(payload.get("webhook_secret", "")).strip(),
         "owner_user_id": owner_user_id,
     }
+    if not config["owner_user_id"]:
+        raise _integration_error(400, "INTEGRATION_OWNER_MISSING", "Integration owner is required.")
     integration = TelegramIntegration()
-    connection = await integration.connect(config)
+    try:
+        connection = await integration.connect(config)
+    except ValueError as exc:
+        raise _integration_error(400, "INVALID_BOT_TOKEN", str(exc)) from exc
     channel_registry.upsert("telegram", integration_id, TelegramChannelAdapter(integration), config)
     if connection.get("connected"):
         asyncio.create_task(_register_telegram_commands(integration))
@@ -3750,15 +3784,24 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
 
 @app.post("/api/integrations/slack/register/{integration_id}")
 async def register_slack_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    user_payload = _get_current_user(request)
+    owner_user_id = str(user_payload.get("uid") or "").strip()
+    if not owner_user_id:
+        raise _integration_error(401, "INTEGRATION_NOT_AUTHENTICATED", "Authenticated user is required before registering integrations.")
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "oauth_token": str(payload.get("oauth_token", "")).strip(),
         "workspace": str(payload.get("workspace", "")).strip(),
         "signing_secret": str(payload.get("signing_secret", "")).strip(),
-        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
+        "owner_user_id": owner_user_id,
     }
+    if not config["owner_user_id"]:
+        raise _integration_error(400, "INTEGRATION_OWNER_MISSING", "Integration owner is required.")
     integration = SlackIntegration()
-    connection = await integration.connect(config)
+    try:
+        connection = await integration.connect(config)
+    except ValueError as exc:
+        raise _integration_error(400, "INVALID_BOT_TOKEN", str(exc)) from exc
     channel_registry.upsert("slack", integration_id, SlackChannelAdapter(integration), config)
     return {"ok": True, "connection": connection}
 
@@ -3949,14 +3992,23 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
 
 @app.post("/api/integrations/discord/register/{integration_id}")
 async def register_discord_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    user_payload = _get_current_user(request)
+    owner_user_id = str(user_payload.get("uid") or "").strip()
+    if not owner_user_id:
+        raise _integration_error(401, "INTEGRATION_NOT_AUTHENTICATED", "Authenticated user is required before registering integrations.")
     config = {
         "bot_token": str(payload.get("bot_token", "")).strip(),
         "guild_id": str(payload.get("guild_id", "")).strip(),
         "public_key": str(payload.get("public_key", "")).strip(),
-        "owner_user_id": _extract_session_user_uid(request.cookies.get("aegis_session")),
+        "owner_user_id": owner_user_id,
     }
+    if not config["owner_user_id"]:
+        raise _integration_error(400, "INTEGRATION_OWNER_MISSING", "Integration owner is required.")
     integration = DiscordIntegration()
-    connection = await integration.connect(config)
+    try:
+        connection = await integration.connect(config)
+    except ValueError as exc:
+        raise _integration_error(400, "INVALID_BOT_TOKEN", str(exc)) from exc
     channel_registry.upsert("discord", integration_id, DiscordChannelAdapter(integration), config)
     return {"ok": True, "connection": connection}
 
@@ -4952,7 +5004,7 @@ def _assert_integration_owner(request: Request, platform: str, integration_id: s
     user = _get_current_user(request)
     owner_uid = str(_get_channel_config(platform, integration_id).get("owner_user_id", "")).strip()
     if not owner_uid:
-        raise HTTPException(status_code=404, detail="Integration owner not configured")
+        raise _integration_error(404, "INTEGRATION_OWNER_MISSING", "Integration owner not configured")
     if owner_uid != user["uid"]:
         raise HTTPException(status_code=403, detail="Forbidden")
     return owner_uid

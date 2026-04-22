@@ -7649,3 +7649,39 @@
 
 ### Blockers
 - No hard blockers.
+## Session 5.72 - April 22, 2026 (Startup reliability + ownership hardening)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 backend/frontend reliability pass
+
+### What Was Done
+- Removed eager browser startup from websocket connect path to prevent silent handshake failures.
+- Added explicit websocket startup error frame (`RUNTIME_STARTUP_FAILED`) and health degradation signals (`orchestrator_ready`, `browser_ready`).
+- Added heartbeat runtime status API (`/api/heartbeat/status`) and scheduler status snapshot fields.
+- Hardened Telegram/Slack/Discord register endpoints to require authenticated user ownership via `_get_current_user(request)`.
+- Added structured integration error codes (`INTEGRATION_NOT_AUTHENTICATED`, `INTEGRATION_OWNER_MISSING`, `INVALID_BOT_TOKEN`) for registration/ownership failures.
+- Updated ConnectionsTab API error mapping to render backend detail message + error code.
+- Removed browser-behavior toggles from Agent Configuration to reduce unstable surface during recovery mode.
+- Updated README branding/positioning to chat-first always-on coworker with runtime truth table and heartbeat caveat.
+
+### What's Working
+- Websocket no longer depends on browser initialization at connect time.
+- Integration registration now binds owner to authenticated user identity.
+- Heartbeat scheduler exposes explicit runtime status fields for UI/docs.
+
+### What's NOT Working Yet
+- Full phase coverage (legacy mode path removals + extra watchdog UI surface + expanded pairing policy matrix UI) still requires follow-up passes.
+
+### Next Steps
+1. Add/expand targeted regression tests for websocket startup-failure framing and unauthenticated integration registration.
+2. Wire heartbeat status endpoint into a visible UI badge and hide “always-on” claim when disabled.
+3. Complete legacy mode path removal and tighten DM policy naming (`allowlist_only`) end-to-end in frontend/backend.
+
+### Decisions Made
+- Prioritized startup determinism and explicit error surfacing before feature restoration.
+- Preserved existing command behavior where possible while introducing structured integration API errors.
+
+### Blockers
+- None.
+
+---
