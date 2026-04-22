@@ -69,6 +69,15 @@ from backend.tasks.worker import BackgroundWorker
 from backend.session_gateway import SessionEventHub
 from backend.session_lanes import QueuedInstruction, SessionLaneQueue
 from backend.runtime_telemetry import RuntimeEventStore, RuntimeTelemetry
+from backend.runtime.integration import (
+    ensure_runtime_started as _runtime_ensure_started,
+    get_fanout_registry as _runtime_get_fanout_registry,
+    get_registry as _runtime_get_registry,
+    runtime_supervisor_enabled as _runtime_supervisor_enabled,
+    shutdown_runtime as _runtime_shutdown,
+)
+from backend.runtime import AgentEvent as _RuntimeAgentEvent, EventKind as _RuntimeEventKind
+from backend.runtime.fanout import Subscriber as _RuntimeSubscriber
 from backend.conversation_service import append_message, get_or_create_conversation
 from backend.migration_rollout import (
     feature_flags_snapshot,
@@ -264,6 +273,12 @@ async def startup_event() -> None:
     if sessions_v2_enabled():
         _heartbeat_session_scheduler.start()
 
+    # Phase 2: always-on runtime supervisor (flag-gated).
+    try:
+        await _runtime_ensure_started()
+    except Exception:
+        logger.exception("Phase 2 supervisor failed to start; staying on legacy path")
+
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
@@ -281,6 +296,12 @@ async def shutdown_event() -> None:
         except asyncio.CancelledError:
             logger.info("Database initialization task cancelled during shutdown")
     await background_worker.stop()
+
+    # Phase 2: drain the always-on runtime supervisor, if it was enabled.
+    try:
+        await _runtime_shutdown()
+    except Exception:
+        logger.exception("Phase 2 supervisor shutdown failed")
 
 
 # ── Auth helper ───────────────────────────────────────────────────────
@@ -2318,8 +2339,80 @@ async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str
             )
 
 
+async def _runtime_supervisor_dispatch_chat(
+    websocket: WebSocket,
+    runtime: SessionRuntime,
+    session_id: str,
+    instruction: str,
+) -> bool:
+    """Route a chat message through the Phase 2 always-on supervisor.
+
+    Returns ``True`` when the supervisor accepted the message (the caller
+    should skip the legacy navigation task), ``False`` when we fell back
+    to the legacy path.
+    """
+    if not _runtime_supervisor_enabled():
+        return False
+    registry = _runtime_get_registry()
+    if registry is None:
+        return False
+    owner_uid = runtime.user_uid or session_id
+    try:
+        supervisor = await registry.get(owner_uid)
+        await supervisor.enqueue(
+            _RuntimeAgentEvent(
+                owner_uid=owner_uid,
+                channel="web",
+                kind=_RuntimeEventKind.CHAT_MESSAGE,
+                payload={"text": instruction, "ws_session_id": session_id},
+            )
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "runtime_supervisor dispatch failed for session=%s — falling back to legacy",
+            session_id,
+        )
+        return False
+    # Acknowledge queueing; richer event fan-out lands in Phase 3.
+    await _safe_ws_send(
+        websocket,
+        {
+            "type": "runtime_event",
+            "data": {"kind": "accepted", "session_id": session_id},
+        },
+        ws_session_id=session_id,
+        phase="runtime_supervisor_accepted",
+    )
+    return True
+
+
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
     """Create and store the background navigation task for the current session."""
+    if _runtime_supervisor_enabled() and _runtime_get_registry() is not None:
+        # Route through the Phase 2 supervisor. We fire-and-forget; the
+        # supervisor's own worker drives the run and the fan-out delivers
+        # streaming deltas to any attached subscriber. If enqueue fails
+        # the helper falls back to the legacy path.
+        async def _dispatch_and_maybe_fallback() -> None:
+            accepted = await _runtime_supervisor_dispatch_chat(
+                websocket, runtime, session_id, instruction
+            )
+            if not accepted:
+                _start_legacy_navigation_task(websocket, runtime, session_id, instruction)
+
+        asyncio.create_task(_dispatch_and_maybe_fallback())
+        return
+
+    _start_legacy_navigation_task(websocket, runtime, session_id, instruction)
+
+
+def _start_legacy_navigation_task(
+    websocket: WebSocket,
+    runtime: SessionRuntime,
+    session_id: str,
+    instruction: str,
+) -> None:
+    """Legacy Gemini-driven navigation task. Stays behind ``LEGACY_ORCHESTRATOR``."""
     runtime.current_task = asyncio.create_task(
         _run_navigation_task(
             websocket,
