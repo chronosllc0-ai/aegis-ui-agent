@@ -2886,7 +2886,23 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await _send_initial_frame(websocket)
 
         while True:
-            data = await websocket.receive_json()
+            try:
+                data = await websocket.receive_json()
+            except Exception as exc:  # noqa: BLE001
+                await _safe_ws_send(
+                    websocket,
+                    {
+                        "type": "error",
+                        "data": {
+                            "message": "Invalid websocket payload. Please retry with valid JSON.",
+                            "code": "E_BAD_PAYLOAD",
+                        },
+                    },
+                    ws_session_id=session_id,
+                    phase="receive_json_invalid_payload",
+                )
+                logger.warning("Invalid websocket payload for session %s: %s", session_id, exc)
+                continue
             action = data.get("action")
             # Normalize action aliases → canonical internal names
             if action in {"navigate", "task", "chat", "message"}:

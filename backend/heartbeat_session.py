@@ -154,7 +154,7 @@ class HeartbeatSessionScheduler:
             self._state.next_run_at_utc = (datetime.now(timezone.utc)).isoformat()
         except Exception as exc:
             self._state.retries += 1
-            self._state.last_result = f"error:{exc}"
+            self._state.last_result = "error"
             logger.warning("Heartbeat session run failed (attempt=%s): %s", self._state.retries, exc)
             if self._state.retries <= self._retry_cap:
                 await asyncio.sleep(1)

@@ -7743,3 +7743,31 @@
 - None.
 
 ---
+## Session 5.76 - April 22, 2026 (Review roast follow-up: WS bad-payload resilience + heartbeat error sanitization)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted hardening pass
+
+### What Was Done
+- Added per-message websocket payload guard: `receive_json()` failures now emit structured `E_BAD_PAYLOAD` error frames and continue the connection loop instead of dropping the session.
+- Sanitized heartbeat scheduler public status output by changing `last_result` failure state to generic `"error"` instead of embedding raw exception text.
+- Re-ran websocket smoke + heartbeat tests and compile checks.
+
+### What's Working
+- Malformed websocket payloads no longer force immediate connection teardown from receive parsing errors.
+- Heartbeat status endpoint no longer risks leaking raw exception details through `last_result`.
+
+### What's NOT Working Yet
+- Full per-action exception isolation inside the websocket dispatch branch remains a potential future refinement.
+
+### Next Steps
+1. Extract action handling into a dedicated per-message handler function and wrap with message-scoped try/except to fully isolate action-level exceptions.
+2. Add targeted websocket test for malformed JSON payload continuity.
+
+### Decisions Made
+- Applied the minimum safe patch that preserves existing behavior while preventing the specific bad-payload disconnect class and exception-detail leakage.
+
+### Blockers
+- None.
+
+---
