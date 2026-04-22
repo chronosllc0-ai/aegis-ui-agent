@@ -565,7 +565,7 @@ function App() {
     send({ action: 'config', settings: wsConfig })
 
     const isNewTask = !isWorking
-    const action = runtimeControlAction ?? 'navigate'
+    const action = runtimeControlAction ?? 'execute'
     console.info('[AegisUI] action=%s route=%s', action, isNewTask ? 'new_task' : 'runtime_control')
     const sent = send({
       action,
