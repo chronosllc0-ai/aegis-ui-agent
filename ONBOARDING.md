@@ -7560,3 +7560,51 @@
 ### Blockers / Decisions
 - **Blocker:** Browser screenshot tool unavailable in the current run environment.
 - **Decision:** Prefer semantic UI-state assertions over CSS utility-class assertions for long-term test stability.
+
+---
+## Session 5.72 - April 22, 2026 (Sessions route fix + heartbeat session foundation + session UX revamp)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 backend/frontend integration pass
+
+### What Was Done
+- Fixed Sessions navigation by wiring a dedicated `/sessions` route into the main app shell and sidebar nav.
+- Added stale route protection for legacy `/settings/sessions` by redirecting to `/sessions`.
+- Implemented a new `SessionsPage` with OpenClaw-style control flow:
+  - header + subtitle + refresh,
+  - filter/search controls,
+  - responsive table with key/label/updated/tokens/compaction/reasoning,
+  - pagination footer and mobile-safe horizontal table container.
+- Redesigned `SessionSwitcher` for grouped/radio-style selection UX with:
+  - grouped sections (`main`, `channels`, `other`),
+  - richer label/detail rows,
+  - mobile bottom-sheet selector behavior.
+- Added heartbeat session foundation in backend:
+  - new `backend/heartbeat_session.py` scheduler,
+  - dedicated session key `agent:main:heartbeat`,
+  - strict heartbeat prompt template with exact `/workspace/aegis-ui-agent/HEARTBEAT.md` path,
+  - timeout/retry guardrails and duplicate-run skip behavior,
+  - auto-start/stop with app lifecycle.
+- Ensured heartbeat session is always present in `/api/sessions` responses when sessions-v2 is enabled.
+- Added/updated tests for Sessions route visibility, sessions page interactions, session switcher selection, and heartbeat prompt/guard behavior.
+
+### What's Working
+- Sessions tab now resolves to a mounted page instead of blank/failing behavior.
+- Session switcher supports grouped selection and mobile bottom-sheet UI.
+- Heartbeat scheduler runs in background, writes prompt/response (`HEARTBEAT_OK`) into dedicated heartbeat session history, and avoids overlapping runs.
+
+### What's NOT Working Yet
+- Tokens/checkpoints/reasoning controls on Sessions table are currently UI-level scaffolding; backend persistence for those controls is not yet implemented.
+- Screenshot artifact capture was not produced in this run because a browser screenshot tool is not available in the current environment context.
+
+### Next Steps
+1. Persist per-session label/reasoning/checkpoint metadata via dedicated backend endpoints.
+2. Add stronger integration tests that verify heartbeat session rows/messages in a live DB-backed environment.
+3. Add visual snapshot baselines for Sessions page and switcher in mobile viewport.
+
+### Decisions Made
+- Implemented heartbeat writes in a dedicated session to keep user-facing chat noise-free while still preserving full history.
+- Used strict heartbeat template text/path and deterministic `HEARTBEAT_OK` assistant response baseline for predictable monitoring behavior.
+
+### Blockers
+- No hard blockers in this pass.

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     CHANNEL_TOOLS_TELEGRAM_ADVANCED_ENABLED: bool = True
     CHANNEL_TOOLS_SLACK_ADVANCED_ENABLED: bool = True
     CHANNEL_TOOLS_DISCORD_ADVANCED_ENABLED: bool = True
+    HEARTBEAT_SESSION_INTERVAL_SECONDS: int = 180
 
     # ── Gemini-specific (kept for backwards compatibility) ───────────
     GEMINI_MODEL: str = "gemini-2.5-pro"

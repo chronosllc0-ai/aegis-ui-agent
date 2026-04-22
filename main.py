@@ -107,6 +107,7 @@ from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
 from backend.session_workspace import cleanup_session_workspace
 from backend.heartbeat_pinger import HeartbeatPinger
+from backend.heartbeat_session import HeartbeatSessionScheduler
 from backend.user_memory import ensure_daily_memory_file
 
 setup_logging(settings.LOG_LEVEL)
@@ -260,6 +261,7 @@ async def startup_event() -> None:
     start_scheduler()
     await background_worker.start()
     _pinger.start()
+    _heartbeat_session_scheduler.start()
 
 
 @app.on_event("shutdown")
@@ -268,6 +270,7 @@ async def shutdown_event() -> None:
     global db_init_task
 
     _pinger.stop()
+    _heartbeat_session_scheduler.stop()
 
     if db_init_task is not None and not db_init_task.done():
         db_init_task.cancel()
@@ -681,6 +684,7 @@ async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
 
 
 _pinger = HeartbeatPinger(dispatch=_heartbeat_dispatch, interval_seconds=60)
+_heartbeat_session_scheduler = HeartbeatSessionScheduler()
 background_worker.set_event_sink(_dispatch_background_task_event)
 
 # Stream subscribers: user_uid -> {platform, integration_id, chat_id, last_sent_at}
@@ -1533,6 +1537,15 @@ async def list_sessions(
     user = _get_current_user(request)
     uid = user["uid"]
     await migrate_user_to_sessions_first(db, user_id=uid, platform="web")
+    if sessions_v2_enabled():
+        await get_or_create_session(
+            db,
+            user_id=uid,
+            platform="web",
+            session_id="agent:main:heartbeat",
+            title="heartbeat",
+            parent_session_id=SESSION_MAIN_ID,
+        )
     await db.commit()
     from sqlalchemy import select as sa_select, desc as sa_desc
     from backend.database import ChatSession as SessionModel, Conversation as ConvModel

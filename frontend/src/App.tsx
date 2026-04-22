@@ -23,6 +23,7 @@ import { SettingsPage } from './components/settings/SettingsPage'
 import { StandaloneSettingsPage } from './components/settings/StandaloneSettingsPage'
 import type { SettingsTab } from './components/settings/SettingsPage'
 import { AutomationsPage } from './components/AutomationsPage'
+import { SessionsPage } from './components/SessionsPage'
 import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
 import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
@@ -152,6 +153,7 @@ function App() {
   const isSettingsPath = pathname.startsWith('/settings')
   const activeSettingsTab: SettingsTab | undefined = settingsInitialTab
   const isAutomationsPath = pathname === '/automations'
+  const isSessionsPath = pathname === '/sessions'
   const { status: impersonationStatus, checkStatus } = useImpersonation()
 
   const { isActive: voiceActive, isSupported: voiceSupported, toggle: toggleVoice, stop: stopVoice } =
@@ -242,6 +244,10 @@ function App() {
   }, [isAuthenticated, isDocsRoute, isPrivacyRoute, isTermsRoute])
 
   useEffect(() => {
+    if (pathname === '/settings/sessions') {
+      navigateTo('/sessions')
+      return
+    }
     setShowSettings(isSettingsPath || isAdminPath)
     setShowAutomations(isAutomationsPath)
 
@@ -414,9 +420,15 @@ function App() {
   const sessionSwitcherItems = useMemo<SessionSwitcherItem[]>(() => {
     const historyItems: SessionSwitcherItem[] = sessions.map((item) => ({
       id: item.session_id,
-      label: item.title || 'Untitled session',
+      label: item.title || (item.session_id === 'agent:main:main' ? 'main' : item.session_id.includes(':heartbeat') ? 'heartbeat' : 'Untitled session'),
       channel: 'chat',
       status: selectedTaskId === item.session_id && isWorking ? 'active' : 'idle',
+      detail: item.session_id,
+      group: item.session_id.endsWith(':main') || item.session_id.includes(':heartbeat')
+        ? 'main'
+        : (item.session_id.includes(':telegram:') || item.session_id.includes(':discord:') || item.session_id.includes(':slack:'))
+          ? 'channels'
+          : 'other',
     }))
 
     const subAgentItems: SessionSwitcherItem[] = subAgents.map((agent) => ({
@@ -424,6 +436,8 @@ function App() {
       label: `${subAgentDisplayName(agent)} · ${agent.instruction.slice(0, 28)}`,
       channel: 'system',
       status: (agent.status === 'running' || agent.status === 'spawning') ? 'active' : 'idle',
+      detail: agent.instruction,
+      group: 'other',
     }))
 
     const merged = [...subAgentItems, ...historyItems]
@@ -766,6 +780,7 @@ function App() {
                 <NavItem icon={Icons.user({ className: 'h-3.5 w-3.5' })} label='Profile' active={pathname === '/settings/profile'} onClick={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }} />
                 <NavItem icon={Icons.chat({ className: 'h-3.5 w-3.5' })} label='Chat' active={pathname === '/' && !showSettings && !showAutomations} onClick={() => { navigateTo('/'); setSidebarOpen(false) }} />
                 <NavItem icon={Icons.alert({ className: 'h-3.5 w-3.5' })} label='Observability' active={pathname === '/settings/observability'} onClick={() => { navigateTo('/settings/observability'); setSidebarOpen(false) }} />
+                <NavItem icon={Icons.folder({ className: 'h-3.5 w-3.5' })} label='Sessions' active={isSessionsPath} onClick={() => { navigateTo('/sessions'); setSidebarOpen(false) }} />
               </SidebarSection>
 
               <SidebarSection title='Agent & AI' defaultCollapsed>
@@ -864,6 +879,23 @@ function App() {
               )
             ) : showAutomations ? (
               <AutomationsPage />
+            ) : isSessionsPath ? (
+              <div className='h-full overflow-y-auto p-2'>
+                {Array.isArray(sessions) ? (
+                  <SessionsPage
+                    sessions={sessions}
+                    onRefresh={fetchSessions}
+                    onOpenSession={(sessionId) => {
+                      setSelectedTaskId(sessionId)
+                      navigateTo('/')
+                    }}
+                  />
+                ) : (
+                  <div className='rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200'>
+                    Sessions page failed to load. Please refresh and try again.
+                  </div>
+                )}
+              </div>
             ) : activePlanId ? (
               <div className='h-full overflow-y-auto p-2'>
                 <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
