@@ -165,10 +165,10 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 
 function SectionShell({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <SurfaceCard className='bg-[#111827]/65'>
+    <SurfaceCard className='bg-[var(--ds-surface-3)]/70 p-3.5 sm:p-4'>
       <h4 className='text-sm font-semibold text-zinc-100'>{title}</h4>
       <p className='mt-1 text-xs text-zinc-400'>{description}</p>
-      <div className='mt-3.5 space-y-3'>{children}</div>
+      <div className='mt-2.5 space-y-2.5'>{children}</div>
     </SurfaceCard>
   )
 }
@@ -329,7 +329,7 @@ function AutomationWizard({
   }
 
   return (
-    <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
+    <PageSection><SurfaceCard>
       <div className='mb-4'>
         <h3 className='text-base font-semibold text-zinc-100'>{initial?.id ? 'Edit job' : 'New Job'}</h3>
         <p className='mt-1 text-xs text-zinc-400'>Create a scheduled wakeup or agent run.</p>
@@ -338,7 +338,7 @@ function AutomationWizard({
 
       {error && <div className='mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300'>{error}</div>}
 
-      <form onSubmit={handleSubmit} className='space-y-4'>
+      <form onSubmit={handleSubmit} className='space-y-3'>
         <SectionShell title='Basics' description='Name it, choose the assistant input, and set enabled state.'>
           <div>
             <FieldLabel label='Name' required />
@@ -463,11 +463,11 @@ function AutomationWizard({
         <details
           open={advancedOpen}
           onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
-          className='rounded-xl border border-[#2a334a] bg-[#111827]/55 p-4 sm:p-5'
+          className='rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)]/70 p-3.5 sm:p-4'
         >
           <summary className='cursor-pointer text-sm font-semibold text-zinc-100'>Advanced</summary>
           <p className='mt-1 text-xs text-zinc-400'>Timezone controls next wake calculations.</p>
-          <div className='mt-3 space-y-3'>
+          <div className='mt-2.5 space-y-2.5'>
             <div>
               <FieldLabel label='Search timezone' />
               <input
@@ -497,13 +497,13 @@ function AutomationWizard({
           </div>
         </details>
 
-        <div className='sticky bottom-0 z-10 -mx-4 border-t border-[#2a334a] bg-[#0e1422]/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-none sm:bg-transparent sm:p-0'>
-          <div className='flex flex-col gap-2 sm:flex-row sm:justify-end'>
+        <div className='sticky bottom-0 z-10 -mx-4 border-t border-[var(--ds-border-subtle)] bg-[var(--ds-surface-2)]/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-none sm:bg-transparent sm:p-0'>
+          <div className='flex flex-wrap gap-2 sm:justify-end'>
             {initial?.id && (
               <button
                 type='button'
                 onClick={onCancelEdit}
-                className='min-h-11 w-full rounded-lg border border-[#2a334a] px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 sm:w-auto'
+                className='min-h-11 flex-1 rounded-lg border border-[var(--ds-border-subtle)] px-4 py-2 text-sm text-zinc-300 hover:text-zinc-100 sm:flex-none'
               >
                 Cancel edit
               </button>
@@ -511,7 +511,7 @@ function AutomationWizard({
             <button
               type='submit'
               disabled={saving}
-              className='min-h-11 w-full rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60 sm:w-auto'
+              className='min-h-11 flex-1 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60 sm:flex-none'
             >
               {saving ? 'Saving…' : initial?.id ? 'Save job' : 'Add job'}
             </button>
@@ -902,22 +902,22 @@ export function AutomationsPage() {
           )}
         />
 
-        <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
+        <PageSection><SurfaceCard>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-            <div className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3'>
+            <div className='rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)] p-3'>
               <p className='text-[11px] uppercase tracking-wide text-zinc-500'>Enabled</p>
               <p className='mt-2 text-sm font-semibold text-emerald-300'>{enabledCount}</p>
             </div>
-            <div className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3'>
+            <div className='rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)] p-3'>
               <p className='text-[11px] uppercase tracking-wide text-zinc-500'>Jobs count</p>
               <p className='mt-2 text-sm font-semibold text-zinc-100'>{tasks.length}</p>
             </div>
-            <div className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3 sm:col-span-2 lg:col-span-1'>
+            <div className='rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)] p-3 sm:col-span-2 lg:col-span-1'>
               <p className='text-[11px] uppercase tracking-wide text-zinc-500'>Next wake</p>
               <p className='mt-2 text-sm font-semibold text-zinc-100'>{formatDateTime(nextWake)}</p>
               <p className='mt-1 text-xs text-zinc-500'>{relativeTime(nextWake)}</p>
             </div>
-            <div className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3'>
+            <div className='rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)] p-3'>
               <p className='text-[11px] uppercase tracking-wide text-zinc-500'>Refresh action</p>
               <button
                 type='button'
@@ -939,7 +939,7 @@ export function AutomationsPage() {
           onCancelEdit={() => setEditingTask(undefined)}
         /></PageSection>
 
-        <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
+        <PageSection><SurfaceCard>
           <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between'>
             <div>
               <h3 className='text-base font-semibold text-zinc-100'>Jobs</h3>
@@ -982,7 +982,7 @@ export function AutomationsPage() {
             {filteredTasks.map((task) => {
               const effectiveStatus: TaskStatus = runningIds.has(task.id) ? 'running' : task.last_status
               return (
-                <article key={task.id} className='rounded-xl border border-[#2a334a] bg-[#0b1220] p-3 sm:p-4'>
+                <article key={task.id} className='rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-surface-3)] p-3 sm:p-4'>
                   <div className='flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between'>
                     <div className='min-w-0'>
                       <div className='flex flex-wrap items-center gap-2'>
@@ -1000,11 +1000,11 @@ export function AutomationsPage() {
                       <p className='mt-1 text-xs text-zinc-500'>Last run: {formatDateTime(task.last_run_at)} · Runs: {task.run_count}</p>
                     </div>
 
-                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[460px]'>
+                    <div className='flex flex-wrap gap-2 lg:w-[460px] lg:justify-end'>
                       <button
                         type='button'
                         onClick={() => setEditingTask(task)}
-                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-[var(--ds-border-subtle)] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100 sm:flex-none'
                       >
                         Edit
                       </button>
@@ -1012,14 +1012,14 @@ export function AutomationsPage() {
                         type='button'
                         onClick={() => void handleClone(task)}
                         disabled={runningIds.has(task.id)}
-                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-[var(--ds-border-subtle)] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100 sm:flex-none'
                       >
                         Clone
                       </button>
                       <button
                         type='button'
                         onClick={() => void handleToggle(task, !task.enabled)}
-                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-[var(--ds-border-subtle)] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100 sm:flex-none'
                       >
                         {task.enabled ? 'Disable' : 'Enable'}
                       </button>
@@ -1027,7 +1027,7 @@ export function AutomationsPage() {
                         type='button'
                         onClick={() => void handleRun(task.id)}
                         disabled={runningIds.has(task.id)}
-                        className='min-h-11 rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10 sm:flex-none'
                       >
                         Run now
                       </button>
@@ -1035,21 +1035,21 @@ export function AutomationsPage() {
                         type='button'
                         onClick={() => void handleRunIfDue(task)}
                         disabled={runningIds.has(task.id)}
-                        className='min-h-11 rounded-lg border border-cyan-500/30 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-cyan-500/30 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/10 sm:flex-none'
                       >
                         Run if due
                       </button>
                       <button
                         type='button'
                         onClick={() => setRunScope(task.id)}
-                        className='min-h-11 rounded-lg border border-[#2a334a] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-[var(--ds-border-subtle)] px-3 py-2 text-sm text-zinc-200 hover:text-zinc-100 sm:flex-none'
                       >
                         History
                       </button>
                       <button
                         type='button'
                         onClick={() => void handleDelete(task)}
-                        className='min-h-11 rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10'
+                        className='min-h-11 min-w-[120px] flex-1 rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 sm:flex-none'
                       >
                         Remove
                       </button>
@@ -1061,7 +1061,7 @@ export function AutomationsPage() {
           </div>
         </SurfaceCard></PageSection>
 
-        <PageSection><SurfaceCard className='border-[#273044] bg-[#0e1422]'>
+        <PageSection><SurfaceCard>
           <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between'>
             <div>
               <h3 className='text-base font-semibold text-zinc-100'>Run history</h3>
@@ -1167,9 +1167,9 @@ export function AutomationsPage() {
             ))}
           </div>
 
-          <div className='mt-4 flex items-center justify-between border-t border-[#2a334a] pt-3 text-xs text-zinc-400'>
+          <div className='mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--ds-border-subtle)] pt-3 text-xs text-zinc-400'>
             <p>Page {runPage} of {totalPages}</p>
-            <div className='flex gap-2'>
+            <div className='flex flex-wrap gap-2'>
               <button
                 type='button'
                 disabled={runPage <= 1}
