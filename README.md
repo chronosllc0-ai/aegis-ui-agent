@@ -1,56 +1,130 @@
-# Aegis — Always-on AI Coworker (Chat-first)
+# Aegis — Always-on AI Coworker
 
-**Aegis** by Chronos is a chat-first, always-on AI coworker for autonomous execution across tools.
-The browser surface is an internal execution viewport, not the primary control plane.
+**Aegis** by Chronos is a chat-first, always-on AI coworker.
+One persistent agent per user, shared across every channel you talk to it on — web, Slack, Telegram, Discord, webhooks, and scheduled heartbeats.
 
-> Production-ready at **[mohex.org](https://mohex.org)** · Docs coming soon
+> Production: **[mohex.org](https://mohex.org)** · Docs: in-app under **Docs**
 
 ---
 
-## Features
+## What it does
 
-| Feature | Description |
-|---|---|
-| 🌐 **Multi-model** | OpenAI (GPT-4.1), Anthropic (Claude 4), Google (Gemini 3), Mistral, Groq — swap mid-session |
-| 🔑 **BYOK** | Bring Your Own Key — encrypted at rest with AES-256; billed to your provider account |
-| 🎙️ **Voice control** | Real-time voice steering via Live API |
-| 🧠 **Vision-first** | Multimodal screenshots → reasoning → Playwright actions |
-| ⚡ **Real-time** | WebSocket streams of actions, frames, and logs |
-| 🧾 **Clean action log** | Browser Action Log shows browser tool calls + task outcomes only; non-browser tools stay in chat |
-| 🔗 **Integrations** | Telegram, Slack, and Discord connectors for agent delegation |
-| 💳 **Credit system** | Per-model cost tracking, usage dashboard, spending caps |
-| 🚀 **Deploy anywhere** | Railway (full-stack), Netlify (frontend) + Railway (API), Docker |
+- **One agent, many surfaces.** Start a task in the web chat, continue it from Slack, have it ping you on Telegram overnight when it finishes. Same session, same memory, same workspace files.
+- **Runs even when you close the tab.** The runtime lives server-side. Heartbeats, scheduled automations, and webhook-triggered tasks all fire with no open client.
+- **Tools everywhere.** 40+ built-in tools (web search, code execution, memory, workspace files, cron, subagents, GitHub) plus real OAuth connectors (Notion, Linear, Google — Gmail/Calendar/Drive, Slack, GitHub) and live MCP servers (Playwright, Browser MCP, anything you add).
+- **Compaction you can trust.** When the context window fills, the agent summarizes, checkpoints, and keeps going. The UI meter shows the *real* loaded footprint — system prompt, active skills, workspace files, pinned memories, and chat history all included.
+- **Multi-model.** OpenAI, Anthropic, Google, Mistral, Groq, or any LiteLLM-compatible provider. BYOK with encrypted-at-rest key storage.
+
+## Architecture
+
+![Aegis always-on runtime](docs/architecture/always-on-runtime.png)
+
+```mermaid
+flowchart LR
+    subgraph CLI[Client Surfaces]
+        WEB[Web Chat UI]
+        SLK[Slack]
+        TGM[Telegram]
+        DSC[Discord]
+    end
+
+    subgraph TRG[Event Triggers]
+        HB[Heartbeat / Cron]
+        WHK[Webhooks]
+        AUT[User Automations]
+    end
+
+    subgraph GW[Ingress]
+        CHAT_API[Chat API]
+        WH_API[Webhook API]
+    end
+
+    subgraph BUS[Task Bus]
+        Q[Priority Queue]
+        RT[Owner Resolver]
+    end
+
+    subgraph RT2[Always-On Agent Runtime]
+        SUP[Per-User Session Supervisor]
+        LOOP[Agent Loop<br/>OpenAI Agents SDK]
+        MEM[Memory + Skills + Workspace FS]
+    end
+
+    subgraph TOOLS[Tool Layer]
+        NAT[Native Tools 40+]
+        MCPH[MCP Host]
+        OAU[OAuth Connectors<br/>Notion · Linear · Google ·<br/>Gmail · Calendar · Drive ·<br/>GitHub · Slack]
+        subgraph MCPS[MCP Servers]
+            PW[Playwright MCP]
+            BMC[Browser MCP]
+            CUS[User MCPs]
+        end
+    end
+
+    subgraph EGR[Fanout]
+        REND[Renderer]
+        SEND[Channel-aware Egress]
+    end
+
+    DB[(Postgres)]
+    FS[(Workspace FS)]
+
+    WEB --> CHAT_API
+    SLK --> CHAT_API
+    TGM --> CHAT_API
+    DSC --> CHAT_API
+    HB --> CHAT_API
+    AUT --> CHAT_API
+    WHK --> WH_API
+    CHAT_API --> RT
+    WH_API --> RT
+    RT --> Q --> SUP
+    SUP --> LOOP
+    LOOP <--> MEM
+    LOOP --> NAT
+    LOOP --> MCPH
+    LOOP --> OAU
+    MCPH --> PW
+    MCPH --> BMC
+    MCPH --> CUS
+    LOOP --> REND --> SEND
+    SEND --> WEB
+    SEND --> SLK
+    SEND --> TGM
+    SEND --> DSC
+    RT2 <--> DB
+    RT2 <--> FS
+```
+
+**Key properties:**
+
+- One `SessionSupervisor` per user. All surfaces are subscribers + producers on the same inbox.
+- Browser is a **tool**, not the runtime. Playwright MCP and Browser MCP are selected per task.
+- Screenshots render inline in the originating chat surface — no standing browser panel.
+- Compaction checkpoints preserved: session survives multi-day work within context limits.
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript + Vite + Tailwind v4
-- **Backend**: FastAPI + WebSockets + Playwright
-- **Database**: PostgreSQL (async via SQLAlchemy + asyncpg)
-- **LLM SDK**: `openai`, `anthropic`, `google-genai`, `mistralai`, `groq`
-- **Deploy**: Docker, Railway, Netlify, docker-compose
+- **Frontend:** React + TypeScript + Vite + Tailwind v4
+- **Backend:** FastAPI + async Postgres (SQLAlchemy/asyncpg)
+- **Agent loop:** OpenAI Agents SDK (`openai-agents`) + LiteLLM for multi-provider
+- **MCP:** official `mcp` Python SDK — stdio, http, sse
+- **Deploy:** Railway (backend + Postgres) + Netlify (frontend)
 
-## Runtime Truth Table
+## Runtime signals
 
-| Runtime signal | Value | Meaning |
+| Signal | Endpoint | Meaning |
 |---|---|---|
-| Startup status | `ok` / `degraded` | Returned by `/health`; degraded means startup dependencies failed and chat should surface explicit errors. |
-| Heartbeat status | `enabled` / `disabled` | Returned by `/api/heartbeat/status`; only claim “always-on” when enabled. |
-| Integration owner status | configured / missing | Integration registration binds owner to authenticated user; missing owner blocks connect. |
-| Pairing status | required / optional | DM policy + pairing enforcement controls first-message behavior before command execution. |
-
-## UX Notes
-
-- Task labels are source-owned at creation:
-  - Tasks started from the browser panel keep the browser-provided label.
-  - Tasks started from chat keep the chat-provided label.
-  - Other panels do not overwrite an existing task label.
-- Agent settings prioritize stable chat-first execution controls during recovery mode.
+| Startup status | `GET /health` | `ok` / `degraded` |
+| Heartbeat status | `GET /api/heartbeat/status` | `enabled` / `disabled`; only claim always-on when enabled |
+| Session context meter | `GET /api/runtime/context-meter/{session_id}` | Token breakdown by bucket: system prompt, skills, workspace files, memories, chat |
+| Integration ownership | `GET /api/integrations/status` | Configured / missing |
 
 ---
 
 ## Quick Start
 
-### 1. Docker Compose (recommended for local dev)
+### Docker Compose (local dev)
 
 ```bash
 cp .env.example .env          # fill in at least one LLM key
@@ -58,12 +132,11 @@ docker compose up -d           # starts postgres + app
 open http://localhost:8000
 ```
 
-### 2. Local development
+### Local development
 
 ```bash
 # Backend
 pip install -r requirements.txt
-playwright install chromium
 cp .env.example .env
 uvicorn main:app --reload
 
@@ -71,159 +144,13 @@ uvicorn main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
----
-
-## Deploy to Netlify (Frontend)
-
-Netlify hosts the React frontend as a static site. The FastAPI backend runs
-separately on Railway (or any server that supports WebSockets + Docker).
-
-### Step 1 — Deploy the backend to Railway
-
-```bash
-npm i -g @railway/cli
-railway login
-railway link          # link this repo
-railway up            # deploys from Dockerfile
-```
-
-Add a PostgreSQL plugin from the Railway dashboard, then set these env vars:
-
-| Variable | Value |
-|---|---|
-| `SESSION_SECRET` | Random 32+ char string |
-| `ENCRYPTION_SECRET` | Random 32+ char string |
-| `ADMIN_EMAILS` | Comma-separated email list for auto-admin assignment |
-| `FRONTEND_URL` | `https://mohex.org` |
-| `PUBLIC_BASE_URL` | `https://api.mohex.org` (recommended) or your Railway URL |
-| `CORS_ORIGINS` | `https://mohex.org,https://www.mohex.org` |
-| `COOKIE_SECURE` | `true` |
-| `COOKIE_SAMESITE` | `lax` with `api.mohex.org`, or `none` if you keep the Railway URL |
-| `GEMINI_API_KEY` | (or any provider key) |
-
-Recommended production topology:
-
-- Frontend: `https://mohex.org`
-- Backend: `https://api.mohex.org`
-
-Railway fallback topology:
-
-- Frontend: `https://mohex.org`
-- Backend: `https://your-service.up.railway.app`
-
-OAuth callback URLs are derived from `PUBLIC_BASE_URL`:
-
-- Google: `https://<backend-origin>/api/auth/google/callback`
-- GitHub: `https://<backend-origin>/api/auth/github/callback`
-- SSO: `https://<backend-origin>/api/auth/sso/callback`
-
-### Step 2 — Deploy the frontend to Netlify
-
-#### Option A: Netlify Dashboard (easiest)
-
-1. Go to [app.netlify.com](https://app.netlify.com) → **Add new site** → **Import an existing project**
-2. Connect your GitHub repo (`chronosllc0-ai/aegis-ui-agent`)
-3. Netlify auto-detects settings from `netlify.toml`:
-   - **Base directory**: `frontend`
-   - **Build command**: `npm ci && npm run build`
-   - **Publish directory**: `frontend/dist`
-4. Set environment variables in **Site configuration → Environment variables**:
-
-   | Variable | Value |
-   |---|---|
-   | `VITE_API_URL` | `https://api.mohex.org` |
-   | `VITE_WS_URL` | `wss://api.mohex.org/ws/navigate` |
-   | `VITE_DOCS_SITE_URL` | `https://docs.mohex.org` |
-
-5. Click **Deploy site**
-
-#### Option B: Netlify CLI
-
-```bash
-# Install the CLI
-npm i -g netlify-cli
-
-# Login
-netlify login
-
-# Init (first time) — link to your Netlify account
-netlify init
-# Select "Create & configure a new site"
-# The CLI reads netlify.toml automatically
-
-# Set environment variables
-netlify env:set VITE_API_URL https://api.mohex.org
-netlify env:set VITE_WS_URL wss://api.mohex.org/ws/navigate
-netlify env:set VITE_DOCS_SITE_URL https://docs.mohex.org
-
-# Deploy (preview)
-netlify deploy
-
-# Deploy to production
-netlify deploy --prod
-```
-
-#### Option C: Manual drag-and-drop
-
-```bash
-cd frontend
-npm ci
-VITE_API_URL=https://api.mohex.org \
-VITE_WS_URL=wss://api.mohex.org/ws/navigate \
-VITE_DOCS_SITE_URL=https://docs.mohex.org \
-npm run build
-```
-
-Then drag the `frontend/dist/` folder into the Netlify dashboard deploy area.
-
-### Step 3 — Custom domain (optional)
-
-1. In Netlify dashboard → **Domain management** → **Add custom domain**
-2. Add `mohex.org` for the frontend and `api.mohex.org` for the backend
-3. Update DNS:
-   - If using Netlify DNS: point nameservers to Netlify
-   - If external DNS: add a CNAME record pointing to `your-site.netlify.app`
-4. SSL is provisioned automatically
-
-### Step 4 — Configure CORS on the backend
-
-Since frontend (Netlify) and backend (Railway) are on different domains, make sure
-the backend allows cross-origin requests. In your Railway environment variables:
-
-| Variable | Value |
-|---|---|
-| `FRONTEND_URL` | `https://mohex.org` |
-| `CORS_ORIGINS` | `https://mohex.org,https://www.mohex.org` |
-| `COOKIE_SECURE` | `true` |
-| `COOKIE_SAMESITE` | `lax` when using `api.mohex.org`; `none` when using `*.up.railway.app` |
-
-Using `api.mohex.org` is recommended because it keeps the frontend and backend on
-the same site (`mohex.org`) and avoids cross-site auth-cookie issues.
-
-### Continuous deployment
-
-Once connected via GitHub, every push to `main` triggers:
-- Netlify rebuilds the frontend automatically
-- Railway rebuilds the backend automatically (if Railway is linked to the same repo)
-
-### Architecture (Netlify + Railway)
-
-```
-┌─────────────────────────┐          ┌─────────────────────────┐
-│  Netlify CDN            │   API    │  Railway                │
-│  ┌───────────────────┐  │  ──────► │  ┌───────────────────┐  │
-│  │ React SPA         │  │  HTTPS   │  │ FastAPI + WS      │  │
-│  │ (static assets)   │  │          │  │ Playwright         │  │
-│  └───────────────────┘  │  ◄────── │  │ PostgreSQL         │  │
-│  mohex.org              │  WSS     │  └───────────────────┘  │
-└─────────────────────────┘          └─────────────────────────┘
-```
+The backend spawns MCP servers on demand. Playwright MCP is bundled; other MCP servers are installed per-user from the Connections settings page.
 
 ---
 
-## Deploy to Railway (Full-Stack)
+## Deploy
 
-If you prefer a single-service deployment:
+### Backend → Railway
 
 ```bash
 npm i -g @railway/cli
@@ -232,16 +159,55 @@ railway link
 railway up
 ```
 
-Add a PostgreSQL plugin from the Railway dashboard, then set `SESSION_SECRET`,
-`ENCRYPTION_SECRET`, `ADMIN_EMAILS` (if you want auto-admin assignment), `PUBLIC_BASE_URL`,
-`FRONTEND_URL`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, and at least one LLM API key in environment variables.
+Add a PostgreSQL plugin. Set these environment variables:
 
-### Seed the first superadmin
+| Variable | Purpose |
+|---|---|
+| `SESSION_SECRET` | Signs session cookies (32+ random chars) |
+| `ENCRYPTION_SECRET` | Encrypts BYOK provider keys at rest |
+| `ADMIN_EMAILS` | Comma-separated emails auto-promoted to admin |
+| `PUBLIC_BASE_URL` | Public backend origin (for OAuth callbacks) |
+| `FRONTEND_URL` | Frontend origin (for redirects + CORS) |
+| `CORS_ORIGINS` | Additional allowed origins |
+| `COOKIE_SECURE` | `true` in production |
+| `COOKIE_SAMESITE` | `lax` if same-site, `none` if cross-site |
+| `OPENAI_API_KEY` | Default provider key (any of OPENAI/ANTHROPIC/GEMINI/etc. works) |
 
-After the backend is up, seed the first password-based superadmin:
+OAuth callback URLs derive from `PUBLIC_BASE_URL`:
+- `https://<backend>/api/auth/google/callback`
+- `https://<backend>/api/auth/github/callback`
+- `https://<backend>/api/auth/sso/callback`
+
+Recommended topology:
+- Frontend: `https://mohex.org`
+- Backend: `https://api.mohex.org`
+
+### Frontend → Netlify
+
+Dashboard flow:
+1. app.netlify.com → Add new site → Import GitHub repo
+2. Settings auto-detected from `netlify.toml`
+3. Environment variables:
+   - `VITE_API_URL` = `https://api.mohex.org`
+   - `VITE_WS_URL` = `wss://api.mohex.org/ws/chat`
+4. Deploy
+
+CLI flow:
+```bash
+npm i -g netlify-cli
+netlify init
+netlify env:set VITE_API_URL https://api.mohex.org
+netlify env:set VITE_WS_URL  wss://api.mohex.org/ws/chat
+netlify deploy --prod
+```
+
+### Seed first superadmin
 
 ```bash
-python scripts/seed_super_admin.py --email admin@mohex.org --password "ChangeThis123!" --name "Mohex Super Admin"
+python scripts/seed_super_admin.py \
+  --email admin@mohex.org \
+  --password "ChangeThis123!" \
+  --name "Aegis Admin"
 ```
 
 ---
@@ -250,51 +216,27 @@ python scripts/seed_super_admin.py --email admin@mohex.org --password "ChangeThi
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | Yes (prod) | PostgreSQL connection string |
-| `SESSION_SECRET` | Yes | Random string for session signing |
-| `PUBLIC_BASE_URL` | Yes (prod) | Public backend origin used for OAuth callbacks |
-| `FRONTEND_URL` | Yes (split deploy) | Frontend origin for redirects and CORS |
-| `COOKIE_SECURE` | Yes (prod) | Must be `true` in production |
-| `COOKIE_SAMESITE` | Depends | `lax` for `api.mohex.org`, `none` for Railway default domain split |
-| `COOKIE_DOMAIN` | No | Optional explicit cookie domain override |
-| `ADMIN_EMAILS` | No | Comma-separated email list for auto-admin assignment |
-| `ENCRYPTION_SECRET` | Yes | Secret for BYOK key encryption |
-| `GEMINI_API_KEY` | No | Default Gemini API key |
-| `OPENAI_API_KEY` | No | Default OpenAI API key |
-| `ANTHROPIC_API_KEY` | No | Default Anthropic API key |
-| `MISTRAL_API_KEY` | No | Default Mistral API key |
-| `GROQ_API_KEY` | No | Default Groq API key |
-| `CORS_ORIGINS` | No | Comma-separated allowed frontend origins |
-| `RAILWAY_PUBLIC_DOMAIN` | No | Railway-provided fallback domain if `PUBLIC_BASE_URL` is left blank |
-| `VITE_API_URL` | Frontend | Backend URL (only when frontend is hosted separately) |
-| `VITE_WS_URL` | Frontend | Backend WebSocket URL (only when hosted separately) |
+| `DATABASE_URL` | Yes (prod) | Postgres connection string |
+| `SESSION_SECRET` | Yes | Session cookie signing |
+| `ENCRYPTION_SECRET` | Yes | BYOK key encryption |
+| `PUBLIC_BASE_URL` | Yes (prod) | Public backend origin |
+| `FRONTEND_URL` | Yes (split deploy) | Frontend origin |
+| `COOKIE_SECURE` | Yes (prod) | `true` in production |
+| `COOKIE_SAMESITE` | Depends | `lax` or `none` |
+| `ADMIN_EMAILS` | No | Auto-admin list |
+| `CORS_ORIGINS` | No | Allowed origins |
+| `HEARTBEAT_SESSION_ENABLED` | No | Default `true`; toggles scheduled heartbeat |
+| `HEARTBEAT_SESSION_INTERVAL_SECONDS` | No | Default `180` |
+| `COMPACT_THRESHOLD_PCT` | No | Default `90`; context-window compaction trigger |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `MISTRAL_API_KEY` / `GROQ_API_KEY` | No | Default provider keys |
+| `VITE_API_URL` / `VITE_WS_URL` | Frontend | Backend URLs when hosted separately |
 
 See `.env.example` for the full list.
 
-## Architecture
+## Contributing
 
-```
-┌──────────────┐   WS    ┌───────────────┐
-│  React       │ ◄─────► │  FastAPI       │
-│  Frontend    │         │  main.py       │
-└──────────────┘         └─────┬─────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-      │ Orchestrator │ │ Providers    │ │ Credit System│
-      │ (Analyzer +  │ │ (OpenAI,     │ │ (Rates +     │
-      │  Executor +  │ │  Anthropic,  │ │  Balance +   │
-      │  Navigator)  │ │  Gemini, …)  │ │  Usage)      │
-      └──────┬───────┘ └──────────────┘ └──────────────┘
-             ▼                                ▼
-      ┌──────────────┐              ┌──────────────┐
-      │ Playwright   │              │ Key Manager  │
-      │ (Browser)    │              │ (AES-256     │
-      └──────────────┘              │  encrypted)  │
-                                    └──────────────┘
-```
+This is a proprietary codebase. For internal contributors, see `AGENTS.md` and `ONBOARDING.md` for session-by-session implementation notes, and `PLAN.md` for the current rewrite's phased migration plan.
 
 ## License
 
-Proprietary — © 2024-2026 Chronos AI
+Proprietary — © 2024–2026 Chronos AI
