@@ -1,7 +1,11 @@
 FROM node:22-slim AS frontend-builder
+# Give vite + tsc enough heap to finish a production build on
+# memory-constrained Railway builders (default was OOM-killed during
+# `vite build`, surfacing as a BuildKit "context canceled" error).
+ENV NODE_OPTIONS=--max-old-space-size=4096
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund --prefer-offline
 COPY shared/ /app/shared/
 COPY frontend/ ./
 RUN npm run build
