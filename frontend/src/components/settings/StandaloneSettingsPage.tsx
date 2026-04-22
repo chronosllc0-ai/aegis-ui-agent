@@ -82,7 +82,7 @@ export function StandaloneSettingsPage({ tab, settings, onPatch, authRole, isAdm
           actions={headerMeta.actions}
         />
 
-        <div className='page-sections'>
+        <div>
           {tab === 'Agent Configuration' && <AgentTab settings={settings} onPatch={onPatch} />}
           {tab === 'API Keys' && <APIKeysTab />}
           {tab === 'Billing' && (

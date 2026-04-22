@@ -7436,3 +7436,32 @@
 - No browser screenshot tool available in this environment.
 
 ---
+## Session 5.91 - April 22, 2026 (Addressed review feedback on section wrappers)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 quick review-fix pass
+
+### What Was Done
+- Fixed `ObservabilityTab` stat tiles to remove `PageSection` wrapping and reverted `Stat` to `PanelCard className='p-3'` to preserve compact grid alignment/padding.
+- Removed redundant nested `page-sections` wrapper from `StandaloneSettingsPage` content area to avoid doubled vertical rhythm.
+
+### What's Working
+- Stat cards in Observability retain intended compact size and no longer inherit section-level scroll-margin/spacing behavior.
+- Standalone settings page keeps unified outer flow while avoiding duplicate inner section spacing.
+- Frontend build and websocket smoke test pass.
+
+### What's NOT Working Yet
+- AGENTS checklist command `python -m py_compile backend/pydantic_adk_runner.py` still fails because that file does not exist in this repository.
+- Browser screenshot capture remains unavailable in this runtime.
+
+### Next Steps
+1. If additional review comments land, continue tightening section-shell usage boundaries (page-level only) vs. intra-grid cards.
+2. Consider adding lint rule/docs note: avoid `PageSection` inside dense grids.
+
+### Decisions Made
+- Kept `PageSection` as a page-level layout primitive only; used `PanelCard` for intra-section stat tiles.
+
+### Blockers
+- No browser screenshot tool available in this environment.
+
+---

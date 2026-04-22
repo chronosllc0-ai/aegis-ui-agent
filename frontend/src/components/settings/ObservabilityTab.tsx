@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../../lib/api'
-import { HeaderBar, PageSection, PanelCard, StatusBadge, SurfaceCard } from '../ui/DesignSystem'
+import { HeaderBar, PanelCard, StatusBadge } from '../ui/DesignSystem'
 
 type AgentTask = {
   id: string
@@ -49,10 +49,10 @@ type RuntimeEventResponse = {
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <PageSection><SurfaceCard className='p-3'>
+    <PanelCard className='p-3'>
       <p className='text-[11px] text-zinc-500'>{label}</p>
       <p className='mt-1 text-lg font-semibold text-zinc-100'>{value}</p>
-    </SurfaceCard></PageSection>
+    </PanelCard>
   )
 }
 
