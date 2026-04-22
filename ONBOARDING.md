@@ -7528,3 +7528,35 @@
 ### Blockers / Decisions
 - **Blocker:** No browser screenshot tool available in this environment for image capture.
 - **Decision:** Prioritized deterministic UI regression tests and mobile-route coverage over non-deterministic manual visual capture for this pass.
+
+---
+## Session 5.93 - April 22, 2026 (PR review follow-up: regression test hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted test-quality follow-up
+
+### What Changed
+- Addressed PR review comments in `frontend/src/App.ui-regression.test.tsx`:
+  - replaced index-based role queries (`getAllByRole(...)[0]`) with deterministic singular queries (`getByRole(...)`).
+  - removed brittle class-name assertions for sidebar active/inactive checks and switched to semantic state assertions using `aria-current` + `data-active` attributes.
+  - fixed viewport test pollution by restoring `window.innerWidth` to its original value in `afterEach`.
+- Updated `frontend/src/components/ui/DesignSystem.tsx` `NavItem` to expose semantic state:
+  - `aria-current='page'` when active,
+  - `data-active='true|false'` for stable test hooks and easier QA introspection.
+
+### Known Deltas vs Reference
+- Mobile screenshot image artifacts still cannot be generated in this environment due unavailable browser screenshot tooling.
+- Mobile validation remains automated regression assertions (route/state behavior) rather than pixel-diff snapshots.
+
+### What Works / What Does Not
+- **Works:** Frontend build passes, updated App regression suite passes, and targeted Connections tab tests pass.
+- **Does not:** No browser image screenshot capture available in this runtime.
+
+### Next UI Polish Backlog
+1. Add a true visual screenshot baseline (mobile + desktop) once screenshot tooling is available.
+2. Add focused accessibility checks around sidebar/current-page semantics to leverage new `aria-current` behavior.
+3. Optionally consolidate App-level mock scaffolding shared across multiple test files.
+
+### Blockers / Decisions
+- **Blocker:** Browser screenshot tool unavailable in the current run environment.
+- **Decision:** Prefer semantic UI-state assertions over CSS utility-class assertions for long-term test stability.

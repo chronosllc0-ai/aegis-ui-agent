@@ -38,6 +38,8 @@ export function NavItem({ icon, label, active = false, onClick }: NavItemProps) 
     <button
       type='button'
       onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      data-active={active ? 'true' : 'false'}
       className={`group flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm font-semibold transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--ds-surface-1)] ${
         active
           ? 'bg-[var(--ds-accent-soft)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-soft)]'

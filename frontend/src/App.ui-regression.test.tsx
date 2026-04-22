@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const sendSpy = vi.fn()
+const originalInnerWidth = window.innerWidth
 
 vi.mock('./hooks/useUsage', () => ({
   useUsage: () => ({
@@ -137,6 +138,7 @@ describe('App UI regression guards (shell + nav)', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
     window.history.pushState({}, '', '/')
   })
 
@@ -171,13 +173,13 @@ describe('App UI regression guards (shell + nav)', () => {
 
     await screen.findByRole('button', { name: /^connections$/i })
 
-    const activeConnections = screen.getAllByRole('button', { name: /^connections$/i })[0]
-    const inactiveChat = screen.getAllByRole('button', { name: /^chat$/i })[0]
+    const activeConnections = screen.getByRole('button', { name: /^connections$/i })
+    const inactiveChat = screen.getByRole('button', { name: /^chat$/i })
 
-    expect(activeConnections.className).toContain('bg-[var(--ds-accent-soft)]')
-    expect(activeConnections.className).toContain('shadow-[var(--ds-shadow-soft)]')
-    expect(inactiveChat.className).toContain('hover:bg-[var(--ds-surface-3)]/45')
-    expect(inactiveChat.className).not.toContain('bg-[var(--ds-accent-soft)]')
+    expect(activeConnections).toHaveAttribute('aria-current', 'page')
+    expect(activeConnections).toHaveAttribute('data-active', 'true')
+    expect(inactiveChat).not.toHaveAttribute('aria-current')
+    expect(inactiveChat).toHaveAttribute('data-active', 'false')
 
   })
 
