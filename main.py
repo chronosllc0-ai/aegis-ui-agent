@@ -107,6 +107,7 @@ from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
 from backend.session_workspace import cleanup_session_workspace
 from backend.heartbeat_pinger import HeartbeatPinger
+from backend.heartbeat_session import HeartbeatSessionScheduler
 from backend.user_memory import ensure_daily_memory_file
 
 setup_logging(settings.LOG_LEVEL)
@@ -260,6 +261,8 @@ async def startup_event() -> None:
     start_scheduler()
     await background_worker.start()
     _pinger.start()
+    if sessions_v2_enabled():
+        _heartbeat_session_scheduler.start()
 
 
 @app.on_event("shutdown")
@@ -268,6 +271,8 @@ async def shutdown_event() -> None:
     global db_init_task
 
     _pinger.stop()
+    if sessions_v2_enabled():
+        _heartbeat_session_scheduler.stop()
 
     if db_init_task is not None and not db_init_task.done():
         db_init_task.cancel()
@@ -681,6 +686,7 @@ async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
 
 
 _pinger = HeartbeatPinger(dispatch=_heartbeat_dispatch, interval_seconds=60)
+_heartbeat_session_scheduler = HeartbeatSessionScheduler(dispatch=_heartbeat_dispatch)
 background_worker.set_event_sink(_dispatch_background_task_event)
 
 # Stream subscribers: user_uid -> {platform, integration_id, chat_id, last_sent_at}
@@ -1533,6 +1539,15 @@ async def list_sessions(
     user = _get_current_user(request)
     uid = user["uid"]
     await migrate_user_to_sessions_first(db, user_id=uid, platform="web")
+    if sessions_v2_enabled():
+        await get_or_create_session(
+            db,
+            user_id=uid,
+            platform="web",
+            session_id="agent:main:heartbeat",
+            title="heartbeat",
+            parent_session_id=SESSION_MAIN_ID,
+        )
     await db.commit()
     from sqlalchemy import select as sa_select, desc as sa_desc
     from backend.database import ChatSession as SessionModel, Conversation as ConvModel
@@ -1585,6 +1600,54 @@ async def list_sessions(
             for c in rows
         ],
     }
+
+
+@app.post("/api/sessions/{session_id}/label")
+async def update_session_label(
+    session_id: str,
+    request: Request,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Persist a session title/label update for the authenticated user."""
+    user = _get_current_user(request)
+    uid = user["uid"]
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    from sqlalchemy import select as sa_select
+    from backend.database import ChatSession as SessionModel, Conversation as ConvModel
+    normalized_session_id = normalize_or_bridge_session_id(session_id)
+    if sessions_v2_enabled():
+        row = (
+            await db.execute(
+                sa_select(SessionModel).where(
+                    SessionModel.user_id == uid,
+                    SessionModel.platform == "web",
+                    SessionModel.session_id == normalized_session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = await get_or_create_session(
+                db,
+                user_id=uid,
+                platform="web",
+                session_id=normalized_session_id,
+                title=title,
+            )
+        row.title = title
+    bridged_conversation_id = session_id_to_conversation_id(normalized_session_id)
+    conv_stmt = sa_select(ConvModel).where(ConvModel.user_id == uid, ConvModel.platform == "web")
+    if bridged_conversation_id:
+        conv_stmt = conv_stmt.where(ConvModel.id == bridged_conversation_id)
+    else:
+        conv_stmt = conv_stmt.where(ConvModel.platform_chat_id == normalized_session_id)
+    conv = (await db.execute(conv_stmt)).scalar_one_or_none()
+    if conv is not None:
+        conv.title = title
+    await db.commit()
+    return {"ok": True, "session_id": normalized_session_id, "title": title}
 
 
 @app.get("/api/conversations/{conversation_id}/messages")

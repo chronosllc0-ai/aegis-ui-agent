@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FiCheck, FiChevronDown, FiMonitor, FiSearch, FiSmartphone, FiX } from 'react-icons/fi'
-import { PanelCard, StatusBadge } from './ui/DesignSystem'
+import { FiCheck, FiChevronDown, FiSearch, FiX } from 'react-icons/fi'
+import { PanelCard } from './ui/DesignSystem'
 
 type SessionChannel = 'chat' | 'browser' | 'system'
 type SessionStatus = 'active' | 'idle'
@@ -10,6 +10,8 @@ export interface SessionSwitcherItem {
   label: string
   channel: SessionChannel
   status: SessionStatus
+  detail?: string
+  group?: 'main' | 'channels' | 'other'
 }
 
 interface SessionSwitcherProps {
@@ -18,38 +20,23 @@ interface SessionSwitcherProps {
   onSelect: (sessionId: string) => void
 }
 
-const channelLabel: Record<SessionChannel, string> = {
-  chat: 'Chat',
-  browser: 'Browser',
-  system: 'System',
-}
-
-function SessionRow({
-  item,
-  selected,
-  onSelect,
-}: {
-  item: SessionSwitcherItem
-  selected: boolean
-  onSelect: (id: string) => void
-}) {
+function RadioItem({ item, selected, onSelect }: { item: SessionSwitcherItem; selected: boolean; onSelect: (id: string) => void }) {
   return (
     <button
       type='button'
       onClick={() => onSelect(item.id)}
-      className={`group flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors cursor-pointer ${
-        selected
-          ? 'border-cyan-500/40 bg-cyan-500/10'
-          : 'border-transparent bg-[#141414] hover:border-[#2a2a2a] hover:bg-[#181818]'
-      }`}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${selected ? 'bg-[#2a2d36]' : 'hover:bg-[#1a1d28]'}`}
+      role='radio'
+      aria-checked={selected}
     >
-      <span className={`h-2 w-2 rounded-full ${item.status === 'active' ? 'bg-emerald-400' : 'bg-zinc-500'}`} aria-hidden='true' />
-      <div className='min-w-0 flex-1'>
-        <p className='truncate text-sm text-zinc-100'>{item.label}</p>
-        <p className='truncate text-[11px] text-zinc-500'>ID: {item.id}</p>
+      <div className={`h-6 w-6 rounded-full border ${selected ? 'border-indigo-300' : 'border-zinc-500'} flex items-center justify-center`}>
+        <div className={`h-3 w-3 rounded-full ${selected ? 'bg-indigo-300' : 'bg-transparent'}`} />
       </div>
-      <StatusBadge label={channelLabel[item.channel]} tone={item.channel === 'chat' ? 'info' : item.channel === 'browser' ? 'warning' : 'default'} />
-      {selected && <FiCheck className='h-3.5 w-3.5 text-cyan-300' aria-hidden='true' />}
+      <div className='min-w-0 flex-1'>
+        <p className='truncate text-base text-zinc-100'>{item.label}</p>
+        {item.detail && <p className='truncate text-xs text-zinc-400'>{item.detail}</p>}
+      </div>
+      {selected && <FiCheck className='h-4 w-4 text-indigo-300' aria-hidden='true' />}
     </button>
   )
 }
@@ -60,33 +47,29 @@ export function SessionSwitcher({ sessions, selectedSessionId, onSelect }: Sessi
   const [query, setQuery] = useState('')
   const desktopRef = useRef<HTMLDivElement>(null)
 
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.id === selectedSessionId) ?? sessions[0],
-    [sessions, selectedSessionId],
-  )
+  const selectedSession = useMemo(() => sessions.find((session) => session.id === selectedSessionId) ?? sessions[0], [sessions, selectedSessionId])
 
   const filteredSessions = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return sessions
-    return sessions.filter((session) => {
-      return (
-        session.label.toLowerCase().includes(q)
-        || session.id.toLowerCase().includes(q)
-        || channelLabel[session.channel].toLowerCase().includes(q)
-      )
-    })
+    const list = !q
+      ? sessions
+      : sessions.filter((session) => `${session.label} ${session.id} ${session.detail ?? ''}`.toLowerCase().includes(q))
+    return {
+      main: list.filter((item) => item.group === 'main'),
+      channels: list.filter((item) => item.group === 'channels'),
+      other: list.filter((item) => !item.group || item.group === 'other'),
+    }
   }, [query, sessions])
 
   useEffect(() => {
     const onDocClick = (event: MouseEvent) => {
-      if (!desktopRef.current) return
-      if (!desktopRef.current.contains(event.target as Node)) {
-        setOpenDesktop(false)
-      }
+      if (desktopRef.current && !desktopRef.current.contains(event.target as Node)) setOpenDesktop(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
+
+  if (sessions.length === 0 || !selectedSession) return null
 
   const closeAll = () => {
     setOpenDesktop(false)
@@ -94,98 +77,61 @@ export function SessionSwitcher({ sessions, selectedSessionId, onSelect }: Sessi
     setQuery('')
   }
 
-  if (sessions.length === 0 || !selectedSession) return null
+  const grouped = (groupLabel: string, rows: SessionSwitcherItem[]) => {
+    if (rows.length === 0) return null
+    return (
+      <div className='space-y-1'>
+        <p className='px-1 text-xs uppercase tracking-wide text-zinc-500'>{groupLabel}</p>
+        <div role='radiogroup' className='space-y-1'>
+          {rows.map((item) => (
+            <RadioItem key={item.id} item={item} selected={selectedSession.id === item.id} onSelect={(id) => { onSelect(id); closeAll() }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   const listBody = (
-    <PanelCard className='p-2 shadow-[var(--ds-shadow-elevated)]'>
-      <div className='mb-2 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#141414] px-2 py-1.5'>
-        <FiSearch className='h-3.5 w-3.5 text-zinc-500' aria-hidden='true' />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder='Search sessions'
-          className='w-full bg-transparent text-xs text-zinc-100 outline-none placeholder:text-zinc-600'
-          aria-label='Search sessions'
-        />
+    <PanelCard className='space-y-3 p-3 shadow-[var(--ds-shadow-elevated)]'>
+      <div className='flex items-center gap-2 rounded-lg border border-zinc-700 bg-[#131722] px-2 py-2'>
+        <FiSearch className='h-3.5 w-3.5 text-zinc-500' />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} className='w-full bg-transparent text-xs text-zinc-100 outline-none' placeholder='Filter sessions' />
       </div>
-      <div className='max-h-[55vh] space-y-1 overflow-y-auto pr-0.5'>
-        {filteredSessions.length > 0 ? (
-          filteredSessions.map((session) => (
-            <SessionRow
-              key={session.id}
-              item={session}
-              selected={session.id === selectedSession.id}
-              onSelect={(sessionId) => {
-                onSelect(sessionId)
-                closeAll()
-              }}
-            />
-          ))
-        ) : (
-          <p className='rounded-lg bg-[#141414] px-2.5 py-3 text-xs text-zinc-500'>No matching sessions.</p>
-        )}
-      </div>
+      {grouped('main', filteredSessions.main)}
+      {grouped('channels', filteredSessions.channels)}
+      {grouped('other', filteredSessions.other)}
     </PanelCard>
   )
 
   return (
     <>
       <div ref={desktopRef} className='relative hidden sm:block'>
-        <button
-          type='button'
-          onClick={() => {
-            setOpenDesktop((prev) => !prev)
-            setOpenMobile(false)
-          }}
-          className='flex min-w-[220px] max-w-[280px] items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#171717] px-2.5 py-1.5 text-left hover:border-zinc-600 transition-colors cursor-pointer'
-          aria-haspopup='listbox'
-          aria-expanded={openDesktop}
-          aria-label='Switch session'
-        >
-          <FiMonitor className='h-3.5 w-3.5 text-zinc-500' aria-hidden='true' />
+        <button type='button' onClick={() => setOpenDesktop((v) => !v)} className='flex min-w-[220px] max-w-[320px] items-center gap-2 rounded-xl border border-zinc-700 bg-[#141823] px-3 py-2 text-left'>
           <div className='min-w-0 flex-1'>
-            <p className='truncate text-xs text-zinc-100'>{selectedSession.label}</p>
-            <p className='truncate text-[10px] text-zinc-500'>{selectedSession.id}</p>
+            <p className='truncate text-sm text-zinc-100'>{selectedSession.label}</p>
+            <p className='truncate text-[11px] text-zinc-500'>{selectedSession.detail ?? selectedSession.id}</p>
           </div>
-          <StatusBadge label={channelLabel[selectedSession.channel]} tone={selectedSession.channel === 'chat' ? 'info' : selectedSession.channel === 'browser' ? 'warning' : 'default'} />
-          <FiChevronDown className={`h-3.5 w-3.5 text-zinc-500 transition-transform ${openDesktop ? 'rotate-180' : ''}`} aria-hidden='true' />
+          <FiChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${openDesktop ? 'rotate-180' : ''}`} />
         </button>
-
-        {openDesktop && <div className='absolute left-0 top-full z-30 mt-2 w-[360px]'>{listBody}</div>}
+        {openDesktop && <div className='absolute left-0 top-full z-30 mt-2 w-[420px]'>{listBody}</div>}
       </div>
 
       <div className='sm:hidden'>
-        <button
-          type='button'
-          onClick={() => {
-            setOpenMobile(true)
-            setOpenDesktop(false)
-          }}
-          className='flex max-w-[78vw] items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#171717] px-2.5 py-1.5 text-left hover:border-zinc-600 transition-colors cursor-pointer'
-          aria-label='Open session switcher'
-        >
-          <FiSmartphone className='h-3.5 w-3.5 text-zinc-500' aria-hidden='true' />
-          <div className='min-w-0'>
-            <p className='truncate text-xs text-zinc-100'>{selectedSession.label}</p>
-          </div>
-          <FiChevronDown className='h-3.5 w-3.5 text-zinc-500' aria-hidden='true' />
+        <button type='button' onClick={() => setOpenMobile(true)} className='flex max-w-[78vw] items-center gap-2 rounded-xl border border-zinc-700 bg-[#141823] px-3 py-2 text-left'>
+          <div className='min-w-0 flex-1'><p className='truncate text-sm text-zinc-100'>{selectedSession.label}</p></div>
+          <FiChevronDown className='h-4 w-4 text-zinc-500' />
         </button>
       </div>
 
       {openMobile && (
-        <div className='fixed inset-0 z-50 flex flex-col bg-black/70 p-3 backdrop-blur-sm sm:hidden'>
-          <div className='mb-2 flex items-center justify-between'>
-            <p className='text-sm font-medium text-zinc-100'>Switch session</p>
-            <button
-              type='button'
-              onClick={closeAll}
-              className='rounded-md border border-[#2a2a2a] bg-[#151515] p-1.5 text-zinc-300'
-              aria-label='Close session switcher'
-            >
-              <FiX className='h-4 w-4' />
-            </button>
+        <div className='fixed inset-0 z-50 bg-black/60 sm:hidden'>
+          <div className='absolute inset-x-0 bottom-0 rounded-t-3xl border border-zinc-700 bg-[#181b25] p-3'>
+            <div className='mb-3 flex items-center justify-between'>
+              <p className='text-sm font-semibold text-zinc-100'>Switch session</p>
+              <button type='button' onClick={closeAll} className='rounded-md border border-zinc-700 p-1.5 text-zinc-300'><FiX className='h-4 w-4' /></button>
+            </div>
+            {listBody}
           </div>
-          {listBody}
         </div>
       )}
     </>

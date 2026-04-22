@@ -162,6 +162,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
     __table_args__ = (
         UniqueConstraint("user_id", "platform", "session_id", name="uq_chat_sessions_user_platform_session"),
+        Index("idx_chat_sessions_platform_status", "platform", "status"),
     )
 
     id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))

@@ -214,4 +214,11 @@ describe('App UI regression guards (shell + nav)', () => {
     const shellRow = header?.querySelector('div.flex.min-h-11.items-center.justify-between.gap-2')
     expect(shellRow).toBeTruthy()
   })
+
+  it('opens sessions view from the mounted /sessions route', async () => {
+    window.history.pushState({}, '', '/sessions')
+    const { default: App } = await import('./App')
+    render(<App />)
+    expect(await screen.findByText('Active sessions and defaults.')).toBeInTheDocument()
+  })
 })
