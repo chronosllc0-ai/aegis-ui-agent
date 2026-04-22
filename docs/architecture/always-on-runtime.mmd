@@ -1,0 +1,102 @@
+flowchart LR
+    %% ─────────── Clients / Surfaces ───────────
+    subgraph CLI[Client Surfaces]
+        direction TB
+        WEB[Web Chat UI<br/>chat-only]
+        SLK[Slack]
+        TGM[Telegram]
+        DSC[Discord]
+        EML[Email / Future]
+    end
+
+    %% ─────────── Triggers ───────────
+    subgraph TRG[Event Triggers]
+        direction TB
+        HB[Heartbeat<br/>Cron Scheduler]
+        WHK[Webhooks<br/>GitHub / Stripe / etc.]
+        AUT[User Automations]
+    end
+
+    %% ─────────── Ingress ───────────
+    subgraph GW[Ingress Gateway]
+        direction TB
+        CHAT_API[Chat API<br/>REST + WS stream]
+        WH_API[Webhook API]
+        ID[Identity / Pairing]
+    end
+
+    WEB --> CHAT_API
+    SLK --> CHAT_API
+    TGM --> CHAT_API
+    DSC --> CHAT_API
+    EML --> CHAT_API
+    HB --> CHAT_API
+    AUT --> CHAT_API
+    WHK --> WH_API
+    CHAT_API --> ID
+    WH_API --> ID
+
+    %% ─────────── Task Bus ───────────
+    subgraph BUS[Task Bus - per-user, persistent]
+        direction TB
+        Q[Priority Queue<br/>chat • heartbeat • webhook • background]
+        RT[Router - Owner UID resolver]
+    end
+    ID --> RT --> Q
+
+    %% ─────────── Always-On Runtime ───────────
+    subgraph RT2[Always-On Agent Runtime]
+        direction TB
+        SUP[Per-User Session Supervisor<br/>survives browser close]
+        LOOP[Agent Loop<br/>OpenAI Agents SDK / multi-provider]
+        MEM[Memory + Skills + Workspace Files]
+        SUP --> LOOP
+        LOOP <--> MEM
+    end
+    Q --> SUP
+
+    %% ─────────── Tool Layer ───────────
+    subgraph TOOLS[Tool Layer - Unified]
+        direction TB
+        NAT[Native Tools<br/>40+ existing:<br/>web_search, exec_*, memory_*,<br/>cron_*, subagent_*, github_*, etc.]
+        MCPH[MCP Host<br/>official SDK: stdio + http + sse]
+        OAU[OAuth Connectors<br/>Notion, Linear, Google,<br/>Gmail, Calendar, Drive]
+        subgraph MCPS[MCP Servers]
+            direction TB
+            PW[Playwright MCP<br/>server-side browser]
+            BMC[Browser MCP<br/>user's own browser]
+            CUS[User-installed MCPs]
+        end
+        MCPH --> PW
+        MCPH --> BMC
+        MCPH --> CUS
+    end
+    LOOP --> NAT
+    LOOP --> MCPH
+    LOOP --> OAU
+
+    %% ─────────── Egress ───────────
+    subgraph EGR[Response Fanout]
+        direction TB
+        REND[Renderer<br/>text / screenshots / files]
+        SEND[Channel-aware Egress]
+    end
+    LOOP --> REND --> SEND
+    SEND --> WEB
+    SEND --> SLK
+    SEND --> TGM
+    SEND --> DSC
+
+    %% ─────────── Persistence ───────────
+    DB[(Postgres<br/>sessions • messages • runs<br/>memories • skills • connectors)]
+    FS[(Session Workspace FS<br/>HEARTBEAT.md, AGENTS.md,<br/>scratch files)]
+    RT2 <--> DB
+    TOOLS <--> DB
+    RT2 <--> FS
+
+    classDef removed fill:#44111199,stroke:#ff5555,color:#ff9999;
+    classDef new fill:#113d2299,stroke:#55ff99,color:#99ffc8;
+    class PW,BMC,MCPH,MCPS,CUS new
+    class OAU new
+    class SUP,LOOP new
+    class HB,AUT new
