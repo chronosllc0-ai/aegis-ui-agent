@@ -7496,3 +7496,67 @@
 - No browser screenshot tool available in this environment.
 
 ---
+
+---
+## Session 5.72 - April 22, 2026 (UI regression guardrails for visual-overhaul safety)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused frontend regression pass
+
+### What Changed
+- Added a dedicated UI regression suite at `frontend/src/App.ui-regression.test.tsx` to guard:
+  - moved settings-tab header routing via standalone tabs (ensures Connections/Observability render through standalone shell),
+  - sidebar active/inactive visual class rules,
+  - topbar single-row shell structure,
+  - mobile-route rendering checks for Sessions (`/`), Automations (`/automations`), Connections (`/settings/connections`), and Observability (`/settings/observability`).
+- Re-ran frontend build and targeted UI tests for this pass.
+
+### Known Deltas vs Reference
+- Mobile visual validation in this run is DOM-based route/shell regression testing (test assertions), not pixel-diff screenshots.
+- Browser screenshot tooling (`browser_container`) is not available in this execution environment, so no image artifacts were generated in this pass.
+- Running `App.ui-regression` and `App.browser-example` in the same Vitest invocation causes cross-file mock interference; each test file passes when run individually in targeted mode.
+
+### What Works / What Does Not
+- **Works:** Frontend build passes; targeted UI regression checks pass; existing targeted Connections settings tests pass.
+- **Does not (in combined run):** Mixed invocation of `src/App.ui-regression.test.tsx` + `src/App.browser-example.test.tsx` fails due shared mock scope collision.
+
+### Next UI Polish Backlog
+1. Add isolated visual snapshot harness (or Playwright screenshot flow) for mobile views once browser screenshot tooling is available in CI/agent runtime.
+2. Strengthen route-level navigation assertions with explicit no-regression checks around settings→chat transitions.
+3. Deconflict App-level test mocks across files (shared factory utility + isolated module boundaries) so combined targeted runs are stable.
+
+### Blockers / Decisions
+- **Blocker:** No browser screenshot tool available in this environment for image capture.
+- **Decision:** Prioritized deterministic UI regression tests and mobile-route coverage over non-deterministic manual visual capture for this pass.
+
+---
+## Session 5.93 - April 22, 2026 (PR review follow-up: regression test hardening)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 targeted test-quality follow-up
+
+### What Changed
+- Addressed PR review comments in `frontend/src/App.ui-regression.test.tsx`:
+  - replaced index-based role queries (`getAllByRole(...)[0]`) with deterministic singular queries (`getByRole(...)`).
+  - removed brittle class-name assertions for sidebar active/inactive checks and switched to semantic state assertions using `aria-current` + `data-active` attributes.
+  - fixed viewport test pollution by restoring `window.innerWidth` to its original value in `afterEach`.
+- Updated `frontend/src/components/ui/DesignSystem.tsx` `NavItem` to expose semantic state:
+  - `aria-current='page'` when active,
+  - `data-active='true|false'` for stable test hooks and easier QA introspection.
+
+### Known Deltas vs Reference
+- Mobile screenshot image artifacts still cannot be generated in this environment due unavailable browser screenshot tooling.
+- Mobile validation remains automated regression assertions (route/state behavior) rather than pixel-diff snapshots.
+
+### What Works / What Does Not
+- **Works:** Frontend build passes, updated App regression suite passes, and targeted Connections tab tests pass.
+- **Does not:** No browser image screenshot capture available in this runtime.
+
+### Next UI Polish Backlog
+1. Add a true visual screenshot baseline (mobile + desktop) once screenshot tooling is available.
+2. Add focused accessibility checks around sidebar/current-page semantics to leverage new `aria-current` behavior.
+3. Optionally consolidate App-level mock scaffolding shared across multiple test files.
+
+### Blockers / Decisions
+- **Blocker:** Browser screenshot tool unavailable in the current run environment.
+- **Decision:** Prefer semantic UI-state assertions over CSS utility-class assertions for long-term test stability.
