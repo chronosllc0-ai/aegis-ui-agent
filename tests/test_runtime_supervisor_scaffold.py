@@ -186,3 +186,62 @@ def test_event_priority_defaults_match_kind() -> None:
 def test_channel_session_key_rejects_unknown_channel() -> None:
     with pytest.raises(ValueError):
         ChannelSessionKey(owner_uid="u", channel="bogus")
+
+
+def test_stop_with_drain_true_processes_queued_events() -> None:
+    """Regression: stop(drain=True) must not drop queued events."""
+
+    processed: list[AgentEvent] = []
+
+    async def record(_sup, event: AgentEvent, session: ChannelSession) -> None:
+        await asyncio.sleep(0.01)  # simulate work
+        processed.append(event)
+
+    async def scenario() -> None:
+        supervisor = SessionSupervisor("user-drain", dispatch=record)
+        # Stage three events before starting the worker.
+        for i in range(3):
+            await supervisor.enqueue(
+                AgentEvent(
+                    owner_uid="user-drain",
+                    channel="web",
+                    kind=EventKind.CHAT_MESSAGE,
+                    payload={"text": f"m{i}"},
+                )
+            )
+        supervisor.start()
+        # Immediately request drain-stop; all three events must still run.
+        await supervisor.stop(drain=True)
+
+    _run(scenario())
+    assert len(processed) == 3
+
+
+def test_stop_with_drain_false_does_not_block_on_idle_worker() -> None:
+    """Regression: stop(drain=False) wakes a worker blocked on get()."""
+
+    async def scenario() -> None:
+        supervisor = SessionSupervisor("user-fast-stop")
+        supervisor.start()
+        # No events queued; worker is blocked on inbox.get(). stop() must
+        # wake it and return promptly.
+        await asyncio.wait_for(supervisor.stop(drain=False), timeout=2.0)
+
+    _run(scenario())
+
+
+def test_enqueue_after_stop_is_rejected() -> None:
+    async def scenario() -> None:
+        supervisor = SessionSupervisor("user-after-stop")
+        supervisor.start()
+        await supervisor.stop(drain=True)
+        with pytest.raises(RuntimeError):
+            await supervisor.enqueue(
+                AgentEvent(
+                    owner_uid="user-after-stop",
+                    channel="web",
+                    kind=EventKind.CHAT_MESSAGE,
+                )
+            )
+
+    _run(scenario())

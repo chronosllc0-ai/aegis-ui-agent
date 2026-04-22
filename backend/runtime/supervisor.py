@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from backend.runtime.events import AgentEvent
+from backend.runtime.events import AgentEvent, EventKind
 from backend.runtime.session import (
     ChannelSession,
     ChannelSessionKey,
@@ -41,6 +41,22 @@ Phase 2 installs the real hook (OpenAI Agents SDK runner). Until then
 the supervisor uses :func:`_noop_dispatch` which simply logs the event
 and returns.
 """
+
+
+# A minimally-constructed AgentEvent acts as the wake sentinel. It is
+# identified by the boolean flag on its payload and never dispatched.
+_SHUTDOWN_SENTINEL: AgentEvent = AgentEvent(
+    owner_uid="__supervisor__",
+    channel="web",
+    kind=EventKind.STOP,
+    payload={"__shutdown__": True},
+)
+
+
+def _is_shutdown_sentinel(event: AgentEvent) -> bool:
+    return event is _SHUTDOWN_SENTINEL or (
+        event.owner_uid == "__supervisor__" and bool(event.payload.get("__shutdown__"))
+    )
 
 
 async def _noop_dispatch(
@@ -98,7 +114,11 @@ class SessionSupervisor:
         self._dispatch: DispatchHook = dispatch or _noop_dispatch
         self._inbox: asyncio.PriorityQueue[AgentEvent] = asyncio.PriorityQueue()
         self._worker: asyncio.Task[None] | None = None
-        self._shutdown = asyncio.Event()
+        # Event flags used to coordinate shutdown semantics. ``_draining``
+        # signals "stop taking new work once the current queue drains";
+        # ``_stopping`` signals "exit ASAP, abandon the queue".
+        self._draining = asyncio.Event()
+        self._stopping = asyncio.Event()
         self.stats = SupervisorStats()
 
     # ------------------------------------------------------------------
@@ -109,25 +129,37 @@ class SessionSupervisor:
         """Start the background worker. Idempotent."""
         if self._worker is not None and not self._worker.done():
             return
-        self._shutdown.clear()
+        self._draining.clear()
+        self._stopping.clear()
         loop = asyncio.get_event_loop()
         self._worker = loop.create_task(self._run(), name=f"supervisor-{self.owner_uid}")
 
     async def stop(self, *, drain: bool = True) -> None:
         """Stop the background worker.
 
-        When ``drain=True`` the worker finishes the current event and
-        processes any queued events in priority order before exiting.
+        When ``drain=True`` the worker processes any queued events in
+        priority order, then exits (subsequent :meth:`enqueue` calls are
+        rejected). When ``drain=False`` the worker exits as soon as it
+        wakes up — any queued events that have not been pulled off the
+        queue are abandoned.
+
+        Safe to call when the worker is not running.
         """
-        self._shutdown.set()
         if drain:
-            # Sentinel wakes the worker to re-check ``_shutdown``.
-            await self._inbox.put(_SHUTDOWN_SENTINEL)
-        if self._worker is not None:
-            try:
-                await self._worker
-            except asyncio.CancelledError:
-                pass
+            self._draining.set()
+        else:
+            self._stopping.set()
+        # Always push a sentinel so a worker blocked on ``inbox.get()``
+        # wakes up and re-checks the shutdown flags.
+        await self._inbox.put(_SHUTDOWN_SENTINEL)
+        worker = self._worker
+        if worker is None:
+            return
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
+        finally:
             self._worker = None
 
     # ------------------------------------------------------------------
@@ -152,10 +184,16 @@ class SessionSupervisor:
         Materializes the target :class:`ChannelSession` before enqueueing
         so the supervisor has an immediate, consistent view of who is
         talking to it.
+
+        Raises ``RuntimeError`` if the supervisor is shutting down.
         """
         if event.owner_uid != self.owner_uid:
             raise ValueError(
                 f"event owner {event.owner_uid!r} does not match supervisor {self.owner_uid!r}"
+            )
+        if self._stopping.is_set() or self._draining.is_set():
+            raise RuntimeError(
+                f"SessionSupervisor({self.owner_uid}) is shutting down; refusing new events"
             )
         self.session(event.channel)  # warm the session
         self.stats.enqueued += 1
@@ -172,11 +210,20 @@ class SessionSupervisor:
     async def _run(self) -> None:
         logger.info("SessionSupervisor(%s) worker starting", self.owner_uid)
         try:
-            while not self._shutdown.is_set():
+            while True:
+                if self._stopping.is_set():
+                    break
+                if self._draining.is_set() and self._inbox.empty():
+                    break
                 event = await self._inbox.get()
-                if event is _SHUTDOWN_SENTINEL:
-                    # Shutdown requested; loop exits naturally.
+                if _is_shutdown_sentinel(event):
+                    # Wake signal; re-check shutdown flags at the top of
+                    # the loop.
                     continue
+                if self._stopping.is_set():
+                    # Requested exit-now while we were blocked on get();
+                    # drop the event on the floor.
+                    break
                 session = self.session(event.channel)
                 session.touch()
                 try:
@@ -205,24 +252,6 @@ class SessionSupervisor:
         self._dispatch = hook
 
 
-class _ShutdownSentinel(AgentEvent):
-    """Sentinel used to wake the worker on shutdown."""
-
-    __slots__ = ()
-
-
-# A real sentinel uses a minimally-constructed AgentEvent so the
-# PriorityQueue comparator still works.
-from backend.runtime.events import EventKind  # noqa: E402  (deliberate late import)
-
-_SHUTDOWN_SENTINEL = AgentEvent(
-    owner_uid="__supervisor__",
-    channel="web",
-    kind=EventKind.STOP,
-    payload={"__shutdown__": True},
-)
-
-
 class SupervisorRegistry:
     """Process-wide registry of per-user supervisors.
 
@@ -248,11 +277,13 @@ class SupervisorRegistry:
             return supervisor
 
     async def shutdown(self) -> None:
-        """Stop every supervisor in the registry."""
+        """Stop every supervisor in the registry, draining queued work."""
         async with self._lock:
             supervisors = list(self._supervisors.values())
             self._supervisors.clear()
-        await asyncio.gather(*(s.stop() for s in supervisors), return_exceptions=True)
+        await asyncio.gather(
+            *(s.stop(drain=True) for s in supervisors), return_exceptions=True
+        )
 
     def describe(self) -> dict[str, dict[str, int | str | None]]:
         """Return per-supervisor stats for admin."""
