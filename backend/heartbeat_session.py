@@ -9,6 +9,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from config import settings
@@ -24,6 +25,9 @@ DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 180
 class HeartbeatRuntimeState:
     running: bool = False
     retries: int = 0
+
+
+HeartbeatDispatcher = Callable[[str, str], Awaitable[None]]
 
 
 def build_heartbeat_prompt(*, now: datetime, tz_name: str = "America/New_York") -> str:
@@ -48,7 +52,15 @@ def build_heartbeat_prompt(*, now: datetime, tz_name: str = "America/New_York") 
 class HeartbeatSessionScheduler:
     """Schedule and persist heartbeat prompts/responses in a dedicated session."""
 
-    def __init__(self, interval_seconds: int | None = None, retry_cap: int = 2, timeout_seconds: int = 20) -> None:
+    def __init__(
+        self,
+        *,
+        dispatch: HeartbeatDispatcher,
+        interval_seconds: int | None = None,
+        retry_cap: int = 2,
+        timeout_seconds: int = 20,
+    ) -> None:
+        self._dispatch = dispatch
         self._interval = max(30, int(interval_seconds or getattr(settings, "HEARTBEAT_SESSION_INTERVAL_SECONDS", DEFAULT_HEARTBEAT_INTERVAL_SECONDS)))
         self._retry_cap = max(0, retry_cap)
         self._timeout_seconds = max(5, timeout_seconds)
@@ -76,20 +88,26 @@ class HeartbeatSessionScheduler:
             return
 
         async def _execute() -> None:
-            from sqlalchemy import select as sa_select
+            from sqlalchemy import select as sa_select, tuple_
             from backend.database import ChatSession as SessionModel, get_session
             from backend.session_store import append_session_message, get_or_create_session
 
             self._state.running = True
             try:
                 async for db in get_session():
+                    dispatch_queue: list[tuple[str, str]] = []
                     users = (
                         await db.execute(
                             sa_select(SessionModel.user_id)
-                            .where(SessionModel.platform == "web", SessionModel.status != "archived")
+                            .where(
+                                tuple_(SessionModel.platform, SessionModel.status).in_(
+                                    [("web", "active"), ("web", "idle")]
+                                )
+                            )
                             .distinct()
                         )
                     ).all()
+                    prompt = build_heartbeat_prompt(now=datetime.now(timezone.utc))
                     for (user_id,) in users:
                         row = await get_or_create_session(
                             db,
@@ -99,7 +117,6 @@ class HeartbeatSessionScheduler:
                             title="heartbeat",
                             parent_session_id="agent:main:main",
                         )
-                        prompt = build_heartbeat_prompt(now=datetime.now(timezone.utc))
                         await append_session_message(
                             db,
                             session_ref_id=row.id,
@@ -107,14 +124,10 @@ class HeartbeatSessionScheduler:
                             content=prompt,
                             metadata={"source": "heartbeat_scheduler", "session": HEARTBEAT_SESSION_ID},
                         )
-                        await append_session_message(
-                            db,
-                            session_ref_id=row.id,
-                            role="assistant",
-                            content="HEARTBEAT_OK",
-                            metadata={"source": "heartbeat_scheduler", "session": HEARTBEAT_SESSION_ID},
-                        )
+                        dispatch_queue.append((HEARTBEAT_SESSION_ID, prompt))
                     await db.commit()
+                    for dispatch_session_id, dispatch_prompt in dispatch_queue:
+                        await self._dispatch(dispatch_session_id, dispatch_prompt)
             finally:
                 self._state.running = False
 
@@ -127,4 +140,3 @@ class HeartbeatSessionScheduler:
             if self._state.retries <= self._retry_cap:
                 await asyncio.sleep(1)
                 await self.run_once()
-

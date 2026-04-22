@@ -15,7 +15,10 @@ def test_build_heartbeat_prompt_contains_required_path_and_time() -> None:
 
 
 def test_scheduler_skips_when_previous_run_active() -> None:
-    scheduler = HeartbeatSessionScheduler(interval_seconds=60)
+    async def _dispatch(_: str, __: str) -> None:
+        return None
+
+    scheduler = HeartbeatSessionScheduler(dispatch=_dispatch, interval_seconds=60)
     scheduler._state.running = True  # noqa: SLF001 - internal state guard validation
     asyncio.run(scheduler.run_once())
     assert scheduler._state.running is True

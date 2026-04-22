@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FiChevronDown, FiSearch, FiX } from 'react-icons/fi'
+import { FiCheck, FiChevronDown, FiSearch, FiX } from 'react-icons/fi'
 import { PanelCard } from './ui/DesignSystem'
 
 type SessionChannel = 'chat' | 'browser' | 'system'
@@ -36,6 +36,7 @@ function RadioItem({ item, selected, onSelect }: { item: SessionSwitcherItem; se
         <p className='truncate text-base text-zinc-100'>{item.label}</p>
         {item.detail && <p className='truncate text-xs text-zinc-400'>{item.detail}</p>}
       </div>
+      {selected && <FiCheck className='h-4 w-4 text-indigo-300' aria-hidden='true' />}
     </button>
   )
 }

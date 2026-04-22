@@ -120,6 +120,16 @@ function App() {
   // Server messages loaded for the selected conversation
   const [serverMessages, setServerMessages] = useState<ServerMessage[]>([])
   const [optimisticMessagesByTask, setOptimisticMessagesByTask] = useState<Record<string, ServerMessage[]>>({})
+  const saveSessionLabel = useCallback(async (sessionId: string, label: string) => {
+    if (!label) return
+    await fetch(apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}/label`), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: label }),
+    })
+    await fetchSessions()
+  }, [fetchSessions])
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -132,6 +142,7 @@ function App() {
   const [showTour, setShowTour] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<{ instruction: string; metadata?: Record<string, unknown> } | null>(null)
   const subAgentsRef = useRef(subAgents)
+  const redirectedLegacySessionsRef = useRef(false)
   // Use case page routing
   const [activeUseCaseId, setActiveUseCaseId] = useState<string | null>(null)
   // draftInput reserved for future InputBar onChange wiring
@@ -245,9 +256,12 @@ function App() {
 
   useEffect(() => {
     if (pathname === '/settings/sessions') {
+      if (redirectedLegacySessionsRef.current) return
+      redirectedLegacySessionsRef.current = true
       navigateTo('/sessions')
       return
     }
+    redirectedLegacySessionsRef.current = false
     setShowSettings(isSettingsPath || isAdminPath)
     setShowAutomations(isAutomationsPath)
 
@@ -885,6 +899,7 @@ function App() {
                   <SessionsPage
                     sessions={sessions}
                     onRefresh={fetchSessions}
+                    onSaveLabel={saveSessionLabel}
                     onOpenSession={(sessionId) => {
                       setSelectedTaskId(sessionId)
                       navigateTo('/')

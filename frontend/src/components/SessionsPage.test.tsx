@@ -13,6 +13,7 @@ describe('SessionsPage', () => {
           { session_id: 'agent:main:heartbeat', parent_session_id: 'agent:main:main', title: 'heartbeat', status: 'active', created_at: null, updated_at: new Date().toISOString() },
         ]}
         onRefresh={vi.fn()}
+        onSaveLabel={vi.fn()}
         onOpenSession={onOpenSession}
       />,
     )

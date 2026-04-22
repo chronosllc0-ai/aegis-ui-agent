@@ -9,12 +9,14 @@ export type SessionPageRow = {
   updated: string | null
   tokens: number
   kind: 'main' | 'channel' | 'heartbeat' | 'unknown'
+  status: string
 }
 
 type SessionsPageProps = {
   sessions: ServerSession[]
   onRefresh: () => Promise<void> | void
   onOpenSession: (sessionId: string) => void
+  onSaveLabel: (sessionId: string, label: string) => Promise<void> | void
 }
 
 const PAGE_SIZES = [10, 20, 50]
@@ -35,7 +37,7 @@ function formatUpdated(value: string | null): string {
   return `${diffDay}d ago`
 }
 
-export function SessionsPage({ sessions, onRefresh, onOpenSession }: SessionsPageProps) {
+export function SessionsPage({ sessions, onRefresh, onOpenSession, onSaveLabel }: SessionsPageProps) {
   const [search, setSearch] = useState('')
   const [filterActive, setFilterActive] = useState(true)
   const [filterGlobal, setFilterGlobal] = useState(true)
@@ -44,6 +46,7 @@ export function SessionsPage({ sessions, onRefresh, onOpenSession }: SessionsPag
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(10)
   const [reasoningBySession, setReasoningBySession] = useState<Record<string, string>>({})
+  const [labelsBySession, setLabelsBySession] = useState<Record<string, string>>({})
 
   const rows = useMemo<SessionPageRow[]>(() => {
     return sessions.map((session) => {
@@ -63,9 +66,18 @@ export function SessionsPage({ sessions, onRefresh, onOpenSession }: SessionsPag
         updated: session.updated_at,
         tokens: estimateTokens(`${session.title ?? ''}${id}`),
         kind,
+        status: session.status || 'unknown',
       }
     })
   }, [sessions])
+
+  useEffect(() => {
+    setLabelsBySession(
+      Object.fromEntries(
+        rows.map((row) => [row.key, row.label]),
+      ),
+    )
+  }, [rows])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -73,8 +85,8 @@ export function SessionsPage({ sessions, onRefresh, onOpenSession }: SessionsPag
     return sorted.filter((row) => {
       if (!filterGlobal && (row.kind === 'main' || row.kind === 'heartbeat')) return false
       if (!filterUnknown && row.kind === 'unknown') return false
-      if (!filterActive && row.kind !== 'heartbeat') return false
-      if (activeOnly === 'active' && row.kind !== 'main' && row.kind !== 'channel' && row.kind !== 'heartbeat') return false
+      if (!filterActive && row.status === 'active') return false
+      if (activeOnly === 'active' && row.status !== 'active') return false
       if (!q) return true
       return `${row.key} ${row.label} ${row.kind} ${row.identity}`.toLowerCase().includes(q)
     })
@@ -137,7 +149,13 @@ export function SessionsPage({ sessions, onRefresh, onOpenSession }: SessionsPag
                     <div className='text-zinc-500'>{row.identity}</div>
                   </td>
                   <td className='py-3 pr-3'>
-                    <input defaultValue={row.label} className='w-full rounded border border-zinc-700 bg-[#13151f] px-2 py-1 text-xs text-zinc-200' aria-label={`Label for ${row.key}`} />
+                    <input
+                      value={labelsBySession[row.key] ?? row.label}
+                      onChange={(e) => setLabelsBySession((prev) => ({ ...prev, [row.key]: e.target.value }))}
+                      onBlur={() => void onSaveLabel(row.key, (labelsBySession[row.key] ?? row.label).trim())}
+                      className='w-full rounded border border-zinc-700 bg-[#13151f] px-2 py-1 text-xs text-zinc-200'
+                      aria-label={`Label for ${row.key}`}
+                    />
                   </td>
                   <td className='py-3 pr-3 text-zinc-300'>{formatUpdated(row.updated)}</td>
                   <td className='py-3 pr-3 text-zinc-300'>{row.tokens.toLocaleString()} / 400000</td>

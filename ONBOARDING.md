@@ -7608,3 +7608,44 @@
 
 ### Blockers
 - No hard blockers in this pass.
+
+---
+## Session 5.73 - April 22, 2026 (Review-fix pass for Sessions + heartbeat PR)
+
+**Agent:** GPT-5.3-Codex  
+**Duration:** ~1 focused review remediation pass
+
+### What Was Done
+- Addressed review feedback for heartbeat correctness:
+  - heartbeat scheduler no longer writes fake assistant `HEARTBEAT_OK` rows directly.
+  - scheduler now persists the heartbeat prompt and dispatches that prompt to runtime via injected dispatcher callback.
+  - reduced heartbeat DB write amplification by removing assistant write and dispatching after commit.
+- Added sessions-v2 gate around heartbeat scheduler startup/shutdown to avoid background writes when feature flag is disabled.
+- Improved heartbeat user selection query shape to use `(platform, status)` tuple predicate and added supporting DB index (`idx_chat_sessions_platform_status`).
+- Fixed Sessions page label persistence:
+  - label input is now controlled,
+  - `onBlur` persists via new backend endpoint `POST /api/sessions/{session_id}/label`.
+- Fixed Sessions “Active” filters to use actual `session.status` rather than inferred kind.
+- Added redirect guard ref in `App.tsx` for legacy `/settings/sessions` redirection path.
+- Restored explicit selected indicator in Session switcher rows with check icon.
+
+### What's Working
+- Review-blocking items were addressed across heartbeat backend flow and sessions UI behavior.
+- Frontend targeted tests and build pass.
+- Heartbeat unit tests and websocket smoke test pass.
+
+### What's NOT Working Yet
+- Checklist command `python -m py_compile main.py backend/pydantic_adk_runner.py` still fails because `backend/pydantic_adk_runner.py` does not exist in this repository path.
+- No browser screenshot artifact captured in this environment due missing screenshot/browser tool.
+
+### Next Steps
+1. Add integration tests that validate heartbeat dispatch reaches runtime and records assistant response via normal execution path.
+2. Add persistence tests for `POST /api/sessions/{session_id}/label` endpoint.
+3. Consider table-level batching/queueing if heartbeat scale increases further.
+
+### Decisions Made
+- Kept heartbeat scheduler as a session-prompt producer + runtime dispatcher trigger, rather than synthesizing assistant responses in DB.
+- Preserved backward-compatible `/settings/sessions` redirect while adding one-shot guard semantics.
+
+### Blockers
+- No hard blockers.
