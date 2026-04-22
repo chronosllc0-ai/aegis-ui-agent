@@ -2874,6 +2874,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
 
     try:
         _get_orchestrator()
+        await _send_initial_frame(websocket)
 
         while True:
             data = await websocket.receive_json()

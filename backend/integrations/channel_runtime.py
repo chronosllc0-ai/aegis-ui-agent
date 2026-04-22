@@ -119,7 +119,13 @@ class SlackChannelAdapter:
         )
 
     async def send_text(self, destination: str, text: str, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        return await self.integration.send_text(destination, text, metadata=metadata)
+        send_text = getattr(self.integration, "send_text", None)
+        if callable(send_text):
+            return await send_text(destination, text, metadata=metadata)
+        return await self.integration.execute_tool(
+            "slack_send_message",
+            {"channel": destination, "text": text, **(metadata or {})},
+        )
 
     async def test_connection(self) -> dict[str, Any]:
         return await self.integration.execute_tool("slack_list_channels", {})
@@ -159,7 +165,13 @@ class DiscordChannelAdapter:
         )
 
     async def send_text(self, destination: str, text: str, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        return await self.integration.send_text(destination, text, metadata=metadata)
+        send_text = getattr(self.integration, "send_text", None)
+        if callable(send_text):
+            return await send_text(destination, text, metadata=metadata)
+        return await self.integration.execute_tool(
+            "discord_send_message",
+            {"channel_id": destination, "content": text, **(metadata or {})},
+        )
 
     async def test_connection(self) -> dict[str, Any]:
         return await self.integration.execute_tool("discord_list_channels", {})

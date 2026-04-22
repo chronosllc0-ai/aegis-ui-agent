@@ -7685,3 +7685,32 @@
 - None.
 
 ---
+## Session 5.74 - April 22, 2026 (Follow-up test-fix pass for startup reliability PR)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 focused regression-fix pass
+
+### What Was Done
+- Fixed Slack/Discord channel adapters to support legacy test doubles that do not implement `send_text(...)` by adding a fallback to `execute_tool(...)` message send paths.
+- Restored websocket bootstrap initial-frame send (`_send_initial_frame`) without reintroducing eager `ensure_browser()`.
+- Re-ran previously failing test targets and confirmed green for conversation persistence + websocket smoke.
+
+### What's Working
+- `tests/test_conversation_persistence.py::test_integration_registration_captures_owner_and_send_message_persists_conversation` now passes.
+- `tests/test_main_websocket.py::test_websocket_navigate_smoke` now passes.
+- Frontend build and backend compile checks still succeed.
+
+### What's NOT Working Yet
+- Broader phase-level acceptance tests beyond targeted regressions were not expanded in this follow-up pass.
+
+### Next Steps
+1. Add explicit unit tests for adapter fallback behavior (`send_text` missing -> `execute_tool` fallback).
+2. Add websocket startup-failure integration test asserting `RUNTIME_STARTUP_FAILED` framing contract.
+
+### Decisions Made
+- Chose compatibility fallback in adapters to preserve behavior with existing stubs/integration wrappers while keeping new structured ownership/auth flow intact.
+
+### Blockers
+- None.
+
+---
