@@ -7714,3 +7714,32 @@
 - None.
 
 ---
+## Session 5.75 - April 22, 2026 (Review follow-up: deterministic WS first event + real heartbeat toggle)
+
+**Agent:** GPT-5.3-Codex
+**Duration:** ~1 targeted review-fix pass
+
+### What Was Done
+- Updated websocket initial-frame helper to always emit a deterministic first `frame` event on connect, including fallback 1x1 PNG when browser/page is blank or screenshot capture fails.
+- Added `HEARTBEAT_SESSION_ENABLED` to typed runtime settings in `config.py` so heartbeat enable/disable can be controlled via environment configuration.
+- Added heartbeat environment variables to `.env.example` (`HEARTBEAT_SESSION_ENABLED`, `HEARTBEAT_SESSION_INTERVAL_SECONDS`).
+- Re-ran websocket + conversation persistence + heartbeat unit tests to validate review concerns.
+
+### What's Working
+- Initial websocket protocol now emits a first event deterministically, preserving existing client/test expectation to read immediately after connect.
+- Heartbeat enable/disable switch is now a real settings field instead of implicit `getattr(..., True)` fallback-only behavior.
+
+### What's NOT Working Yet
+- No additional blockers identified in this pass.
+
+### Next Steps
+1. Add a narrow test asserting fallback-frame behavior when screenshot capture raises.
+2. Surface `HEARTBEAT_SESSION_ENABLED` in operator docs/dashboard controls explicitly.
+
+### Decisions Made
+- Chose to preserve existing `frame` first-event contract (instead of introducing a new `ready` event type) for compatibility.
+
+### Blockers
+- None.
+
+---

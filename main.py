@@ -2088,11 +2088,20 @@ async def _send_initial_frame(websocket: WebSocket) -> None:
         page = getattr(executor, "page", None)
         current_url = getattr(page, "url", None) if page is not None else None
         if current_url in ("about:blank", ""):
-            return  # Don't replace the welcome screen with a white blank frame
+            # Emit deterministic first frame event even before navigation starts.
+            await _send_frame(
+                websocket,
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z2ioAAAAASUVORK5CYII=",
+            )
+            return
         screenshot_bytes = await executor.screenshot()
         await _send_frame(websocket, base64.b64encode(screenshot_bytes).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Initial frame capture failed: %s", exc)
+        await _send_frame(
+            websocket,
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z2ioAAAAASUVORK5CYII=",
+        )
 
 
 async def _send_workflow_step(
