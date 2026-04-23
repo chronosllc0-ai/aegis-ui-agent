@@ -120,6 +120,17 @@ class SessionSupervisor:
         self._draining = asyncio.Event()
         self._stopping = asyncio.Event()
         self.stats = SupervisorStats()
+        # Optional async teardown callbacks. Populated by the agent loop
+        # (:mod:`backend.runtime.agent_loop`) so per-supervisor MCP tool
+        # providers, database pools, etc. can be released when the
+        # supervisor stops. Registered callables are awaited in LIFO
+        # order during :meth:`stop`; errors are logged but do not abort
+        # the shutdown sequence.
+        self._teardown_hooks: list[Callable[[], Awaitable[None]]] = []
+
+    def register_teardown(self, hook: Callable[[], Awaitable[None]]) -> None:
+        """Register an async callback to run when the supervisor stops."""
+        self._teardown_hooks.append(hook)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -161,6 +172,17 @@ class SessionSupervisor:
             pass
         finally:
             self._worker = None
+            # Fire teardown hooks in reverse registration order.
+            hooks = list(reversed(self._teardown_hooks))
+            self._teardown_hooks.clear()
+            for hook in hooks:
+                try:
+                    await hook()
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "SessionSupervisor(%s) teardown hook raised",
+                        self.owner_uid,
+                    )
 
     # ------------------------------------------------------------------
     # Session access

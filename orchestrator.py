@@ -20,7 +20,6 @@ from analyzer import ScreenshotAnalyzer, detect_available_model
 from universal_navigator import run_universal_navigation
 from config import settings as settings_module
 from executor import ActionExecutor
-from mcp_client import MCPClient
 from navigator import NavigatorAgent
 
 logger = logging.getLogger(__name__)
@@ -87,7 +86,6 @@ class AgentOrchestrator:
         self.default_model_name = settings_module.GEMINI_MODEL
         self.model_name = self.default_model_name
         self.agent: Agent | None = None
-        self.mcp_client = MCPClient()
 
     def _ensure_gemini_stack(self) -> None:
         """Initialize Gemini-dependent components lazily when needed."""

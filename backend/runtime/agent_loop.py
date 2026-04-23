@@ -42,6 +42,7 @@ from backend.runtime.persistence import (
 from backend.runtime.session import ChannelSession
 from backend.runtime.supervisor import DispatchHook, SessionSupervisor, SupervisorRegistry
 from backend.runtime.tools.context import ToolContext
+from backend.runtime.tools.mcp_host import MCPToolProvider, SpecLoader
 from backend.runtime.tools.native import NATIVE_TOOLS, get_enabled_native_tools
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,14 @@ class DispatchConfig:
     build_agent_fn: Callable[[ChannelSession, ToolContext], Agent] | None = None
     instructions: str | None = None
     model: Model | str | None = None
+    mcp_spec_loader: SpecLoader | None = None
+    """Optional per-user MCP spec loader.
+
+    When set, each supervisor gets its own :class:`MCPToolProvider`
+    (lazily spawned on first dispatch, torn down in
+    :meth:`SessionSupervisor.stop`). When ``None``, MCP tools are not
+    attached and the agent runs with native tools only.
+    """
 
 
 def _extract_text(event: AgentEvent) -> str:
@@ -183,12 +192,45 @@ async def _maybe_record(
         logger.exception("record_event failed kind=%s run=%s", kind, run_id)
 
 
-def _default_build_agent(session: ChannelSession, ctx: ToolContext, config: DispatchConfig) -> Agent:
+def _default_build_agent(
+    session: ChannelSession,
+    ctx: ToolContext,
+    config: DispatchConfig,
+    mcp_tools: Sequence[Any] | None = None,
+) -> Agent:
+    tools: list[Any] = list(get_enabled_native_tools())
+    if mcp_tools:
+        tools.extend(mcp_tools)
     return build_agent(
         session=session,
+        tools=tools,
         instructions=config.instructions,
         model=config.model,
     )
+
+
+async def _ensure_mcp_provider(
+    supervisor: SessionSupervisor,
+    config: DispatchConfig,
+) -> MCPToolProvider | None:
+    """Lazily create an :class:`MCPToolProvider` bound to ``supervisor``.
+
+    The provider is cached on a private attribute so every dispatch for
+    this user reuses the same underlying MCP sessions. A teardown hook
+    on the supervisor closes it when the supervisor stops.
+    """
+    if config.mcp_spec_loader is None:
+        return None
+    existing: MCPToolProvider | None = getattr(supervisor, "_mcp_provider", None)
+    if existing is not None:
+        return existing
+    provider = MCPToolProvider(
+        owner_uid=supervisor.owner_uid,
+        spec_loader=config.mcp_spec_loader,
+    )
+    supervisor._mcp_provider = provider  # type: ignore[attr-defined]
+    supervisor.register_teardown(provider.aclose)
+    return provider
 
 
 def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
@@ -273,8 +315,19 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             is_main_session=True,
         )
 
+        mcp_tools: list[Any] = []
+        provider = await _ensure_mcp_provider(supervisor, cfg)
+        if provider is not None:
+            try:
+                mcp_tools = list(await provider.get_tools())
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "runtime_dispatch: MCP provider failed for %s",
+                    session.owner_uid,
+                )
+
         agent_builder = cfg.build_agent_fn or (
-            lambda s, c: _default_build_agent(s, c, cfg)
+            lambda s, c: _default_build_agent(s, c, cfg, mcp_tools)
         )
         agent = agent_builder(session, tool_ctx)
 

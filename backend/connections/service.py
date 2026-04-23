@@ -10,21 +10,26 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.connections.models import ConnectionTemplate, MCPServerConfig
-from backend.mcp.transport import scan_mcp_tools, test_mcp_transport
+from backend.mcp.transport import test_mcp_transport
+from backend.runtime.tools.mcp_host import MCPServerSpec, scan_mcp_server
 
 DEFAULT_MCP_PRESETS: list[dict[str, Any]] = [
     {
         "id": "preset-browsermcp",
         "name": "BrowserMCP",
         "subtitle": "Web browser automation",
-        "description": "Launches browser automation primitives for navigation and snapshots.",
+        "description": "Browser automation primitives via @browsermcp/mcp, spawned as a stdio subprocess by the backend.",
         "logo_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/webassembly.svg",
         "connection_type": "mcp",
         "published": True,
         "status": "published",
+        # Phase 3 PLAN.md §4 option (a): bundle @browsermcp/mcp as an
+        # opt-in backend stdio subprocess. Operators flip the server on
+        # by setting ``BROWSERMCP_ENABLED=true`` in the backend env.
         "config": {
-            "transport": "http",
-            "endpoint": "http://localhost:3333/mcp",
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@browsermcp/mcp@latest"],
             "auth_type": "none",
         },
     },
@@ -166,19 +171,35 @@ async def test_connection(connection_type: str, config: dict[str, Any]) -> tuple
     return False, f"Unsupported connection type '{connection_type}'."
 
 
-def scan_tools_for_server(
+async def scan_tools_for_server(
+    server_id: str,
     name: str,
     transport: str,
     endpoint: str | None,
-    source_type: str | None = None,
-    preset_id: str | None = None,
+    command: str | None = None,
+    args: list[str] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Run MCP tool discovery and return serialized response payload."""
-    result = scan_mcp_tools(name, transport, endpoint, source_type=source_type, preset_id=preset_id)
+    """Run a live MCP ``tools/list`` scan and return a serialized payload.
+
+    Phase 3 replaces the deprecated fixture-based ``scan_mcp_tools`` with
+    a real SDK round-trip. The return shape is preserved so existing
+    callers (the admin router, the test suite) keep working.
+    """
+    spec = MCPServerSpec(
+        server_id=server_id,
+        transport=(transport or "http").lower(),
+        command=(command or "").strip() or None,
+        args=tuple(args or ()),
+        endpoint=(endpoint or "").strip() or None,
+        headers=dict(headers or {}),
+        display_name=name,
+    )
+    report = await scan_mcp_server(spec)
     return {
-        "ok": result.ok,
-        "tools": result.tools,
-        "message": result.message,
-        "error": result.error,
-        "tested_at": result.tested_at.isoformat(),
+        "ok": report.ok,
+        "tools": report.tools,
+        "message": report.message,
+        "error": report.error,
+        "tested_at": report.tested_at.isoformat(),
     }
