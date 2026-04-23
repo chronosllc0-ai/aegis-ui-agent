@@ -42,6 +42,10 @@ from backend.runtime.persistence import (
 from backend.runtime.session import ChannelSession
 from backend.runtime.supervisor import DispatchHook, SessionSupervisor, SupervisorRegistry
 from backend.runtime.tools.context import ToolContext
+from backend.runtime.tools.connectors import (
+    ConnectorLoader,
+    load_connector_tools,
+)
 from backend.runtime.tools.mcp_host import MCPToolProvider, SpecLoader
 from backend.runtime.tools.native import NATIVE_TOOLS, get_enabled_native_tools
 
@@ -127,6 +131,15 @@ class DispatchConfig:
     :meth:`SessionSupervisor.stop`). When ``None``, MCP tools are not
     attached and the agent runs with native tools only.
     """
+    connector_loader: ConnectorLoader | None = None
+    """Optional async loader returning connector tools for the current user.
+
+    Defaults to :func:`backend.runtime.tools.connectors.load_connector_tools`
+    when ``None`` — which queries the ``user_connections`` table and
+    exposes every active connector action as an Agents SDK tool. Set to
+    a no-op loader (``async def _empty(_): return []``) in tests that
+    want to bypass connector discovery.
+    """
 
 
 def _extract_text(event: AgentEvent) -> str:
@@ -192,15 +205,66 @@ async def _maybe_record(
         logger.exception("record_event failed kind=%s run=%s", kind, run_id)
 
 
+def _tool_name(tool: Any) -> str | None:
+    """Best-effort name extractor for Agents SDK tool-like objects."""
+    name = getattr(tool, "name", None)
+    if isinstance(name, str):
+        return name
+    return None
+
+
 def _default_build_agent(
     session: ChannelSession,
     ctx: ToolContext,
     config: DispatchConfig,
     mcp_tools: Sequence[Any] | None = None,
+    connector_tools: Sequence[Any] | None = None,
 ) -> Agent:
+    """Compose native + MCP + connector tools into a single Agent.
+
+    *Name-collision policy:* native wins, then MCP, then connectors.
+    Connector tool names use the canonical ``{connector_id}_{action_id}``
+    format (single underscore) per PLAN.md §4, which overlaps with a
+    handful of native GitHub tools (e.g. ``github_list_repos``,
+    ``github_create_issue``, ``github_get_file``). The Agents SDK
+    resolves duplicate tool names last-wins, so without dedup the
+    connector path would silently shadow the native PAT-backed tools
+    and regress existing flows.
+
+    We therefore drop any connector or MCP tool whose name is already
+    taken by something earlier in the chain and log a warning listing
+    the shadowed names so it's visible in production.
+    """
+
     tools: list[Any] = list(get_enabled_native_tools())
+    seen: set[str] = {n for n in (_tool_name(t) for t in tools) if n}
+
+    def _extend_unique(extra: Sequence[Any], source: str) -> None:
+        shadowed: list[str] = []
+        for tool in extra:
+            name = _tool_name(tool)
+            if name is None:
+                # Unnamed tools can't collide; just accept them.
+                tools.append(tool)
+                continue
+            if name in seen:
+                shadowed.append(name)
+                continue
+            seen.add(name)
+            tools.append(tool)
+        if shadowed:
+            logger.warning(
+                "agent_loop: dropped %d %s tool(s) shadowed by earlier "
+                "layer: %s",
+                len(shadowed),
+                source,
+                ", ".join(sorted(shadowed)),
+            )
+
     if mcp_tools:
-        tools.extend(mcp_tools)
+        _extend_unique(mcp_tools, "MCP")
+    if connector_tools:
+        _extend_unique(connector_tools, "connector")
     return build_agent(
         session=session,
         tools=tools,
@@ -330,8 +394,22 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                     session.owner_uid,
                 )
 
+        # Connector tools: one per action for every active UserConnection.
+        # The loader does a fresh DB round-trip on every dispatch so newly
+        # added connections surface on the very next turn without needing
+        # a supervisor restart.
+        connector_tools: list[Any] = []
+        connector_loader = cfg.connector_loader or load_connector_tools
+        try:
+            connector_tools = list(await connector_loader(session.owner_uid))
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "runtime_dispatch: connector loader failed for %s",
+                session.owner_uid,
+            )
+
         agent_builder = cfg.build_agent_fn or (
-            lambda s, c: _default_build_agent(s, c, cfg, mcp_tools)
+            lambda s, c: _default_build_agent(s, c, cfg, mcp_tools, connector_tools)
         )
         agent = agent_builder(session, tool_ctx)
 
@@ -402,6 +480,7 @@ def install_supervisor_dispatch(
 
 
 __all__ = [
+    "ConnectorLoader",
     "DEFAULT_MODEL_ENV",
     "DEFAULT_MODEL_FALLBACK",
     "DispatchConfig",

@@ -404,11 +404,13 @@ Each phase is a PR. Do not batch phases — this codebase has a lot of moving pa
 
 **Merge criteria:** fresh user with Playwright MCP enabled can run `go_to_url("https://example.com")` + `screenshot()` via the agent and see the image render in the chat surface. Browser MCP card flips from "preset" to "real" with a live `tools/list`.
 
-### Phase 4 — Connectors-as-tools
+### Phase 4 — Connectors-as-tools ✅ (PR #338)
 
-- Implement `backend/runtime/tools/connectors.py`.
-- For each connector in `backend/connectors/*` with a stored per-user token, expose every `ConnectorAction` as an agent tool. Tool-name format: `{connector_id}_{action_id}` (e.g. `notion_search`, `google_gmail_send`, `linear_create_issue`).
-- Add conformance tests per connector hitting a sandbox token (skip in CI if no sandbox is provided).
+- [x] Implement `backend/runtime/tools/connectors.py` — tool builder, tool-name canonicalisation (`{connector_id}_{action_id}`), per-call token decrypt + refresh-on-expiry, friendly `ERROR: …` surfacing.
+- [x] Wire into `backend/runtime/agent_loop.py` — new `DispatchConfig.connector_loader` (defaults to `load_connector_tools`); appended after native + MCP tools so connector names never collide.
+- [x] Expose 37 tools across the 5 OAuth connectors: Notion (6) · GitHub (9) · Google Gmail/Drive/Calendar (9) · Linear (7) · Slack (6).
+- [x] `tests/test_runtime_connectors.py` — 12 tests covering name builder, schema translation, per-connector tool coverage, DB-backed discovery (active vs. revoked connections), decrypt + execute, no-connection error path, refresh-on-expiry with writeback, exception surfacing, JSON-arg validation.
+- [ ] Per-connector conformance tests hitting sandbox tokens (skipped by default — follow-up).
 
 **Merge criteria:** with Notion + Gmail + Linear + Slack + GitHub all connected, the agent can execute at least one non-trivial action per connector end-to-end (e.g. create a Notion page with content, send a Gmail draft, list Linear issues, post to a Slack channel, open a GitHub issue).
 
