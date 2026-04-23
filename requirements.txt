@@ -31,6 +31,8 @@ pydantic-ai-slim[openai,anthropic,groq,xai]>=1.79.0
 # Always-on runtime (Phase 2+): OpenAI Agents SDK + LiteLLM shim
 openai-agents>=0.14.4,<1.0.0
 litellm>=1.83.0,<2.0.0
+# Phase 3: MCP host (stdio + http + sse) via the official SDK
+mcp>=1.27.0,<2.0.0
 
 # Browser automation
 playwright>=1.49.0

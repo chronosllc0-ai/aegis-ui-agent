@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,10 +23,9 @@ from backend.connections.service import list_published_mcp_presets, list_user_mc
 from backend.database import User, get_session
 from backend.key_management import KeyManager
 from config import settings
-from mcp_client import MCPClient
 
 router = APIRouter(prefix="/api", tags=["connections"])
-_mcp_registry = MCPClient()
+logger = logging.getLogger(__name__)
 _key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 
 
@@ -104,8 +104,6 @@ async def create_mcp_server_from_preset(
     session.add(server)
     await session.commit()
     await session.refresh(server)
-
-    await _mcp_registry.register_preset_server(str(payload["uid"]), server.id, server.name, [])
     return {"ok": True, "server_id": server.id, "status": server.status}
 
 
@@ -133,7 +131,6 @@ async def create_custom_mcp_server(
     session.add(server)
     await session.commit()
     await session.refresh(server)
-    await _mcp_registry.register_custom_server(str(payload["uid"]), server.id, server.name, [])
     return {"ok": True, "server": {"id": server.id, "name": server.name, "status": server.status}}
 
 
@@ -148,18 +145,53 @@ async def scan_mcp_server_tools(
     if not server or server.user_id != str(payload["uid"]):
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    result = scan_tools_for_server(
+    args: list[str] = []
+    try:
+        parsed = json.loads(server.args_json or "[]")
+        if isinstance(parsed, list):
+            args = [str(x) for x in parsed]
+    except json.JSONDecodeError:
+        args = []
+
+    # Forward stored auth for HTTP / SSE servers that need an API key
+    # bearer token. Without this, user-owned MCP records with
+    # ``auth_type="api_key"`` would always scan unauthenticated and get
+    # flagged as errored by the remote server.
+    headers: dict[str, str] = {}
+    if (
+        (server.auth_type or "none").lower() == "api_key"
+        and server.secret_ref
+        and (server.transport or "").lower() in {"http", "sse"}
+    ):
+        try:
+            api_key = _key_manager.decrypt(server.secret_ref)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "mcp_scan: failed to decrypt secret for server %s",
+                server.id,
+            )
+            api_key = None
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+    result = await scan_tools_for_server(
+        server.id,
         server.name,
         server.transport,
         server.endpoint,
-        source_type=server.source_type,
-        preset_id=server.preset_id,
+        command=server.command,
+        args=args,
+        headers=headers or None,
     )
     server.tools_json = json.dumps(result["tools"])
-    server.status = "connected"
-    server.last_error = None
+    if result["ok"]:
+        server.status = "connected"
+        server.last_error = None
+    else:
+        server.status = "error"
+        server.last_error = result.get("error") or result.get("message")
     await session.commit()
-    return {"ok": True, **result}
+    return {"ok": result["ok"], **result}
 
 
 @router.post("/mcp/servers/{server_id}/test")

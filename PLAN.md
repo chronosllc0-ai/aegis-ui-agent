@@ -398,7 +398,8 @@ Each phase is a PR. Do not batch phases — this codebase has a lot of moving pa
 - **Fix Browser MCP.** The `preset-browsermcp` card currently points at `http://localhost:3333/mcp` with no server running and hardcoded fixtures. Options (pick one; document the pick here once decided):
   - (a) Bundle `@browsermcp/mcp` as a user-side install guide + a backend-side stdio spawn when the user opts in.
   - (b) If Browser MCP must run in the user's browser (as the project intends), document the extension install flow + pairing endpoint, and have the backend proxy.
-- Delete `backend/mcp/transport.py::scan_mcp_tools`. Replace `/api/connections/mcp/scan` to call `MCPToolProvider.scan(user_uid)`.
+  - **Decision (Phase 3 PR):** Ship option **(a)**. `@browsermcp/mcp` is spawned as an **opt-in stdio subprocess on the backend**, gated by `BROWSERMCP_ENABLED=true` (with an optional `BROWSERMCP_COMMAND` override for bundled builds). The `preset-browsermcp` card now advertises the real `stdio` transport + `npx -y @browsermcp/mcp@latest` command instead of the dead `http://localhost:3333/mcp` URL. Option (b) is deferred until a future phase brings the browser extension + pairing UX.
+- Delete `backend/mcp/transport.py::scan_mcp_tools` (the `test_mcp_transport` validator survives for the admin connection wizard). `/api/connections/mcp/servers/{id}/scan` now calls `backend.runtime.tools.mcp_host.scan_mcp_server` (via `scan_tools_for_server`) which opens a real MCP session, lists tools, and tears down.
 - Delete `mcp_client.py`.
 
 **Merge criteria:** fresh user with Playwright MCP enabled can run `go_to_url("https://example.com")` + `screenshot()` via the agent and see the image render in the chat surface. Browser MCP card flips from "preset" to "real" with a live `tools/list`.

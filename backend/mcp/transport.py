@@ -1,12 +1,19 @@
-"""MCP transport helpers for connection testing and tool discovery."""
+"""MCP transport helpers for connection testing.
+
+Phase 3 removed the deprecated ``scan_mcp_tools`` fixture generator
+from this module. Live tool discovery now goes through
+:class:`backend.runtime.tools.mcp_host.MCPToolProvider.scan` (and the
+lower-level :func:`backend.runtime.tools.mcp_host.scan_mcp_server`),
+which dials a real MCP server over stdio / HTTP / SSE via the official
+``mcp`` Python SDK.
+
+The :func:`test_mcp_transport` validator survives as a cheap
+pre-flight check used by the admin connection wizard.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
 from urllib.parse import urlparse
-
-from backend.connections.models import MCPScanResponse
 
 
 def _is_http_url(value: str) -> bool:
@@ -33,48 +40,3 @@ def test_mcp_transport(transport: str, endpoint: str | None, command: str | None
         return True, "STDIO transport configuration is valid."
 
     return False, "Invalid MCP transport configuration."
-
-
-def scan_mcp_tools(
-    server_name: str,
-    transport: str,
-    endpoint: str | None,
-    source_type: str | None = None,
-    preset_id: str | None = None,
-) -> MCPScanResponse:
-    """Return a deterministic tool manifest for configured MCP servers."""
-    lower_name = server_name.lower()
-    tools: list[dict[str, Any]] = []
-
-    preset = (preset_id or "").lower()
-    if preset == "preset-browsermcp":
-        tools = [
-            {"name": "browser_navigate", "description": "Open a URL in the browser context."},
-            {"name": "browser_click", "description": "Click interactive elements by selector."},
-            {"name": "browser_screenshot", "description": "Capture viewport screenshot."},
-        ]
-    elif preset == "preset-chrome-devtools-mcp":
-        tools = [
-            {"name": "cdp_navigate", "description": "Navigate tab through Chrome DevTools protocol."},
-            {"name": "cdp_network_log", "description": "Read recent network requests."},
-            {"name": "cdp_console", "description": "Collect browser console messages."},
-        ]
-    elif source_type == "global_preset" and "browser" in lower_name:
-        tools = [
-            {"name": "browser_navigate", "description": "Open a URL in the browser context."},
-            {"name": "browser_click", "description": "Click interactive elements by selector."},
-            {"name": "browser_screenshot", "description": "Capture viewport screenshot."},
-        ]
-    else:
-        tools = [
-            {"name": "mcp_ping", "description": "Health-check call for MCP server."},
-            {"name": "mcp_invoke", "description": "Invoke MCP tool by name with arguments."},
-        ]
-
-    target = endpoint or "local stdio"
-    return MCPScanResponse(
-        ok=True,
-        tools=tools,
-        message=f"Discovered {len(tools)} tools via {transport.upper()} on {target}.",
-        tested_at=datetime.now(timezone.utc),
-    )
