@@ -37,6 +37,23 @@ type BrowserEventContext = {
 }
 
 /**
+ * Returns true when a persisted chat message is a raw echo of a browser
+ * primitive tool call, e.g. `[click] ...`, `[go_to_url] ...`, `[wait] ...`.
+ *
+ * Unlike `isBrowserOnlyEvent` this is intentionally narrow: it only matches a
+ * bracketed tool-name prefix whose name is in the browser/silent tool sets.
+ * It deliberately does NOT match status phrases like "Task completed" so that
+ * legitimate assistant prose is never hidden during thread rehydration.
+ */
+export function isBracketedBrowserToolEcho(message: string): boolean {
+  const trimmed = message.trim()
+  const toolMatch = trimmed.match(TOOL_CALL_RE)
+  const toolName = toolMatch?.[1]?.toLowerCase()
+  if (!toolName) return false
+  return BROWSER_TOOL_NAMES.has(toolName) || SILENT_TOOL_NAMES.has(toolName)
+}
+
+/**
  * Returns true when an event belongs exclusively to browser execution workflow
  * (Action Log) and should be excluded from chat timelines.
  */

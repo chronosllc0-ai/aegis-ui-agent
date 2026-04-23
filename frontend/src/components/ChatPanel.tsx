@@ -7,7 +7,7 @@ import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { isBrowserPrimitiveActionLogEntry } from '../lib/actionLogFilter'
-import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
+import { isBracketedBrowserToolEcho } from '../lib/browserOnlyEvents'
 import { SuggestionChips } from './SuggestionChips'
 import { SessionSwitcher, type SessionSwitcherItem } from './SessionSwitcher'
 import { PromptGallery } from './PromptGallery'
@@ -1596,7 +1596,19 @@ export function ChatPanel({
   useEffect(() => {
     if (serverMessages.length > 0) {
       const mapped = serverMessages
-        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined) && !isSystemInternalMessage(m.metadata as Record<string, unknown> | null) && !isBrowserOnlyEvent({ message: m.content }))
+        .filter((m) => {
+          if (isDeniedChatText(m.content)) return false
+          if (classifyInternalEvent(m.content, undefined)) return false
+          if (isSystemInternalMessage(m.metadata as Record<string, unknown> | null)) return false
+          // Strip raw browser-primitive tool echoes from hydrated history so
+          // rehydrated sessions don't leak `[click] ...`, `[go_to_url] ...`,
+          // etc. into the chat transcript. We only consider non-user
+          // messages, and we only match when the content starts with a
+          // bracketed tool-call prefix — so prose like "Task completed" or
+          // quoted user text is never affected.
+          if (m.role !== 'user' && isBracketedBrowserToolEcho(m.content)) return false
+          return true
+        })
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,

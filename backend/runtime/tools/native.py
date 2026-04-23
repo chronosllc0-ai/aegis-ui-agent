@@ -612,7 +612,16 @@ async def exec_shell(
 
 
 # ----------------------------------------------------------------------
-# flow control: ask_user_input, handoff_to_user, summarize_task, confirm_plan
+# flow control: ask_user_input, summarize_task, confirm_plan
+#
+# NOTE: `handoff_to_user` (manual browser handoff for CAPTCHA / auth /
+# manual unblock) was removed as of Phase 5. The runtime is chat-only and
+# browser execution is owned by the always-on MCP-backed session; there is
+# no frontend affordance to accept handback, so exposing the tool would
+# either be a no-op error string or a silent stall. If HITL browser
+# steering is reintroduced, wire it back in via a different mechanism
+# (e.g. a dedicated MCP tool + operator console) rather than resurrecting
+# this path.
 # ----------------------------------------------------------------------
 
 
@@ -635,47 +644,6 @@ async def ask_user_input(
     except Exception as exc:  # noqa: BLE001
         return f"ask_user_input error: {exc}"
     return f"User answered: {answer}"
-
-
-@function_tool
-async def handoff_to_user(
-    ctx: RunContextWrapper[ToolContext],
-    reason: str,
-    instructions: str,
-    continue_label: str | None = None,
-) -> str:
-    """Pause execution and hand browser control to the human.
-
-    Used for CAPTCHA / auth / manual unblock steps.
-    """
-    reason = reason.strip()
-    instructions = instructions.strip()
-    if not reason or not instructions:
-        return "handoff_to_user error: reason and instructions are required."
-    handler = ctx.context.on_handoff_to_user
-    if handler is None:
-        return "handoff_to_user error: no handoff handler is available in this run."
-    request_id = uuid4().hex
-    if ctx.context.on_step is not None:
-        try:
-            await ctx.context.on_step(
-                {
-                    "type": "handoff_request",
-                    "content": f"[handoff_to_user] {reason}",
-                    "reason": reason,
-                    "instructions": instructions,
-                    "continue_label": continue_label,
-                    "request_id": request_id,
-                    "steering": [],
-                }
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("handoff_to_user step emit failed")
-    try:
-        resume_text = await handler(reason, instructions, continue_label, request_id)
-    except Exception as exc:  # noqa: BLE001
-        return f"handoff_to_user error: {exc}"
-    return resume_text or "Human handoff completed. Resuming agent."
 
 
 @function_tool
@@ -1385,7 +1353,6 @@ NATIVE_TOOLS = [
     exec_shell,
     # flow control
     ask_user_input,
-    handoff_to_user,
     summarize_task,
     confirm_plan,
     # memory v2 (DB)
