@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,6 +25,7 @@ from backend.key_management import KeyManager
 from config import settings
 
 router = APIRouter(prefix="/api", tags=["connections"])
+logger = logging.getLogger(__name__)
 _key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 
 
@@ -151,6 +153,27 @@ async def scan_mcp_server_tools(
     except json.JSONDecodeError:
         args = []
 
+    # Forward stored auth for HTTP / SSE servers that need an API key
+    # bearer token. Without this, user-owned MCP records with
+    # ``auth_type="api_key"`` would always scan unauthenticated and get
+    # flagged as errored by the remote server.
+    headers: dict[str, str] = {}
+    if (
+        (server.auth_type or "none").lower() == "api_key"
+        and server.secret_ref
+        and (server.transport or "").lower() in {"http", "sse"}
+    ):
+        try:
+            api_key = _key_manager.decrypt(server.secret_ref)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "mcp_scan: failed to decrypt secret for server %s",
+                server.id,
+            )
+            api_key = None
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
     result = await scan_tools_for_server(
         server.id,
         server.name,
@@ -158,6 +181,7 @@ async def scan_mcp_server_tools(
         server.endpoint,
         command=server.command,
         args=args,
+        headers=headers or None,
     )
     server.tools_json = json.dumps(result["tools"])
     if result["ok"]:

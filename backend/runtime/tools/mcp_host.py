@@ -495,6 +495,7 @@ class MCPToolProvider:
                 return list(self._tools_cache)
             specs = await self._resolve_specs()
             tools: list[FunctionTool] = []
+            had_failures = False
             for spec in specs:
                 try:
                     spec.validate()
@@ -504,22 +505,40 @@ class MCPToolProvider:
                         spec.server_id,
                         exc,
                     )
+                    # Invalid specs are a permanent configuration bug,
+                    # not a transient failure — it's safe to keep caching
+                    # around them. Don't flip ``had_failures`` for these.
                     continue
-                handle = _MCPSessionHandle(spec)
+                # Reuse an already-open handle when retrying after a
+                # partial failure — otherwise we'd orphan the previous
+                # stdio subprocess + its anyio task group and trip a
+                # cross-task cancel-scope error at teardown.
+                handle = self._handles.get(spec.server_id) or _MCPSessionHandle(spec)
                 try:
                     session = await handle.ensure_open()
                     listing = await session.list_tools()
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     logger.exception(
                         "mcp_host: failed to initialize server %s",
                         spec.server_id,
                     )
-                    await handle.close()
+                    # Only close if this handle isn't already tracked;
+                    # an already-tracked handle means a previous call
+                    # succeeded and the failure is on this round only.
+                    if self._handles.get(spec.server_id) is not handle:
+                        await handle.close()
+                    had_failures = True
                     continue
                 self._handles[spec.server_id] = handle
                 for mcp_tool in listing.tools or []:
                     tools.append(_make_tool(handle, mcp_tool))
-            self._tools_cache = tools
+            # Only memoise a clean load. If any server failed (network
+            # blip, subprocess crash, …), leave ``_tools_cache`` unset so
+            # the next dispatch retries the handshake. We still return
+            # the successful tools so in-flight turns keep working with
+            # whatever loaded.
+            if not had_failures:
+                self._tools_cache = tools
             return list(tools)
 
     async def aclose(self) -> None:

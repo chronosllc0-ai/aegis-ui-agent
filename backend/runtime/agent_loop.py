@@ -218,9 +218,13 @@ async def _ensure_mcp_provider(
     The provider is cached on a private attribute so every dispatch for
     this user reuses the same underlying MCP sessions. A teardown hook
     on the supervisor closes it when the supervisor stops.
+
+    When ``config.mcp_spec_loader`` is ``None`` we still instantiate a
+    provider so that the built-in :func:`default_server_specs` (e.g.
+    Playwright when ``PLAYWRIGHT_MCP_ENABLED=true``) is consulted. That
+    function already returns an empty list when every built-in server is
+    gated off, so this is a zero-op in the default-disabled case.
     """
-    if config.mcp_spec_loader is None:
-        return None
     existing: MCPToolProvider | None = getattr(supervisor, "_mcp_provider", None)
     if existing is not None:
         return existing

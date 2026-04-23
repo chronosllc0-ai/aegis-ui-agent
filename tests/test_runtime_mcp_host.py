@@ -199,6 +199,116 @@ def test_provider_scan_returns_one_report_per_spec() -> None:
 # ----------------------------------------------------------------------
 
 
+def test_provider_retries_after_transient_server_failure(monkeypatch) -> None:
+    """A failing server must not poison the cache.
+
+    Phase 3 review fix (Codex P2): if any server fails discovery during
+    the first ``get_tools()`` call, the provider must retry the whole
+    resolve-and-spawn loop on the next call instead of caching the
+    partial result forever. Otherwise a transient blip permanently
+    disables MCP until the supervisor restarts.
+
+    We simulate servers entirely in-memory (no real stdio subprocess /
+    anyio task group) to exercise only the cache-decision logic.
+    """
+
+    class _FakeTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _FakeHandle:
+        def __init__(self, spec: MCPServerSpec, *, fail_once: bool) -> None:
+            self.spec = spec
+            self._fail_once = fail_once
+            self._opened = False
+            self.close_calls = 0
+
+        async def ensure_open(self):  # noqa: D401 — mimic real API
+            if self._fail_once and not self._opened:
+                self._fail_once = False
+                raise RuntimeError("simulated transient spawn failure")
+            self._opened = True
+            return self
+
+        async def list_tools(self):
+            tools = [
+                _FakeTool(name=f"{self.spec.server_id}:echo"),
+                _FakeTool(name=f"{self.spec.server_id}:add"),
+            ]
+            return type("_Listing", (), {"tools": tools})()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    async def scenario() -> None:
+        good_spec = MCPServerSpec(
+            server_id="good", transport="stdio", command="fake-good"
+        )
+        second_spec = MCPServerSpec(
+            server_id="second", transport="stdio", command="fake-second"
+        )
+
+        handles_by_id: dict[str, _FakeHandle] = {}
+
+        def handle_factory(spec: MCPServerSpec) -> _FakeHandle:
+            existing = handles_by_id.get(spec.server_id)
+            if existing is not None:
+                return existing
+            fail_once = spec.server_id == "second"
+            h = _FakeHandle(spec, fail_once=fail_once)
+            handles_by_id[spec.server_id] = h
+            return h
+
+        # Patch both the session handle factory and the session->tool
+        # wrapper so we don't need the real Agents SDK in this test.
+        def fake_make_tool(handle, mcp_tool):  # type: ignore[no-untyped-def]
+            return type(
+                "_Wrapped", (), {"name": f"{handle.spec.server_id}__{mcp_tool.name.split(':')[1]}"}
+            )()
+
+        def ensure_open_wrapper(self):  # type: ignore[no-untyped-def]
+            return self.ensure_open()
+
+        async def list_tools_wrapper(session):  # type: ignore[no-untyped-def]
+            return await session.list_tools()
+
+        monkeypatch.setattr(mcp_host, "_MCPSessionHandle", handle_factory)
+        monkeypatch.setattr(mcp_host, "_make_tool", fake_make_tool)
+
+        provider = MCPToolProvider(
+            owner_uid="user",
+            specs=[good_spec, second_spec],
+        )
+        try:
+            first = await provider.get_tools()
+            assert {t.name for t in first} == {"good__echo", "good__add"}
+            # Cache MUST NOT be populated because ``second`` failed.
+            assert provider._tools_cache is None
+
+            # Second call retries and should now pick up both servers.
+            second = await provider.get_tools()
+            assert {t.name for t in second} == {
+                "good__echo",
+                "good__add",
+                "second__echo",
+                "second__add",
+            }
+            # Clean load → cache should now be populated.
+            assert provider._tools_cache is not None
+            # Third call is a cache hit (no new discovery, no extra
+            # ensure_open) — we verify by checking the fake handle
+            # state didn't change.
+            third = await provider.get_tools()
+            assert [t.name for t in third] == [t.name for t in second]
+        finally:
+            await provider.aclose()
+            # aclose must close every tracked handle at least once.
+            assert handles_by_id["good"].close_calls >= 1
+            assert handles_by_id["second"].close_calls >= 1
+
+    _run(scenario())
+
+
 def test_provider_skips_invalid_specs(caplog) -> None:
     async def scenario() -> None:
         provider = MCPToolProvider(
