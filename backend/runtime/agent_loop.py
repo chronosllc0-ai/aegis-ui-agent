@@ -205,6 +205,14 @@ async def _maybe_record(
         logger.exception("record_event failed kind=%s run=%s", kind, run_id)
 
 
+def _tool_name(tool: Any) -> str | None:
+    """Best-effort name extractor for Agents SDK tool-like objects."""
+    name = getattr(tool, "name", None)
+    if isinstance(name, str):
+        return name
+    return None
+
+
 def _default_build_agent(
     session: ChannelSession,
     ctx: ToolContext,
@@ -212,11 +220,51 @@ def _default_build_agent(
     mcp_tools: Sequence[Any] | None = None,
     connector_tools: Sequence[Any] | None = None,
 ) -> Agent:
+    """Compose native + MCP + connector tools into a single Agent.
+
+    *Name-collision policy:* native wins, then MCP, then connectors.
+    Connector tool names use the canonical ``{connector_id}_{action_id}``
+    format (single underscore) per PLAN.md §4, which overlaps with a
+    handful of native GitHub tools (e.g. ``github_list_repos``,
+    ``github_create_issue``, ``github_get_file``). The Agents SDK
+    resolves duplicate tool names last-wins, so without dedup the
+    connector path would silently shadow the native PAT-backed tools
+    and regress existing flows.
+
+    We therefore drop any connector or MCP tool whose name is already
+    taken by something earlier in the chain and log a warning listing
+    the shadowed names so it's visible in production.
+    """
+
     tools: list[Any] = list(get_enabled_native_tools())
+    seen: set[str] = {n for n in (_tool_name(t) for t in tools) if n}
+
+    def _extend_unique(extra: Sequence[Any], source: str) -> None:
+        shadowed: list[str] = []
+        for tool in extra:
+            name = _tool_name(tool)
+            if name is None:
+                # Unnamed tools can't collide; just accept them.
+                tools.append(tool)
+                continue
+            if name in seen:
+                shadowed.append(name)
+                continue
+            seen.add(name)
+            tools.append(tool)
+        if shadowed:
+            logger.warning(
+                "agent_loop: dropped %d %s tool(s) shadowed by earlier "
+                "layer: %s",
+                len(shadowed),
+                source,
+                ", ".join(sorted(shadowed)),
+            )
+
     if mcp_tools:
-        tools.extend(mcp_tools)
+        _extend_unique(mcp_tools, "MCP")
     if connector_tools:
-        tools.extend(connector_tools)
+        _extend_unique(connector_tools, "connector")
     return build_agent(
         session=session,
         tools=tools,

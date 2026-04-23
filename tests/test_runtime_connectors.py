@@ -524,3 +524,155 @@ def test_tool_invocation_rejects_non_object_args(session_factory) -> None:
 
 
 __all__: list[str] = []
+
+
+# ----------------------------------------------------------------------
+# Codex P1 regression: native tools must not be shadowed by connectors
+# ----------------------------------------------------------------------
+
+
+def test_default_build_agent_does_not_shadow_native_github_tools(caplog) -> None:
+    """Regression test for Codex P1 on PR #338.
+
+    Native tools and connector tools both use ``github_*`` names (native
+    is the PAT-backed workspace manager, connector is the OAuth wrapper).
+    Without de-duplication the Agents SDK's last-wins resolution lets
+    the connector silently replace the native tool, breaking every flow
+    that currently relies on PAT auth. We must keep native, drop the
+    colliding connector version, and log a warning.
+    """
+    import logging
+
+    from backend.runtime import agent_loop
+    from backend.runtime.session import ChannelSession, ChannelSessionKey
+    from backend.runtime.tools.native import get_enabled_native_tools
+
+    native = list(get_enabled_native_tools())
+    native_names = {t.name for t in native if getattr(t, "name", None)}
+    # Sanity: the three PLAN-level collisions we care about really do
+    # exist on the native side.
+    for colliding_name in ("github_list_repos", "github_create_issue", "github_get_file"):
+        assert colliding_name in native_names, (
+            f"native tools unexpectedly lost {colliding_name!r} — update this "
+            "regression test if the native surface changed on purpose"
+        )
+
+    connector_tools = build_connector_tools_for_connection("github", "user-xyz")
+    # Isolate just the two classes we care about for this assertion so
+    # the test stays deterministic even if native tools drift.
+    caplog.set_level(logging.WARNING, logger="backend.runtime.agent_loop")
+
+    session = ChannelSession(key=ChannelSessionKey(owner_uid="user-xyz", channel="web"))
+    agent = agent_loop._default_build_agent(
+        session,
+        None,  # ToolContext is unused by _default_build_agent
+        agent_loop.DispatchConfig(),
+        mcp_tools=None,
+        connector_tools=connector_tools,
+    )
+    names = [getattr(t, "name", None) for t in agent.tools]
+
+    # Every native tool survived.
+    for native_name in native_names:
+        assert native_name in names, f"native tool {native_name!r} disappeared"
+
+    # Connector-unique github tools did get added (not every github
+    # connector action collides with native).
+    for unique_name in (
+        "github_get_repo",
+        "github_list_issues",
+        "github_list_prs",
+        "github_get_pr",
+        "github_create_pr",
+        "github_search_code",
+    ):
+        assert unique_name in names, (
+            f"connector-only tool {unique_name!r} should still register"
+        )
+
+    # Colliding connector tools were dropped — each name appears
+    # exactly once in the final list.
+    for colliding_name in ("github_list_repos", "github_create_issue", "github_get_file"):
+        assert names.count(colliding_name) == 1, (
+            f"{colliding_name!r} appears {names.count(colliding_name)} times; "
+            "connector version must be deduped against native"
+        )
+
+    # And the warning actually fired, so the shadowing is visible in
+    # production logs.
+    warnings = [r for r in caplog.records if "shadowed by earlier layer" in r.getMessage()]
+    assert warnings, "expected a warning log when connector tools are dropped"
+    msg = warnings[-1].getMessage()
+    for colliding_name in ("github_list_repos", "github_create_issue", "github_get_file"):
+        assert colliding_name in msg, f"warning should name {colliding_name!r}"
+
+
+def test_default_build_agent_dedupes_mcp_and_connector_tools() -> None:
+    """MCP tools de-duplicate against native too, and connectors then
+    de-duplicate against both earlier layers."""
+    from agents import FunctionTool
+
+    from backend.runtime import agent_loop
+    from backend.runtime.session import ChannelSession, ChannelSessionKey
+
+    async def _noop(ctx, args):  # pragma: no cover - never invoked
+        return "ok"
+
+    schema = {"type": "object", "properties": {}, "additionalProperties": True}
+
+    # Fake MCP tool whose name collides with a native tool.
+    mcp_dup = FunctionTool(
+        name="github_list_repos",
+        description="mcp dup",
+        params_json_schema=schema,
+        on_invoke_tool=_noop,
+        strict_json_schema=False,
+    )
+    # Fake MCP tool with a brand-new name that should survive.
+    mcp_new = FunctionTool(
+        name="browser__goto",
+        description="mcp unique",
+        params_json_schema=schema,
+        on_invoke_tool=_noop,
+        strict_json_schema=False,
+    )
+    # Fake connector tool that collides with the MCP unique tool.
+    connector_dup = FunctionTool(
+        name="browser__goto",
+        description="connector dup",
+        params_json_schema=schema,
+        on_invoke_tool=_noop,
+        strict_json_schema=False,
+    )
+    connector_unique = FunctionTool(
+        name="notion_search",
+        description="connector unique",
+        params_json_schema=schema,
+        on_invoke_tool=_noop,
+        strict_json_schema=False,
+    )
+
+    session = ChannelSession(key=ChannelSessionKey(owner_uid="user-xyz", channel="web"))
+    agent = agent_loop._default_build_agent(
+        session,
+        None,
+        agent_loop.DispatchConfig(),
+        mcp_tools=[mcp_dup, mcp_new],
+        connector_tools=[connector_dup, connector_unique],
+    )
+    names = [getattr(t, "name", None) for t in agent.tools]
+
+    # github_list_repos stays native (MCP dup dropped).
+    descriptions_for_github = [
+        getattr(t, "description", "") for t in agent.tools if t.name == "github_list_repos"
+    ]
+    assert len(descriptions_for_github) == 1
+    assert "mcp dup" not in descriptions_for_github[0]
+
+    # browser__goto survives exactly once, from MCP (connector dup dropped).
+    goto_tools = [t for t in agent.tools if t.name == "browser__goto"]
+    assert len(goto_tools) == 1
+    assert goto_tools[0].description == "mcp unique"
+
+    # Connector-unique tool survives.
+    assert "notion_search" in names
