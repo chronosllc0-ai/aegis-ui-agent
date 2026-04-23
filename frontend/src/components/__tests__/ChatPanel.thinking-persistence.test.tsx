@@ -17,7 +17,6 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof ChatPanel>> = 
     connectionStatus: 'connected',
     transcripts: [],
     onSwitchToBrowser: vi.fn(),
-    latestFrame: null,
     activeTaskId: 'task-a',
     serverMessages: [],
     onUserInputResponse: vi.fn(),

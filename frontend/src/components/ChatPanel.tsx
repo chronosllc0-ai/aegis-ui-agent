@@ -7,6 +7,7 @@ import { PROVIDERS, providerById } from '../lib/models'
 import { normalizeTextPreservingMarkdown } from '../lib/textNormalization'
 import { normalizeAskUserInputOptions } from '../lib/askUserInput'
 import { isBrowserPrimitiveActionLogEntry } from '../lib/actionLogFilter'
+import { isBrowserOnlyEvent } from '../lib/browserOnlyEvents'
 import { SuggestionChips } from './SuggestionChips'
 import { SessionSwitcher, type SessionSwitcherItem } from './SessionSwitcher'
 import { PromptGallery } from './PromptGallery'
@@ -27,7 +28,6 @@ function Svg({ className, children }: SvgProps & { children: ReactNode }) {
     </svg>
   )
 }
-const IcoGlobe       = (p: SvgProps) => <Svg {...p}><circle cx='12' cy='12' r='9' /><path d='M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18' /></Svg>
 const IcoMessage     = (p: SvgProps) => <Svg {...p}><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' /></Svg>
 const IcoPaperclip   = (p: SvgProps) => <Svg {...p}><path d='m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48' /></Svg>
 const IcoCopy        = (p: SvgProps) => <Svg {...p}><rect x='9' y='9' width='11' height='11' rx='2' /><rect x='4' y='4' width='11' height='11' rx='2' /></Svg>
@@ -58,9 +58,6 @@ export interface ChatPanelProps {
   onUserInputResponse: (answer: string, requestId: string) => void
   onPlanConfirm?: (requestId: string) => void
   onPlanReject?: (requestId: string) => void
-  handoffActive?: boolean
-  onHumanBrowserAction?: (action: { kind: 'click' | 'type_text' | 'scroll' | 'press_key'; x?: number; y?: number; text?: string; key?: string; deltaY?: number }) => void
-  onHandoffContinue?: (requestId: string) => void
   provider: string
   model: string
   onProviderChange: (provider: string) => void
@@ -87,7 +84,7 @@ export interface ChatPanelProps {
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'handoff_request' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router'
 
 interface ChatMessage {
   id: string
@@ -306,7 +303,7 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
     if (isBrowserPrimitiveActionLogEntry(entry)) continue
     if (entry.type === 'step') {
       const rawType = String(entry.rawStepType ?? '').trim().toLowerCase()
-      const allowedStepTypes = new Set(['assistant_message', 'result', 'handoff_request', 'handoff_complete', 'user_input_request'])
+      const allowedStepTypes = new Set(['assistant_message', 'result', 'user_input_request'])
       if (!allowedStepTypes.has(rawType)) continue
     }
     const rawMessage = typeof entry.message === 'string' ? entry.message : String(entry.message ?? '')
@@ -355,29 +352,6 @@ function logsToMessages(logs: LogEntry[]): ChatMessage[] {
         })
       } catch {
         msgs.push({ id: entry.id, role: 'user_input', text: normalizeTextPreservingMarkdown(msg.replace('[ask_user_input]', '').trim()), options: [] })
-      }
-      continue
-    }
-
-    if (entry.rawStepType === 'handoff_request' || msg.includes('[handoff_to_user]')) {
-      try {
-        const jsonStr = msg.replace('[handoff_to_user]', '').trim()
-        const parsed = JSON.parse(jsonStr)
-        msgs.push({
-          id: entry.id,
-          role: 'handoff_request',
-          text: parsed.reason ?? jsonStr,
-          instructions: parsed.instructions,
-          continueLabel: parsed.continue_label,
-          requestId: parsed.request_id,
-        })
-      } catch {
-        msgs.push({
-          id: entry.id,
-          role: 'handoff_request',
-          text: normalizeTextPreservingMarkdown(msg.replace('[handoff_to_user]', '').trim()),
-          requestId: entry.id,
-        })
       }
       continue
     }
@@ -1223,42 +1197,6 @@ function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
   )
 }
 
-export function HandoffRequestCard({
-  reason,
-  instructions,
-  continueLabel,
-  requestId,
-  onContinue,
-}: {
-  reason: string
-  instructions?: string
-  continueLabel?: string
-  requestId: string
-  onContinue: (requestId: string) => void
-}) {
-  return (
-    <div className='my-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 overflow-hidden'>
-      <div className='flex items-center gap-2 border-b border-amber-400/20 px-4 py-3'>
-        <IcoGlobe className='h-4 w-4 text-amber-300' />
-        <p className='text-xs font-semibold text-amber-200'>Manual browser handoff required</p>
-      </div>
-      <div className='space-y-2 px-4 py-3'>
-        <p className='text-sm text-zinc-100'>{reason}</p>
-        {instructions && <p className='text-xs text-zinc-300 whitespace-pre-wrap'>{instructions}</p>}
-      </div>
-      <div className='border-t border-amber-400/20 px-4 py-3'>
-        <button
-          type='button'
-          onClick={() => onContinue(requestId)}
-          className='rounded-lg bg-amber-300 px-3 py-2 text-xs font-semibold text-zinc-900 hover:bg-amber-200'
-        >
-          {continueLabel || 'Continue'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ─── LivePlanCard — animated step checklist for announce_plan ────────────────
 function LivePlanCard({ steps, completedTools }: { steps: string[]; completedTools: Set<string> }) {
   if (!steps.length) return null
@@ -1593,9 +1531,6 @@ export function ChatPanel({
   onUserInputResponse,
   onPlanConfirm,
   onPlanReject,
-  handoffActive = false,
-  onHumanBrowserAction,
-  onHandoffContinue,
   provider,
   model,
   reasoningEffort,
@@ -1661,7 +1596,7 @@ export function ChatPanel({
   useEffect(() => {
     if (serverMessages.length > 0) {
       const mapped = serverMessages
-        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined) && !isSystemInternalMessage(m.metadata as Record<string, unknown> | null))
+        .filter((m) => !isDeniedChatText(m.content) && !classifyInternalEvent(m.content, undefined) && !isSystemInternalMessage(m.metadata as Record<string, unknown> | null) && !isBrowserOnlyEvent({ message: m.content }))
         .map((m) => ({
           id: m.id,
           role: (m.role === 'user' ? 'user' : 'assistant') as ChatRole,
@@ -1699,16 +1634,6 @@ export function ChatPanel({
   const [approvedIds, setApprovedIds]   = useState<Set<string>>(new Set())
   const [rejectedIds, setRejectedIds]   = useState<Set<string>>(new Set())
   const [activityExpanded, setActivityExpanded] = useState(false)
-  const [handoffClickX, setHandoffClickX] = useState('640')
-  const [handoffClickY, setHandoffClickY] = useState('360')
-  const [handoffText, setHandoffText] = useState('')
-  const [handoffScrollDelta, setHandoffScrollDelta] = useState('600')
-  const parsedClickX = Number(handoffClickX)
-  const parsedClickY = Number(handoffClickY)
-  const parsedScrollDelta = Number(handoffScrollDelta)
-  const hasValidClickCoords = Number.isFinite(parsedClickX) && Number.isFinite(parsedClickY)
-  const hasValidScrollDelta = Number.isFinite(parsedScrollDelta)
-
   // ── Voice (Gemini Live + browser SR fallback) ─────────────────────────────
   type AnySR = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
   const srRef = useRef<AnySR | null>(null)
@@ -1970,88 +1895,6 @@ export function ChatPanel({
         </div>
       )}
 
-      {handoffActive && (
-        <div className='border-b border-amber-500/30 bg-amber-500/10 px-3 py-2'>
-          <p className='text-xs font-medium text-amber-200'>Manual handoff active</p>
-          <div className='mt-2 grid gap-2 md:grid-cols-2'>
-            <div className='flex items-center gap-1'>
-              <input
-                value={handoffClickX}
-                onChange={(event) => setHandoffClickX(event.target.value)}
-                className='w-20 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
-                placeholder='x'
-                aria-label='Click X'
-              />
-              <input
-                value={handoffClickY}
-                onChange={(event) => setHandoffClickY(event.target.value)}
-                className='w-20 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
-                placeholder='y'
-                aria-label='Click Y'
-              />
-              <button
-                type='button'
-                onClick={() => {
-                  if (!hasValidClickCoords) return
-                  onHumanBrowserAction?.({ kind: 'click', x: parsedClickX, y: parsedClickY })
-                }}
-                disabled={!hasValidClickCoords}
-                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40'
-              >
-                Send click
-              </button>
-            </div>
-            <div className='flex items-center gap-1'>
-              <input
-                value={handoffText}
-                onChange={(event) => setHandoffText(event.target.value)}
-                className='flex-1 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
-                placeholder='Type text'
-                aria-label='Type text'
-              />
-              <button
-                type='button'
-                onClick={() => {
-                  if (!handoffText.trim()) return
-                  onHumanBrowserAction?.({ kind: 'type_text', text: handoffText })
-                  setHandoffText('')
-                }}
-                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
-              >
-                Type
-              </button>
-            </div>
-            <div className='flex items-center gap-1'>
-              <input
-                value={handoffScrollDelta}
-                onChange={(event) => setHandoffScrollDelta(event.target.value)}
-                className='w-24 rounded border border-[#2a2a2a] bg-[#111] px-2 py-1 text-xs'
-                placeholder='deltaY'
-                aria-label='Scroll delta'
-              />
-              <button
-                type='button'
-                onClick={() => {
-                  if (!hasValidScrollDelta) return
-                  onHumanBrowserAction?.({ kind: 'scroll', deltaY: parsedScrollDelta })
-                }}
-                disabled={!hasValidScrollDelta}
-                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40'
-              >
-                Scroll
-              </button>
-              <button
-                type='button'
-                onClick={() => onHumanBrowserAction?.({ kind: 'press_key', key: 'Enter' })}
-                className='rounded border border-amber-400/60 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20'
-              >
-                Enter
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Messages */}
       <div className='flex-1 overflow-y-auto px-3 py-3 space-y-0.5'>
         {!threadReady && (
@@ -2174,19 +2017,6 @@ export function ChatPanel({
               <PlanConfirmCard key={msg.id} plan={msg.text} requestId={msg.requestId ?? msg.id}
                 onConfirm={(reqId) => { onPlanConfirm?.(reqId) }}
                 onReject={(reqId) => { onPlanReject?.(reqId) }}
-              />
-            )
-          }
-
-          if (msg.role === 'handoff_request') {
-            return (
-              <HandoffRequestCard
-                key={msg.id}
-                reason={msg.text}
-                instructions={msg.instructions}
-                continueLabel={msg.continueLabel}
-                requestId={msg.requestId ?? msg.id}
-                onContinue={(reqId) => onHandoffContinue?.(reqId)}
               />
             )
           }
