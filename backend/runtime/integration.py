@@ -1,17 +1,17 @@
 """Glue between the FastAPI app and the always-on runtime.
 
-Phase 2 is deliberately minimal: one feature flag
-(``RUNTIME_SUPERVISOR_ENABLED``) turns on a parallel chat path. When the
-flag is off, everything runs exactly as it did in Phase 1 — the legacy
-Gemini orchestrator owns websocket chat.
+Phase 6 landed the chat-only runtime: the legacy Gemini orchestrator was
+deleted, so ``RUNTIME_SUPERVISOR_ENABLED`` now defaults to ``True`` and
+the paired ``LEGACY_ORCHESTRATOR`` flag is gone. The env var remains as
+a safety switch — operators can still flip it off temporarily if a bad
+runtime regression needs to be isolated, but nothing is gated on the
+legacy path anymore.
 
 The helpers here are designed to be called from ``main.py``'s startup
 / shutdown / websocket handlers without importing the entire runtime
 subsystem into the chat path:
 
 * :func:`runtime_supervisor_enabled` — reads the env flag.
-* :func:`legacy_orchestrator_enabled` — reads the paired flag
-  (default ``true``; must stay the deployed default).
 * :func:`ensure_runtime_started` — idempotent app-startup setup.
 * :func:`shutdown_runtime` — app-shutdown teardown.
 * :func:`get_registry` / :func:`get_fanout_registry` — accessors used
@@ -48,16 +48,15 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def runtime_supervisor_enabled() -> bool:
-    """``True`` when ``RUNTIME_SUPERVISOR_ENABLED`` is truthy."""
-    return _env_flag("RUNTIME_SUPERVISOR_ENABLED", default=False)
+    """``True`` when the always-on runtime supervisor should own chat.
 
-
-def legacy_orchestrator_enabled() -> bool:
-    """``True`` when the legacy Gemini orchestrator is allowed.
-
-    Default ``True`` so existing deploys keep behaving exactly as before.
+    Default is ``True`` as of Phase 6 — the legacy Gemini orchestrator
+    was deleted so there is no fallback. Operators can set
+    ``RUNTIME_SUPERVISOR_ENABLED=false`` to temporarily disable the
+    supervisor during incident triage, but chat will be unavailable
+    until it's turned back on.
     """
-    return _env_flag("LEGACY_ORCHESTRATOR", default=True)
+    return _env_flag("RUNTIME_SUPERVISOR_ENABLED", default=True)
 
 
 async def ensure_runtime_started() -> None:
@@ -69,7 +68,7 @@ async def ensure_runtime_started() -> None:
     global _registry, _fanout_registry
     if not runtime_supervisor_enabled():
         logger.info(
-            "always-on runtime: RUNTIME_SUPERVISOR_ENABLED=false — staying on legacy path"
+            "always-on runtime: RUNTIME_SUPERVISOR_ENABLED=false — chat dispatch disabled"
         )
         return
     if _registry is not None:
@@ -135,7 +134,6 @@ def get_fanout_registry() -> Optional[FanOutRegistry]:
 
 __all__ = [
     "runtime_supervisor_enabled",
-    "legacy_orchestrator_enabled",
     "ensure_runtime_started",
     "shutdown_runtime",
     "get_registry",

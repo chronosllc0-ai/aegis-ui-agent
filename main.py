@@ -112,7 +112,6 @@ from integrations.discord import DiscordIntegration
 from integrations.github_connector import GitHubIntegration
 from integrations.slack_connector import SlackIntegration
 from integrations.telegram import TelegramIntegration
-from orchestrator import AgentOrchestrator
 from session import LiveSessionManager
 from backend.session_workspace import cleanup_session_workspace
 from backend.heartbeat_pinger import HeartbeatPinger
@@ -164,7 +163,6 @@ app.include_router(skills_hub_router)
 app.include_router(workspace_files_router)
 app.include_router(legacy_workspace_files_router)
 
-orchestrator: AgentOrchestrator | None = None
 live_manager = LiveSessionManager()
 key_manager = KeyManager(settings.ENCRYPTION_SECRET)
 session_events = SessionEventHub()
@@ -1202,14 +1200,6 @@ async def _enforce_ingress_policy(
         await session_iter.aclose()
 
 
-def _get_orchestrator() -> AgentOrchestrator:
-    """Return a lazily initialized orchestrator instance."""
-    global orchestrator
-    if orchestrator is None:
-        orchestrator = AgentOrchestrator()
-    return orchestrator
-
-
 class SessionRuntime:
     """In-memory runtime state for a websocket navigation session."""
 
@@ -1227,10 +1217,6 @@ class SessionRuntime:
         self.session_route_key: str | None = None
         # Pending user-input futures keyed by request_id
         self.pending_user_inputs: dict[str, asyncio.Future[str]] = {}
-        self.handoff_active: bool = False
-        self.handoff_request_id: str | None = None
-        self.handoff_future: asyncio.Future[str] | None = None
-        self.handoff_started_at: float | None = None
         # Tracks the frontend-generated task UUID for the currently active navigate action.
         # Sent by the client in spawn_subagent so sub-agents can be scoped to the right parent task.
         self.current_frontend_task_id: str | None = None
@@ -1241,13 +1227,6 @@ class SessionRuntime:
         # Sub-agent manager — created lazily on first spawn
         from subagent_runtime import SubAgentManager
         self.subagent_manager: SubAgentManager = SubAgentManager()
-
-    def clear_handoff_state(self) -> None:
-        """Reset any active human handoff state."""
-        self.handoff_active = False
-        self.handoff_request_id = None
-        self.handoff_future = None
-        self.handoff_started_at = None
 
     def get_idempotent_ack(self, request_id: str) -> dict[str, Any] | None:
         """Return cached idempotent ack payload for request_id when available."""
@@ -1511,21 +1490,19 @@ async def reply_support_thread(
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    """Return service health status without failing while dependencies warm up."""
-    orchestrator_ready = True
-    browser_ready = "deferred"
-    try:
-        _get_orchestrator()
-    except Exception:
-        orchestrator_ready = False
-        browser_ready = "degraded"
+    """Return service health status without failing while dependencies warm up.
+
+    The always-on runtime supervisor owns the browser lifecycle now, so we
+    only report DB readiness and a static browser status. Supervisor health
+    is surfaced via ``/api/observability/events`` + the supervisor registry.
+    """
     return {
-        "status": "ok" if orchestrator_ready else "degraded",
+        "status": "ok",
         "version": "1.0.0",
         "database": "ready" if db_ready else "initializing",
         "database_error": db_init_error or "",
-        "orchestrator_ready": "ready" if orchestrator_ready else "degraded",
-        "browser_ready": browser_ready,
+        "runtime_supervisor": "enabled" if _runtime_supervisor_enabled() else "disabled",
+        "browser_ready": "managed_by_runtime",
     }
 
 
@@ -2093,38 +2070,6 @@ async def _send_step(
         )
 
 
-async def _send_frame(websocket: WebSocket, image_b64: str) -> None:
-    """Send a base64 PNG frame over websocket."""
-    await websocket.send_json({"type": "frame", "data": {"image": image_b64}})
-
-
-async def _send_initial_frame(websocket: WebSocket) -> None:
-    """Capture and send an initial frame when the websocket connects.
-
-    Skips sending if the browser is still at about:blank so the frontend can
-    display its "Tell me what to do" welcome screen instead of a white frame.
-    """
-    try:
-        executor = _get_orchestrator().executor
-        page = getattr(executor, "page", None)
-        current_url = getattr(page, "url", None) if page is not None else None
-        if current_url in ("about:blank", ""):
-            # Emit deterministic first frame event even before navigation starts.
-            await _send_frame(
-                websocket,
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z2ioAAAAASUVORK5CYII=",
-            )
-            return
-        screenshot_bytes = await executor.screenshot()
-        await _send_frame(websocket, base64.b64encode(screenshot_bytes).decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Initial frame capture failed: %s", exc)
-        await _send_frame(
-            websocket,
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z2ioAAAAASUVORK5CYII=",
-        )
-
-
 async def _send_workflow_step(
     websocket: WebSocket,
     workflow_step: dict[str, Any],
@@ -2308,37 +2253,6 @@ async def _log_web_message(
         logger.warning("Failed to persist web message to DB for session %s: %s", session_id, exc)
 
 
-async def _on_frame_combined(websocket: WebSocket, image_b64: str, user_uid: str | None) -> None:
-    """Send frame to websocket AND any active stream subscribers (rate-limited)."""
-    await _send_frame(websocket, image_b64)
-    if not user_uid:
-        return
-    sub = _stream_subscribers.get(user_uid)
-    if not sub:
-        return
-    now = _time.monotonic()
-    if now - sub.get("last_sent_at", 0) < 3.0:
-        return  # rate limit: max 1 frame per 3 seconds
-    sub["last_sent_at"] = now
-    platform = sub.get("platform")
-    integration_id = sub.get("integration_id")
-    chat_id = sub.get("chat_id")
-    if platform == "telegram":
-        integration = _get_channel_integration("telegram", str(integration_id))
-        if integration:
-            asyncio.create_task(integration.send_photo(chat_id, image_b64))
-    elif platform == "discord":
-        integration = _get_channel_integration("discord", str(integration_id))
-        if integration:
-            channel = str(sub.get("channel_id", chat_id) or chat_id)
-            asyncio.create_task(
-                integration.execute_tool(
-                    "discord_send_image",
-                    {"channel": channel, "image_b64": image_b64},
-                )
-            )
-
-
 async def _runtime_supervisor_dispatch_chat(
     websocket: WebSocket,
     runtime: SessionRuntime,
@@ -2400,54 +2314,46 @@ async def _runtime_supervisor_dispatch_chat(
 
 
 def _start_navigation_task(websocket: WebSocket, runtime: SessionRuntime, session_id: str, instruction: str) -> None:
-    """Create and store the background navigation task for the current session."""
-    if _runtime_supervisor_enabled() and _runtime_get_registry() is not None:
-        # Route through the Phase 2 supervisor. We fire-and-forget; the
-        # supervisor's own worker drives the run and the fan-out delivers
-        # streaming deltas to any attached subscriber. If enqueue fails
-        # the helper falls back to the legacy path.
-        async def _dispatch_and_maybe_fallback() -> None:
-            accepted = await _runtime_supervisor_dispatch_chat(
-                websocket, runtime, session_id, instruction
-            )
-            if not accepted:
-                _start_legacy_navigation_task(websocket, runtime, session_id, instruction)
+    """Dispatch a chat message through the always-on runtime supervisor.
 
-        asyncio.create_task(_dispatch_and_maybe_fallback())
-        return
-
-    _start_legacy_navigation_task(websocket, runtime, session_id, instruction)
-
-
-def _start_legacy_navigation_task(
-    websocket: WebSocket,
-    runtime: SessionRuntime,
-    session_id: str,
-    instruction: str,
-) -> None:
-    """Legacy Gemini-driven navigation task. Stays behind ``LEGACY_ORCHESTRATOR``."""
-    runtime.current_task = asyncio.create_task(
-        _run_navigation_task(
-            websocket,
-            runtime,
-            session_id,
-            instruction,
-            request_id=runtime.current_request_id or "",
-            task_id=runtime.current_task_id or str(uuid4()),
+    Phase 6 removed the legacy Gemini-driven navigation task. The runtime
+    supervisor is now the only execution path; it owns the MCP-backed
+    browser lifecycle and streams fan-out events to every attached
+    subscriber. If the supervisor registry is unavailable we surface a
+    clear websocket error rather than silently falling back — the
+    operator needs to know the runtime isn't up.
+    """
+    async def _dispatch() -> None:
+        accepted = await _runtime_supervisor_dispatch_chat(
+            websocket, runtime, session_id, instruction
         )
-    )
-    def _task_done_callback(task: asyncio.Task[None]) -> None:
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            logger.info("Navigation task cancellation finalized for session %s", session_id)
-        except Exception:
-            logger.exception("Navigation background task crashed for session %s", session_id)
-        finally:
-            if runtime.current_task is task:
-                runtime.current_task = None
+        if accepted:
+            return
+        logger.error(
+            "runtime supervisor unavailable for session=%s; chat message dropped",
+            session_id,
+        )
+        await _safe_ws_send(
+            websocket,
+            {
+                "type": "task_error",
+                "data": {
+                    "task_id": runtime.current_task_id,
+                    "code": "E_RUNTIME_UNAVAILABLE",
+                    "message": (
+                        "Always-on runtime supervisor is unavailable. "
+                        "Check RUNTIME_SUPERVISOR_ENABLED and server logs."
+                    ),
+                    "retryable": True,
+                },
+            },
+            request_id=runtime.current_request_id,
+            task_id=runtime.current_task_id,
+            ws_session_id=session_id,
+            phase="runtime_supervisor_unavailable",
+        )
 
-    runtime.current_task.add_done_callback(_task_done_callback)
+    asyncio.create_task(_dispatch())
 
 
 async def _start_idle_navigation_from_control_action(
@@ -2550,398 +2456,6 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
     _start_navigation_task(websocket, runtime, session_id, queued_instruction.instruction)
 
 
-async def _run_navigation_task(
-    websocket: WebSocket,
-    runtime: SessionRuntime,
-    session_id: str,
-    instruction: str,
-    *,
-    request_id: str,
-    task_id: str,
-) -> None:
-    """Execute a single navigation task and optionally schedule one queued follow-up."""
-    terminal_event_sent = False
-    first_emit_logged = False
-
-    async def _emit_terminal_result(*, summary: str, status: str) -> None:
-        nonlocal terminal_event_sent
-        if terminal_event_sent:
-            return
-        terminal_event_sent = True
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_state", "data": {"task_id": task_id, "state": status, "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_state_terminal",
-        )
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_result", "data": {"task_id": task_id, "summary": summary, "timestamp": _time.time()}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_result_terminal",
-        )
-
-    async def callback(step: dict[str, Any]) -> None:
-        nonlocal first_emit_logged
-        await _send_step(websocket, step, runtime=runtime, session_id=session_id)
-        step_type = str(step.get("type") or "").lower()
-        if not first_emit_logged:
-            first_emit_logged = True
-            logger.info(
-                "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_step_emit step_type=%s",
-                request_id,
-                task_id,
-                session_id,
-                step_type or "unknown",
-            )
-        if step_type in {"tool_start", "tool_result", "tool-call", "tool_call"}:
-            _record_runtime_event(
-                category="tool_lifecycle",
-                subsystem="tools",
-                level="info",
-                message=f"internal tool lifecycle: {step_type}",
-                session_id=session_id,
-                request_id=request_id,
-                task_id=task_id,
-                details={"step": step},
-            )
-        task_state = "tool_call" if step_type in {"tool-call", "tool_call"} else "running"
-        await _safe_ws_send(
-            websocket,
-            {
-                "type": "task_state",
-                "data": {
-                    "task_id": task_id,
-                    "state": task_state,
-                    "detail": str(step.get("content") or step_type or "task_update"),
-                    "timestamp": _time.time(),
-                },
-            },
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_state",
-        )
-
-    runtime.task_running = True
-    runtime.cancel_event.clear()
-    await _safe_ws_send(
-        websocket,
-        {"type": "task_state", "data": {"task_id": task_id, "state": "running", "timestamp": _time.time()}},
-        request_id=request_id,
-        task_id=task_id,
-        ws_session_id=session_id,
-        phase="task_state_running",
-    )
-
-    async def _on_user_input(question: str, options: list[str]) -> str:
-        """Send a user_input_request WS message and await the user's response."""
-        import uuid as _uuid
-        request_id = str(_uuid.uuid4())
-        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
-        runtime.pending_user_inputs[request_id] = fut
-        try:
-            await websocket.send_json({
-                "type": "step",
-                "data": {
-                    "type": "user_input_request",
-                    "content": f"[ask_user_input] {question}",
-                    "question": question,
-                    "options": options,
-                    "request_id": request_id,
-                },
-            })
-            return await asyncio.wait_for(fut, timeout=300.0)
-        except asyncio.TimeoutError:
-            return "No response (timed out)."
-        finally:
-            runtime.pending_user_inputs.pop(request_id, None)
-
-    async def _on_handoff_to_user(
-        reason: str,
-        instructions: str,
-        continue_label: str | None,
-        request_id: str,
-    ) -> str:
-        """Pause execution and wait for user-triggered handoff_continue."""
-        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
-        runtime.handoff_active = True
-        runtime.handoff_request_id = request_id
-        runtime.handoff_future = fut
-        runtime.handoff_started_at = _time.time()
-        try:
-            await websocket.send_json(
-                {
-                    "type": "step",
-                    "data": {
-                        "type": "handoff_request",
-                        "content": f"[handoff_to_user] {reason}",
-                        "request_id": request_id,
-                        "reason": reason,
-                        "instructions": instructions,
-                        "continue_label": continue_label,
-                    },
-                }
-            )
-            timeout_candidate = runtime.settings.get("handoff_timeout_seconds") or settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS
-            try:
-                timeout_seconds = int(timeout_candidate)
-            except (TypeError, ValueError):
-                timeout_seconds = settings.NAVIGATION_HANDOFF_TIMEOUT_SECONDS
-            return await asyncio.wait_for(fut, timeout=max(1, timeout_seconds))
-        except asyncio.TimeoutError:
-            runtime.clear_handoff_state()
-            raise RuntimeError("Handoff timed out after waiting for manual completion.")
-        finally:
-            if runtime.handoff_future is fut and fut.done():
-                runtime.clear_handoff_state()
-
-    async def _on_reasoning_delta(step_id: str, delta_text: str) -> None:
-        normalized_delta, _ = normalize_for_channel(delta_text, channel="web")
-        await websocket.send_json({
-            "type": "reasoning_delta",
-            "data": {
-                "step_id": step_id,
-                "delta": normalized_delta,
-            },
-        })
-
-    async def _on_spawn_subagent(sub_instruction: str, sub_model: str) -> str:
-        """Spawn a sub-agent on behalf of the main agent and return its sub_id."""
-        effective_model = sub_model or str(runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b")).strip()
-
-        async def _sub_send(msg: dict[str, Any]) -> None:
-            try:
-                await websocket.send_json(msg)
-            except Exception:  # noqa: BLE001
-                pass
-
-        sub_id = await runtime.subagent_manager.spawn(
-            instruction=sub_instruction,
-            model=effective_model,
-            parent_user_uid=runtime.user_uid,
-            orchestrator=_get_orchestrator(),
-            parent_settings=runtime.settings,
-            send_to_parent=_sub_send,
-            on_user_input=None,
-            parent_task_id=runtime.current_frontend_task_id,
-        )
-        # Send updated agent list to frontend on the primary session websocket.
-        subagent_list_event = {
-            "type": "subagent_list",
-            "data": {"agents": runtime.subagent_manager.list_agents()},
-        }
-        await websocket.send_json(subagent_list_event)
-        return sub_id
-
-    async def _on_message_subagent(sub_id: str, message: str) -> bool:
-        return await runtime.subagent_manager.send_message(sub_id, message)
-
-    async def _on_first_model_call(model_name: str, provider_name: str) -> None:
-        logger.info(
-            "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_model_call provider=%s model=%s",
-            request_id,
-            task_id,
-            session_id,
-            provider_name,
-            model_name,
-        )
-        _record_runtime_event(
-            category="task_start",
-            subsystem="orchestrator",
-            level="info",
-            message="first model call",
-            session_id=session_id,
-            request_id=request_id,
-            task_id=task_id,
-            details={"model": model_name, "provider": provider_name},
-        )
-
-    try:
-        max_duration_seconds = int(runtime.settings.get("model_timeout_seconds") or settings.NAVIGATION_TASK_TIMEOUT_SECONDS)
-        max_tool_calls = int(runtime.settings.get("max_tool_calls") or settings.NAVIGATION_MAX_TOOL_CALLS)
-        effective_runtime_settings = {
-            "max_tool_calls": max_tool_calls,
-            "model_timeout_seconds": max_duration_seconds,
-            **runtime.settings,
-        }
-        logger.info(
-            "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=orchestrator_start",
-            request_id,
-            task_id,
-            session_id,
-        )
-        result = await asyncio.wait_for(
-            _get_orchestrator().execute_task(
-            session_id=session_id,
-            instruction=instruction,
-            on_step=callback,
-            on_frame=lambda image_b64: _on_frame_combined(websocket, image_b64, runtime.user_uid),
-            cancel_event=runtime.cancel_event,
-            steering_context=runtime.steering_context,
-            on_workflow_step=lambda step: _send_workflow_step(
-                websocket,
-                step,
-                runtime=runtime,
-                session_id=session_id,
-                task_id=task_id,
-                frontend_task_id=runtime.current_frontend_task_id,
-            ),
-            user_uid=runtime.user_uid,
-            on_user_input=_on_user_input,
-            on_handoff_to_user=_on_handoff_to_user,
-            on_reasoning_delta=_on_reasoning_delta,
-            on_spawn_subagent=_on_spawn_subagent,
-            on_message_subagent=_on_message_subagent,
-            on_first_model_call=_on_first_model_call,
-            settings=effective_runtime_settings,
-        ),
-            timeout=max_duration_seconds,
-        )
-        result_status = result.get("status") if isinstance(result, dict) else "completed"
-
-        # ── Chronos Gateway credit recording ──────────────────────────
-        if (
-            isinstance(result, dict)
-            and runtime.settings.get("provider") == "chronos"
-            and runtime.user_uid
-        ):
-            input_tokens = result.get("input_tokens", 0)
-            output_tokens = result.get("output_tokens", 0)
-            model_id = runtime.settings.get("model", "nvidia/nemotron-3-super-120b-a12b:free")
-            if input_tokens or output_tokens:
-                try:
-                    async for _db_session in get_session():
-                        await record_usage(
-                            _db_session,
-                            runtime.user_uid,
-                            "chronos",
-                            model_id,
-                            input_tokens,
-                            output_tokens,
-                            session_id=session_id,
-                        )
-                        await _db_session.commit()
-                        break
-                except Exception:  # noqa: BLE001
-                    logger.warning("Failed to record Chronos Gateway usage for user %s", runtime.user_uid)
-
-        # If execute_task returned a failure (e.g. unsupported provider), surface it as an error
-        if result_status == "failed":
-            error_msg = (result.get("error") or "Task failed") if isinstance(result, dict) else "Task failed"
-            error_already_emitted = bool(result.get("error_already_emitted")) if isinstance(result, dict) else False
-            await _safe_ws_send(
-                websocket,
-                {
-                    "type": "task_error",
-                    "data": {
-                        "task_id": task_id,
-                        "request_id": request_id,
-                        "code": "E_TASK_FAILED",
-                        "message": error_msg,
-                        "retryable": True,
-                        "error_already_emitted": error_already_emitted,
-                    },
-                },
-                request_id=request_id,
-                task_id=task_id,
-                ws_session_id=session_id,
-                phase="task_error",
-            )
-            if not error_already_emitted:
-                if not first_emit_logged:
-                    first_emit_logged = True
-                    logger.info(
-                        "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_error_emit",
-                        request_id,
-                        task_id,
-                        session_id,
-                    )
-                await _safe_ws_send(
-                    websocket,
-                    {"type": "error", "data": {"message": error_msg}},
-                    request_id=request_id,
-                    task_id=task_id,
-                    ws_session_id=session_id,
-                    phase="legacy_error",
-                )
-        await _log_web_message(
-            runtime,
-            session_id,
-            "assistant",
-            f"Task {result_status}: {instruction}",
-            metadata={
-                "source": "websocket",
-                "action": "result",
-                "status": result_status,
-                "result": result if isinstance(result, dict) else str(result),
-            },
-        )
-        terminal_state = "succeeded" if result_status == "completed" else "failed"
-        await _emit_terminal_result(
-            summary=str((result or {}).get("summary") or (result or {}).get("error") or result_status),
-            status=terminal_state,
-        )
-        if not first_emit_logged:
-            first_emit_logged = True
-            logger.info(
-                "navigation_trace request_id=%s task_id=%s ws_session_id=%s phase=first_result_emit",
-                request_id,
-                task_id,
-                session_id,
-            )
-        await _safe_ws_send(websocket, {"type": "result", "data": result}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result")
-    except asyncio.CancelledError:
-        logger.info("Navigation task cancelled for session %s", session_id)
-        await _emit_terminal_result(summary="Task cancelled", status="cancelled")
-        raise
-    except asyncio.TimeoutError:
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_TIMEOUT", "message": "Task execution timed out", "retryable": True}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_timeout_error",
-        )
-        await _emit_terminal_result(summary="Task timed out", status="failed")
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Navigation task failed for session %s", session_id)
-        await _log_web_message(
-            runtime,
-            session_id,
-            "assistant",
-            f"Task failed: {instruction}",
-            metadata={
-                "source": "websocket",
-                "action": "result",
-                "status": "failed",
-                "error": str(exc),
-            },
-        )
-        await _safe_ws_send(
-            websocket,
-            {"type": "task_error", "data": {"task_id": task_id, "request_id": request_id, "code": "E_TASK_EXCEPTION", "message": str(exc), "retryable": True}},
-            request_id=request_id,
-            task_id=task_id,
-            ws_session_id=session_id,
-            phase="task_exception_error",
-        )
-        await _emit_terminal_result(summary=str(exc), status="failed")
-        await _safe_ws_send(websocket, {"type": "error", "data": {"message": str(exc)}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_error_exception")
-        await _safe_ws_send(websocket, {"type": "result", "data": {"status": "failed", "instruction": instruction, "steps": []}}, request_id=request_id, task_id=task_id, ws_session_id=session_id, phase="legacy_result_exception")
-    finally:
-        runtime.clear_handoff_state()
-        runtime.task_running = False
-        runtime.completed_task_ids.add(task_id)
-
-    await _start_next_queued_task_if_ready(websocket, runtime, session_id)
-
-
 # ── WebSocket navigation endpoint ────────────────────────────────────
 
 
@@ -2988,9 +2502,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         await db_session_gen.aclose()
 
     try:
-        _get_orchestrator()
-        await _send_initial_frame(websocket)
-
         while True:
             try:
                 data = await websocket.receive_json()
@@ -3388,96 +2899,45 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 else:
                     logger.debug("user_input_response for unknown/expired request_id=%s", request_id)
             elif action == "handoff_continue":
-                request_id = str(data.get("request_id") or "").strip()
-                if not runtime.handoff_active:
-                    await _safe_ws_send(
-                        websocket,
-                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "handoff_continue: no active handoff", "retryable": False}},
-                        request_id=runtime.current_request_id,
-                        task_id=runtime.current_task_id,
-                        ws_session_id=session_id,
-                        phase="handoff_continue_idle",
-                    )
-                    continue
-                if not request_id or request_id != runtime.handoff_request_id:
-                    await _safe_ws_send(
-                        websocket,
-                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "handoff_continue: request_id mismatch", "retryable": True}},
-                        request_id=runtime.current_request_id,
-                        task_id=runtime.current_task_id,
-                        ws_session_id=session_id,
-                        phase="handoff_continue_mismatch",
-                    )
-                    continue
-                fut = runtime.handoff_future
-                if fut and not fut.done():
-                    fut.set_result("Human handoff completed. Resuming agent.")
-                runtime.clear_handoff_state()
-                await _send_step(
+                # Phase 6: HITL browser handoff was removed with the legacy
+                # runtime. Reject politely so legacy clients see a clear
+                # signal instead of a silent stall.
+                await _safe_ws_send(
                     websocket,
-                    {"type": "handoff_complete", "content": "Human handoff completed. Resuming agent."},
-                    runtime=runtime,
-                    session_id=session_id,
+                    {
+                        "type": "task_error",
+                        "data": {
+                            "task_id": runtime.current_task_id,
+                            "code": "E_UNSUPPORTED_ACTION",
+                            "message": "handoff_continue is no longer supported (chat-only runtime)",
+                            "retryable": False,
+                        },
+                    },
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    ws_session_id=session_id,
+                    phase="handoff_continue_removed",
                 )
             elif action == "human_browser_action":
-                if not runtime.handoff_active:
-                    await _safe_ws_send(
-                        websocket,
-                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": "human_browser_action: handoff is not active", "retryable": True}},
-                        request_id=runtime.current_request_id,
-                        task_id=runtime.current_task_id,
-                        ws_session_id=session_id,
-                        phase="human_browser_action_no_handoff",
-                    )
-                    continue
-                action_kind = str(data.get("kind") or "").strip().lower()
-                request_id = runtime.handoff_request_id or ""
-                try:
-                    if action_kind == "click":
-                        x = int(data.get("x"))
-                        y = int(data.get("y"))
-                        if x < 0 or y < 0 or x > settings.VIEWPORT_WIDTH or y > settings.VIEWPORT_HEIGHT:
-                            raise ValueError("click coordinates out of bounds")
-                        await _get_orchestrator().executor.click(x, y)
-                    elif action_kind == "type_text":
-                        text = str(data.get("text") or "")
-                        x_raw = data.get("x")
-                        y_raw = data.get("y")
-                        x = int(x_raw) if x_raw is not None else None
-                        y = int(y_raw) if y_raw is not None else None
-                        if x is not None and (x < 0 or x > settings.VIEWPORT_WIDTH):
-                            raise ValueError("type_text x out of bounds")
-                        if y is not None and (y < 0 or y > settings.VIEWPORT_HEIGHT):
-                            raise ValueError("type_text y out of bounds")
-                        await _get_orchestrator().executor.type_text(text, x, y)
-                    elif action_kind == "scroll":
-                        delta = int(data.get("deltaY"))
-                        direction = "down" if delta > 0 else "up"
-                        amount = min(max(abs(delta), 10), 1200)
-                        await _get_orchestrator().executor.scroll(direction, amount)
-                    elif action_kind == "press_key":
-                        key = str(data.get("key") or "").strip()
-                        if not key:
-                            raise ValueError("press_key requires key")
-                        await _get_orchestrator().executor.press_key(key)
-                    else:
-                        raise ValueError("unknown human browser action")
-                except Exception as exc:  # noqa: BLE001
-                    await _safe_ws_send(
-                        websocket,
-                        {"type": "task_error", "data": {"task_id": runtime.current_task_id, "code": "E_BAD_PAYLOAD", "message": f"human_browser_action rejected: {exc}", "retryable": True}},
-                        request_id=runtime.current_request_id,
-                        task_id=runtime.current_task_id,
-                        ws_session_id=session_id,
-                        phase="human_browser_action_invalid",
-                    )
-                    continue
-                logger.info(
-                    "hitl_action session_id=%s request_id=%s kind=%s payload=%s",
-                    session_id,
-                    request_id,
-                    action_kind,
-                    {k: data.get(k) for k in ("x", "y", "text", "key", "deltaY")},
+                # Phase 6: chat-only runtime. Manual browser steering from
+                # the frontend was removed; the always-on runtime owns the
+                # browser lifecycle via MCP. Reject politely so legacy
+                # clients get a clear signal.
+                await _safe_ws_send(
+                    websocket,
+                    {
+                        "type": "task_error",
+                        "data": {
+                            "task_id": runtime.current_task_id,
+                            "code": "E_UNSUPPORTED_ACTION",
+                            "message": "human_browser_action is no longer supported (chat-only runtime)",
+                            "retryable": False,
+                        },
+                    },
+                    request_id=runtime.current_request_id,
+                    task_id=runtime.current_task_id,
+                    ws_session_id=session_id,
+                    phase="human_browser_action_removed",
                 )
             elif action == "ping":
                 _record_runtime_event(
@@ -3518,7 +2978,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     instruction=sub_instruction,
                     model=sub_model,
                     parent_user_uid=runtime.user_uid,
-                    orchestrator=_get_orchestrator(),
+                    orchestrator=None,  # Phase 6: legacy orchestrator removed
                     parent_settings=runtime.settings,
                     send_to_parent=_sub_send,
                     on_user_input=None,  # sub-agents don't forward user-input to parent for now
@@ -3821,7 +3281,6 @@ async def telegram_webhook(integration_id: str, request: Request) -> dict[str, A
     return _channel_webhook_response(result)
 
 
-
 @app.post("/api/integrations/telegram/register/{integration_id}")
 async def register_telegram_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     user_payload = _get_current_user(request)
@@ -3848,7 +3307,6 @@ async def register_telegram_integration(integration_id: str, payload: dict[str, 
     return {"ok": True, "connection": connection}
 
 
-
 @app.post("/api/integrations/telegram/{integration_id}/test")
 async def test_telegram_integration(integration_id: str) -> dict[str, Any]:
     adapter = _get_channel_adapter("telegram", integration_id)
@@ -3856,7 +3314,6 @@ async def test_telegram_integration(integration_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Integration not found")
     result = await adapter.test_connection()
     return {"ok": bool(result.get("ok")), "result": result}
-
 
 
 @app.post("/api/integrations/telegram/{integration_id}/send_message")
@@ -3883,7 +3340,6 @@ async def telegram_send_message(integration_id: str, payload: dict[str, Any]) ->
         log_source="send_message",
     )
     return {"ok": bool(result.get("ok")), "result": result}
-
 
 
 @app.post("/api/integrations/telegram/{integration_id}/send_draft")
@@ -3913,7 +3369,6 @@ async def telegram_send_draft(integration_id: str, payload: dict[str, Any]) -> d
     return {"ok": bool(result.get("ok")), "result": result}
 
 
-
 @app.post("/api/integrations/slack/register/{integration_id}")
 async def register_slack_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     user_payload = _get_current_user(request)
@@ -3936,7 +3391,6 @@ async def register_slack_integration(integration_id: str, payload: dict[str, Any
         raise _integration_error(400, "INVALID_BOT_TOKEN", str(exc)) from exc
     channel_registry.upsert("slack", integration_id, SlackChannelAdapter(integration), config)
     return {"ok": True, "connection": connection}
-
 
 
 @app.post("/api/integrations/slack/webhook/{integration_id}")
@@ -4086,7 +3540,6 @@ async def slack_webhook(integration_id: str, request: Request) -> dict[str, Any]
     return _channel_webhook_response(result)
 
 
-
 @app.post("/api/integrations/slack/{integration_id}/test")
 async def test_slack_integration(integration_id: str) -> dict[str, Any]:
     adapter = _get_channel_adapter("slack", integration_id)
@@ -4094,7 +3547,6 @@ async def test_slack_integration(integration_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Integration not found")
     result = await adapter.test_connection()
     return {"ok": bool(result.get("ok")), "result": result}
-
 
 
 @app.post("/api/integrations/slack/{integration_id}/send_message")
@@ -4121,7 +3573,6 @@ async def slack_send_message(integration_id: str, payload: dict[str, Any]) -> di
     return {"ok": bool(result.get("ok")), "result": result}
 
 
-
 @app.post("/api/integrations/discord/register/{integration_id}")
 async def register_discord_integration(integration_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
     user_payload = _get_current_user(request)
@@ -4143,7 +3594,6 @@ async def register_discord_integration(integration_id: str, payload: dict[str, A
         raise _integration_error(400, "INVALID_BOT_TOKEN", str(exc)) from exc
     channel_registry.upsert("discord", integration_id, DiscordChannelAdapter(integration), config)
     return {"ok": True, "connection": connection}
-
 
 
 @app.post("/api/integrations/discord/webhook/{integration_id}")
@@ -4294,7 +3744,6 @@ async def discord_webhook(integration_id: str, request: Request) -> dict[str, An
     return _channel_webhook_response(result)
 
 
-
 @app.post("/api/integrations/discord/{integration_id}/test")
 async def test_discord_integration(integration_id: str) -> dict[str, Any]:
     adapter = _get_channel_adapter("discord", integration_id)
@@ -4302,7 +3751,6 @@ async def test_discord_integration(integration_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Integration not found")
     result = await adapter.test_connection()
     return {"ok": bool(result.get("ok")), "result": result}
-
 
 
 @app.post("/api/integrations/discord/{integration_id}/send_message")
@@ -4325,7 +3773,6 @@ async def discord_send_message(integration_id: str, payload: dict[str, Any]) -> 
         log_source="send_message",
     )
     return {"ok": bool(result.get("ok")), "result": result}
-
 
 
 @app.post("/api/integrations/github/register/{integration_id}")
@@ -4616,92 +4063,6 @@ async def _register_telegram_commands(integration: TelegramIntegration) -> None:
         logger.warning("Failed to register Telegram commands: %s", exc)
 
 
-async def _on_frame_for_stream(user_uid: str, image_b64: str) -> None:
-    """Forward a frame to stream subscribers (used when task is triggered from bot)."""
-    sub = _stream_subscribers.get(user_uid)
-    if not sub:
-        return
-    now = _time.monotonic()
-    if now - sub.get("last_sent_at", 0) < 3.0:
-        return
-    sub["last_sent_at"] = now
-    platform = sub.get("platform")
-    integration_id = sub.get("integration_id")
-    chat_id = sub.get("chat_id")
-    if platform == "telegram":
-        integration = _get_channel_integration("telegram", str(integration_id))
-        if integration:
-            await integration.send_photo(chat_id, image_b64)
-    elif platform == "discord":
-        integration = _get_channel_integration("discord", str(integration_id))
-        if integration:
-            await integration.execute_tool(
-                "discord_send_image",
-                {"channel": str(sub.get("channel_id", chat_id) or chat_id), "image_b64": image_b64},
-            )
-
-
-async def _run_navigation_task_from_bot(
-    runtime: "SessionRuntime",
-    owner_uid: str,
-    platform: str,
-    integration_id: str,
-    chat_id: Any,
-    instruction: str,
-) -> None:
-    """Run a navigation task triggered from a bot command (no websocket)."""
-    runtime.task_running = True
-    runtime.cancel_event.clear()
-    steps: list[Any] = []
-    typing_pulse_task: asyncio.Task[None] | None = None
-    if platform == "telegram":
-        integration = _get_channel_integration("telegram", str(integration_id))
-        if isinstance(integration, TelegramIntegration) and integration.client:
-            async def _typing_pulse() -> None:
-                while runtime.task_running and not runtime.cancel_event.is_set():
-                    try:
-                        await integration.client.send_chat_action(chat_id, "typing")
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("telegram typing pulse failed: %s", exc)
-                    await asyncio.sleep(4.5)
-
-            typing_pulse_task = asyncio.create_task(_typing_pulse())
-    try:
-        result = await _get_orchestrator().execute_task(
-            session_id=f"bot_{owner_uid}",
-            instruction=instruction,
-            on_step=lambda step: steps.append(step),
-            on_frame=lambda img: _on_frame_for_stream(owner_uid, img),
-            cancel_event=runtime.cancel_event,
-            steering_context=runtime.steering_context,
-            settings=runtime.settings,
-            on_workflow_step=lambda _: None,
-            user_uid=owner_uid,
-        )
-        status = result.get("status", "completed")
-        reply = f"✅ Task {status}: {instruction[:60]}"
-    except asyncio.CancelledError:
-        reply = "🛑 Task was interrupted."
-    except Exception as exc:
-        reply = f"❌ Task failed: {exc}"
-    finally:
-        runtime.task_running = False
-        if typing_pulse_task:
-            typing_pulse_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await typing_pulse_task
-        await cleanup_session_workspace(f"bot_{owner_uid}")
-    # Send result back to bot
-    if platform in {"telegram", "discord"}:
-        await _send_channel_text(
-            platform,
-            integration_id,
-            str(chat_id),
-            reply,
-            log_source="bot_runtime",
-        )
-
-
 def _get_telegram_sender_id(update: dict[str, Any]) -> str:
     callback_query = update.get("callback_query") or {}
     callback_from = callback_query.get("from") or {}
@@ -4827,16 +4188,54 @@ async def _run_or_queue_from_bot_command(
             metadata={"command": source_command},
         )
         return f"📋 Task queued (agent is busy): {instruction[:80]}"
-    asyncio.create_task(
-        _run_navigation_task_from_bot(
-            runtime,
-            str(owner_uid),
-            platform,
-            integration_id,
-            chat_id,
-            instruction,
-        )
-    )
+    # Phase 6: route bot commands through the always-on runtime supervisor.
+    # The legacy Gemini-driven helper was removed; we enqueue a CHAT_MESSAGE
+    # event scoped to the bot platform channel so the same agent loop that
+    # services the websocket can stream the reply back through the channel
+    # adapter.
+    async def _dispatch_bot_command() -> None:
+        registry = _runtime_get_registry()
+        if not _runtime_supervisor_enabled() or registry is None:
+            logger.error(
+                "bot command dropped: runtime supervisor unavailable "
+                "(platform=%s integration_id=%s owner_uid=%s)",
+                platform,
+                integration_id,
+                owner_uid,
+            )
+            return
+        supervisor_owner = str(owner_uid) if owner_uid else ""
+        if not supervisor_owner:
+            return
+        runtime_settings = dict(getattr(runtime, "settings", {}) or {}) if runtime else {}
+        memory_mode = str(runtime_settings.get("memory_mode") or "files")
+        try:
+            supervisor = await registry.get(supervisor_owner)
+            await supervisor.enqueue(
+                _RuntimeAgentEvent(
+                    owner_uid=supervisor_owner,
+                    channel=platform,
+                    kind=_RuntimeEventKind.CHAT_MESSAGE,
+                    payload={
+                        "text": instruction,
+                        "ws_session_id": runtime.session_id if runtime else None,
+                        "settings": runtime_settings,
+                        "memory_mode": memory_mode,
+                        "integration_id": integration_id,
+                        "chat_id": chat_id,
+                        "source_command": source_command,
+                    },
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "bot command dispatch to runtime supervisor failed "
+                "(platform=%s integration_id=%s)",
+                platform,
+                integration_id,
+            )
+
+    asyncio.create_task(_dispatch_bot_command())
     return f"🚀 Starting task: {instruction[:80]}"
 
 
