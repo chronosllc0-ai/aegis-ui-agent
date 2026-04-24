@@ -97,12 +97,7 @@ def runtime_compact_threshold_pct() -> int:
 
 
 def estimate_tokens(text: str | None) -> int:
-    """Cheap deterministic token estimate.
-
-    We intentionally avoid adding a tokenizer dependency to this path.
-    The estimate is conservative enough for meter/compaction decisions:
-    roughly char/4, bounded by a simple lexical split.
-    """
+    """Cheap deterministic token estimate."""
     if not text:
         return 0
     lexical = len(_TOKEN_RE.findall(text))
@@ -134,11 +129,7 @@ def _event_line(event: RuntimeRunEvent) -> str:
     return f"[{event.kind}] {_jsonish(text)[:1600]}"
 
 
-async def _latest_checkpoint(
-    session: AsyncSession,
-    *,
-    session_id: str,
-) -> RuntimeContextCheckpoint | None:
+async def _latest_checkpoint(session: AsyncSession, *, session_id: str) -> RuntimeContextCheckpoint | None:
     stmt = (
         select(RuntimeContextCheckpoint)
         .where(RuntimeContextCheckpoint.session_id == session_id)
@@ -148,12 +139,7 @@ async def _latest_checkpoint(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def _recent_events(
-    session: AsyncSession,
-    *,
-    session_id: str,
-    limit: int,
-) -> list[RuntimeRunEvent]:
+async def _recent_events(session: AsyncSession, *, session_id: str, limit: int) -> list[RuntimeRunEvent]:
     stmt = (
         select(RuntimeRunEvent)
         .join(RuntimeRun, RuntimeRun.id == RuntimeRunEvent.run_id)
@@ -166,20 +152,10 @@ async def _recent_events(
     return rows
 
 
-async def _pending_tools(
-    session: AsyncSession,
-    *,
-    session_id: str,
-    limit: int,
-) -> list[RuntimeToolCall]:
+async def _pending_tools(session: AsyncSession, *, session_id: str, limit: int) -> list[RuntimeToolCall]:
     stmt = (
         select(RuntimeToolCall)
-        .where(
-            and_(
-                RuntimeToolCall.session_id == session_id,
-                RuntimeToolCall.status == "started",
-            )
-        )
+        .where(and_(RuntimeToolCall.session_id == session_id, RuntimeToolCall.status == "started"))
         .order_by(RuntimeToolCall.started_at.desc())
         .limit(max(1, limit))
     )
@@ -201,14 +177,7 @@ def _pending_tool_text(tools: Iterable[RuntimeToolCall]) -> str:
     return "\n".join(lines)
 
 
-def _prompt_from_parts(
-    *,
-    instructions: str,
-    checkpoint_text: str,
-    history_text: str,
-    pending_tools_text: str,
-    current_text: str,
-) -> str:
+def _prompt_from_parts(*, instructions: str, checkpoint_text: str, history_text: str, pending_tools_text: str, current_text: str) -> str:
     sections = [instructions.strip()]
     if checkpoint_text.strip():
         sections.append("Previous compacted checkpoint:\n" + checkpoint_text.strip())
@@ -255,7 +224,6 @@ async def build_prepared_context(
     history_text = "\n".join(_event_line(event) for event in recent)
     pending_tools_text = _pending_tool_text(pending_tools)
     tool_catalog = _tool_catalog_text(tool_names)
-
     buckets = [
         _bucket("system_prompt", instructions, "Agent identity, behavior rules, and runtime guardrails."),
         _bucket("active_tools", tool_catalog, "Names of native, MCP, and connector tools loaded for this turn."),
@@ -286,13 +254,7 @@ async def build_prepared_context(
         pending_tools_text=pending_tools_text,
         current_text=current_text,
     )
-    return PreparedContext(
-        prompt=prompt,
-        meter=meter,
-        history_text=history_text,
-        latest_checkpoint=checkpoint,
-        recent_event_count=len(recent),
-    )
+    return PreparedContext(prompt=prompt, meter=meter, history_text=history_text, latest_checkpoint=checkpoint, recent_event_count=len(recent))
 
 
 def _checkpoint_summary(previous: str, history: str, max_chars: int = 12_000) -> str:
@@ -308,13 +270,7 @@ def _checkpoint_summary(previous: str, history: str, max_chars: int = 12_000) ->
     )
 
 
-async def maybe_create_checkpoint(
-    *,
-    session_factory: Any,
-    prepared: PreparedContext,
-    owner_uid: str,
-    session_id: str,
-) -> dict[str, Any] | None:
+async def maybe_create_checkpoint(*, session_factory: Any, prepared: PreparedContext, owner_uid: str, session_id: str) -> dict[str, Any] | None:
     """Persist a compaction checkpoint when the meter crosses threshold."""
     if not prepared.meter.get("should_compact") or session_factory is None:
         return None
@@ -335,6 +291,7 @@ async def maybe_create_checkpoint(
         "checkpoint_id": row.id,
         "session_id": session_id,
         "owner_uid": owner_uid,
+        "summary": summary,
         "source_event_count": row.source_event_count,
         "token_count": row.token_count,
         "created_at": datetime.now(timezone.utc).isoformat(),
