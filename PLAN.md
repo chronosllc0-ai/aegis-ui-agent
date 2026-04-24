@@ -423,13 +423,16 @@ Each phase is a PR. Do not batch phases — this codebase has a lot of moving pa
 
 **Merge criteria:** `npm run build` clean in `frontend/`, UI regression tests updated, Netlify preview renders.
 
-### Phase 6 — Remove legacy paths + cleanup
+### Phase 6 — Remove legacy paths + cleanup — **DONE (PR pending merge)**
 
-- Delete `universal_navigator.py`, `orchestrator.py`, `executor.py`, `analyzer.py` (if unused), `mcp_client.py`.
-- Delete `_send_initial_frame`, `_on_frame_combined`, browser-control websocket action handlers from `main.py`.
-- Remove `LEGACY_ORCHESTRATOR` flag.
-- Update `ONBOARDING.md` with Session ≥ 7 notes.
-- Update `AGENTS.md` with the new module layout.
+- ✅ Deleted `universal_navigator.py` (2,750 LOC), `orchestrator.py` (408), `analyzer.py` (154), `executor.py` (113), `navigator.py` (70).
+- ✅ Deleted `_get_orchestrator`, `_send_frame`, `_send_initial_frame`, `_on_frame_combined`, `_start_legacy_navigation_task`, `_run_navigation_task`, `_on_frame_for_stream`, `_run_navigation_task_from_bot` (~750 LOC across 8 helpers in `main.py`).
+- ✅ Removed the `human_browser_action` + `handoff_continue` websocket handlers (now return `E_UNSUPPORTED_ACTION`).
+- ✅ Removed `SessionRuntime.handoff_*` state + `clear_handoff_state`.
+- ✅ Flipped `runtime_supervisor_enabled()` default `False → True`; dropped `legacy_orchestrator_enabled()` + the `LEGACY_ORCHESTRATOR` env var entirely.
+- ✅ Rewrote `_start_navigation_task` to dispatch **only** through the supervisor; rewrote `_run_or_queue_from_bot_command` to enqueue `CHAT_MESSAGE` events for platform channels.
+- ✅ Deleted 12 legacy tests (`test_analyzer`, `test_executor`, `test_orchestrator_*`, `test_parallel_tool_calls`, `test_universal_memory_mode`, `test_universal_navigator_*`, `test_conversation_persistence`, `test_main_websocket`).
+- ✅ Updated `ONBOARDING.md` with Session ≥ 7 notes + `AGENTS.md` with the new module layout.
 
 **Merge criteria:** no remaining import from the deleted modules. `grep -rn 'executor\|orchestrator\|navigator\|_send_initial_frame'` returns only historical log lines. Deploy to Railway + Netlify and verify heartbeat fires with no browser tab open.
 

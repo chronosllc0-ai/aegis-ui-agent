@@ -75,21 +75,28 @@ Prefer machine-readable error codes (example set):
 
 ## Architecture Notes
 
-### Frontend
-- Chat is command center.
-- Browser is a tool viewport.
+### Frontend (`frontend/`)
+- Chat is the only user-facing surface (Phase 5 removed the browser viewport + screenshot stream).
+- Screenshots surface only when the agent explicitly invokes the `screenshot` tool — never auto-frames.
 - Do not hide start/reject events.
-- Keep low-level browser noise out of chat during run; provide concise completion summary.
 
-### Backend
-- Normalize and validate inbound payloads.
-- Preserve original client metadata when logging.
-- Emit explicit protocol states.
-- Always produce terminal outcomes.
+### Backend (`main.py` + `backend/`)
+- `main.py` is the FastAPI entrypoint: websocket + REST, session state, bot command routing.
+- `backend/runtime/` owns the always-on agent loop:
+  - `supervisor.py` — one persistent `Supervisor` per `owner_uid`; durable event queue.
+  - `session.py` — per-session context (channel, settings, memory mode, history).
+  - `events.py` — `AgentEvent` / `EventKind` taxonomy (CHAT_MESSAGE, TASK_EVENT, etc.).
+  - `agent_loop.py` — OpenAI Agents SDK integration + LiteLLM provider routing.
+  - `fanout.py` — fan-out registry wiring channel subscribers (websocket, Slack, Telegram, Discord) to the supervisor stream.
+  - `integration.py` — FastAPI glue; `runtime_supervisor_enabled()` + startup/shutdown hooks.
+  - `tools/native.py` — 40+ native agent tools (non-browser).
+  - `mcp_host.py` — real MCP host; Playwright + Browser MCP servers + connector adapters.
+- `backend/integrations/` — Slack/Telegram/Discord channel adapters + connector glue.
 
-### Runtime
-- Provider-agnostic orchestration with safe tool bridging.
-- Fallback runtime behavior is explicit and observable.
+### Runtime contract
+- Exactly one execution path: events are enqueued on the supervisor; the agent loop produces deltas; fan-out delivers them to subscribers.
+- Legacy helpers (`_run_navigation_task*`, `_send_initial_frame`, `_on_frame_*`, manual `human_browser_action`) were deleted in Phase 6 — do not re-introduce them.
+- Browser is a tool only. It starts lazily via MCP when an agent calls a browser-namespaced tool, and it shuts down with the supervisor.
 
 ---
 
@@ -97,6 +104,6 @@ Prefer machine-readable error codes (example set):
 
 ```bash
 npm run -w frontend build
-python -m py_compile main.py backend/pydantic_adk_runner.py
-pytest -q tests/test_main_websocket.py::test_websocket_navigate_smoke -q
+python -m py_compile main.py
+pytest -q tests/test_runtime_supervisor_smoke.py -q
 ```

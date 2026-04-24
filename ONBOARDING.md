@@ -7771,3 +7771,45 @@
 - None.
 
 ---
+## Session 7 - April 24, 2026 (Phase 6: delete legacy Gemini runtime)
+
+**Agent:** Viktor (Claude)
+**Duration:** Phase 6 surgery pass; merged behind PR
+
+### What Was Done
+- Deleted legacy top-level modules: `universal_navigator.py` (2,750 LOC), `orchestrator.py` (408), `analyzer.py` (154), `executor.py` (113), `navigator.py` (70).
+- Removed 8 legacy helpers from `main.py` (~750 LOC total): `_get_orchestrator`, `_send_frame`, `_send_initial_frame`, `_on_frame_combined`, `_start_legacy_navigation_task`, `_run_navigation_task`, `_on_frame_for_stream`, `_run_navigation_task_from_bot`. `main.py` dropped from 5,630 → 5,029 lines.
+- Rewrote `_start_navigation_task` to always dispatch through the runtime supervisor; unavailable supervisor now surfaces `E_RUNTIME_UNAVAILABLE` instead of falling back to legacy.
+- Rewrote `_run_or_queue_from_bot_command` to enqueue a `CHAT_MESSAGE` event scoped to the platform channel (Slack/Telegram/Discord) on the supervisor.
+- Replaced `human_browser_action` + `handoff_continue` websocket handlers with `E_UNSUPPORTED_ACTION` rejects.
+- Removed `SessionRuntime.handoff_active / handoff_request_id / handoff_future / handoff_started_at` and `clear_handoff_state()`.
+- `backend/runtime/integration.py`: flipped `runtime_supervisor_enabled()` default `False → True`; deleted `legacy_orchestrator_enabled()` and the `LEGACY_ORCHESTRATOR` env var.
+- Deleted 12 legacy tests (all `test_analyzer*`, `test_executor*`, `test_orchestrator_*`, `test_parallel_tool_calls`, `test_universal_memory_mode`, `test_universal_navigator_*`, `test_conversation_persistence`, `test_main_websocket`).
+- Replaced the `universal_navigator`-dependent parity check in `test_runtime_supervisor_smoke.py` with a static ≥40-tool floor aligned with PLAN.md.
+- Updated `AGENTS.md` with the new `backend/runtime/` module layout + the Phase 6 "do not re-introduce" rule.
+- Updated `PLAN.md` Phase 6 block to a DONE checklist.
+
+### What's Working
+- `main.py` parses clean via `ast.parse`; no remaining references to legacy orchestrator / navigator / executor symbols.
+- Runtime supervisor is the single execution path for chat (websocket + bot commands).
+- Browser lifecycle is owned entirely by MCP (Playwright + Browser MCP), started lazily on first browser-namespaced tool call.
+
+### What's NOT Working Yet
+- Persistence rehydration (kill-mid-tool-call → restart → resume) is still Phase 7 scope.
+- `ask_user_input` / `run_code` chat-render flows are still marked `it.skip` in the frontend; restoring them is deferred.
+- `bubblewrap` sandbox is not yet in the Railway Dockerfile (also Phase 7).
+
+### Next Steps
+1. Phase 7 hardening + persistence rehydration.
+2. Restore `ask_user_input` / `run_code` UI flows.
+3. Add per-connector conformance tests (currently skipped).
+
+### Decisions Made
+- No migration shim for the removed `LEGACY_ORCHESTRATOR` flag — per product owner, Phase 6 is a hard cut.
+- Bot commands enqueue directly onto the supervisor instead of running a parallel "from_bot" helper; reduces code duplication and guarantees identical semantics between web chat and platform chat.
+- Kept the `test_native_tool_manifest_covers_all_non_terminal_non_browser_tools` test name as a tombstone so `git log --follow` still surfaces the Phase 2 parity history.
+
+### Blockers
+- None.
+
+---
