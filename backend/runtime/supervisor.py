@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from backend.runtime.events import AgentEvent, EventKind
 from backend.runtime.session import (
@@ -106,12 +106,19 @@ class SessionSupervisor:
         *,
         dispatch: DispatchHook | None = None,
         session_store: InMemoryChannelSessionStore | None = None,
+        persistence_factory: Callable[[], Any] | None = None,
     ) -> None:
         if not owner_uid:
             raise ValueError("owner_uid is required")
         self.owner_uid = owner_uid
         self._sessions = session_store or InMemoryChannelSessionStore()
         self._dispatch: DispatchHook = dispatch or _noop_dispatch
+        # Optional async-session factory (``async def () -> AsyncSession``
+        # or ``() -> AsyncContextManager[AsyncSession]``). When set, the
+        # supervisor persists every enqueued :class:`AgentEvent` to the
+        # ``runtime_inbox_events`` table so Phase 7 rehydration can
+        # replay unfinished work after a crash.
+        self._persistence_factory: Callable[[], Any] | None = persistence_factory
         self._inbox: asyncio.PriorityQueue[AgentEvent] = asyncio.PriorityQueue()
         self._worker: asyncio.Task[None] | None = None
         # Event flags used to coordinate shutdown semantics. ``_draining``
@@ -217,7 +224,26 @@ class SessionSupervisor:
             raise RuntimeError(
                 f"SessionSupervisor({self.owner_uid}) is shutting down; refusing new events"
             )
-        self.session(event.channel)  # warm the session
+        channel_session = self.session(event.channel)  # warm the session
+        # Persist the inbox row *before* queueing so a crash between
+        # ``put`` and the worker pickup still leaves a rehydration trail.
+        # Persistence failures must never reject an enqueue — the queue
+        # is the source of truth for live dispatch; persistence is a
+        # best-effort durability layer.
+        if self._persistence_factory is not None:
+            try:
+                from backend.runtime.persistence import record_inbox_event
+
+                async with self._persistence_factory() as db:
+                    await record_inbox_event(
+                        db, event, session_id=channel_session.session_id
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "SessionSupervisor(%s) failed to persist inbox event %s",
+                    self.owner_uid,
+                    event.event_id,
+                )
         self.stats.enqueued += 1
         self.stats.last_event_id = event.event_id
         await self._inbox.put(event)
@@ -282,10 +308,28 @@ class SupervisorRegistry:
     changing call sites.
     """
 
-    def __init__(self, *, dispatch: DispatchHook | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        dispatch: DispatchHook | None = None,
+        persistence_factory: Callable[[], Any] | None = None,
+    ) -> None:
         self._supervisors: dict[str, SessionSupervisor] = {}
         self._dispatch = dispatch
+        self._persistence_factory = persistence_factory
         self._lock = asyncio.Lock()
+
+    def set_persistence_factory(
+        self, factory: Callable[[], Any] | None
+    ) -> None:
+        """Install the persistence factory used by new supervisors.
+
+        Existing supervisors are updated in place so the first crash
+        after install still captures inbox rows.
+        """
+        self._persistence_factory = factory
+        for supervisor in self._supervisors.values():
+            supervisor._persistence_factory = factory  # type: ignore[attr-defined]
 
     async def get(self, owner_uid: str) -> SessionSupervisor:
         """Return (or lazily create + start) the supervisor for ``owner_uid``."""
@@ -293,7 +337,11 @@ class SupervisorRegistry:
             existing = self._supervisors.get(owner_uid)
             if existing is not None:
                 return existing
-            supervisor = SessionSupervisor(owner_uid, dispatch=self._dispatch)
+            supervisor = SessionSupervisor(
+                owner_uid,
+                dispatch=self._dispatch,
+                persistence_factory=self._persistence_factory,
+            )
             supervisor.start()
             self._supervisors[owner_uid] = supervisor
             return supervisor

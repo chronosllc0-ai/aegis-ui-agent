@@ -17,6 +17,11 @@ RUN apt-get update && apt-get install -y \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
     libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
     libcairo2 libasound2 libatspi2.0-0 \
+    # Phase 7: bubblewrap sandbox for the ``run_code`` native tool.
+    # The chat-only UI does not expose this tool yet (see the `it.skip`
+    # branches in the frontend), but the runtime and tests depend on
+    # the binary being present.
+    bubblewrap \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
