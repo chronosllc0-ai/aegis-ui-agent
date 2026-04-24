@@ -49,7 +49,6 @@ describe('ChatPanel ask_user_input reply flow', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         activeTaskId='task-1'
         onUserInputResponse={onUserInputResponse}
@@ -108,7 +107,6 @@ describe('ChatPanel plan intent UX', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         {...baseChatPanelProps}
       />,
@@ -144,7 +142,6 @@ describe('ChatPanel chronological message ordering', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         activeTaskId='task-order'
         serverMessages={[
           { id: 'srv-user-1', role: 'user', content: 'First request', created_at: '2026-04-19T10:00:00Z', metadata: null },
@@ -184,7 +181,6 @@ describe('ChatPanel steering control in composer', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         {...baseChatPanelProps}
       />,
@@ -203,7 +199,6 @@ describe('ChatPanel steering control in composer', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         {...baseChatPanelProps}
       />,
@@ -226,7 +221,6 @@ describe('ChatPanel steering control in composer', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
       />,
     )
@@ -256,7 +250,6 @@ describe('ChatPanel control surface regressions', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
       />,
     )
@@ -277,7 +270,6 @@ describe('ChatPanel control surface regressions', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         reasoningEffort='medium'
         onReasoningEffortChange={onReasoningEffortChange}
@@ -432,7 +424,6 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         activeTaskId='task-noise'
         serverMessages={[
           { id: 'srv-noise-1', role: 'assistant', content: 'Model response (no tool call): hidden' },
@@ -461,10 +452,13 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
     expect(screen.queryByText(/code summary:/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/outcome: completed/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/^task completed$/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/\[extract_page\] historical fixture/i)).toBeInTheDocument()
-    expect(screen.getByText(/\[go_back\] historical fixture/i)).toBeInTheDocument()
-    expect(screen.getByText(/\[click\] historical fixture/i)).toBeInTheDocument()
-    expect(screen.getByText(/\[go_to_url\] historical fixture/i)).toBeInTheDocument()
+    // Chat-only runtime (Phase 5): browser-primitive tool messages are
+    // excluded from the chat timeline for both live logs and persisted
+    // server messages. See frontend/src/lib/browserOnlyEvents.ts.
+    expect(screen.queryByText(/\[extract_page\] historical fixture/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_back\] historical fixture/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[click\] historical fixture/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\[go_to_url\] historical fixture/i)).not.toBeInTheDocument()
   })
 
   it('shows one live activity accordion instead of repeated thinking rows', async () => {
@@ -501,7 +495,6 @@ describe('ChatPanel noise filtering + thinking row spacing', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         activeTaskId='task-snapshot'
         isActivityVisible
         activityStatusLabel='Aegis is thinking…'
@@ -549,7 +542,6 @@ describe('ChatPanel tool call request/response sections', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         activeTaskId='task-tools-success'
         {...baseChatPanelProps}
@@ -592,7 +584,6 @@ describe('ChatPanel tool call request/response sections', () => {
         connectionStatus='connected'
         transcripts={[]}
         onSwitchToBrowser={vi.fn()}
-        latestFrame={null}
         serverMessages={[]}
         activeTaskId='task-tools-failed'
         {...baseChatPanelProps}

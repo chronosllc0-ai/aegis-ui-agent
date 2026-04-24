@@ -16,7 +16,6 @@ vi.mock('./hooks/useWebSocket', () => ({
   useWebSocket: () => ({
     connectionStatus: 'connected',
     isWorking: false,
-    latestFrame: null,
     logs: [],
     workflowSteps: [],
     currentUrl: 'about:blank',
@@ -24,7 +23,6 @@ vi.mock('./hooks/useWebSocket', () => ({
     send: sendSpy,
     sendAudioChunk: vi.fn(),
     resetClientState: vi.fn(),
-    clearFrameCache: vi.fn(),
     activeTaskIdRef: { current: 'idle' },
     activeConversationId: null,
     reasoningMap: {},
@@ -35,7 +33,6 @@ vi.mock('./hooks/useWebSocket', () => ({
     activityStatusLabel: '',
     activityDetail: '',
     isActivityVisible: false,
-    handoffActive: false,
   }),
 }))
 
@@ -91,14 +88,6 @@ vi.mock('./context/NotificationContext', () => ({
 
 vi.mock('./hooks/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
-}))
-
-vi.mock('./components/ScreenView', () => ({
-  ScreenView: () => <div />,
-}))
-
-vi.mock('./components/ActionLog', () => ({
-  ActionLog: ({ entries }: { entries: unknown[] }) => <div data-testid='action-log-count'>{entries.length}</div>,
 }))
 
 vi.mock('./components/ChatPanel', () => ({

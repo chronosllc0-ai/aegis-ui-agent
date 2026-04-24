@@ -99,7 +99,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, handoffActive, logs, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
+  const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, logs, transcripts, send, sendAudioChunk, resetClientState, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
@@ -338,11 +338,10 @@ function App() {
   useEffect(() => {
     const nextUid = authUser?.uid ?? null
     if (prevUserUidRef.current !== null && prevUserUidRef.current !== nextUid) {
-      clearFrameCache()
       setSelectedTaskId(null)
     }
     prevUserUidRef.current = nextUid
-  }, [authUser?.uid, clearFrameCache])
+  }, [authUser?.uid])
 
   useEffect(() => {
     if (!isAuthenticated || !isImpersonating) return
@@ -654,10 +653,6 @@ function App() {
     send({ action: 'plan_confirm_response', request_id: requestId, response: 'Cancel' })
   }
 
-  const handleHandoffContinue = (requestId: string) => {
-    send({ action: 'handoff_continue', request_id: requestId })
-  }
-
   const newSession = () => {
     send({ action: 'stop_task' })
     setTaskStartedAt(null)
@@ -832,7 +827,6 @@ function App() {
               onOpenSettings={() => { navigateTo('/settings/profile'); setSidebarOpen(false) }}
               onSignOut={async () => {
                 await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' })
-                clearFrameCache()
                 setAuthUser(null)
                 setIsAuthenticated(false)
                 setSelectedTaskId(MAIN_SESSION_ID)
@@ -934,9 +928,6 @@ function App() {
                 onUserInputResponse={handleUserInputResponse}
                 onPlanConfirm={handlePlanConfirm}
                 onPlanReject={handlePlanReject}
-                handoffActive={handoffActive}
-                onHumanBrowserAction={(action) => send({ action: 'human_browser_action', ...action })}
-                onHandoffContinue={handleHandoffContinue}
                 activityStatusLabel={activityStatusLabel}
                 activityDetail={activityDetailText}
                 isActivityVisible={isActivityVisible}

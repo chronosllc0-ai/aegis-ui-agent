@@ -79,57 +79,12 @@ export interface PersistedThinkingMessage {
 }
 
 export type WebSocketPayload = {
-  type: 'step' | 'result' | 'frame' | 'error' | 'interrupt' | 'workflow_step' | 'screenshot' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_transition' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong'
+  type: 'step' | 'result' | 'error' | 'interrupt' | 'workflow_step' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_transition' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong'
   data?: Record<string, unknown>
   [key: string]: unknown
 }
 
 const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
-const FRAME_CACHE_PREFIX = 'aegis.frame.'
-const FRAME_CACHE_KEY = (scopeKey: string) => `${FRAME_CACHE_PREFIX}${scopeKey}`
-
-function readPersistedFrame(scopeKey: string): string {
-  if (!scopeKey || typeof window === 'undefined') return ''
-  try {
-    return window.localStorage.getItem(FRAME_CACHE_KEY(scopeKey)) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function persistFrame(scopeKey: string, frameDataUrl: string): void {
-  if (!scopeKey || typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(FRAME_CACHE_KEY(scopeKey), frameDataUrl)
-  } catch {
-    // Ignore localStorage quota/sandbox issues.
-  }
-}
-
-function removePersistedFrame(scopeKey: string): void {
-  if (!scopeKey || typeof window === 'undefined') return
-  try {
-    window.localStorage.removeItem(FRAME_CACHE_KEY(scopeKey))
-  } catch {
-    // Ignore localStorage access issues.
-  }
-}
-
-function clearPersistedFrameCache(): void {
-  if (typeof window === 'undefined') return
-  try {
-    const keysToDelete: string[] = []
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index)
-      if (key && key.startsWith(FRAME_CACHE_PREFIX)) {
-        keysToDelete.push(key)
-      }
-    }
-    keysToDelete.forEach((key) => window.localStorage.removeItem(key))
-  } catch {
-    // Ignore localStorage access issues.
-  }
-}
 
 function readPersistedThinking(taskId: string): PersistedThinkingMessage[] {
   if (!taskId || typeof window === 'undefined') return []
@@ -187,13 +142,11 @@ type UseWebSocketOptions = {
 
 export function useWebSocket(options?: UseWebSocketOptions) {
   const onUsageMessage = options?.onUsageMessage
-  const userId = options?.userId ?? null
   const activeThreadId = options?.activeThreadId ?? null
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [executionState, setExecutionState] = useState<ExecutionState>('idle')
   const [isWorking, setIsWorking] = useState(false)
   const [taskActivity, setTaskActivity] = useState<ActivityState>(() => createIdleActivityState())
-  const [latestFrame, setLatestFrame] = useState('')
   const [activityView, setActivityView] = useState<ActivitySelector>(() => selectActivityView(createIdleActivityState(), false))
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([])
@@ -207,14 +160,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([])
   const [subAgentSteps, setSubAgentSteps] = useState<Record<string, SubAgentStep[]>>({})
   const [activeExecutionMode, setActiveExecutionMode] = useState<AgentModeId>('orchestrator')
-  const [handoffActive, setHandoffActive] = useState(false)
-  const [handoffRequestId, setHandoffRequestId] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
   const shouldReconnectRef = useRef(true)
   const activeTaskIdRef = useRef('idle')
-  const activeFrameScopeKeyRef = useRef('')
   const reasoningNormalizersRef = useRef<Record<string, IncrementalTextNormalizer>>({})
   const lastStepAtRef = useRef(0)
   const lastNotConnectedAtRef = useRef(0)
@@ -248,13 +198,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     [],
   )
 
-  useEffect(() => {
-    const normalizedUserId = (userId ?? '').trim() || 'anon'
-    const normalizedThreadId = (activeThreadId ?? '').trim()
-    const scopeKey = normalizedThreadId ? `${normalizedUserId}:${normalizedThreadId}` : ''
-    activeFrameScopeKeyRef.current = scopeKey
-    setLatestFrame(scopeKey ? readPersistedFrame(scopeKey) : '')
-  }, [activeThreadId, userId])
+
 
   const connect = useCallback(function connectSocket() {
     setConnectionStatus('connecting')
@@ -487,27 +431,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           return
         }
 
-        if (stepType === 'handoff_request') {
-          setHandoffActive(true)
-          setHandoffRequestId(String(payload.data?.request_id ?? ''))
-          appendLog({
-            message: `[handoff_to_user] ${JSON.stringify({
-              request_id: String(payload.data?.request_id ?? ''),
-              reason: String(payload.data?.reason ?? payload.data?.content ?? 'Manual browser handoff required'),
-              instructions: String(payload.data?.instructions ?? ''),
-              continue_label: String(payload.data?.continue_label ?? ''),
-            })}`,
-            taskId,
-            type: 'step',
-            status: 'in_progress',
-            rawStepType: 'handoff_request',
-          })
-          return
-        } else if (stepType === 'handoff_complete') {
-          setHandoffActive(false)
-          setHandoffRequestId(null)
-        }
-
         // ── stream_done: mark bubble as complete ───────────────────────────
         if (stepType === 'stream_done') {
           const msgId = String(payload.data?.message_id ?? '')
@@ -613,8 +536,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'result') {
         setIsWorking(false)
-        setHandoffActive(false)
-        setHandoffRequestId(null)
         setExecutionState('completed')
         const persisted = readPersistedThinking(taskId)
         if (persisted.length > 0) {
@@ -634,26 +555,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           type: status === 'interrupted' ? 'interrupt' : failed ? 'error' : 'result',
           status: failed ? 'failed' : 'completed',
         })
-        return
-      }
-      if (payload.type === 'frame') {
-        const image = String(payload.data?.image ?? '')
-        const frameDataUrl = image ? `data:image/png;base64,${image}` : ''
-        const scopeKey = activeFrameScopeKeyRef.current
-        if (frameDataUrl && scopeKey) {
-          persistFrame(scopeKey, frameDataUrl)
-          setLatestFrame(frameDataUrl)
-        }
-        return
-      }
-      if (payload.type === 'screenshot') {
-        const image = String(payload.data ?? '')
-        const frameDataUrl = image ? `data:image/png;base64,${image}` : ''
-        const scopeKey = activeFrameScopeKeyRef.current
-        if (frameDataUrl && scopeKey) {
-          persistFrame(scopeKey, frameDataUrl)
-          setLatestFrame(frameDataUrl)
-        }
         return
       }
       if (payload.type === 'workflow_step') {
@@ -946,8 +847,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'error') {
         setIsWorking(false)
-        setHandoffActive(false)
-        setHandoffRequestId(null)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
         return
       }
@@ -1081,7 +980,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
 
   const resetClientState = useCallback(() => {
     setLogs([])
-    setLatestFrame('')
     setCurrentUrl('about:blank')
     setIsWorking(false)
     setTaskActivity(createIdleActivityState())
@@ -1091,8 +989,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     setSubAgents([])
     setSubAgentSteps({})
     setActiveExecutionMode('orchestrator')
-    setHandoffActive(false)
-    setHandoffRequestId(null)
     if (pendingBackendActivityTimeoutRef.current !== null) {
       window.clearTimeout(pendingBackendActivityTimeoutRef.current)
       pendingBackendActivityTimeoutRef.current = null
@@ -1100,22 +996,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
   }, [])
-
-  const clearFrameCache = useCallback(() => {
-    clearPersistedFrameCache()
-    setLatestFrame('')
-  }, [])
-
-  const removeFrameForThread = useCallback((threadId: string) => {
-    const normalizedThreadId = threadId.trim()
-    if (!normalizedThreadId) return
-    const normalizedUserId = (userId ?? '').trim() || 'anon'
-    const scopeKey = `${normalizedUserId}:${normalizedThreadId}`
-    removePersistedFrame(scopeKey)
-    if (activeFrameScopeKeyRef.current === scopeKey) {
-      setLatestFrame('')
-    }
-  }, [userId])
 
   const spawnSubAgent = useCallback((instruction: string, model: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -1155,5 +1035,5 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   }, [isWorking, taskActivity])
 
 
-  return { connectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, handoffActive, handoffRequestId, latestFrame, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, clearFrameCache, removeFrameForThread, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
+  return { connectionStatus, executionState, isWorking, taskActivity, activityStatusLabel: activityView.activityStatusLabel, activityDetail: activityView.activityDetail, isActivityVisible: activityView.isActivityVisible, activeExecutionMode, logs, workflowSteps, currentUrl, transcripts, send, sendAudioChunk, resetClientState, activeTaskIdRef, activeConversationId, reasoningMap, subAgents, subAgentSteps, spawnSubAgent, messageSubAgent, cancelSubAgent }
 }

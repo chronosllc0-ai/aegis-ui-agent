@@ -8,7 +8,7 @@ carries everything the legacy tool implementations used to read off
 - session id + owner uid (Postgres + workspace keys),
 - the merged websocket/runtime settings blob (for memory mode, integration
   tokens, permissions, etc.),
-- async callbacks the model can use to pause for the user (ask / handoff /
+- async callbacks the model can use to pause for the user (ask /
   confirm) or hand off to a sub-agent.
 
 Phase 2 does *not* wire the pause callbacks end-to-end — those land when
@@ -20,14 +20,17 @@ so the model can recover.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
 
 AskUserInputFn = Callable[[str, list[str]], Awaitable[str]]
 """(question, options) → user's answer."""
 
-HandoffFn = Callable[[str, str, Optional[str], str], Awaitable[str]]
-"""(reason, instructions, continue_label, request_id) → resume text."""
+# NOTE: `HandoffFn` and `on_handoff_to_user` were removed in Phase 5 along
+# with the `handoff_to_user` native tool. The runtime is chat-only — there is
+# no frontend affordance to resume a manual browser handoff. If HITL browser
+# steering is reintroduced, wire it through a dedicated operator surface
+# rather than resurrecting these callbacks on the per-run context.
 
 SpawnSubagentFn = Callable[[str, str], Awaitable[str]]
 """(instruction, model) → sub-agent id."""
@@ -62,7 +65,6 @@ class ToolContext:
     is_main_session: bool = True
 
     on_ask_user_input: AskUserInputFn | None = None
-    on_handoff_to_user: HandoffFn | None = None
     on_spawn_subagent: SpawnSubagentFn | None = None
     on_message_subagent: MessageSubagentFn | None = None
     on_step: StepEmitterFn | None = None

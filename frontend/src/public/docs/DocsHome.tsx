@@ -5,16 +5,12 @@ type DocsHomeProps = {
   query: string
   onQueryChange: (nextQuery: string) => void
   onNavigate: (slug: string) => void
-  onOpenStandalone?: () => void
-  standaloneLabel?: string
 }
 
 export function DocsHome({
   query,
   onQueryChange,
   onNavigate,
-  onOpenStandalone,
-  standaloneLabel = 'Open standalone docs',
 }: DocsHomeProps) {
   const results = query.trim() ? findDocsPages(query) : []
   const featured = getFeaturedDocsPages()
@@ -27,20 +23,9 @@ export function DocsHome({
             <p className='text-[11px] uppercase tracking-[0.24em] text-cyan-200'>Aegis docs</p>
             <h1 className='mt-4 text-4xl font-semibold text-white'>Shared docs for operators, builders, and deployers.</h1>
             <p className='mt-4 text-base leading-8 text-zinc-300'>
-              Browse quickstart, API reference, tutorials, FAQ, and changelog from one shared source. The embedded docs
-              inside the product and the standalone docs portal stay in sync.
+              Browse quickstart, API reference, tutorials, FAQ, and changelog from one shared source. Every guide is
+              served directly from the product shell so docs and app state stay aligned.
             </p>
-          </div>
-          <div className='flex flex-wrap gap-3'>
-            {onOpenStandalone && (
-              <button
-                type='button'
-                onClick={onOpenStandalone}
-                className='rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-400/14'
-              >
-                {standaloneLabel}
-              </button>
-            )}
           </div>
         </div>
 
