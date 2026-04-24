@@ -88,7 +88,9 @@ Prefer machine-readable error codes (example set):
   - `events.py` — `AgentEvent` / `EventKind` taxonomy (CHAT_MESSAGE, TASK_EVENT, etc.).
   - `agent_loop.py` — OpenAI Agents SDK integration + LiteLLM provider routing.
   - `fanout.py` — fan-out registry wiring channel subscribers (websocket, Slack, Telegram, Discord) to the supervisor stream.
-  - `integration.py` — FastAPI glue; `runtime_supervisor_enabled()` + startup/shutdown hooks.
+  - `persistence.py` — SQLAlchemy models + helpers for `runtime_runs`, `runtime_run_events`, and (Phase 7) `runtime_inbox_events` / `runtime_tool_calls` durability tables.
+  - `rehydration.py` — Phase 7 boot-rehydration pass: re-enqueues `pending` inbox rows, terminates `dispatched` rows as `interrupted` with a `run_interrupted` fan-out frame.
+  - `integration.py` — FastAPI glue; `runtime_supervisor_enabled()` + startup/shutdown hooks; wires the persistence factory and runs `rehydrate_pending_events` at boot.
   - `tools/native.py` — 40+ native agent tools (non-browser).
   - `mcp_host.py` — real MCP host; Playwright + Browser MCP servers + connector adapters.
 - `backend/integrations/` — Slack/Telegram/Discord channel adapters + connector glue.
@@ -97,6 +99,7 @@ Prefer machine-readable error codes (example set):
 - Exactly one execution path: events are enqueued on the supervisor; the agent loop produces deltas; fan-out delivers them to subscribers.
 - Legacy helpers (`_run_navigation_task*`, `_send_initial_frame`, `_on_frame_*`, manual `human_browser_action`) were deleted in Phase 6 — do not re-introduce them.
 - Browser is a tool only. It starts lazily via MCP when an agent calls a browser-namespaced tool, and it shuts down with the supervisor.
+- **Durability (Phase 7):** every `AgentEvent` accepted by `SessionSupervisor.enqueue` is persisted to `runtime_inbox_events` *before* the worker touches it. On boot, `rehydrate_pending_events` re-queues `pending` rows and terminates `dispatched` rows as `interrupted`. Tool calls are checkpointed to `runtime_tool_calls`. **Never** bypass `enqueue`; the DB ledger is the source of truth for crash recovery.
 
 ---
 

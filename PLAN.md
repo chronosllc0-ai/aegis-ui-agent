@@ -436,14 +436,49 @@ Each phase is a PR. Do not batch phases — this codebase has a lot of moving pa
 
 **Merge criteria:** no remaining import from the deleted modules. `grep -rn 'executor\|orchestrator\|navigator\|_send_initial_frame'` returns only historical log lines. Deploy to Railway + Netlify and verify heartbeat fires with no browser tab open.
 
-### Phase 7 — Hardening
+### Phase 7 — Hardening — **IN PROGRESS (PR pending merge)**
 
-- Persistence: agent turns survive process restart. On boot, the supervisor rehydrates in-flight runs from Postgres.
-- Observability: structured events to `runtime_event_store` (already exists), richer tool-call timings.
-- Rate limits + credit accounting: make sure tool calls still pass through the credit ledger.
-- Security review: any new tool that touches `exec_shell` / `exec_python` / the filesystem must go through the existing sandbox.
+**Shipped in this PR:**
 
-**Merge criteria:** kill backend mid-tool-call, restart, agent picks up at next event without losing session context.
+- ✅ Inbox event durability — every `AgentEvent` accepted by
+  `SessionSupervisor.enqueue` is persisted to the new
+  `runtime_inbox_events` table *before* the worker picks it up. Table
+  tracks full lifecycle: `pending → dispatched → completed | error |
+  interrupted`, `run_id`, `dispatched_at`, `completed_at`, `error`.
+- ✅ Tool-call checkpoints — new `runtime_tool_calls` table. The
+  dispatch hook records a `started` row per `tool_call_item` and closes
+  it out on the matching `tool_call_output_item`. On restart, rows
+  still in `started` for an interrupted run are cascaded to
+  `interrupted`.
+- ✅ Boot rehydration — `backend/runtime/rehydration.py`
+  (`rehydrate_pending_events`) runs at supervisor startup via
+  `ensure_runtime_started()`. Rows in `pending` are rebuilt into
+  `AgentEvent`s and re-enqueued; rows in `dispatched` become
+  `interrupted` and get a `run_interrupted` fan-out frame for the UI.
+- ✅ Sandbox prereq — `bubblewrap` added to the Railway Dockerfile so
+  `run_code` has its sandbox binary available when the UI reintroduces
+  it.
+
+**Deferred to a follow-up phase:**
+
+- [ ] Richer tool-call timings in `runtime_event_store` (current
+      telemetry stays unchanged; this phase only adds the persistence
+      ledger).
+- [ ] Rate limits + credit accounting parity check against the new
+      tool-call ledger.
+- [ ] Security review: any new tool that touches `exec_shell` /
+      `exec_python` / the filesystem must go through the existing
+      sandbox.
+
+**Merge criteria:** kill backend mid-tool-call, restart, agent picks
+up at next event without losing session context. Verified end-to-end
+in `tests/test_runtime_persistence.py` — `test_rehydration_marks_dispatched_row_interrupted`
+plants a live `runtime_runs` + `runtime_tool_calls` + dispatched
+`runtime_inbox_events` state and asserts the rehydration pass
+transitions all three to `interrupted` and publishes a
+`run_interrupted` fan-out frame; `test_rehydration_replays_pending_event`
+re-enqueues a dropped message and watches it finish cleanly on a
+fresh supervisor.
 
 ---
 

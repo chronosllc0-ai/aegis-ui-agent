@@ -29,6 +29,7 @@ from backend.runtime.agent_loop import (
     install_supervisor_dispatch,
 )
 from backend.runtime.fanout import FanOutRegistry
+from backend.runtime.rehydration import rehydrate_pending_events
 from backend.runtime.supervisor import SupervisorRegistry
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,28 @@ async def ensure_runtime_started() -> None:
             session_factory=_session_ctx,
         ),
     )
+    # Phase 7: enable inbox durability on every supervisor the registry
+    # spawns from now on. ``SessionSupervisor.enqueue`` will persist a
+    # row per event before pushing to the priority queue.
+    _registry.set_persistence_factory(_session_ctx)
     logger.info("always-on runtime: supervisor + dispatch hook installed")
+
+    # Phase 7: boot rehydration. Any ``runtime_inbox_events`` row the
+    # previous process left in ``pending`` is re-enqueued; any row in
+    # ``dispatched`` is marked ``interrupted`` and a ``run_interrupted``
+    # frame is published via the fan-out registry. Persistence errors
+    # (e.g. DB not ready yet) are swallowed so startup still completes.
+    try:
+        summary = await rehydrate_pending_events(
+            _registry,
+            _session_ctx,
+            fanout_registry=_fanout_registry,
+        )
+        logger.info(
+            "always-on runtime: rehydration summary=%s", summary.as_dict()
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("always-on runtime: rehydration pass failed")
 
 
 async def shutdown_runtime() -> None:

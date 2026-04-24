@@ -34,10 +34,14 @@ from agents.models.interface import Model
 from backend.runtime.events import AgentEvent, EventKind
 from backend.runtime.fanout import FanOut, FanOutRegistry, RuntimeEvent
 from backend.runtime.persistence import (
+    mark_inbox_completed,
+    mark_inbox_dispatched,
     new_run_id,
     record_event,
     record_run_end,
     record_run_start,
+    record_tool_call_completed,
+    record_tool_call_started,
 )
 from backend.runtime.session import ChannelSession
 from backend.runtime.supervisor import DispatchHook, SessionSupervisor, SupervisorRegistry
@@ -365,6 +369,12 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                         session_id=session.session_id,
                         model=str(cfg.model) if cfg.model else None,
                     )
+                    # Tie the inbox row to this run and move it to
+                    # ``dispatched`` so a crash mid-run surfaces as
+                    # ``interrupted`` on rehydration.
+                    await mark_inbox_dispatched(
+                        sess, event_id=event.event_id, run_id=run_id
+                    )
             except Exception:  # noqa: BLE001
                 logger.exception("record_run_start failed run=%s", run_id)
 
@@ -423,12 +433,46 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                 max_turns=cfg.max_turns,
             )
             for item_record in _summarize_new_items(result.new_items):
-                kind = "tool_call" if item_record["type"] == "tool_call_item" else (
-                    "tool_result" if item_record["type"] == "tool_call_output_item" else
-                    "model_message" if item_record["type"] == "message_output_item" else
+                item_type = item_record["type"]
+                kind = "tool_call" if item_type == "tool_call_item" else (
+                    "tool_result" if item_type == "tool_call_output_item" else
+                    "model_message" if item_type == "message_output_item" else
                     "trace"
                 )
                 await emit(kind, item_record)
+                # Checkpoint tool calls so the post-mortem ledger is
+                # populated even for runs that completed cleanly. Row
+                # inserts for ``started`` events are idempotent on
+                # ``(run_id, call_id)``; matching ``completed`` updates
+                # close them out.
+                if cfg.session_factory is not None:
+                    try:
+                        if item_type == "tool_call_item":
+                            async with cfg.session_factory() as sess:
+                                await record_tool_call_started(
+                                    sess,
+                                    run_id=run_id,
+                                    event_id=event.event_id,
+                                    owner_uid=session.owner_uid,
+                                    session_id=session.session_id,
+                                    tool_name=item_record.get("name") or "unknown",
+                                    arguments=item_record.get("arguments"),
+                                    call_id=item_record.get("call_id"),
+                                )
+                        elif item_type == "tool_call_output_item":
+                            async with cfg.session_factory() as sess:
+                                await record_tool_call_completed(
+                                    sess,
+                                    run_id=run_id,
+                                    call_id=item_record.get("call_id"),
+                                    output_preview=item_record.get("output"),
+                                )
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "tool-call checkpoint failed run=%s item=%s",
+                            run_id,
+                            item_type,
+                        )
             final_text = str(result.final_output) if result.final_output is not None else ""
             await emit("final_message", {"text": final_text})
         except Exception as exc:  # noqa: BLE001
@@ -455,6 +499,12 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                     async with cfg.session_factory() as sess:
                         await record_run_end(
                             sess, run_id=run_id, status=status, error=error_text
+                        )
+                        await mark_inbox_completed(
+                            sess,
+                            event_id=event.event_id,
+                            status="completed" if status == "completed" else "error",
+                            error=error_text,
                         )
                 except Exception:  # noqa: BLE001
                     logger.exception("record_run_end failed run=%s", run_id)

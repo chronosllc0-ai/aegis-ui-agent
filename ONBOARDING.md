@@ -7813,3 +7813,53 @@
 - None.
 
 ---
+## Session 7.1 - April 24, 2026 (Phase 7: persistence rehydration)
+
+**Agent:** Viktor (Claude)
+**Duration:** Phase 7 durability + rehydration pass; PR pending review
+
+### What Was Done
+- Extended `backend/runtime/persistence.py` with two new tables:
+  - `runtime_inbox_events` — one row per `AgentEvent` accepted by `SessionSupervisor.enqueue`. Status lifecycle `pending → dispatched → completed | error | interrupted`, with `run_id`, `dispatched_at`, `completed_at`, `error`.
+  - `runtime_tool_calls` — per-tool-call checkpoint rows, scoped to a `run_id`. Idempotent on `(run_id, call_id)`.
+- Added helper functions: `record_inbox_event`, `mark_inbox_dispatched`, `mark_inbox_completed`, `mark_inbox_interrupted`, `list_unterminated_inbox_events`, `record_tool_call_started`, `record_tool_call_completed`, `rebuild_agent_event`.
+- `SessionSupervisor.enqueue` now persists the inbox row *before* pushing to the priority queue (best-effort — DB failures are logged but never block enqueue). Persistence factory propagates through `SupervisorRegistry.set_persistence_factory()`.
+- Dispatch hook (`backend/runtime/agent_loop.py`) now:
+  - Calls `mark_inbox_dispatched` alongside `record_run_start`, tying the inbox row to the run.
+  - Records `runtime_tool_calls` rows as `tool_call_item` / `tool_call_output_item` flow through `result.new_items`.
+  - Calls `mark_inbox_completed` in the `finally:` block alongside `record_run_end`.
+- New `backend/runtime/rehydration.py`: `rehydrate_pending_events(registry, session_factory, fanout_registry=...)` replays unterminated inbox rows on boot. `pending` → re-enqueue via `AgentEvent`; `dispatched` → `interrupted` + `run_interrupted` fan-out frame, with cascading `runtime_tool_calls` and `runtime_runs` rows also flipped to `interrupted`.
+- `integration.ensure_runtime_started` wires the persistence factory and runs the rehydration pass after dispatch-hook install.
+- `Dockerfile`: added `bubblewrap` to the apt install list so `run_code` has its sandbox binary.
+- New test file `tests/test_runtime_persistence.py` (4 tests):
+  - `test_enqueue_persists_inbox_event_as_pending`
+  - `test_dispatch_lifecycle_pending_dispatched_completed`
+  - `test_rehydration_marks_dispatched_row_interrupted`
+  - `test_rehydration_replays_pending_event`
+
+### What's Working
+- End-to-end durability loop: enqueue → dispatched → tool_call checkpoint → completed, all persisted.
+- Crash simulation: a planted `runtime_runs` + `runtime_inbox_events` + `runtime_tool_calls` state in flight is cleanly terminated on `rehydrate_pending_events` run, with a `run_interrupted` frame published to the session fan-out.
+- Replay path: a `pending` row that never reached the worker is rebuilt into an `AgentEvent`, enqueued on the owner's supervisor, and dispatched to completion.
+
+### What's NOT Working Yet
+- Richer tool-call timings in `runtime_event_store` (current telemetry stays unchanged; Phase 7 only adds the DB ledger).
+- Credit-ledger parity check against the new tool-call rows.
+- Security review of `exec_shell` / `exec_python` against the new sandbox prereq.
+- `ask_user_input` / `run_code` chat-render UI flows are still `it.skip`.
+
+### Next Steps
+1. Merge Phase 7 PR, verify heartbeat-no-browser on Railway.
+2. Wire credit ledger to `runtime_tool_calls` rows.
+3. Restore `ask_user_input` / `run_code` UI.
+
+### Decisions Made
+- Persistence is best-effort: `enqueue` never fails because of a DB hiccup. The priority queue is the source of truth for live dispatch; the DB ledger is the rehydration + audit layer.
+- Rehydration re-publishes a `run_interrupted` fan-out frame rather than auto-retrying dispatched events. Policy: *user decides whether to retry*, because a tool call that was mid-flight may have already produced a side effect.
+- Idempotency on `record_inbox_event` keyed by `event_id`; on `record_tool_call_started` keyed by `(run_id, call_id)`. Protects against double-insert if the dispatch loop ever retries.
+- Race fix in tests: poll the persisted `RuntimeInboxEvent.status`, not the `run_completed` fan-out frame (fan-out fires *before* the final DB commit).
+
+### Blockers
+- None.
+
+---
