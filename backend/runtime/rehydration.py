@@ -26,10 +26,14 @@ from typing import Any, Callable
 
 from backend.runtime.fanout import FanOut, FanOutRegistry, RuntimeEvent
 from backend.runtime.persistence import (
+    RuntimeRun,
     list_unterminated_inbox_events,
+    mark_inbox_completed,
     mark_inbox_interrupted,
     rebuild_agent_event,
 )
+
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "error", "interrupted"})
 from backend.runtime.supervisor import SupervisorRegistry
 
 logger = logging.getLogger(__name__)
@@ -118,6 +122,35 @@ async def rehydrate_pending_events(
     for row in rows:
         try:
             if row.status == "dispatched":
+                # Defense-in-depth (Codex PR #342 P2): if the run was
+                # already flipped to a terminal status but we crashed
+                # before ``mark_inbox_completed`` could commit, don't
+                # misreport the run as interrupted. Instead, drag the
+                # inbox row up to match the run's terminal state.
+                if row.run_id:
+                    async with session_factory() as db:
+                        run_row = await db.get(RuntimeRun, row.run_id)
+                        if run_row is not None and run_row.status in _TERMINAL_RUN_STATUSES:
+                            await mark_inbox_completed(
+                                db,
+                                event_id=row.event_id,
+                                status=(
+                                    run_row.status
+                                    if run_row.status != "completed"
+                                    else "completed"
+                                ),
+                                error=run_row.error,
+                            )
+                            logger.info(
+                                "rehydration: inbox %s reconciled to run=%s "
+                                "status=%s (no interrupt frame)",
+                                row.event_id,
+                                row.run_id,
+                                run_row.status,
+                            )
+                            result.skipped += 1
+                            continue
+
                 # The worker was mid-run when the process died. Terminal
                 # state + run_interrupted frame so egress can react.
                 async with session_factory() as db:

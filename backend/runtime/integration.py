@@ -20,9 +20,10 @@ subsystem into the chat path:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from backend.runtime.agent_loop import (
     DispatchConfig,
@@ -36,6 +37,74 @@ logger = logging.getLogger(__name__)
 
 _registry: SupervisorRegistry | None = None
 _fanout_registry: FanOutRegistry | None = None
+_rehydration_task: asyncio.Task[None] | None = None
+
+
+# Tunable via env so tests (or ops incidents) can shorten the retry
+# window without patching the module. 30 attempts × 2s ≈ 60s is enough
+# for the DB init background task on a cold Railway boot.
+_REHYDRATION_ATTEMPTS = int(os.environ.get("RUNTIME_REHYDRATION_ATTEMPTS", "30"))
+_REHYDRATION_INTERVAL_SEC = float(
+    os.environ.get("RUNTIME_REHYDRATION_INTERVAL_SEC", "2.0")
+)
+
+
+async def _rehydrate_with_retry(
+    *,
+    registry: SupervisorRegistry,
+    session_factory: Callable[[], object],
+    fanout_registry: FanOutRegistry | None,
+) -> None:
+    """Run ``rehydrate_pending_events`` once the DB is actually ready.
+
+    ``main.py`` kicks off ``_initialize_database`` as a background
+    task, so the runtime can start *before* the session factory is
+    bound. If rehydration runs inline in ``ensure_runtime_started`` it
+    either crashes inside ``list_unterminated_inbox_events`` or — worse
+    — finds a brand-new schema with no rows and silently declares
+    victory, leaving the previous process's pending/dispatched rows
+    stuck until the next restart.
+
+    The retry loop here polls for a usable session factory. Once it
+    lands, it performs exactly one rehydration pass and exits.
+    """
+
+    last_error: BaseException | None = None
+    for attempt in range(1, _REHYDRATION_ATTEMPTS + 1):
+        try:
+            # Probe: opening and immediately closing a session is cheap
+            # and raises RuntimeError if ``_session_factory`` is still
+            # ``None``.
+            async with session_factory() as probe:  # type: ignore[misc]
+                await probe.close()
+            summary = await rehydrate_pending_events(
+                registry,
+                session_factory,
+                fanout_registry=fanout_registry,
+            )
+            logger.info(
+                "always-on runtime: rehydration summary=%s (attempt %d)",
+                summary.as_dict(),
+                attempt,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.info(
+                "rehydration: DB not ready yet (attempt %d/%d): %s",
+                attempt,
+                _REHYDRATION_ATTEMPTS,
+                exc,
+            )
+            await asyncio.sleep(_REHYDRATION_INTERVAL_SEC)
+
+    logger.error(
+        "always-on runtime: rehydration giving up after %d attempts "
+        "(last error: %s). Pending/dispatched inbox rows will not be "
+        "recovered until the next restart.",
+        _REHYDRATION_ATTEMPTS,
+        last_error,
+    )
 
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -115,27 +184,36 @@ async def ensure_runtime_started() -> None:
     _registry.set_persistence_factory(_session_ctx)
     logger.info("always-on runtime: supervisor + dispatch hook installed")
 
-    # Phase 7: boot rehydration. Any ``runtime_inbox_events`` row the
-    # previous process left in ``pending`` is re-enqueued; any row in
-    # ``dispatched`` is marked ``interrupted`` and a ``run_interrupted``
-    # frame is published via the fan-out registry. Persistence errors
-    # (e.g. DB not ready yet) are swallowed so startup still completes.
-    try:
-        summary = await rehydrate_pending_events(
-            _registry,
-            _session_ctx,
-            fanout_registry=_fanout_registry,
+    # Phase 7: boot rehydration runs as a retrying background task so
+    # it does not race ``_initialize_database`` (Codex PR #342 P1).
+    # Startup fires DB init as its own background task; reading
+    # ``_session_factory`` here can easily find ``None``. If we
+    # swallowed that error synchronously, ``_registry`` would be
+    # installed and any future ``ensure_runtime_started`` call would
+    # return early, never recovering pending/dispatched rows until
+    # another process restart.
+    global _rehydration_task
+    if _rehydration_task is None or _rehydration_task.done():
+        _rehydration_task = asyncio.create_task(
+            _rehydrate_with_retry(
+                registry=_registry,
+                session_factory=_session_ctx,
+                fanout_registry=_fanout_registry,
+            ),
+            name="runtime-rehydration",
         )
-        logger.info(
-            "always-on runtime: rehydration summary=%s", summary.as_dict()
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("always-on runtime: rehydration pass failed")
 
 
 async def shutdown_runtime() -> None:
     """Drain every supervisor and drop the registries."""
-    global _registry, _fanout_registry
+    global _registry, _fanout_registry, _rehydration_task
+    if _rehydration_task is not None and not _rehydration_task.done():
+        _rehydration_task.cancel()
+        try:
+            await _rehydration_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    _rehydration_task = None
     if _registry is None:
         return
     try:

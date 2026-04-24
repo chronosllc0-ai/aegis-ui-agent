@@ -348,6 +348,46 @@ async def mark_inbox_completed(
     await session.commit()
 
 
+async def finalize_run_and_inbox(
+    session: AsyncSession,
+    *,
+    run_id: str,
+    event_id: str,
+    run_status: str,
+    inbox_status: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Flip the run + inbox rows to terminal status in a single commit.
+
+    The dispatch hook finalises both rows at the end of every agent
+    run. Committing the run first and the inbox second used to leave a
+    crash window where :data:`runtime_runs` was terminal but the inbox
+    row was still ``dispatched`` — which would cause the next boot to
+    misreport a completed run as ``interrupted`` (Codex review P2 on
+    PR #342). Bundling both updates into a single transaction closes
+    that window.
+
+    ``inbox_status`` defaults to ``"completed"`` for a successful
+    run and ``"error"`` otherwise.
+    """
+    if inbox_status is None:
+        inbox_status = "completed" if run_status == "completed" else "error"
+    now = datetime.now(timezone.utc)
+    run = await session.get(RuntimeRun, run_id)
+    if run is not None:
+        run.status = run_status
+        run.ended_at = now
+        if error:
+            run.error = error
+    inbox = await session.get(RuntimeInboxEvent, event_id)
+    if inbox is not None:
+        inbox.status = inbox_status
+        inbox.completed_at = now
+        if error:
+            inbox.error = error
+    await session.commit()
+
+
 async def list_unterminated_inbox_events(
     session: AsyncSession,
 ) -> list[RuntimeInboxEvent]:
@@ -554,6 +594,7 @@ __all__ = [
     "record_inbox_event",
     "mark_inbox_dispatched",
     "mark_inbox_completed",
+    "finalize_run_and_inbox",
     "mark_inbox_interrupted",
     "list_unterminated_inbox_events",
     # Tool call records

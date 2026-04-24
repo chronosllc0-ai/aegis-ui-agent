@@ -499,3 +499,156 @@ def test_rehydration_replays_pending_event() -> None:
 
 async def _empty_connectors() -> list[Any]:
     return []
+
+
+def test_rehydration_reconciles_completed_run_with_dispatched_inbox() -> None:
+    """Codex PR #342 P2: if the run is already terminal, don't interrupt.
+
+    Crash window: the dispatch hook wrote ``runtime_runs.status =
+    'completed'`` but the process died before ``mark_inbox_completed``
+    could flush. Before the fix, boot rehydration flipped the inbox
+    row to ``interrupted`` and emitted a ``run_interrupted`` frame —
+    incorrectly reporting a successful run as crashed. After the fix,
+    rehydration drags the inbox row up to match the run's terminal
+    status and publishes *no* frame.
+    """
+
+    async def scenario() -> None:
+        harness = await _init_harness()
+
+        async with harness.session_factory() as db:
+            db.add_all(
+                [
+                    RuntimeRun(
+                        id="run-terminal",
+                        owner_uid="reconcile-user",
+                        channel="web",
+                        session_id="agent:main:web:reconcile-user",
+                        status="completed",
+                        model="stub",
+                    ),
+                    RuntimeInboxEvent(
+                        event_id="evt-terminal",
+                        owner_uid="reconcile-user",
+                        channel="web",
+                        session_id="agent:main:web:reconcile-user",
+                        kind="chat_message",
+                        priority=10,
+                        payload=json.dumps({"text": "already done"}),
+                        status="dispatched",
+                        created_at=datetime.now(timezone.utc),
+                        enqueued_at=datetime.now(timezone.utc),
+                        dispatched_at=datetime.now(timezone.utc),
+                        run_id="run-terminal",
+                    ),
+                ]
+            )
+            await db.commit()
+
+        received: list[RuntimeEvent] = []
+
+        async def collector(event: RuntimeEvent) -> None:
+            received.append(event)
+
+        fan = await harness.fanout.get("agent:main:web:reconcile-user")
+        await fan.subscribe(Subscriber(name="t", callback=collector))
+
+        registry = SupervisorRegistry()
+        registry.set_persistence_factory(harness.session_factory)
+
+        summary = await rehydrate_pending_events(
+            registry, harness.session_factory, fanout_registry=harness.fanout
+        )
+
+        # Give any would-be fan-out frame a chance to land.
+        await asyncio.sleep(0.1)
+
+        assert summary.interrupted == 0, (
+            "a run whose run_id is already in a terminal state must not "
+            "trigger the interrupted path"
+        )
+        assert summary.replayed == 0
+        assert not any(ev.kind == "run_interrupted" for ev in received), (
+            "no run_interrupted frame should be emitted for a run that "
+            "actually completed"
+        )
+
+        async with harness.session_factory() as db:
+            row = await db.get(RuntimeInboxEvent, "evt-terminal")
+            assert row is not None
+            assert row.status == "completed", row.status
+            run_row = await db.get(RuntimeRun, "run-terminal")
+            assert run_row is not None and run_row.status == "completed"
+
+        await registry.shutdown()
+        await harness.engine.dispose()
+
+    _run(scenario())
+
+
+def test_finalize_run_and_inbox_is_atomic() -> None:
+    """Codex PR #342 P2: run + inbox update share a single commit.
+
+    We call :func:`finalize_run_and_inbox` once and assert both rows
+    land in their terminal state inside the same session's commit
+    boundary. We can't simulate a mid-function crash in a unit test,
+    but we can at least prove the helper does both updates and that
+    neither row stays behind.
+    """
+
+    async def scenario() -> None:
+        harness = await _init_harness()
+
+        # Plant a running run + dispatched inbox row.
+        async with harness.session_factory() as db:
+            db.add_all(
+                [
+                    RuntimeRun(
+                        id="run-atomic",
+                        owner_uid="atomic-user",
+                        channel="web",
+                        session_id="agent:main:web:atomic-user",
+                        status="running",
+                        model="stub",
+                    ),
+                    RuntimeInboxEvent(
+                        event_id="evt-atomic",
+                        owner_uid="atomic-user",
+                        channel="web",
+                        session_id="agent:main:web:atomic-user",
+                        kind="chat_message",
+                        priority=10,
+                        payload=json.dumps({"text": "go"}),
+                        status="dispatched",
+                        created_at=datetime.now(timezone.utc),
+                        enqueued_at=datetime.now(timezone.utc),
+                        dispatched_at=datetime.now(timezone.utc),
+                        run_id="run-atomic",
+                    ),
+                ]
+            )
+            await db.commit()
+
+        from backend.runtime.persistence import finalize_run_and_inbox
+
+        async with harness.session_factory() as db:
+            await finalize_run_and_inbox(
+                db,
+                run_id="run-atomic",
+                event_id="evt-atomic",
+                run_status="completed",
+            )
+
+        async with harness.session_factory() as db:
+            run_row = await db.get(RuntimeRun, "run-atomic")
+            inbox_row = await db.get(RuntimeInboxEvent, "evt-atomic")
+            assert run_row is not None
+            assert inbox_row is not None
+            assert run_row.status == "completed"
+            assert run_row.ended_at is not None
+            assert inbox_row.status == "completed"
+            assert inbox_row.completed_at is not None
+
+        await harness.engine.dispose()
+
+    _run(scenario())

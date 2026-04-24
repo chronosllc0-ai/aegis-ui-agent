@@ -34,11 +34,10 @@ from agents.models.interface import Model
 from backend.runtime.events import AgentEvent, EventKind
 from backend.runtime.fanout import FanOut, FanOutRegistry, RuntimeEvent
 from backend.runtime.persistence import (
-    mark_inbox_completed,
+    finalize_run_and_inbox,
     mark_inbox_dispatched,
     new_run_id,
     record_event,
-    record_run_end,
     record_run_start,
     record_tool_call_completed,
     record_tool_call_started,
@@ -497,17 +496,22 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             if cfg.session_factory is not None:
                 try:
                     async with cfg.session_factory() as sess:
-                        await record_run_end(
-                            sess, run_id=run_id, status=status, error=error_text
-                        )
-                        await mark_inbox_completed(
+                        # Atomic finalize: flip ``runtime_runs`` and
+                        # ``runtime_inbox_events`` to their terminal
+                        # state in a single commit so a crash here
+                        # cannot leave the run ``completed`` but the
+                        # inbox row ``dispatched`` (Codex PR #342 P2).
+                        await finalize_run_and_inbox(
                             sess,
+                            run_id=run_id,
                             event_id=event.event_id,
-                            status="completed" if status == "completed" else "error",
+                            run_status=status,
                             error=error_text,
                         )
                 except Exception:  # noqa: BLE001
-                    logger.exception("record_run_end failed run=%s", run_id)
+                    logger.exception(
+                        "finalize_run_and_inbox failed run=%s", run_id
+                    )
 
     return dispatch
 
