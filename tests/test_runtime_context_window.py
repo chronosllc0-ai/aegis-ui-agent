@@ -81,6 +81,9 @@ def test_maybe_create_checkpoint_persists_when_threshold_crossed() -> None:
             ])
             await db.commit()
 
+        # Tiny window + low threshold so the buckets we plant above
+        # (~240 tokens of instructions + current text + history) push
+        # the projected percentage past the compaction threshold.
         prepared = await build_prepared_context(
             session_factory=factory,
             session_id=session_id,
@@ -88,7 +91,7 @@ def test_maybe_create_checkpoint_persists_when_threshold_crossed() -> None:
             current_text="current message" * 20,
             instructions="system prompt" * 20,
             tool_names=["read_file", "write_file", "memory_search"],
-            model_context_window=1000,
+            model_context_window=300,
             threshold_pct=50,
         )
         assert prepared.meter["should_compact"] is True

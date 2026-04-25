@@ -401,9 +401,20 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             final_text = str(result.final_output) if result.final_output is not None else ""
             await emit("final_message", {"text": final_text})
         except Exception as exc:  # noqa: BLE001
+            # Critical: do NOT re-raise. The supervisor worker serves
+            # every channel session for this user — propagating the
+            # exception would degrade the entire per-user loop. We
+            # fully own the error here: record it on the run row,
+            # stream it to subscribers, finalize via the
+            # ``finally`` block, and let the worker pick up the next
+            # event.
             status = "error"
             error_text = f"{type(exc).__name__}: {exc}"
-            logger.exception("runtime_dispatch: Runner.run failed run=%s session=%s", run_id, session.session_id)
+            logger.exception(
+                "runtime_dispatch: Runner.run failed run=%s session=%s",
+                run_id,
+                session.session_id,
+            )
             await emit("error", {"message": error_text})
         finally:
             await emit("run_completed", {"status": status})
