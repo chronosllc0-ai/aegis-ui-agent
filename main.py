@@ -2483,6 +2483,7 @@ async def _attach_runtime_event_bridge(
     *,
     ws_session_id: str,
     owner_uid: str,
+    runtime: "SessionRuntime | None" = None,
 ) -> tuple[str, str] | None:
     """Subscribe ``websocket`` to the runtime FanOut for this session.
 
@@ -2505,23 +2506,62 @@ async def _attach_runtime_event_bridge(
         # FanOut deliveries always carry that shape regardless of what
         # the supervisor enqueued. We only need ``kind`` / ``payload``
         # / metadata for the wire format.
+        kind = getattr(event, "kind", None)
+        channel = getattr(event, "channel", "web")
+        payload = getattr(event, "payload", {}) or {}
         await _safe_ws_send(
             websocket,
             {
                 "type": "runtime_event",
                 "data": {
-                    "kind": getattr(event, "kind", None),
+                    "kind": kind,
                     "session_id": getattr(event, "session_id", runtime_session_id),
                     "owner_uid": getattr(event, "owner_uid", owner_uid),
-                    "channel": getattr(event, "channel", "web"),
+                    "channel": channel,
                     "run_id": getattr(event, "run_id", None),
                     "seq": getattr(event, "seq", 0),
-                    "payload": getattr(event, "payload", {}) or {},
+                    "payload": payload,
                 },
             },
             ws_session_id=ws_session_id,
             phase="runtime_event_forward",
         )
+        # Phase 10: persist the assistant final reply to the chat log
+        # so a refresh / reconnect sees the full transcript. The user
+        # half is already persisted at start_action time. Only the web
+        # channel writes here — Slack / Telegram egress workers own
+        # their own platforms\' message stores.
+        if (
+            kind == "final_message"
+            and channel == "web"
+            and runtime is not None
+            and runtime.user_uid
+        ):
+            text = ""
+            if isinstance(payload, dict):
+                raw_text = payload.get("text")
+                if isinstance(raw_text, str):
+                    text = raw_text
+            if text.strip():
+                try:
+                    await _log_web_message(
+                        runtime,
+                        ws_session_id,
+                        "assistant",
+                        text,
+                        metadata={
+                            "source": "runtime",
+                            "action": "final_message",
+                            "run_id": getattr(event, "run_id", None),
+                            "runtime_session_id": runtime_session_id,
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "runtime final_message persistence failed ws=%s run=%s",
+                        ws_session_id,
+                        getattr(event, "run_id", None),
+                    )
 
     subscriber_name = f"ws:{ws_session_id}"
     await fanout.subscribe(_RuntimeSubscriber(name=subscriber_name, callback=_forward))
@@ -2612,6 +2652,7 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             websocket,
             ws_session_id=session_id,
             owner_uid=runtime.user_uid or session_id,
+            runtime=runtime,
         )
     except Exception:  # noqa: BLE001
         logger.exception("runtime fan-out bridge attach failed session=%s", session_id)

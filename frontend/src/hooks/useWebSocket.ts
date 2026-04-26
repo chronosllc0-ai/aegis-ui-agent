@@ -416,16 +416,42 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       // arrives here. We route by ``kind`` and forward truthful bucket
       // payloads up to the consumer hooks. The fan-out also carries
       // ``final_message`` / ``run_completed`` / ``error`` /
-      // ``tool_call*`` etc., which prior phases never delivered to the
-      // websocket because no Subscriber was registered. We only
-      // *consume* the meter / checkpoint kinds here so we do not race
-      // with the legacy ``step`` / ``result`` rendering pipeline; if
-      // future phases want assistant replies sourced from the runtime
-      // they should be added explicitly.
+      // ``tool_call*`` etc. Phase 10 wires the chat-content kinds into
+      // ``appendLog`` so the live UI stops depending on the (now-dead)
+      // legacy ``step`` emitter for assistant replies. Phase 8/9 only
+      // consumed the meter / checkpoint kinds; everything else is
+      // dispatched here.
+      //
+      // Branch contract:
+      //   • ``run_started``       → flip working/running state
+      //   • ``user_message``      → ignored (frontend already shows the
+      //                              optimistic bubble before dispatch)
+      //   • ``model_message``     → ignored (intermediate Agents-SDK
+      //                              messages are coalesced into the
+      //                              ``final_message`` to avoid double
+      //                              rendering on no-tool turns)
+      //   • ``final_message``     → assistant ``result`` bubble
+      //   • ``tool_call``         → in-progress tool ``step`` card
+      //   • ``tool_result``       → completed tool ``step`` card
+      //   • ``run_completed``     → terminal state (clears working flag)
+      //   • ``error``             → error log + failed state
+      //   • ``context_meter`` /
+      //     ``compaction_checkpoint`` → forwarded to the meter hook
+      //   • ``trace`` / ``accepted`` → ignored (debug-only)
       if (payload.type === 'runtime_event') {
         const data = payload.data as Record<string, unknown> | undefined
         const kind = typeof data?.kind === 'string' ? data.kind : ''
         const inner = (data?.payload as Record<string, unknown> | undefined) ?? {}
+        const channel = typeof data?.channel === 'string' ? data.channel : ''
+        // Runtime events fan out to every subscribed surface; only the
+        // ``web`` channel events should drive the chat UI. Slack /
+        // Telegram / heartbeat events are surfaced by their own egress
+        // workers and would otherwise spam the chat panel with foreign
+        // assistant bubbles. Meter / checkpoint events are exempt
+        // because the context meter is session-wide regardless of
+        // origin channel.
+        const isChannelChatRelevant =
+          channel === '' || channel === 'web' || kind === 'context_meter' || kind === 'compaction_checkpoint'
         if (kind === 'context_meter' && onRuntimeContextMeter) {
           // Validate at the WS boundary so the consumer never sees a
           // partially-populated meter — missing numeric fields would
@@ -439,14 +465,91 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             // eslint-disable-next-line no-console
             console.warn('[runtime] dropped malformed context_meter payload', inner)
           }
-        } else if (kind === 'compaction_checkpoint' && onRuntimeCompactionCheckpoint) {
+          return
+        }
+        if (kind === 'compaction_checkpoint' && onRuntimeCompactionCheckpoint) {
           if (isRuntimeCompactionCheckpoint(inner)) {
             onRuntimeCompactionCheckpoint(inner)
           } else if (typeof console !== 'undefined') {
             // eslint-disable-next-line no-console
             console.warn('[runtime] dropped malformed compaction_checkpoint payload', inner)
           }
+          return
         }
+        if (!isChannelChatRelevant) return
+        const liveTaskId = activeTaskIdRef.current
+        lastBackendActivityAtRef.current = performance.now()
+        if (kind === 'run_started') {
+          setIsWorking(true)
+          setExecutionState('running')
+          return
+        }
+        if (kind === 'final_message') {
+          const text = typeof inner.text === 'string' ? inner.text : ''
+          if (text.trim().length > 0) {
+            appendLog({
+              message: text,
+              taskId: liveTaskId,
+              type: 'result',
+              status: 'completed',
+              rawStepType: 'final_message',
+            })
+          }
+          return
+        }
+        if (kind === 'tool_call') {
+          setIsWorking(true)
+          const name = typeof inner.name === 'string' ? inner.name : 'tool'
+          const args = typeof inner.arguments === 'string' ? inner.arguments : ''
+          // Mirror the legacy ``tool_start`` step card shape so
+          // ChatPanel / SubAgentPanel render a familiar in-progress
+          // card. Truncate arguments aggressively to keep the chat
+          // log readable; the full payload is in the persisted run
+          // record for replay.
+          const previewArgs = args.length > 160 ? `${args.slice(0, 160)}…` : args
+          appendLog({
+            message: previewArgs ? `${name}(${previewArgs})` : name,
+            taskId: liveTaskId,
+            type: 'step',
+            status: 'in_progress',
+            rawStepType: 'tool_start',
+          })
+          return
+        }
+        if (kind === 'tool_result') {
+          const output = typeof inner.output === 'string' ? inner.output : ''
+          if (output.trim().length > 0) {
+            const preview = output.length > 240 ? `${output.slice(0, 240)}…` : output
+            appendLog({
+              message: preview,
+              taskId: liveTaskId,
+              type: 'step',
+              status: 'completed',
+              rawStepType: 'tool_end',
+            })
+          }
+          return
+        }
+        if (kind === 'run_completed') {
+          const status = typeof inner.status === 'string' ? inner.status : 'completed'
+          setIsWorking(false)
+          setExecutionState(status === 'failed' ? 'failed' : status === 'cancelled' ? 'cancelled' : 'completed')
+          return
+        }
+        if (kind === 'error') {
+          const message = typeof inner.message === 'string' ? inner.message : 'Runtime error'
+          setIsWorking(false)
+          setExecutionState('failed')
+          appendLog({
+            message: `⚠️ ${message}`,
+            taskId: liveTaskId,
+            type: 'error',
+            status: 'failed',
+          })
+          return
+        }
+        // ``user_message`` / ``model_message`` / ``trace`` / ``accepted``
+        // are intentionally dropped — see the contract block above.
         return
       }
       if (payload.type === 'navigate_ack') {
