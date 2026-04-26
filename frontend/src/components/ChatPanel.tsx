@@ -558,9 +558,11 @@ function CodeCard({ code, lang }: { code: string; lang: string }) {
 function GeneratingCanvas({ label }: { label: string }) {
   return (
     <div className='my-2 flex items-center gap-3 rounded-xl border border-blue-500/10 bg-[#0d1117] p-4'>
-      {/* Pulsing shield logo */}
+      {/* Aegis Scanning logo */}
       <div className='relative flex h-9 w-9 flex-shrink-0 items-center justify-center'>
-        <img src='/aegis-shield.png' alt='Aegis' className='h-9 w-9 object-contain mix-blend-screen animate-pulse' style={{ animationDuration: '2s' }} />
+        <div className='aegis-radar-ring' />
+        <div className='aegis-radar-ring' style={{ animationDelay: '1s' }} />
+        <img src='/aegis-shield.png' alt='Aegis' className='h-9 w-9 object-contain animate-aegis-scan mix-blend-screen' />
       </div>
       <div className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium text-zinc-300'>{label}</span>
@@ -2062,7 +2064,9 @@ export function ChatPanel({
                   >
                     <div className='flex items-center gap-2.5'>
                       <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
-                        <img src='/aegis-shield.png' alt='Aegis activity' className='h-6 w-6 object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+                        <div className='aegis-radar-ring' />
+                        <div className='aegis-radar-ring' style={{ animationDelay: '1s' }} />
+                        <img src='/aegis-shield.png' alt='Aegis activity' className='h-6 w-6 object-contain animate-aegis-scan mix-blend-screen' />
                       </div>
                       <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
                       <IcoChevronRight className={`ml-auto mr-1 h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />
@@ -2088,7 +2092,9 @@ export function ChatPanel({
             >
               <div className='flex items-center gap-2.5'>
                 <div className='relative flex h-6 w-6 flex-shrink-0 items-center justify-center'>
-                  <img src='/aegis-shield.png' alt='Aegis activity' className='h-6 w-6 object-contain animate-pulse mix-blend-screen' style={{ animationDuration: '2s' }} />
+                  <div className='aegis-radar-ring' />
+                  <div className='aegis-radar-ring' style={{ animationDelay: '1s' }} />
+                  <img src='/aegis-shield.png' alt='Aegis activity' className='h-6 w-6 object-contain animate-aegis-scan mix-blend-screen' />
                 </div>
                 <span className='thinking-shimmer activity-beam text-xs font-medium text-zinc-300'>{activityStatusLabel}</span>
                 <IcoChevronRight className={`ml-auto mr-1 h-3.5 w-3.5 text-zinc-500 transition-transform ${activityExpanded ? 'rotate-90' : ''}`} />

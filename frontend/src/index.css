@@ -236,3 +236,58 @@ body {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* ── Aegis Scan: Unique scanning effect for the logo ──────────────────────── */
+@keyframes aegis-scan {
+  0% {
+    clip-path: inset(0 0 100% 0);
+    filter: brightness(1) drop-shadow(0 0 0px rgba(59, 130, 246, 0));
+  }
+  50% {
+    clip-path: inset(0 0 0 0);
+    filter: brightness(1.5) drop-shadow(0 0 8px rgba(59, 130, 246, 0.8));
+  }
+  100% {
+    clip-path: inset(100% 0 0 0);
+    filter: brightness(1) drop-shadow(0 0 0px rgba(59, 130, 246, 0));
+  }
+}
+
+.animate-aegis-scan {
+  position: relative;
+}
+
+.animate-aegis-scan::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: inherit;
+  background-image: inherit;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  animation: aegis-scan 2s ease-in-out infinite;
+  z-index: 1;
+}
+
+/* ── Aegis Radar: Pulsing radar rings ─────────────────────────────────────── */
+@keyframes aegis-radar {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+    border-color: rgba(59, 130, 246, 0.5);
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+    border-color: rgba(59, 130, 246, 0);
+  }
+}
+
+.aegis-radar-ring {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 50%;
+  animation: aegis-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
