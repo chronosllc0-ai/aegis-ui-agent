@@ -113,6 +113,14 @@ export function useContextMeter(currentModelId: string) {
   const bucketsRef = useRef<RuntimeMeterBucket[]>([])
   const projectedPctRef = useRef<number>(0)
   const compactThresholdPctRef = useRef<number>(DEFAULT_COMPACT_THRESHOLD_PCT)
+  // Last truthful runtime tokensUsed / contextLimit, retained so that
+  // when the user switches tasks while the runtime meter is the
+  // source-of-truth we can hydrate the new task's snapshot with the
+  // shared session footprint instead of falling back to 0/limit. The
+  // backend keeps a single context window per session across channels,
+  // so the displayed footprint must follow it across task switches.
+  const runtimeTokensUsedRef = useRef<number>(0)
+  const runtimeContextLimitRef = useRef<number>(0)
 
   const [state, setState] = useState<ContextMeterState>(() =>
     buildState(emptySnapshot(currentModelId), 'heuristic', [], 0, DEFAULT_COMPACT_THRESHOLD_PCT),
@@ -137,17 +145,38 @@ export function useContextMeter(currentModelId: string) {
     (taskId: string) => {
       activeTaskRef.current = taskId
       const existing = snapshots.current.get(taskId)
+      // When the runtime meter is the source-of-truth, the displayed
+      // footprint is session-wide (the backend reports one prepared
+      // context window per session id, regardless of which task /
+      // channel triggered the dispatch). Override the per-task
+      // ``tokensUsed`` / ``contextLimit`` with the latest runtime
+      // values so the bar doesn't drop to 0 every time the user
+      // switches threads in the sidebar.
+      const runtimeOverride = sourceRef.current === 'runtime'
+        && runtimeContextLimitRef.current > 0
       if (existing) {
-        // Restore snapshot - update contextLimit if model changed
-        const updated = {
-          ...existing,
-          modelId: currentModelId,
-          contextLimit: contextLengthForModel(currentModelId),
-        }
+        const updated: TaskContextSnapshot = runtimeOverride
+          ? {
+              ...existing,
+              modelId: currentModelId,
+              tokensUsed: runtimeTokensUsedRef.current,
+              contextLimit: runtimeContextLimitRef.current,
+            }
+          : {
+              ...existing,
+              modelId: currentModelId,
+              contextLimit: contextLengthForModel(currentModelId),
+            }
         snapshots.current.set(taskId, updated)
         setState(withPercent(updated))
       } else {
-        const fresh = emptySnapshot(currentModelId)
+        const fresh: TaskContextSnapshot = runtimeOverride
+          ? {
+              ...emptySnapshot(currentModelId),
+              tokensUsed: runtimeTokensUsedRef.current,
+              contextLimit: runtimeContextLimitRef.current,
+            }
+          : emptySnapshot(currentModelId)
         snapshots.current.set(taskId, fresh)
         setState(withPercent(fresh))
       }
@@ -261,9 +290,15 @@ export function useContextMeter(currentModelId: string) {
       const window = typeof meter.model_context_window === 'number' && meter.model_context_window > 0
         ? meter.model_context_window
         : snap.contextLimit
+      const tokensUsed = typeof meter.total_tokens === 'number' ? meter.total_tokens : snap.tokensUsed
+      // Cache the latest truthful values so ``switchTask`` can apply
+      // them to whatever task the user navigates to next without
+      // waiting for another dispatch.
+      runtimeTokensUsedRef.current = tokensUsed
+      runtimeContextLimitRef.current = window
       const updated: TaskContextSnapshot = {
         ...snap,
-        tokensUsed: typeof meter.total_tokens === 'number' ? meter.total_tokens : snap.tokensUsed,
+        tokensUsed,
         contextLimit: window,
       }
       snapshots.current.set(taskId, updated)
@@ -304,6 +339,8 @@ export function useContextMeter(currentModelId: string) {
     bucketsRef.current = []
     projectedPctRef.current = 0
     compactThresholdPctRef.current = DEFAULT_COMPACT_THRESHOLD_PCT
+    runtimeTokensUsedRef.current = 0
+    runtimeContextLimitRef.current = 0
     setState(buildState(emptySnapshot(currentModelId), 'heuristic', [], 0, DEFAULT_COMPACT_THRESHOLD_PCT))
   }, [currentModelId])
 

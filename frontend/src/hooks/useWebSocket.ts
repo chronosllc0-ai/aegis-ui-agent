@@ -131,6 +131,45 @@ export type RuntimeSessionInfo = {
   channel: string
 }
 
+// ── Runtime payload type guards (Phase 9) ─────────────────────────
+// These run on every fan-out event before it reaches the React state,
+// so they need to be cheap. The backend always sends the full set of
+// required fields when the meter is real; partial payloads can only
+// come from a degraded backend or a future schema change. Either way,
+// surfacing them as ``NaN%`` is worse than dropping them on the floor.
+
+function isRuntimeMeterBucket(value: unknown): value is RuntimeMeterBucket {
+  if (!value || typeof value !== 'object') return false
+  const b = value as Record<string, unknown>
+  return (
+    typeof b.name === 'string'
+    && typeof b.tokens === 'number'
+    && Number.isFinite(b.tokens)
+    && typeof b.chars === 'number'
+    && Number.isFinite(b.chars)
+  )
+}
+
+export function isRuntimeContextMeter(value: unknown): value is RuntimeContextMeter {
+  if (!value || typeof value !== 'object') return false
+  const m = value as Record<string, unknown>
+  if (typeof m.total_tokens !== 'number' || !Number.isFinite(m.total_tokens)) return false
+  if (typeof m.projected_pct !== 'number' || !Number.isFinite(m.projected_pct)) return false
+  if (typeof m.should_compact !== 'boolean') return false
+  if (typeof m.model_context_window !== 'number' || !Number.isFinite(m.model_context_window)) return false
+  if (typeof m.compact_threshold_pct !== 'number' || !Number.isFinite(m.compact_threshold_pct)) return false
+  if (!Array.isArray(m.buckets)) return false
+  return m.buckets.every(isRuntimeMeterBucket)
+}
+
+export function isRuntimeCompactionCheckpoint(value: unknown): value is RuntimeCompactionCheckpoint {
+  if (!value || typeof value !== 'object') return false
+  // Every documented field is optional, so the only requirement is
+  // "is an object" — but we still null-check above so the consumer
+  // can rely on getting a non-null record.
+  return true
+}
+
 const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
 
 function readPersistedThinking(taskId: string): PersistedThinkingMessage[] {
@@ -388,12 +427,25 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const kind = typeof data?.kind === 'string' ? data.kind : ''
         const inner = (data?.payload as Record<string, unknown> | undefined) ?? {}
         if (kind === 'context_meter' && onRuntimeContextMeter) {
-          const meter = inner as unknown as RuntimeContextMeter
-          if (typeof meter.total_tokens === 'number' && Array.isArray(meter.buckets)) {
-            onRuntimeContextMeter(meter)
+          // Validate at the WS boundary so the consumer never sees a
+          // partially-populated meter — missing numeric fields would
+          // otherwise turn into NaN downstream (percentage bars going
+          // wild). All required-by-the-type fields are checked; the
+          // optional ``owner_uid`` / ``session_id`` are passed through
+          // untouched.
+          if (isRuntimeContextMeter(inner)) {
+            onRuntimeContextMeter(inner)
+          } else if (typeof console !== 'undefined') {
+            // eslint-disable-next-line no-console
+            console.warn('[runtime] dropped malformed context_meter payload', inner)
           }
         } else if (kind === 'compaction_checkpoint' && onRuntimeCompactionCheckpoint) {
-          onRuntimeCompactionCheckpoint(inner as unknown as RuntimeCompactionCheckpoint)
+          if (isRuntimeCompactionCheckpoint(inner)) {
+            onRuntimeCompactionCheckpoint(inner)
+          } else if (typeof console !== 'undefined') {
+            // eslint-disable-next-line no-console
+            console.warn('[runtime] dropped malformed compaction_checkpoint payload', inner)
+          }
         }
         return
       }

@@ -130,9 +130,14 @@ export function UsageDropdown({ balance, context, modelLabel }: UsageDropdownPro
                   // automatically when the bucket starts carrying data.
                   .filter((b) => b.tokens > 0)
                   .map((bucket) => {
-                    const share = context.current.tokensUsed > 0
-                      ? Math.min(100, (bucket.tokens / context.current.tokensUsed) * 100)
-                      : 0
+                    // ``Math.max(1, …)`` keeps the denominator finite
+                    // even when ``tokensUsed`` is briefly 0 / NaN
+                    // between transitions, and the explicit
+                    // ``isFinite`` clamp belt-and-braces against any
+                    // upstream NaN that slips past the type guards.
+                    const denom = Math.max(1, context.current.tokensUsed)
+                    const raw = (bucket.tokens / denom) * 100
+                    const share = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0
                     return (
                       <li key={bucket.name} className='flex items-center justify-between text-[10px]'>
                         <span className='truncate text-zinc-400'>{bucketLabel(bucket.name)}</span>

@@ -29,6 +29,17 @@ import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
 import { useContextMeter } from './hooks/useContextMeter'
 import type { RuntimeCompactionCheckpoint, RuntimeContextMeter } from './hooks/useWebSocket'
+import { useSettingsContext } from './context/useSettingsContext'
+import { useMicrophone } from './hooks/useMicrophone'
+import { useUsage } from './hooks/useUsage'
+import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
+import { useSessions, type ServerMessage } from './hooks/useSessions'
+import { apiUrl } from './lib/api'
+import { LuShield } from 'react-icons/lu'
+import { modelInfo, PROVIDERS } from './lib/models'
+import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
+import { getStandaloneDocUrl } from './lib/site'
+import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
 /**
  * Phase 9 helper: pull the truthful, eight-bucket context meter for a
@@ -48,8 +59,11 @@ async function hydrateRuntimeMeter(
 ): Promise<void> {
   if (!sessionId || !apply) return
   try {
+    // Use ``apiUrl`` so deployments with ``VITE_API_URL`` pointing to
+    // a different origin (the common Netlify-frontend + Railway-API
+    // split) actually hit the backend rather than the static host.
     const resp = await fetch(
-      `/api/runtime/context-meter/${encodeURIComponent(sessionId)}`,
+      apiUrl(`/api/runtime/context-meter/${encodeURIComponent(sessionId)}`),
       { credentials: 'include' },
     )
     if (!resp.ok) {
@@ -71,18 +85,6 @@ async function hydrateRuntimeMeter(
     console.warn('[runtime] context-meter hydrate error', err)
   }
 }
-import { useSettingsContext } from './context/useSettingsContext'
-import { useMicrophone } from './hooks/useMicrophone'
-import { useUsage } from './hooks/useUsage'
-import { useWebSocket, type LogEntry, type SteeringMode } from './hooks/useWebSocket'
-import { useSessions, type ServerMessage } from './hooks/useSessions'
-import { apiUrl } from './lib/api'
-import { LuShield } from 'react-icons/lu'
-import { modelInfo, PROVIDERS } from './lib/models'
-import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './lib/routes'
-import { getStandaloneDocUrl } from './lib/site'
-import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
-
 const MAIN_SESSION_ID = 'agent:main:main'
 // Stop-words to skip when picking the first meaningful word from an instruction
 const STOP_WORDS = new Set(['a', 'an', 'the', 'to', 'do', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'with', 'by', 'from', 'please', 'now', 'then', 'that', 'this', 'it', 'is', 'be', 'can', 'will', 'your', 'my', 'our', 'their'])
@@ -142,23 +144,41 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
-  // Phase 9 runtime meter wiring. ``useContextMeter`` lives below
-  // ``useSettingsContext`` (it depends on ``settings.model``) but
-  // ``useWebSocket`` needs to forward runtime events into the meter,
-  // so we route through refs and an effect-installed REST hydration.
-  // The ``runtimeSessionIdRef`` also acts as the canonical id for any
-  // future code path that needs to call ``GET /api/runtime/...``
-  // without re-deriving ``agent:main:web:{owner_uid}``.
-  const runtimeSessionIdRef = useRef<string | null>(null)
+  // Phase 9 runtime meter wiring. ``useSettingsContext`` and
+  // ``useContextMeter`` are now hoisted above ``useWebSocket`` so the
+  // runtime callbacks can reference ``contextMeter.*`` directly via
+  // refs that are populated *during render* (not in an effect). This
+  // closes the first-render race the original code had: the websocket
+  // can fan-out a ``runtime_session`` event between mount and the
+  // post-render effect, so any ref written in a ``useEffect`` is null
+  // exactly when ``onRuntimeSession`` fires.
+  const { settings, patchSettings, wsConfig } = useSettingsContext()
+  const pathname = usePathname()
+  const contextMeter = useContextMeter(settings.model)
+
+  // Latest-ref pattern: assigned synchronously on every render so any
+  // websocket callback (which always runs after at least one render
+  // completes, since the WS itself is opened in a useEffect) sees the
+  // current ``applyRuntimeMeter`` / ``applyCompactionCheckpoint``.
   const runtimeMeterCbRef = useRef<((meter: RuntimeContextMeter) => void) | null>(null)
   const runtimeCheckpointCbRef = useRef<((cp: RuntimeCompactionCheckpoint) => void) | null>(null)
+  runtimeMeterCbRef.current = contextMeter.applyRuntimeMeter
+  runtimeCheckpointCbRef.current = contextMeter.applyCompactionCheckpoint
+
+  // Keep the snapshot's ``modelId`` / ``contextLimit`` in sync when
+  // the user switches models in Settings. ``useContextMeter`` doesn't
+  // sync internally — it only knows the *current* model on construction
+  // — so we drive ``updateModel`` from the settings change.
+  const updateMeterModel = contextMeter.updateModel
+  useEffect(() => {
+    updateMeterModel(settings.model)
+  }, [settings.model, updateMeterModel])
 
   const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, logs, transcripts, send, sendAudioChunk, resetClientState, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
     onRuntimeSession: (info) => {
-      runtimeSessionIdRef.current = info.session_id
       // Hydrate the meter immediately so the bar reflects the session's
       // current footprint before the user even types — the dispatch
       // hook only emits ``context_meter`` on actual runs, so without
@@ -173,18 +193,6 @@ function App() {
     },
   })
   const prevConnectionStatus = useRef(connectionStatus)
-  const { settings, patchSettings, wsConfig } = useSettingsContext()
-  const pathname = usePathname()
-
-  const contextMeter = useContextMeter(settings.model)
-  // Hand the meter's callbacks to the WS-side refs. Effect runs once
-  // per render but the refs are mutated in place so identity churn is
-  // free — useWebSocket's onMessage handler always reads the latest
-  // ref values via the wrapper closures above.
-  useEffect(() => {
-    runtimeMeterCbRef.current = contextMeter.applyRuntimeMeter
-    runtimeCheckpointCbRef.current = contextMeter.applyCompactionCheckpoint
-  }, [contextMeter.applyRuntimeMeter, contextMeter.applyCompactionCheckpoint])
 
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
