@@ -28,6 +28,7 @@ import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
 import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
 import { useContextMeter } from './hooks/useContextMeter'
+import type { RuntimeCompactionCheckpoint, RuntimeContextMeter } from './hooks/useWebSocket'
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
@@ -40,6 +41,50 @@ import { docsPath, navigateTo, usePathname, PRIVACY_PATH, TERMS_PATH } from './l
 import { getStandaloneDocUrl } from './lib/site'
 import { EmbeddedDocsPage, slugFromDocsPath } from './public/EmbeddedDocsPage'
 
+/**
+ * Phase 9 helper: pull the truthful, eight-bucket context meter for a
+ * runtime session and feed it into the meter hook. The dispatch hook
+ * only emits ``context_meter`` events on actual runs, so without this
+ * REST call the bar would sit at zero from WS open until the first
+ * model invocation. ``GET /api/runtime/context-meter/{session_id}``
+ * returns the same payload shape ``RuntimeContextMeter`` decodes.
+ *
+ * Failures are logged and swallowed — the meter falls back to the
+ * heuristic until the next live ``context_meter`` event arrives, which
+ * is strictly better than throwing into a render path.
+ */
+async function hydrateRuntimeMeter(
+  sessionId: string,
+  apply: ((meter: RuntimeContextMeter) => void) | null,
+): Promise<void> {
+  if (!sessionId || !apply) return
+  try {
+    // Use ``apiUrl`` so deployments with ``VITE_API_URL`` pointing to
+    // a different origin (the common Netlify-frontend + Railway-API
+    // split) actually hit the backend rather than the static host.
+    const resp = await fetch(
+      apiUrl(`/api/runtime/context-meter/${encodeURIComponent(sessionId)}`),
+      { credentials: 'include' },
+    )
+    if (!resp.ok) {
+      // 404 is expected for sessions that have never dispatched a run.
+      // We keep silent on 404 so the console isn't littered for fresh
+      // anonymous tabs.
+      if (resp.status !== 404) {
+        // eslint-disable-next-line no-console
+        console.warn('[runtime] context-meter hydrate failed', resp.status)
+      }
+      return
+    }
+    const body = (await resp.json()) as RuntimeContextMeter
+    if (typeof body?.total_tokens === 'number' && Array.isArray(body?.buckets)) {
+      apply(body)
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[runtime] context-meter hydrate error', err)
+  }
+}
 const MAIN_SESSION_ID = 'agent:main:main'
 // Stop-words to skip when picking the first meaningful word from an instruction
 const STOP_WORDS = new Set(['a', 'an', 'the', 'to', 'do', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'with', 'by', 'from', 'please', 'now', 'then', 'that', 'this', 'it', 'is', 'be', 'can', 'will', 'your', 'my', 'our', 'their'])
@@ -99,16 +144,55 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
+  // Phase 9 runtime meter wiring. ``useSettingsContext`` and
+  // ``useContextMeter`` are now hoisted above ``useWebSocket`` so the
+  // runtime callbacks can reference ``contextMeter.*`` directly via
+  // refs that are populated *during render* (not in an effect). This
+  // closes the first-render race the original code had: the websocket
+  // can fan-out a ``runtime_session`` event between mount and the
+  // post-render effect, so any ref written in a ``useEffect`` is null
+  // exactly when ``onRuntimeSession`` fires.
+  const { settings, patchSettings, wsConfig } = useSettingsContext()
+  const pathname = usePathname()
+  const contextMeter = useContextMeter(settings.model)
+
+  // Latest-ref pattern: assigned synchronously on every render so any
+  // websocket callback (which always runs after at least one render
+  // completes, since the WS itself is opened in a useEffect) sees the
+  // current ``applyRuntimeMeter`` / ``applyCompactionCheckpoint``.
+  const runtimeMeterCbRef = useRef<((meter: RuntimeContextMeter) => void) | null>(null)
+  const runtimeCheckpointCbRef = useRef<((cp: RuntimeCompactionCheckpoint) => void) | null>(null)
+  runtimeMeterCbRef.current = contextMeter.applyRuntimeMeter
+  runtimeCheckpointCbRef.current = contextMeter.applyCompactionCheckpoint
+
+  // Keep the snapshot's ``modelId`` / ``contextLimit`` in sync when
+  // the user switches models in Settings. ``useContextMeter`` doesn't
+  // sync internally — it only knows the *current* model on construction
+  // — so we drive ``updateModel`` from the settings change.
+  const updateMeterModel = contextMeter.updateModel
+  useEffect(() => {
+    updateMeterModel(settings.model)
+  }, [settings.model, updateMeterModel])
+
   const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, logs, transcripts, send, sendAudioChunk, resetClientState, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
+    onRuntimeSession: (info) => {
+      // Hydrate the meter immediately so the bar reflects the session's
+      // current footprint before the user even types — the dispatch
+      // hook only emits ``context_meter`` on actual runs, so without
+      // this fetch the bar would sit at zero across reconnects.
+      void hydrateRuntimeMeter(info.session_id, runtimeMeterCbRef.current)
+    },
+    onRuntimeContextMeter: (meter) => {
+      runtimeMeterCbRef.current?.(meter)
+    },
+    onRuntimeCompactionCheckpoint: (cp) => {
+      runtimeCheckpointCbRef.current?.(cp)
+    },
   })
   const prevConnectionStatus = useRef(connectionStatus)
-  const { settings, patchSettings, wsConfig } = useSettingsContext()
-  const pathname = usePathname()
-
-  const contextMeter = useContextMeter(settings.model)
 
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
@@ -818,6 +902,10 @@ function App() {
                 current: contextMeter.current,
                 percent: contextMeter.percent,
                 isCompacting: contextMeter.isCompacting,
+                source: contextMeter.source,
+                buckets: contextMeter.buckets,
+                projectedPct: contextMeter.projectedPct,
+                compactThresholdPct: contextMeter.compactThresholdPct,
               }}
               modelLabel={currentModelLabel}
             />
