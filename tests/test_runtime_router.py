@@ -128,3 +128,65 @@ def test_context_meter_returns_required_buckets(app_with_router) -> None:
     assert body["model_context_window"] > 0
     assert isinstance(body["projected_pct"], (int, float))
     assert isinstance(body["should_compact"], bool)
+
+
+def test_context_meter_includes_connector_tools_in_active_tools(
+    app_with_router, monkeypatch
+) -> None:
+    """The endpoint must report the same tool catalog dispatch builds.
+
+    Codex P2: dispatch composes ``native + MCP + connector`` tools and
+    emits a meter whose ``active_tools`` bucket reflects that catalog.
+    The HTTP endpoint must agree, otherwise the UI gets two different
+    meters for the same session depending on which surface produced
+    them. We patch ``load_connector_tools`` so the test does not
+    require a live Slack/Notion/etc. connection and assert that
+    enabling connector tools strictly *grows* the ``active_tools``
+    bucket (which is what the dispatch loop would also see).
+    """
+    cookie = _signed_cookie("user-A")
+
+    class _StubTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    captured_uid: list[str] = []
+
+    async def _empty_loader(uid: str):
+        captured_uid.append(uid)
+        return []
+
+    async def _populated_loader(uid: str):
+        captured_uid.append(uid)
+        return [
+            _StubTool("slack_send_message"),
+            _StubTool("notion_query_database"),
+            _StubTool("github_get_file"),
+        ]
+
+    def _active_bucket() -> dict:
+        with TestClient(app_with_router) as client:
+            resp = client.get(
+                "/api/runtime/context-meter/agent:main:web:user-A",
+                cookies={"aegis_session": cookie},
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        return next(b for b in body["buckets"] if b["name"] == "active_tools")
+
+    monkeypatch.setattr(
+        "backend.runtime.router.load_connector_tools", _empty_loader
+    )
+    baseline = _active_bucket()
+
+    monkeypatch.setattr(
+        "backend.runtime.router.load_connector_tools", _populated_loader
+    )
+    populated = _active_bucket()
+
+    # Both calls were resolved against the requesting user's uid.
+    assert captured_uid and all(uid == "user-A" for uid in captured_uid)
+    # Adding three connector tools must grow chars and tokens. If the
+    # router still hard-coded native-only this would be equal.
+    assert populated["chars"] > baseline["chars"]
+    assert populated["tokens"] > baseline["tokens"]

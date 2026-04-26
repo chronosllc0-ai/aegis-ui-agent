@@ -107,3 +107,120 @@ def test_maybe_create_checkpoint_persists_when_threshold_crossed() -> None:
         await engine.dispose()
 
     _run(scenario())
+
+
+def test_exclude_run_id_filters_current_turn_from_chat_history() -> None:
+    """run_started + user_message of the in-flight run must not double-count.
+
+    The dispatch hook records run_started + user_message *before* it
+    asks for prepared context. Without the exclude_run_id filter, those
+    rows leak into chat_history and the current user message ends up
+    counted in two buckets, inflating the meter (Codex P2).
+    """
+
+    async def scenario() -> None:
+        engine, factory = await _make_db()
+        session_id = "agent:main:web:owner-3"
+        async with factory() as db:
+            db.add_all([
+                RuntimeRun(id="run-prev", owner_uid="owner-3", channel="web", session_id=session_id, status="completed"),
+                RuntimeRunEvent(id="ev-prev", run_id="run-prev", seq=1, kind="final_message", payload=json.dumps({"text": "earlier turn answer"})),
+                RuntimeRun(id="run-now", owner_uid="owner-3", channel="web", session_id=session_id, status="started"),
+                RuntimeRunEvent(id="ev-now-start", run_id="run-now", seq=1, kind="run_started", payload=json.dumps({"text": "ZZZUNIQUEZZZ"})),
+                RuntimeRunEvent(id="ev-now-msg", run_id="run-now", seq=2, kind="user_message", payload=json.dumps({"text": "ZZZUNIQUEZZZ"})),
+            ])
+            await db.commit()
+
+        unfiltered = await build_prepared_context(
+            session_factory=factory,
+            session_id=session_id,
+            owner_uid="owner-3",
+            current_text="ZZZUNIQUEZZZ",
+            instructions="You are Aegis.",
+            tool_names=["read_file"],
+            model_context_window=10_000,
+            threshold_pct=90,
+        )
+        filtered = await build_prepared_context(
+            session_factory=factory,
+            session_id=session_id,
+            owner_uid="owner-3",
+            current_text="ZZZUNIQUEZZZ",
+            instructions="You are Aegis.",
+            tool_names=["read_file"],
+            model_context_window=10_000,
+            threshold_pct=90,
+            exclude_run_id="run-now",
+        )
+
+        def _bucket(meter: dict, name: str) -> dict:
+            return next(b for b in meter["buckets"] if b["name"] == name)
+
+        # Filtered version: chat_history holds only the previous turn,
+        # not the current ZZZUNIQUEZZZ user message.
+        assert "earlier turn answer" in filtered.history_text
+        assert "ZZZUNIQUEZZZ" not in filtered.history_text
+        # Unfiltered version: ZZZUNIQUEZZZ shows up in history (the bug).
+        assert "ZZZUNIQUEZZZ" in unfiltered.history_text
+        # Filtering must reduce — never inflate — chat_history tokens.
+        assert _bucket(filtered.meter, "chat_history")["tokens"] < _bucket(unfiltered.meter, "chat_history")["tokens"]
+        assert filtered.meter["total_tokens"] < unfiltered.meter["total_tokens"]
+        await engine.dispose()
+
+    _run(scenario())
+
+
+def test_compacted_meter_drops_history_and_swaps_checkpoint() -> None:
+    """After compaction, the re-emitted meter must reflect the rewritten prompt.
+
+    The dispatch hook rewrites run_input via _checkpoint_prompt() when a
+    checkpoint is created, dropping chat_history + pending_tool_outputs
+    and replacing the checkpoints bucket with the brand-new summary.
+    The post-compaction meter must mirror that shape (Codex P1).
+    """
+
+    async def scenario() -> None:
+        engine, factory = await _make_db()
+        session_id = "agent:main:web:owner-4"
+        async with factory() as db:
+            db.add_all([
+                RuntimeRun(id="run4", owner_uid="owner-4", channel="web", session_id=session_id, status="completed"),
+                RuntimeRunEvent(id="ev4", run_id="run4", seq=1, kind="user_message", payload=json.dumps({"text": "long history " * 60})),
+                RuntimeToolCall(id="tc4", run_id="run4", event_id="ev4", call_id="call4", owner_uid="owner-4", session_id=session_id, tool_name="github_get_file", arguments="{}", status="started"),
+            ])
+            await db.commit()
+
+        prepared = await build_prepared_context(
+            session_factory=factory,
+            session_id=session_id,
+            owner_uid="owner-4",
+            current_text="next message" * 5,
+            instructions="system prompt" * 10,
+            tool_names=["read_file", "write_file"],
+            model_context_window=400,
+            threshold_pct=50,
+        )
+        assert prepared.meter["should_compact"] is True
+        checkpoint_summary = "CHECKPOINT: compressed earlier work."
+        post = prepared.compacted_meter(checkpoint_summary=checkpoint_summary)
+
+        def _bucket(meter: dict, name: str) -> dict:
+            return next(b for b in meter["buckets"] if b["name"] == name)
+
+        assert _bucket(post, "chat_history")["tokens"] == 0
+        assert _bucket(post, "pending_tool_outputs")["tokens"] == 0
+        assert _bucket(post, "checkpoints")["tokens"] > 0
+        # Post-compaction must report a smaller footprint than pre.
+        assert post["total_tokens"] < prepared.meter["total_tokens"]
+        # And the buckets that survive (system_prompt, active_tools,
+        # current_user_message) keep their token counts.
+        for name in ("system_prompt", "active_tools", "current_user_message"):
+            assert _bucket(post, name)["tokens"] == _bucket(prepared.meter, name)["tokens"]
+        # Owner / session / window / threshold all stay constant.
+        assert post["owner_uid"] == prepared.meter["owner_uid"]
+        assert post["session_id"] == prepared.meter["session_id"]
+        assert post["model_context_window"] == prepared.meter["model_context_window"]
+        assert post["compact_threshold_pct"] == prepared.meter["compact_threshold_pct"]
+        await engine.dispose()
+
+    _run(scenario())

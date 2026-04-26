@@ -74,6 +74,37 @@ class PreparedContext:
     history_text: str
     latest_checkpoint: RuntimeContextCheckpoint | None
     recent_event_count: int
+    instructions: str = ""
+    tool_catalog: str = ""
+    current_text: str = ""
+    model_context_window: int = DEFAULT_CONTEXT_WINDOW_TOKENS
+    threshold_pct: int = DEFAULT_COMPACT_THRESHOLD_PCT
+    owner_uid: str = ""
+    session_id: str = ""
+
+    def compacted_meter(self, *, checkpoint_summary: str) -> dict[str, Any]:
+        """Return a fresh meter that mirrors the post-compaction prompt.
+
+        After ``maybe_create_checkpoint`` succeeds the dispatch hook
+        rewrites ``run_input`` to ``_checkpoint_prompt(...)``, which drops
+        ``chat_history`` + ``pending_tool_outputs`` entirely and replaces
+        ``checkpoints`` with the freshly-persisted summary. The meter
+        emitted *with* that rewrite must reflect the same shape, otherwise
+        the UI shows the pre-compaction footprint at exactly the moment
+        compaction happens.
+        """
+        return _build_meter(
+            instructions=self.instructions,
+            tool_catalog=self.tool_catalog,
+            checkpoint_text=checkpoint_summary,
+            history_text="",
+            pending_tools_text="",
+            current_text=self.current_text,
+            model_window=self.model_context_window,
+            threshold=self.threshold_pct,
+            owner_uid=self.owner_uid,
+            session_id=self.session_id,
+        )
 
 
 def runtime_context_window_tokens() -> int:
@@ -139,11 +170,20 @@ async def _latest_checkpoint(session: AsyncSession, *, session_id: str) -> Runti
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def _recent_events(session: AsyncSession, *, session_id: str, limit: int) -> list[RuntimeRunEvent]:
+async def _recent_events(
+    session: AsyncSession,
+    *,
+    session_id: str,
+    limit: int,
+    exclude_run_id: str | None = None,
+) -> list[RuntimeRunEvent]:
+    where_clauses = [RuntimeRun.session_id == session_id]
+    if exclude_run_id:
+        where_clauses.append(RuntimeRunEvent.run_id != exclude_run_id)
     stmt = (
         select(RuntimeRunEvent)
         .join(RuntimeRun, RuntimeRun.id == RuntimeRunEvent.run_id)
-        .where(RuntimeRun.session_id == session_id)
+        .where(and_(*where_clauses))
         .order_by(RuntimeRunEvent.created_at.desc(), RuntimeRunEvent.seq.desc())
         .limit(max(1, limit))
     )
@@ -189,41 +229,19 @@ def _prompt_from_parts(*, instructions: str, checkpoint_text: str, history_text:
     return "\n\n".join(section for section in sections if section)
 
 
-async def build_prepared_context(
+def _build_meter(
     *,
-    session_factory: Any,
-    session_id: str,
-    owner_uid: str,
-    current_text: str,
     instructions: str,
-    tool_names: Sequence[str],
-    model_context_window: int | None = None,
-    threshold_pct: int | None = None,
-    recent_event_limit: int = DEFAULT_RECENT_EVENT_LIMIT,
-    pending_tool_limit: int = DEFAULT_PENDING_TOOL_LIMIT,
-) -> PreparedContext:
-    """Build the prompt input and truthful context meter for a run."""
-    model_window = model_context_window or runtime_context_window_tokens()
-    threshold = threshold_pct or runtime_compact_threshold_pct()
-    checkpoint: RuntimeContextCheckpoint | None = None
-    recent: list[RuntimeRunEvent] = []
-    pending_tools: list[RuntimeToolCall] = []
-
-    if session_factory is not None:
-        try:
-            async with session_factory() as db:
-                checkpoint = await _latest_checkpoint(db, session_id=session_id)
-                recent = await _recent_events(db, session_id=session_id, limit=recent_event_limit)
-                pending_tools = await _pending_tools(db, session_id=session_id, limit=pending_tool_limit)
-        except Exception:  # noqa: BLE001
-            checkpoint = None
-            recent = []
-            pending_tools = []
-
-    checkpoint_text = checkpoint.summary if checkpoint is not None else ""
-    history_text = "\n".join(_event_line(event) for event in recent)
-    pending_tools_text = _pending_tool_text(pending_tools)
-    tool_catalog = _tool_catalog_text(tool_names)
+    tool_catalog: str,
+    checkpoint_text: str,
+    history_text: str,
+    pending_tools_text: str,
+    current_text: str,
+    model_window: int,
+    threshold: int,
+    owner_uid: str,
+    session_id: str,
+) -> dict[str, Any]:
     buckets = [
         _bucket("system_prompt", instructions, "Agent identity, behavior rules, and runtime guardrails."),
         _bucket("active_tools", tool_catalog, "Names of native, MCP, and connector tools loaded for this turn."),
@@ -236,7 +254,7 @@ async def build_prepared_context(
     ]
     total = sum(bucket.tokens for bucket in buckets)
     pct = round((total / model_window) * 100, 2) if model_window else 0.0
-    meter = {
+    return {
         "session_id": session_id,
         "owner_uid": owner_uid,
         "model_context_window": model_window,
@@ -247,6 +265,69 @@ async def build_prepared_context(
         "buckets": [bucket.as_dict() for bucket in buckets],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def build_prepared_context(
+    *,
+    session_factory: Any,
+    session_id: str,
+    owner_uid: str,
+    current_text: str,
+    instructions: str,
+    tool_names: Sequence[str],
+    model_context_window: int | None = None,
+    threshold_pct: int | None = None,
+    recent_event_limit: int = DEFAULT_RECENT_EVENT_LIMIT,
+    pending_tool_limit: int = DEFAULT_PENDING_TOOL_LIMIT,
+    exclude_run_id: str | None = None,
+) -> PreparedContext:
+    """Build the prompt input and truthful context meter for a run.
+
+    ``exclude_run_id`` filters out events that belong to the current
+    run-in-flight. Dispatch persists ``run_started`` + ``user_message``
+    *before* it asks for context, so without this filter the current
+    user message would be double-counted (in ``chat_history`` *and*
+    ``current_user_message``) and inflate every meter, occasionally
+    triggering premature compaction on long inputs.
+    """
+    model_window = model_context_window or runtime_context_window_tokens()
+    threshold = threshold_pct or runtime_compact_threshold_pct()
+    checkpoint: RuntimeContextCheckpoint | None = None
+    recent: list[RuntimeRunEvent] = []
+    pending_tools: list[RuntimeToolCall] = []
+
+    if session_factory is not None:
+        try:
+            async with session_factory() as db:
+                checkpoint = await _latest_checkpoint(db, session_id=session_id)
+                recent = await _recent_events(
+                    db,
+                    session_id=session_id,
+                    limit=recent_event_limit,
+                    exclude_run_id=exclude_run_id,
+                )
+                pending_tools = await _pending_tools(db, session_id=session_id, limit=pending_tool_limit)
+        except Exception:  # noqa: BLE001
+            checkpoint = None
+            recent = []
+            pending_tools = []
+
+    checkpoint_text = checkpoint.summary if checkpoint is not None else ""
+    history_text = "\n".join(_event_line(event) for event in recent)
+    pending_tools_text = _pending_tool_text(pending_tools)
+    tool_catalog = _tool_catalog_text(tool_names)
+    meter = _build_meter(
+        instructions=instructions,
+        tool_catalog=tool_catalog,
+        checkpoint_text=checkpoint_text,
+        history_text=history_text,
+        pending_tools_text=pending_tools_text,
+        current_text=current_text,
+        model_window=model_window,
+        threshold=threshold,
+        owner_uid=owner_uid,
+        session_id=session_id,
+    )
     prompt = _prompt_from_parts(
         instructions=instructions,
         checkpoint_text=checkpoint_text,
@@ -254,7 +335,20 @@ async def build_prepared_context(
         pending_tools_text=pending_tools_text,
         current_text=current_text,
     )
-    return PreparedContext(prompt=prompt, meter=meter, history_text=history_text, latest_checkpoint=checkpoint, recent_event_count=len(recent))
+    return PreparedContext(
+        prompt=prompt,
+        meter=meter,
+        history_text=history_text,
+        latest_checkpoint=checkpoint,
+        recent_event_count=len(recent),
+        instructions=instructions,
+        tool_catalog=tool_catalog,
+        current_text=current_text,
+        model_context_window=model_window,
+        threshold_pct=threshold,
+        owner_uid=owner_uid,
+        session_id=session_id,
+    )
 
 
 def _checkpoint_summary(previous: str, history: str, max_chars: int = 12_000) -> str:

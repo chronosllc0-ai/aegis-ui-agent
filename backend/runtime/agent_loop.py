@@ -333,6 +333,11 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
         instructions = _instructions_for_meter(agent, cfg)
         run_input = text
         try:
+            # Pass exclude_run_id so the current turn's run_started +
+            # user_message events (already persisted above) don't get
+            # read back as chat_history and double-count the user
+            # message — that would inflate the meter and could trigger
+            # premature compaction on long prompts.
             prepared_context = await build_prepared_context(
                 session_factory=cfg.session_factory,
                 session_id=session.session_id,
@@ -342,9 +347,9 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                 tool_names=_tool_names_for_meter(agent),
                 model_context_window=cfg.context_window_tokens,
                 threshold_pct=cfg.compact_threshold_pct,
+                exclude_run_id=run_id,
             )
             run_input = prepared_context.prompt
-            await emit("context_meter", prepared_context.meter)
             try:
                 checkpoint = await maybe_create_checkpoint(
                     session_factory=cfg.session_factory,
@@ -356,8 +361,24 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                 checkpoint = None
                 logger.exception("context checkpoint creation failed session=%s", session.session_id)
             if checkpoint is not None:
-                await emit("compaction_checkpoint", {k: v for k, v in checkpoint.items() if k != "summary"})
+                # Compaction rewrites the prompt: history + pending tool
+                # outputs are dropped and the new checkpoint summary
+                # replaces them. Re-derive the meter so the emitted
+                # event matches what Runner.run is actually about to
+                # see. Fall back to the pre-compaction meter only if
+                # the recompute itself fails.
                 run_input = _checkpoint_prompt(instructions=instructions, checkpoint=checkpoint, current_text=text)
+                try:
+                    post_meter = prepared_context.compacted_meter(
+                        checkpoint_summary=str(checkpoint.get("summary") or ""),
+                    )
+                except Exception:  # noqa: BLE001
+                    post_meter = prepared_context.meter
+                    logger.exception("post-compaction meter recompute failed session=%s", session.session_id)
+                await emit("context_meter", post_meter)
+                await emit("compaction_checkpoint", {k: v for k, v in checkpoint.items() if k != "summary"})
+            else:
+                await emit("context_meter", prepared_context.meter)
         except Exception:  # noqa: BLE001
             logger.exception("context meter preparation failed session=%s", session.session_id)
 
