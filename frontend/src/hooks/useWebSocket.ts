@@ -79,9 +79,56 @@ export interface PersistedThinkingMessage {
 }
 
 export type WebSocketPayload = {
-  type: 'step' | 'result' | 'error' | 'interrupt' | 'workflow_step' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_transition' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong'
+  type: 'step' | 'result' | 'error' | 'interrupt' | 'workflow_step' | 'transcript' | 'usage' | 'usage_tick' | 'context_update' | 'conversation_id' | 'reasoning_start' | 'reasoning_delta' | 'reasoning' | 'tool-call' | 'subagent_spawned' | 'subagent_step' | 'subagent_completed' | 'subagent_error' | 'subagent_cancelled' | 'subagent_list' | 'mode_event' | 'mode_transition' | 'mode_event_parse_failed' | 'navigate_ack' | 'task_state' | 'task_result' | 'task_error' | 'pong' | 'runtime_session' | 'runtime_event'
   data?: Record<string, unknown>
   [key: string]: unknown
+}
+
+// ── Phase 9: truthful runtime context meter wire types ────────────
+// These mirror the payloads :func:`backend.runtime.context_window.build_prepared_context`
+// emits via the agent_loop dispatch hook. The frontend used to derive
+// the meter from chat tokens alone — that heuristic is replaced by
+// the eight-bucket meter the model actually receives.
+
+export type RuntimeMeterBucket = {
+  name:
+    | 'system_prompt'
+    | 'active_tools'
+    | 'checkpoints'
+    | 'workspace_files'
+    | 'pinned_memories'
+    | 'pending_tool_outputs'
+    | 'chat_history'
+    | 'current_user_message'
+    | string
+  tokens: number
+  chars: number
+}
+
+export type RuntimeContextMeter = {
+  total_tokens: number
+  projected_pct: number
+  should_compact: boolean
+  model_context_window: number
+  compact_threshold_pct: number
+  buckets: RuntimeMeterBucket[]
+  owner_uid?: string
+  session_id?: string
+}
+
+export type RuntimeCompactionCheckpoint = {
+  id?: string
+  session_id?: string
+  owner_uid?: string
+  source_event_count?: number
+  token_count?: number
+  created_at?: string
+}
+
+export type RuntimeSessionInfo = {
+  session_id: string
+  owner_uid: string
+  channel: string
 }
 
 const THINKING_KEY = (taskId: string) => `aegis.reasoning.${taskId}`
@@ -138,11 +185,25 @@ type UseWebSocketOptions = {
   onUsageMessage?: (msg: Record<string, unknown>) => void
   userId?: string | null
   activeThreadId?: string | null
+  /**
+   * Phase 9 runtime fan-out hooks. ``onRuntimeContextMeter`` fires on
+   * every dispatch (including background heartbeat / automation runs),
+   * ``onRuntimeCompactionCheckpoint`` fires when the projected pct
+   * crosses ``compact_threshold_pct`` and the prompt was rewritten.
+   * ``onRuntimeSession`` fires once at WS open with the canonical
+   * ``agent:main:web:{owner_uid}`` id the meter REST endpoint expects.
+   */
+  onRuntimeSession?: (info: RuntimeSessionInfo) => void
+  onRuntimeContextMeter?: (meter: RuntimeContextMeter) => void
+  onRuntimeCompactionCheckpoint?: (checkpoint: RuntimeCompactionCheckpoint) => void
 }
 
 export function useWebSocket(options?: UseWebSocketOptions) {
   const onUsageMessage = options?.onUsageMessage
   const activeThreadId = options?.activeThreadId ?? null
+  const onRuntimeSession = options?.onRuntimeSession
+  const onRuntimeContextMeter = options?.onRuntimeContextMeter
+  const onRuntimeCompactionCheckpoint = options?.onRuntimeCompactionCheckpoint
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [executionState, setExecutionState] = useState<ExecutionState>('idle')
   const [isWorking, setIsWorking] = useState(false)
@@ -296,6 +357,44 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       if (payload.type === 'conversation_id') {
         const convId = String(payload.data?.conversation_id ?? '')
         if (convId) setActiveConversationId(convId)
+        return
+      }
+      // Phase 9: announce the canonical runtime session id so the
+      // caller can hydrate /api/runtime/context-meter/{session_id}
+      // before any user message has dispatched. Without this hook the
+      // meter shows zero until the first reply arrives.
+      if (payload.type === 'runtime_session') {
+        const data = payload.data as Record<string, unknown> | undefined
+        const sessionId = typeof data?.session_id === 'string' ? data.session_id : ''
+        const ownerUid = typeof data?.owner_uid === 'string' ? data.owner_uid : ''
+        const channel = typeof data?.channel === 'string' ? data.channel : 'web'
+        if (sessionId && onRuntimeSession) {
+          onRuntimeSession({ session_id: sessionId, owner_uid: ownerUid, channel })
+        }
+        return
+      }
+      // Phase 9: every event the agent_loop dispatch hook fans out
+      // arrives here. We route by ``kind`` and forward truthful bucket
+      // payloads up to the consumer hooks. The fan-out also carries
+      // ``final_message`` / ``run_completed`` / ``error`` /
+      // ``tool_call*`` etc., which prior phases never delivered to the
+      // websocket because no Subscriber was registered. We only
+      // *consume* the meter / checkpoint kinds here so we do not race
+      // with the legacy ``step`` / ``result`` rendering pipeline; if
+      // future phases want assistant replies sourced from the runtime
+      // they should be added explicitly.
+      if (payload.type === 'runtime_event') {
+        const data = payload.data as Record<string, unknown> | undefined
+        const kind = typeof data?.kind === 'string' ? data.kind : ''
+        const inner = (data?.payload as Record<string, unknown> | undefined) ?? {}
+        if (kind === 'context_meter' && onRuntimeContextMeter) {
+          const meter = inner as unknown as RuntimeContextMeter
+          if (typeof meter.total_tokens === 'number' && Array.isArray(meter.buckets)) {
+            onRuntimeContextMeter(meter)
+          }
+        } else if (kind === 'compaction_checkpoint' && onRuntimeCompactionCheckpoint) {
+          onRuntimeCompactionCheckpoint(inner as unknown as RuntimeCompactionCheckpoint)
+        }
         return
       }
       if (payload.type === 'navigate_ack') {

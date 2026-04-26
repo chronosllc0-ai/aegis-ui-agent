@@ -17,6 +17,25 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+// Phase 9: human labels for the eight runtime meter buckets. Anything
+// the backend introduces later still renders — we fall back to the
+// raw bucket name so a forward-compatible frontend doesn't hide new
+// buckets behind a generic label.
+const BUCKET_LABELS: Record<string, string> = {
+  system_prompt: 'System prompt',
+  active_tools: 'Active tools',
+  checkpoints: 'Checkpoints',
+  workspace_files: 'Workspace files',
+  pinned_memories: 'Pinned memories',
+  pending_tool_outputs: 'Pending tool outputs',
+  chat_history: 'Chat history',
+  current_user_message: 'Current message',
+}
+
+function bucketLabel(name: string): string {
+  return BUCKET_LABELS[name] ?? name.replace(/_/g, ' ')
+}
+
 function formatCredits(n: number): string {
   if (n >= 10_000) return `${(n / 1000).toFixed(1)}k`
   return n.toLocaleString()
@@ -93,9 +112,43 @@ export function UsageDropdown({ balance, context, modelLabel }: UsageDropdownPro
         </div>
       </div>
 
-      {/* ── Expanded: Credits + plan info ── */}
+      {/* ── Expanded: bucket breakdown (runtime meter only) + credits + plan info ── */}
       {expanded && (
         <div className='border-t border-[#2a2a2a] px-3 py-2.5 space-y-3'>
+          {context.source === 'runtime' && context.buckets.length > 0 && (
+            <div>
+              <div className='mb-1.5 flex items-center justify-between'>
+                <span className='text-[10px] font-medium text-zinc-400'>Context breakdown</span>
+                <span className='text-[10px] text-zinc-500'>
+                  projected {context.projectedPct.toFixed(1)}%
+                </span>
+              </div>
+              <ul className='space-y-1'>
+                {context.buckets
+                  // Hide perfectly-empty buckets so the breakdown stays
+                  // readable on a fresh session — they will reappear
+                  // automatically when the bucket starts carrying data.
+                  .filter((b) => b.tokens > 0)
+                  .map((bucket) => {
+                    const share = context.current.tokensUsed > 0
+                      ? Math.min(100, (bucket.tokens / context.current.tokensUsed) * 100)
+                      : 0
+                    return (
+                      <li key={bucket.name} className='flex items-center justify-between text-[10px]'>
+                        <span className='truncate text-zinc-400'>{bucketLabel(bucket.name)}</span>
+                        <span className='ml-2 shrink-0 text-zinc-500'>
+                          {formatTokens(bucket.tokens)}
+                          <span className='ml-1 text-zinc-600'>({share.toFixed(0)}%)</span>
+                        </span>
+                      </li>
+                    )
+                  })}
+              </ul>
+              <div className='mt-1.5 text-[9px] text-zinc-600'>
+                Auto-compaction at {context.compactThresholdPct.toFixed(0)}% projected
+              </div>
+            </div>
+          )}
           {/* Credits meter */}
           <div>
             <div className='mb-1.5 flex items-center justify-between'>

@@ -2458,6 +2458,112 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
     _start_navigation_task(websocket, runtime, session_id, queued_instruction.instruction)
 
 
+# ── Runtime fan-out → websocket bridge ─────────────────────────────
+# Phase 9: forward agent_loop runtime events (context_meter,
+# compaction_checkpoint, final_message, run_completed, tool_call*, etc.)
+# from the per-session FanOut to the websocket. Until this exists, the
+# truthful context-meter events ship by Phase 8 are dropped on the
+# floor — the fan-out has no subscribers and the only frontend signal
+# was the `kind: accepted` ack. The bridge subscribes on WS open and
+# unsubscribes on disconnect; failures inside the callback get logged
+# and FanOut auto-evicts the bad subscriber.
+
+def _runtime_session_id_for_web(owner_uid: str) -> str:
+    """Mirror :class:`backend.runtime.session.ChannelSessionKey.to_session_id`.
+
+    The runtime supervisor keys its FanOut by ``agent:main:web:{owner_uid}``
+    for chat sessions. We replicate the format inline here so the chat
+    WS handler stays decoupled from the runtime dataclasses.
+    """
+    return f"agent:main:web:{owner_uid}"
+
+
+async def _attach_runtime_event_bridge(
+    websocket: WebSocket,
+    *,
+    ws_session_id: str,
+    owner_uid: str,
+) -> tuple[str, str] | None:
+    """Subscribe ``websocket`` to the runtime FanOut for this session.
+
+    Returns ``(runtime_session_id, subscriber_name)`` on success so the
+    caller can unsubscribe in its ``finally`` block. Returns ``None`` if
+    the runtime fan-out registry is unavailable (supervisor disabled,
+    startup failure, etc.) — chat still works but the truthful meter
+    won't update until reconnect.
+    """
+    if not _runtime_supervisor_enabled():
+        return None
+    fanout_registry = _runtime_get_fanout_registry()
+    if fanout_registry is None:
+        return None
+    runtime_session_id = _runtime_session_id_for_web(owner_uid)
+    fanout = await fanout_registry.get(runtime_session_id)
+
+    async def _forward(event: _RuntimeAgentEvent) -> None:  # type: ignore[override]
+        # ``event`` here is actually a :class:`backend.runtime.fanout.RuntimeEvent`;
+        # FanOut deliveries always carry that shape regardless of what
+        # the supervisor enqueued. We only need ``kind`` / ``payload``
+        # / metadata for the wire format.
+        await _safe_ws_send(
+            websocket,
+            {
+                "type": "runtime_event",
+                "data": {
+                    "kind": getattr(event, "kind", None),
+                    "session_id": getattr(event, "session_id", runtime_session_id),
+                    "owner_uid": getattr(event, "owner_uid", owner_uid),
+                    "channel": getattr(event, "channel", "web"),
+                    "run_id": getattr(event, "run_id", None),
+                    "seq": getattr(event, "seq", 0),
+                    "payload": getattr(event, "payload", {}) or {},
+                },
+            },
+            ws_session_id=ws_session_id,
+            phase="runtime_event_forward",
+        )
+
+    subscriber_name = f"ws:{ws_session_id}"
+    await fanout.subscribe(_RuntimeSubscriber(name=subscriber_name, callback=_forward))
+    # Tell the frontend which runtime session_id to use for the
+    # /api/runtime/context-meter/{session_id} hydration call. This is
+    # not the same as ``ws_session_id`` — that one comes from
+    # ``live_manager`` and is not what the runtime persistence layer
+    # keys events on.
+    await _safe_ws_send(
+        websocket,
+        {
+            "type": "runtime_session",
+            "data": {
+                "session_id": runtime_session_id,
+                "owner_uid": owner_uid,
+                "channel": "web",
+            },
+        },
+        ws_session_id=ws_session_id,
+        phase="runtime_session_announce",
+    )
+    return runtime_session_id, subscriber_name
+
+
+async def _detach_runtime_event_bridge(
+    runtime_session_id: str, subscriber_name: str
+) -> None:
+    """Best-effort unsubscribe — never raises into the WS finally block."""
+    try:
+        fanout_registry = _runtime_get_fanout_registry()
+        if fanout_registry is None:
+            return
+        fanout = await fanout_registry.get(runtime_session_id)
+        await fanout.unsubscribe(subscriber_name)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "runtime fan-out unsubscribe failed session=%s subscriber=%s",
+            runtime_session_id,
+            subscriber_name,
+        )
+
+
 # ── WebSocket navigation endpoint ────────────────────────────────────
 
 
@@ -2493,6 +2599,22 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         details={"user_uid": runtime.user_uid},
     )
     ensure_daily_memory_file(session_id)
+
+    # Phase 9: bridge runtime fan-out events (context_meter,
+    # compaction_checkpoint, final_message, run_completed, tool_call*,
+    # error, …) onto this websocket. Without this the truthful meter
+    # never reaches the frontend. Owner_uid falls back to ws_session_id
+    # for unauthenticated sessions to mirror the dispatch path's
+    # ``owner_uid = runtime.user_uid or session_id`` rule.
+    _runtime_bridge: tuple[str, str] | None = None
+    try:
+        _runtime_bridge = await _attach_runtime_event_bridge(
+            websocket,
+            ws_session_id=session_id,
+            owner_uid=runtime.user_uid or session_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("runtime fan-out bridge attach failed session=%s", session_id)
 
     db_session_gen = get_session()
     try:
@@ -3078,6 +3200,8 @@ async def websocket_navigate(websocket: WebSocket) -> None:
             _user_runtimes.pop(runtime.user_uid, None)
         _session_runtimes.pop(session_id, None)
         session_events.unregister(session_id)
+        if _runtime_bridge is not None:
+            await _detach_runtime_event_bridge(*_runtime_bridge)
         await cleanup_session_workspace(session_id)
         await live_manager.close_session(session_id)
         _record_runtime_event(

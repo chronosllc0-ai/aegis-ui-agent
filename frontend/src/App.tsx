@@ -28,6 +28,49 @@ import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
 import { useImpersonation } from './components/admin/useImpersonation'
 import { useToast } from './hooks/useToast'
 import { useContextMeter } from './hooks/useContextMeter'
+import type { RuntimeCompactionCheckpoint, RuntimeContextMeter } from './hooks/useWebSocket'
+
+/**
+ * Phase 9 helper: pull the truthful, eight-bucket context meter for a
+ * runtime session and feed it into the meter hook. The dispatch hook
+ * only emits ``context_meter`` events on actual runs, so without this
+ * REST call the bar would sit at zero from WS open until the first
+ * model invocation. ``GET /api/runtime/context-meter/{session_id}``
+ * returns the same payload shape ``RuntimeContextMeter`` decodes.
+ *
+ * Failures are logged and swallowed — the meter falls back to the
+ * heuristic until the next live ``context_meter`` event arrives, which
+ * is strictly better than throwing into a render path.
+ */
+async function hydrateRuntimeMeter(
+  sessionId: string,
+  apply: ((meter: RuntimeContextMeter) => void) | null,
+): Promise<void> {
+  if (!sessionId || !apply) return
+  try {
+    const resp = await fetch(
+      `/api/runtime/context-meter/${encodeURIComponent(sessionId)}`,
+      { credentials: 'include' },
+    )
+    if (!resp.ok) {
+      // 404 is expected for sessions that have never dispatched a run.
+      // We keep silent on 404 so the console isn't littered for fresh
+      // anonymous tabs.
+      if (resp.status !== 404) {
+        // eslint-disable-next-line no-console
+        console.warn('[runtime] context-meter hydrate failed', resp.status)
+      }
+      return
+    }
+    const body = (await resp.json()) as RuntimeContextMeter
+    if (typeof body?.total_tokens === 'number' && Array.isArray(body?.buckets)) {
+      apply(body)
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[runtime] context-meter hydrate error', err)
+  }
+}
 import { useSettingsContext } from './context/useSettingsContext'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useUsage } from './hooks/useUsage'
@@ -99,16 +142,49 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
+  // Phase 9 runtime meter wiring. ``useContextMeter`` lives below
+  // ``useSettingsContext`` (it depends on ``settings.model``) but
+  // ``useWebSocket`` needs to forward runtime events into the meter,
+  // so we route through refs and an effect-installed REST hydration.
+  // The ``runtimeSessionIdRef`` also acts as the canonical id for any
+  // future code path that needs to call ``GET /api/runtime/...``
+  // without re-deriving ``agent:main:web:{owner_uid}``.
+  const runtimeSessionIdRef = useRef<string | null>(null)
+  const runtimeMeterCbRef = useRef<((meter: RuntimeContextMeter) => void) | null>(null)
+  const runtimeCheckpointCbRef = useRef<((cp: RuntimeCompactionCheckpoint) => void) | null>(null)
+
   const { connectionStatus, isWorking, activityStatusLabel, activityDetail, isActivityVisible, logs, transcripts, send, sendAudioChunk, resetClientState, activeConversationId, subAgents, subAgentSteps, messageSubAgent, cancelSubAgent } = useWebSocket({
     onUsageMessage: handleUsageMessage,
     userId: authUser?.uid ?? null,
     activeThreadId: selectedTaskId,
+    onRuntimeSession: (info) => {
+      runtimeSessionIdRef.current = info.session_id
+      // Hydrate the meter immediately so the bar reflects the session's
+      // current footprint before the user even types — the dispatch
+      // hook only emits ``context_meter`` on actual runs, so without
+      // this fetch the bar would sit at zero across reconnects.
+      void hydrateRuntimeMeter(info.session_id, runtimeMeterCbRef.current)
+    },
+    onRuntimeContextMeter: (meter) => {
+      runtimeMeterCbRef.current?.(meter)
+    },
+    onRuntimeCompactionCheckpoint: (cp) => {
+      runtimeCheckpointCbRef.current?.(cp)
+    },
   })
   const prevConnectionStatus = useRef(connectionStatus)
   const { settings, patchSettings, wsConfig } = useSettingsContext()
   const pathname = usePathname()
 
   const contextMeter = useContextMeter(settings.model)
+  // Hand the meter's callbacks to the WS-side refs. Effect runs once
+  // per render but the refs are mutated in place so identity churn is
+  // free — useWebSocket's onMessage handler always reads the latest
+  // ref values via the wrapper closures above.
+  useEffect(() => {
+    runtimeMeterCbRef.current = contextMeter.applyRuntimeMeter
+    runtimeCheckpointCbRef.current = contextMeter.applyCompactionCheckpoint
+  }, [contextMeter.applyRuntimeMeter, contextMeter.applyCompactionCheckpoint])
 
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
@@ -818,6 +894,10 @@ function App() {
                 current: contextMeter.current,
                 percent: contextMeter.percent,
                 isCompacting: contextMeter.isCompacting,
+                source: contextMeter.source,
+                buckets: contextMeter.buckets,
+                projectedPct: contextMeter.projectedPct,
+                compactThresholdPct: contextMeter.compactThresholdPct,
               }}
               modelLabel={currentModelLabel}
             />
