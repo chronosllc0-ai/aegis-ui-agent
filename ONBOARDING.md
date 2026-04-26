@@ -7863,3 +7863,56 @@
 - None.
 
 ---
+
+## Session 8 - April 25, 2026 (Phase 8: truthful context meter + compaction checkpoints)
+
+### Branch / PR
+- Branch: `phase8/context-meter-compaction`
+- PR: [#343](https://github.com/chronosllc0-ai/aegis-ui-agent/pull/343)
+- Built on top of Phase 7 (`0afe19d` on main).
+
+### What Shipped
+- **`backend/runtime/context_window.py`** — deterministic token estimator + `RuntimeContextCheckpoint` SQLAlchemy model on `Base`. Tokenizer is char-bounded (`max(len/4, lexical_count)`) so the meter never under-reports. Eight buckets:
+  `system_prompt`, `active_tools`, `checkpoints`, `workspace_files`, `pinned_memories`, `pending_tool_outputs`, `chat_history`, `current_user_message`.
+  Window: `RUNTIME_CONTEXT_WINDOW_TOKENS` (default 128_000). Threshold: `COMPACT_THRESHOLD_PCT` (default 90, clamped 50..99).
+- **`backend/runtime/router.py`** — `GET /api/runtime/context-meter/{session_id}`. Auth: `aegis_session` cookie via `auth._verify_session`. Cross-tenant guard: resolves `RuntimeRun.owner_uid` and 404s anyone else.
+- **`backend/runtime/agent_loop.py` rewrite** — emits `context_meter` runtime event before every `Runner.run`; on threshold cross persists a checkpoint row, emits `compaction_checkpoint`, and feeds the next `Runner.run` a checkpoint-prefixed prompt instead of full history.
+- **`backend/migrations/20260424_runtime_context_checkpoints.sql`** — Postgres DDL for `runtime_context_checkpoints` (informational; SQLAlchemy `create_all` also creates the table on boot).
+- **Mounted runtime router on `app` in `main.py`** so the meter endpoint is reachable.
+
+### Tests Added
+- `tests/test_runtime_context_window.py` (3) — meter shape, threshold-crossing checkpoint persistence, post-compaction prompt rewrite.
+- `tests/test_runtime_router.py` (3) — auth required (401), cross-tenant blocked (404), full bucket payload (200).
+
+### Verification
+- `pytest tests/` → 227 passed, 1 skipped, 6 failures (all pre-existing on main: 5 skills tests + 1 sessions migration). **No new regressions.**
+- Phase 7 suite (`test_runtime_persistence.py`, `test_runtime_supervisor_smoke.py`, `test_runtime_rehydration_retry.py`) green.
+
+### Pitfalls Hit
+- `file_edit` corrupted `main.py` mid-session (5029-line file ended up with reshuffled blocks at line ~640 and a syntax error at ~2700). Recovery: `git restore --source=origin/<branch> --staged --worktree main.py`, then re-apply edits with a tiny inline Python script that asserts `text.count(needle) == 1` before `text.replace`. **Rule:** never use `file_edit` on `main.py`. Always use `text.replace()` with single-occurrence guards.
+- `pytest` hangs on full-suite runs > 60s because background bash defaults to 60s timeout. Tee to `/tmp/*.log` and poll `status.json`, or `wait_for_paths` on the job dir.
+- `NATIVE_TOOL_NAMES` import takes ~30-40s due to side effects, so any test that touches `backend/runtime/agent_loop` pays that cost once.
+
+### What's Working
+- End-to-end context awareness: each dispatch publishes a `context_meter` runtime event keyed by the actual prompt the model is about to see.
+- Threshold-crossing publishes a `compaction_checkpoint` event and feeds the next dispatch a compacted prompt.
+- API endpoint mounted, auth-checked, cross-tenant-safe.
+
+### What's NOT Working Yet
+- Frontend doesn't yet consume `context_meter` / `compaction_checkpoint` runtime events or call the new endpoint. Tracked as a follow-up phase.
+- Migration script is informational; production relies on SQLAlchemy `create_all` to materialize the new table.
+
+### Next Steps
+1. Merge PR #343.
+2. Frontend integration: chat UI consumes `context_meter` updates + checkpoint events; settings exposes `RUNTIME_CONTEXT_WINDOW_TOKENS` / `COMPACT_THRESHOLD_PCT`.
+3. Tighten the bucket estimator using a real tokenizer for the configured model (current estimator is conservative on purpose).
+
+### Decisions Made
+- Eight fixed buckets, in fixed order. Future buckets get appended; existing ones never get renamed (the API contract is the bucket name).
+- Checkpoints live in their own table (`runtime_context_checkpoints`) rather than overloading `runtime_run_events`, because they are session-scoped, not run-scoped.
+- The compaction prompt drops history+pending-tool buckets when a checkpoint just got created. Intentional: that's the whole point of compaction. The persisted checkpoint summary is the only carry-over.
+
+### Blockers
+- None.
+
+---

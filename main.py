@@ -78,6 +78,7 @@ from backend.runtime.integration import (
 )
 from backend.runtime import AgentEvent as _RuntimeAgentEvent, EventKind as _RuntimeEventKind
 from backend.runtime.fanout import Subscriber as _RuntimeSubscriber
+from backend.runtime.router import router as runtime_router
 from backend.conversation_service import append_message, get_or_create_conversation
 from backend.migration_rollout import (
     feature_flags_snapshot,
@@ -162,6 +163,7 @@ app.include_router(skills_router)
 app.include_router(skills_hub_router)
 app.include_router(workspace_files_router)
 app.include_router(legacy_workspace_files_router)
+app.include_router(runtime_router)
 
 live_manager = LiveSessionManager()
 key_manager = KeyManager(settings.ENCRYPTION_SECRET)

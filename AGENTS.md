@@ -88,9 +88,11 @@ Prefer machine-readable error codes (example set):
   - `events.py` — `AgentEvent` / `EventKind` taxonomy (CHAT_MESSAGE, TASK_EVENT, etc.).
   - `agent_loop.py` — OpenAI Agents SDK integration + LiteLLM provider routing.
   - `fanout.py` — fan-out registry wiring channel subscribers (websocket, Slack, Telegram, Discord) to the supervisor stream.
-  - `persistence.py` — SQLAlchemy models + helpers for `runtime_runs`, `runtime_run_events`, and (Phase 7) `runtime_inbox_events` / `runtime_tool_calls` durability tables.
-  - `rehydration.py` — Phase 7 boot-rehydration pass: re-enqueues `pending` inbox rows, terminates `dispatched` rows as `interrupted` with a `run_interrupted` fan-out frame.
-  - `integration.py` — FastAPI glue; `runtime_supervisor_enabled()` + startup/shutdown hooks; wires the persistence factory and runs `rehydrate_pending_events` at boot.
+  - `persistence.py` — SQLAlchemy models + helpers for `runtime_runs`, `runtime_run_events`, (Phase 7) `runtime_inbox_events` / `runtime_tool_calls` durability tables, and the atomic `finalize_run_and_inbox` helper.
+  - `rehydration.py` — Phase 7 boot-rehydration pass: re-enqueues `pending` inbox rows, terminates `dispatched` rows as `interrupted` with a `run_interrupted` fan-out frame, and reconciles `dispatched` inbox rows whose run already finished to the matching terminal status without a spurious frame.
+  - `integration.py` — FastAPI glue; `runtime_supervisor_enabled()` + startup/shutdown hooks; wires the persistence factory and runs `rehydrate_pending_events` in a background `_rehydrate_with_retry` task that probes the session factory until ready (`RUNTIME_REHYDRATION_ATTEMPTS`, `RUNTIME_REHYDRATION_INTERVAL_SEC`).
+  - `context_window.py` — Phase 8 deterministic prompt-bucket estimator + `RuntimeContextCheckpoint` persistence model. Drives the context meter and the compaction-checkpoint path.
+  - `router.py` — Phase 8 FastAPI router exposing `GET /api/runtime/context-meter/{session_id}` (cookie-authenticated, cross-tenant-safe). Mounted on `app` in `main.py`.
   - `tools/native.py` — 40+ native agent tools (non-browser).
   - `mcp_host.py` — real MCP host; Playwright + Browser MCP servers + connector adapters.
 - `backend/integrations/` — Slack/Telegram/Discord channel adapters + connector glue.
@@ -99,7 +101,8 @@ Prefer machine-readable error codes (example set):
 - Exactly one execution path: events are enqueued on the supervisor; the agent loop produces deltas; fan-out delivers them to subscribers.
 - Legacy helpers (`_run_navigation_task*`, `_send_initial_frame`, `_on_frame_*`, manual `human_browser_action`) were deleted in Phase 6 — do not re-introduce them.
 - Browser is a tool only. It starts lazily via MCP when an agent calls a browser-namespaced tool, and it shuts down with the supervisor.
-- **Durability (Phase 7):** every `AgentEvent` accepted by `SessionSupervisor.enqueue` is persisted to `runtime_inbox_events` *before* the worker touches it. On boot, `rehydrate_pending_events` re-queues `pending` rows and terminates `dispatched` rows as `interrupted`. Tool calls are checkpointed to `runtime_tool_calls`. **Never** bypass `enqueue`; the DB ledger is the source of truth for crash recovery.
+- **Durability (Phase 7):** every `AgentEvent` accepted by `SessionSupervisor.enqueue` is persisted to `runtime_inbox_events` *before* the worker touches it. On boot, `rehydrate_pending_events` re-queues `pending` rows and terminates `dispatched` rows as `interrupted`. Tool calls are checkpointed to `runtime_tool_calls`. The dispatch hook flips `runtime_runs` and `runtime_inbox_events` to their terminal state in a single commit via `finalize_run_and_inbox`. **Never** bypass `enqueue`; the DB ledger is the source of truth for crash recovery.
+- **Context meter + compaction (Phase 8):** the dispatch hook calls `build_prepared_context` before every `Runner.run` and emits a `context_meter` runtime event with eight buckets (`system_prompt`, `active_tools`, `checkpoints`, `workspace_files`, `pinned_memories`, `pending_tool_outputs`, `chat_history`, `current_user_message`). When `projected_pct ≥ COMPACT_THRESHOLD_PCT` (default 90, clamped 50..99), `maybe_create_checkpoint` persists a `runtime_context_checkpoints` row, emits a `compaction_checkpoint` runtime event, and rewrites the next prompt to use the checkpoint summary plus the current user message. Window size is `RUNTIME_CONTEXT_WINDOW_TOKENS` (default 128_000). The UI consumes this via `GET /api/runtime/context-meter/{session_id}`.
 
 ---
 

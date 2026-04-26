@@ -436,7 +436,7 @@ Each phase is a PR. Do not batch phases — this codebase has a lot of moving pa
 
 **Merge criteria:** no remaining import from the deleted modules. `grep -rn 'executor\|orchestrator\|navigator\|_send_initial_frame'` returns only historical log lines. Deploy to Railway + Netlify and verify heartbeat fires with no browser tab open.
 
-### Phase 7 — Hardening — **IN PROGRESS (PR pending merge)**
+### Phase 7 — Hardening — **DONE (merged as PR #342, commit `0afe19d`)**
 
 **Shipped in this PR:**
 
@@ -479,6 +479,69 @@ transitions all three to `interrupted` and publishes a
 `run_interrupted` fan-out frame; `test_rehydration_replays_pending_event`
 re-enqueues a dropped message and watches it finish cleanly on a
 fresh supervisor.
+
+**Codex review round 1 (P1+P2) addressed in commit `be2da88`:**
+- *P1 — boot rehydration retries until DB is ready:* moved
+  rehydration to a background `_rehydrate_with_retry` task in
+  `backend/runtime/integration.py` that probes the session factory each
+  attempt (default 30 × 2s, tunable via
+  `RUNTIME_REHYDRATION_ATTEMPTS` and `RUNTIME_REHYDRATION_INTERVAL_SEC`).
+  `shutdown_runtime` cancels cleanly. New regression
+  `tests/test_runtime_rehydration_retry.py::test_rehydration_retries_until_db_is_ready`.
+- *P2 — atomic run-end + inbox completion:* new
+  `finalize_run_and_inbox(...)` helper in
+  `backend/runtime/persistence.py` is invoked from the dispatch hook's
+  `finally:` so a crash between `record_run_end` and
+  `mark_inbox_completed` can't leave the run terminal but the inbox
+  row stuck in `dispatched`. Defense-in-depth: `rehydration.py` now
+  reconciles a dispatched inbox row whose run already finished to the
+  matching terminal status without emitting a spurious
+  `run_interrupted` frame.
+
+### Phase 8 — Truthful context meter + compaction checkpoints — **IN PROGRESS (PR #343)**
+
+**What changes:**
+
+- **Context window estimator** (`backend/runtime/context_window.py`):
+  deterministic per-bucket token counter that the dispatch hook calls
+  before every `Runner.run`. Reports eight buckets — `system_prompt`,
+  `active_tools`, `checkpoints`, `workspace_files`, `pinned_memories`,
+  `pending_tool_outputs`, `chat_history`, `current_user_message` — so
+  the UI's context meter reflects the actual prompt the model will see,
+  not a heuristic derived from chat history alone. Window size is
+  `RUNTIME_CONTEXT_WINDOW_TOKENS` (default 128_000); the compaction
+  threshold is `COMPACT_THRESHOLD_PCT` (default 90, clamped 50..99).
+- **Compaction checkpoints** (`runtime_context_checkpoints` table +
+  `RuntimeContextCheckpoint` SQLAlchemy model registered on `Base`):
+  when the projected percentage crosses the threshold the dispatch
+  hook persists a checkpoint, emits a `compaction_checkpoint` runtime
+  event, and rewrites the next prompt to use the checkpoint summary +
+  the current user message instead of the full history. Boot
+  rehydration unconditionally honours existing checkpoints on the
+  resumed session.
+- **Always-on awareness:** the `context_meter` runtime event fires on
+  every dispatch, not just when the user sends a message, so the meter
+  is accurate even when background heartbeat / automation events drive
+  the run.
+- **Cross-tenant-safe API**
+  (`backend/runtime/router.py`): `GET /api/runtime/context-meter/{session_id}`
+  returns the latest meter for the authenticated user. The handler
+  resolves `RuntimeRun.owner_uid` and rejects any session whose owner
+  does not match the cookie payload (`auth._verify_session` against
+  `aegis_session`). Mounted on the FastAPI app in `main.py`.
+- **Tests**: `tests/test_runtime_context_window.py` (3) +
+  `tests/test_runtime_router.py` (3) lock the bucket shape, the
+  threshold/compaction transition, the auth requirement, and the
+  cross-tenant 404. Phase 7 regression suite (`test_runtime_persistence.py`,
+  `test_runtime_supervisor_smoke.py`, `test_runtime_rehydration_retry.py`)
+  stays green.
+
+**Merge criteria:** UI meter matches what the model actually sees.
+Crossing `COMPACT_THRESHOLD_PCT` produces a `compaction_checkpoint`
+runtime event and the very next dispatch uses the checkpoint as the
+prompt prefix. Frontend integration of the new `/api/runtime/context-meter/{session_id}`
+endpoint and the `context_meter` / `compaction_checkpoint` runtime
+events is a follow-up phase tracked separately.
 
 ---
 
