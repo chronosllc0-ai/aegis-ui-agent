@@ -208,6 +208,18 @@ class _FakeRuntime:
         self.conversation_id: str | None = None
 
 
+@pytest.fixture(autouse=True)
+def _reset_dedupe():
+    """Each test starts with a fresh dedupe set so cross-test runs of
+    the same ``run_id`` don't accidentally suppress a write.
+    """
+    import main
+
+    main._runtime_persistence_reset_for_tests()
+    yield
+    main._runtime_persistence_reset_for_tests()
+
+
 def test_final_message_is_persisted_for_authenticated_web_session(
     _isolate_runtime, monkeypatch
 ) -> None:
@@ -310,6 +322,169 @@ def test_final_message_skipped_for_anonymous_session(
 
     asyncio.run(scenario())
     assert captured == []
+
+
+def test_final_message_persistence_dedupes_per_run_across_bridges(
+    _isolate_runtime, monkeypatch
+) -> None:
+    """Multi-tab dedupe — codex P1 follow-up from PR #345 review.
+
+    Authenticated web sessions share a single per-user runtime FanOut
+    (``agent:main:web:{owner_uid}``). Every tab attaches its own
+    bridge; without a process-global dedupe each bridge would persist
+    the same ``final_message``, so a 2-tab user would see the
+    assistant reply duplicated in their chat history. The dedupe set
+    is keyed on ``run_id``: the first bridge to handle the event
+    wins, the rest skip.
+    """
+    import main
+
+    fake_registry = _isolate_runtime
+    main._runtime_persistence_reset_for_tests()
+    captured: list[dict] = []
+
+    async def fake_log(runtime, session_id, role, content, *, title=None, metadata=None, title_candidate=None):
+        captured.append({"session_id": session_id, "role": role, "content": content, "metadata": metadata or {}})
+
+    monkeypatch.setattr(main, "_log_web_message", fake_log)
+
+    runtime_a = _FakeRuntime(user_uid="user-A")
+    runtime_b = _FakeRuntime(user_uid="user-A")
+
+    async def scenario() -> None:
+        ws_a = _FakeWebSocket()
+        ws_b = _FakeWebSocket()
+        attached_a = await main._attach_runtime_event_bridge(
+            ws_a, ws_session_id="ws-tab-A", owner_uid="user-A", runtime=runtime_a
+        )
+        attached_b = await main._attach_runtime_event_bridge(
+            ws_b, ws_session_id="ws-tab-B", owner_uid="user-A", runtime=runtime_b
+        )
+        assert attached_a is not None and attached_b is not None
+        runtime_session_id, _ = attached_a
+        # Both tabs share the same FanOut — that's the whole point of
+        # the per-user runtime model.
+        assert attached_b[0] == runtime_session_id
+        fanout = await fake_registry.get(runtime_session_id)
+        await fanout.publish(
+            RuntimeEvent(
+                kind="final_message",
+                session_id=runtime_session_id,
+                owner_uid="user-A",
+                channel="web",
+                run_id="run-multitab",
+                seq=7,
+                payload={"text": "shared reply", "ws_session_id": "ws-tab-A"},
+            )
+        )
+
+    asyncio.run(scenario())
+
+    # Exactly one persistence write despite two attached bridges.
+    assert len(captured) == 1, captured
+    entry = captured[0]
+    # And the write lands on the *originating* tab's session, not on
+    # whichever bridge happened to fire second.
+    assert entry["session_id"] == "ws-tab-A"
+    assert entry["metadata"]["origin_ws_session_id"] == "ws-tab-A"
+    assert entry["metadata"]["run_id"] == "run-multitab"
+
+
+def test_final_message_uses_origin_ws_session_id_when_bridge_differs(
+    _isolate_runtime, monkeypatch
+) -> None:
+    """Cross-tab targeting — codex P1 follow-up from PR #345 review.
+
+    Even with dedupe, if the *only* bridge to receive the event is
+    not the originating tab (e.g. the originating tab disconnected
+    between dispatch and final), the persistence path must still
+    target the originating ``ws_session_id`` so the reply ends up in
+    the correct chat session row, not the bystander tab's session.
+    """
+    import main
+
+    fake_registry = _isolate_runtime
+    main._runtime_persistence_reset_for_tests()
+    captured: list[dict] = []
+
+    async def fake_log(runtime, session_id, role, content, *, title=None, metadata=None, title_candidate=None):
+        captured.append({"session_id": session_id, "metadata": metadata or {}})
+
+    monkeypatch.setattr(main, "_log_web_message", fake_log)
+
+    runtime = _FakeRuntime(user_uid="user-A")
+
+    async def scenario() -> None:
+        ws = _FakeWebSocket()
+        attached = await main._attach_runtime_event_bridge(
+            ws, ws_session_id="ws-bystander", owner_uid="user-A", runtime=runtime
+        )
+        assert attached is not None
+        runtime_session_id, _ = attached
+        fanout = await fake_registry.get(runtime_session_id)
+        await fanout.publish(
+            RuntimeEvent(
+                kind="final_message",
+                session_id=runtime_session_id,
+                owner_uid="user-A",
+                channel="web",
+                run_id="run-cross",
+                seq=3,
+                payload={"text": "reply for the originator", "ws_session_id": "ws-originator"},
+            )
+        )
+
+    asyncio.run(scenario())
+    assert len(captured) == 1
+    assert captured[0]["session_id"] == "ws-originator"
+    assert captured[0]["metadata"]["origin_ws_session_id"] == "ws-originator"
+
+
+def test_final_message_falls_back_to_bridge_session_when_origin_missing(
+    _isolate_runtime, monkeypatch
+) -> None:
+    """If the runtime event omits ``ws_session_id`` (legacy producer
+    or non-chat-originated runs) the persistence path falls back to
+    the bridge's own ``ws_session_id`` — never silently drops the
+    write.
+    """
+    import main
+
+    fake_registry = _isolate_runtime
+    main._runtime_persistence_reset_for_tests()
+    captured: list[dict] = []
+
+    async def fake_log(runtime, session_id, role, content, *, title=None, metadata=None, title_candidate=None):
+        captured.append({"session_id": session_id, "metadata": metadata or {}})
+
+    monkeypatch.setattr(main, "_log_web_message", fake_log)
+
+    runtime = _FakeRuntime(user_uid="user-A")
+
+    async def scenario() -> None:
+        ws = _FakeWebSocket()
+        attached = await main._attach_runtime_event_bridge(
+            ws, ws_session_id="ws-self", owner_uid="user-A", runtime=runtime
+        )
+        assert attached is not None
+        runtime_session_id, _ = attached
+        fanout = await fake_registry.get(runtime_session_id)
+        await fanout.publish(
+            RuntimeEvent(
+                kind="final_message",
+                session_id=runtime_session_id,
+                owner_uid="user-A",
+                channel="web",
+                run_id="run-legacy",
+                seq=1,
+                payload={"text": "legacy producer reply"},  # no ws_session_id
+            )
+        )
+
+    asyncio.run(scenario())
+    assert len(captured) == 1
+    assert captured[0]["session_id"] == "ws-self"
+    assert captured[0]["metadata"]["origin_ws_session_id"] == "ws-self"
 
 
 def test_final_message_skipped_for_non_web_channel(

@@ -300,7 +300,23 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             except Exception:  # noqa: BLE001
                 logger.exception("record_run_start failed run=%s", run_id)
 
-        await emit("run_started", {"text": text, "channel": session.channel, "owner_uid": session.owner_uid})
+        # Phase 10: thread the originating ws_session_id through so
+        # the WS bridge can target persistence + chat rendering at the
+        # tab that fired the message. Without this, a multi-tab user
+        # whose tabs share the per-user runtime fan-out would have one
+        # tab's reply persisted into another tab's session_id (codex
+        # P1 from PR #345 review).
+        origin_ws_session_id = (
+            event.payload.get("ws_session_id") if isinstance(event.payload, dict) else None
+        )
+        run_started_payload: dict[str, Any] = {
+            "text": text,
+            "channel": session.channel,
+            "owner_uid": session.owner_uid,
+        }
+        if isinstance(origin_ws_session_id, str) and origin_ws_session_id:
+            run_started_payload["ws_session_id"] = origin_ws_session_id
+        await emit("run_started", run_started_payload)
         await emit("user_message", {"text": text})
 
         tool_ctx = ToolContext(
@@ -420,7 +436,10 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                     except Exception:  # noqa: BLE001
                         logger.exception("tool-call checkpoint failed run=%s item=%s", run_id, item_type)
             final_text = str(result.final_output) if result.final_output is not None else ""
-            await emit("final_message", {"text": final_text})
+            final_payload: dict[str, Any] = {"text": final_text}
+            if isinstance(origin_ws_session_id, str) and origin_ws_session_id:
+                final_payload["ws_session_id"] = origin_ws_session_id
+            await emit("final_message", final_payload)
         except Exception as exc:  # noqa: BLE001
             # Critical: do NOT re-raise. The supervisor worker serves
             # every channel session for this user — propagating the

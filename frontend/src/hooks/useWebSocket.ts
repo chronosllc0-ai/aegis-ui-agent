@@ -443,15 +443,24 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const kind = typeof data?.kind === 'string' ? data.kind : ''
         const inner = (data?.payload as Record<string, unknown> | undefined) ?? {}
         const channel = typeof data?.channel === 'string' ? data.channel : ''
-        // Runtime events fan out to every subscribed surface; only the
-        // ``web`` channel events should drive the chat UI. Slack /
+        // Runtime events fan out to every subscribed surface; only
+        // the ``web`` channel events should drive the chat UI. Slack /
         // Telegram / heartbeat events are surfaced by their own egress
         // workers and would otherwise spam the chat panel with foreign
         // assistant bubbles. Meter / checkpoint events are exempt
         // because the context meter is session-wide regardless of
         // origin channel.
+        //
+        // Empty-string ``channel`` is *not* accepted: the runtime
+        // dispatch path always sets ``channel`` from the
+        // ``ChannelSession``, so an empty string indicates a malformed
+        // / forged event. Treating it as web-relevant would diverge
+        // from the backend persistence guard (``channel == "web"``)
+        // and was flagged as the kilo critical from the PR #345
+        // review — we now align both sides on a strict ``"web"``
+        // match.
         const isChannelChatRelevant =
-          channel === '' || channel === 'web' || kind === 'context_meter' || kind === 'compaction_checkpoint'
+          channel === 'web' || kind === 'context_meter' || kind === 'compaction_checkpoint'
         if (kind === 'context_meter' && onRuntimeContextMeter) {
           // Validate at the WS boundary so the consumer never sees a
           // partially-populated meter — missing numeric fields would
@@ -477,6 +486,16 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           return
         }
         if (!isChannelChatRelevant) return
+        // ``activeTaskIdRef`` reflects whatever task the UI considers
+        // current at the moment the event lands; runtime events do not
+        // (yet) carry a frontend ``task_id`` so we cannot do better
+        // than this. If the user starts a new task before the
+        // previous run's tail events drain, those tail events get
+        // attributed to the new task in the chat log. Acceptable for
+        // now — fix in a future phase by either (a) propagating
+        // ``frontend_task_id`` through ``agent_loop.emit`` or (b)
+        // pairing run_started/run_completed with a per-run task scope
+        // ref. (kilo S1 from the PR #345 review.)
         const liveTaskId = activeTaskIdRef.current
         lastBackendActivityAtRef.current = performance.now()
         if (kind === 'run_started') {
@@ -495,6 +514,14 @@ export function useWebSocket(options?: UseWebSocketOptions) {
               rawStepType: 'final_message',
             })
           }
+          // Defensive: clear the working flag here too. ``run_completed``
+          // is the canonical terminal signal, but if it's ever dropped
+          // (websocket re-handshake mid-run, supervisor crash before
+          // emit, etc.) the spinner would otherwise hang forever
+          // (kilo P2 from the PR #345 review). A transient
+          // ``tool_call`` after a ``final_message`` is rare but flips
+          // it back on cleanly.
+          setIsWorking(false)
           return
         }
         if (kind === 'tool_call') {
@@ -531,9 +558,23 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           return
         }
         if (kind === 'run_completed') {
+          // ``agent_loop.dispatch`` emits ``status: "error"`` when
+          // ``Runner.run`` raises (the ``error`` event is fired first
+          // and ``run_completed`` follows in the ``finally`` block).
+          // Without folding ``"error"`` into ``failed`` here the
+          // execution state would be briefly set to ``failed`` by
+          // the ``error`` handler and then immediately overwritten
+          // back to ``completed`` — flagged as codex P1 from the PR
+          // #345 review.
           const status = typeof inner.status === 'string' ? inner.status : 'completed'
           setIsWorking(false)
-          setExecutionState(status === 'failed' ? 'failed' : status === 'cancelled' ? 'cancelled' : 'completed')
+          if (status === 'failed' || status === 'error') {
+            setExecutionState('failed')
+          } else if (status === 'cancelled') {
+            setExecutionState('cancelled')
+          } else {
+            setExecutionState('completed')
+          }
           return
         }
         if (kind === 'error') {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 import contextlib
 from datetime import datetime, timedelta, timezone
@@ -2467,6 +2468,55 @@ async def _start_next_queued_task_if_ready(websocket: WebSocket, runtime: Sessio
 # was the `kind: accepted` ack. The bridge subscribes on WS open and
 # unsubscribes on disconnect; failures inside the callback get logged
 # and FanOut auto-evicts the bad subscriber.
+#
+# Phase 10 (post-review): authenticated web sessions share a single
+# per-user runtime FanOut (``agent:main:web:{owner_uid}``). When a user
+# has multiple tabs open, every tab's bridge receives every
+# ``final_message`` — without a dedupe + origin guard we'd write the
+# same assistant reply N times *and* attribute each write to whichever
+# tab's ``ws_session_id`` got there first (codex P1 from PR #345
+# review). The dedupe set below is a small bounded LRU keyed on
+# ``run_id``: the first bridge to handle a final_message wins the
+# persistence, the rest skip. The originating tab's ``ws_session_id``
+# is carried in the event payload by ``agent_loop.dispatch`` so writes
+# always land in the chat session that fired the message.
+
+# Bounded process-global dedupe for runtime ``final_message``
+# persistence. ``OrderedDict`` is used as a poor-man's LRU: insert at
+# the tail, evict from the head when the size cap is hit. ``None`` is
+# the sentinel value because we only need set semantics, but
+# ``OrderedDict`` keeps insertion order for deterministic eviction.
+_RUNTIME_PERSISTED_RUNS: "OrderedDict[str, None]" = OrderedDict()
+_RUNTIME_PERSISTED_RUNS_MAX = 4096
+
+
+def _runtime_persistence_already_done(run_id: str) -> bool:
+    """Return ``True`` if ``run_id`` was already persisted by another bridge.
+
+    Performs a thread-unsafe insert-or-touch on ``_RUNTIME_PERSISTED_RUNS``
+    — safe because every caller is on the asyncio event loop and the
+    operation is two synchronous dict ops with no awaits between them.
+    """
+    if run_id in _RUNTIME_PERSISTED_RUNS:
+        # Touch for LRU semantics: a long-running session shouldn't
+        # have its early run_ids evicted while it's still actively
+        # producing finals against them.
+        _RUNTIME_PERSISTED_RUNS.move_to_end(run_id)
+        return True
+    _RUNTIME_PERSISTED_RUNS[run_id] = None
+    if len(_RUNTIME_PERSISTED_RUNS) > _RUNTIME_PERSISTED_RUNS_MAX:
+        _RUNTIME_PERSISTED_RUNS.popitem(last=False)
+    return False
+
+
+def _runtime_persistence_reset_for_tests() -> None:
+    """Test helper — clear the dedupe set between cases.
+
+    Production code never calls this; the test harness uses it via a
+    fixture so each test starts from a known-empty state.
+    """
+    _RUNTIME_PERSISTED_RUNS.clear()
+
 
 def _runtime_session_id_for_web(owner_uid: str) -> str:
     """Mirror :class:`backend.runtime.session.ChannelSessionKey.to_session_id`.
@@ -2526,41 +2576,63 @@ async def _attach_runtime_event_bridge(
             ws_session_id=ws_session_id,
             phase="runtime_event_forward",
         )
-        # Phase 10: persist the assistant final reply to the chat log
-        # so a refresh / reconnect sees the full transcript. The user
-        # half is already persisted at start_action time. Only the web
-        # channel writes here — Slack / Telegram egress workers own
-        # their own platforms\' message stores.
+        # Phase 10: persist the assistant final reply to the chat
+        # log so a refresh / reconnect sees the full transcript. The
+        # user half is already persisted at ``start_action`` time.
+        # Only the web channel writes here — Slack / Telegram egress
+        # workers own their own platforms\' message stores.
+        #
+        # Two safeguards layered on top of the basic write (codex P1
+        # follow-up from PR #345 review):
+        #   1. Per-user runtimes fan out to every tab; dedupe on
+        #      ``run_id`` via the process-global LRU so we write
+        #      exactly once per assistant turn no matter how many
+        #      bridges fire.
+        #   2. The originating tab\'s ``ws_session_id`` is carried in
+        #      the event payload by ``agent_loop.dispatch``; we use
+        #      it (not this bridge\'s ``ws_session_id``) so the write
+        #      lands in the chat session that fired the message even
+        #      when another tab\'s bridge wins the dedupe race.
         if (
             kind == "final_message"
             and channel == "web"
             and runtime is not None
             and runtime.user_uid
+            and isinstance(payload, dict)
         ):
             text = ""
-            if isinstance(payload, dict):
-                raw_text = payload.get("text")
-                if isinstance(raw_text, str):
-                    text = raw_text
-            if text.strip():
+            raw_text = payload.get("text")
+            if isinstance(raw_text, str):
+                text = raw_text
+            origin_ws_session_id = ws_session_id
+            origin_candidate = payload.get("ws_session_id")
+            if isinstance(origin_candidate, str) and origin_candidate:
+                origin_ws_session_id = origin_candidate
+            run_id_value = getattr(event, "run_id", None)
+            should_persist = bool(text.strip())
+            if should_persist and isinstance(run_id_value, str) and run_id_value:
+                if _runtime_persistence_already_done(run_id_value):
+                    should_persist = False
+            if should_persist:
                 try:
                     await _log_web_message(
                         runtime,
-                        ws_session_id,
+                        origin_ws_session_id,
                         "assistant",
                         text,
                         metadata={
                             "source": "runtime",
                             "action": "final_message",
-                            "run_id": getattr(event, "run_id", None),
+                            "run_id": run_id_value,
                             "runtime_session_id": runtime_session_id,
+                            "origin_ws_session_id": origin_ws_session_id,
                         },
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception(
-                        "runtime final_message persistence failed ws=%s run=%s",
-                        ws_session_id,
-                        getattr(event, "run_id", None),
+                        "runtime final_message persistence failed origin_ws=%s run=%s",
+                        origin_ws_session_id,
+                        run_id_value,
                     )
 
     subscriber_name = f"ws:{ws_session_id}"
