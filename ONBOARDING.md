@@ -1,3 +1,103 @@
+## Session 5.74 - April 27, 2026 (Phase 10: web chat from runtime event stream + assistant-reply persistence)
+
+**Agent:** Claude (Viktor) — pair-driven by Jesse
+**Branches → main:** `phase10/web-chat-runtime-events` (PR #345, merged as `2b9c91c`)
+
+### What Was Done
+- Made the web chat panel a pure consumer of the runtime event stream. `frontend/src/hooks/useWebSocket.ts` renders assistant turns from `runtime_event` frames (`final_message`, `tool_call_started`, `tool_call_completed`, `error`, `run_completed`); the legacy WS action ack path is no longer the source of assistant bubbles.
+- Persisted the assistant half of every web turn from the WS runtime bridge (`main.py` `_forward` final_message branch via `_log_web_message`). User half was already persisted at chat-event accept time, so a refresh now shows the full transcript.
+- Solved the multi-tab fan-out problem (per-user runtime FanOut shared across all tabs) with two layered safeguards:
+  - `agent_loop.dispatch` reads `ws_session_id` from the inbound chat event and threads it into the `run_started` + `final_message` event payloads. The bridge persists with that **originating** `ws_session_id`, not its own.
+  - Process-global LRU `_RUNTIME_PERSISTED_RUNS: OrderedDict[str, None]` (cap 4096, `move_to_end` on hit) keyed on `run_id`. The first bridge to handle a given `final_message` wins persistence; siblings skip. `_runtime_persistence_reset_for_tests` exposes a clean reset for the test fixture.
+- Tightened the frontend channel filter: `isChannelChatRelevant` now requires `channel === "web"` (no empty-string fallback), aligning with the backend persistence guard.
+- Defensive spinner clear: `setIsWorking(false)` fires on `final_message` as well as `run_completed`, so a dropped terminal event (websocket re-handshake mid-run, supervisor crash before emit) doesn't leave the UI hanging.
+- Folded `status: "error"` (raised by `agent_loop.dispatch` after a `Runner.run` exception) into the frontend `failed` terminal state alongside `"failed"` so the UI doesn't briefly flip `failed → completed`.
+
+### What's Working
+- 10/10 cases in `tests/test_ws_runtime_bridge.py` (including new dedupe / origin-target / legacy-fallback cases + autouse `_reset_dedupe` fixture).
+- 19/19 in `tests/test_runtime_connectors.py` + `tests/test_runtime_context_window.py` — no regression in `agent_loop.emit` shape from the origin threading.
+- `bun run build` clean.
+- Manual: two tabs of the same authenticated user, message from tab A → both tabs render the assistant reply live, refresh either tab → reply appears once and is attributed to the originating session.
+
+### What's NOT Working Yet
+- `tool_call` / `tool_result` runtime events render as plain log entries; collapsible cards with args/output are a future polish pass.
+- No streaming `model_message` deltas yet (`stream_chunk` / `stream_done` are emitted but the chat UI waits for `final_message`).
+- Runtime events still don't carry a `frontend_task_id`; tail events from a previous run can attribute to the next active task. Documented as the kilo S1 caveat in `useWebSocket.ts`.
+- Slack / Telegram egress side of the runtime fan-out is untouched — those workers still use their pre-runtime paths.
+
+### Next Steps
+1. Phase 11 docs sync (this session) for PLAN.md / AGENTS.md / ONBOARDING.md.
+2. Pick from: tool-call card UI polish · streaming model_message deltas · `frontend_task_id` propagation · Slack/Telegram egress alignment · Phase 7 deferred items (richer runtime event store timings, rate-limit/credit parity, exec sandbox security review).
+
+### Decisions Made
+- Per-run dedupe is process-global (not per-bridge) so multi-worker fan-out doesn't duplicate writes within a single replica. Cross-replica dedupe would need a DB or Redis key — not a problem yet because each user's runtime is single-replica.
+- Originating `ws_session_id` is propagated via the event payload (not via per-run state on the runtime) so the dispatcher can stay channel-agnostic.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.73 - April 26, 2026 (Phase 9: frontend wiring for the truthful context meter)
+
+**Agent:** Claude (Viktor) — pair-driven by Jesse
+**Branches → main:** `phase9/frontend-runtime-meter` (PR #344, merged as `dbd519b`)
+
+### What Was Done
+- Added `_attach_runtime_event_bridge` in `main.py`: the per-user runtime FanOut now pushes every event (`context_meter`, `compaction_checkpoint`, `run_started`, `run_completed`, `tool_call_*`, `final_message`, `error`, …) to every authenticated websocket, wrapped as `{kind: "runtime_event", event: {...}}`. Bridge subscribes on WS open, unsubscribes on disconnect; FanOut auto-evicts a callback that raises.
+- Replaced the chat-only heuristic in `frontend/src/hooks/useContextMeter.ts` with the eight truthful buckets reported by `backend/runtime/context_window.py`. Initial state seeds from `GET /api/runtime/context-meter/{session_id}` on mount; live updates arrive via the `context_meter` runtime event. The bar reflects the same `projected_pct` the dispatch hook uses for compaction decisions.
+- Updated `frontend/src/components/UsageDropdown.tsx` to render the new bucket model + a one-shot toast on `compaction_checkpoint` with the checkpoint summary inline.
+- Background-only dispatches (heartbeat, automation) update the meter the same way as user-driven runs, satisfying hard requirement #13.
+
+### What's Working
+- `tests/test_ws_runtime_bridge.py` baseline cases — bridge attach/detach, FanOut error eviction, owner-isolation, runtime → ws envelope shape.
+- `tests/test_runtime_router.py` (Phase 8 carry-over) still green — auth + cross-tenant guards on the seeding endpoint unchanged.
+- `bun run build` clean.
+
+### What's NOT Working Yet
+- Web chat panel still renders assistant bubbles via the legacy WS action ack path — Phase 10 will move that to the runtime event stream.
+
+### Next Steps
+1. Phase 10: render web chat from the truthful runtime event stream + persist the assistant reply.
+
+### Decisions Made
+- Frame envelope `{kind: "runtime_event", event: {...}}` keeps the websocket protocol additive; legacy ack frames continue to flow alongside until Phase 10 deletes them on the chat path.
+
+### Blockers
+- None.
+
+---
+
+## Session 5.72 - April 25, 2026 (Phase 8 close-out: truthful context meter + compaction checkpoints landed)
+
+**Agent:** Claude (Viktor) — pair-driven by Jesse
+**Branches → main:** `phase8/context-meter` (PR #343, merged as `c9ae065`)
+
+### What Was Done
+- Shipped the deterministic prompt-bucket estimator at `backend/runtime/context_window.py`, called by the dispatch hook before every `Runner.run`. Reports eight buckets — `system_prompt`, `active_tools`, `checkpoints`, `workspace_files`, `pinned_memories`, `pending_tool_outputs`, `chat_history`, `current_user_message`.
+- Added the `runtime_context_checkpoints` table + `RuntimeContextCheckpoint` SQLAlchemy model. When `projected_pct ≥ COMPACT_THRESHOLD_PCT` (default 90, clamped 50..99), `maybe_create_checkpoint` persists a row, emits a `compaction_checkpoint` runtime event, and rewrites the next prompt to use the checkpoint summary plus the current user message instead of the full history. Boot rehydration unconditionally honours existing checkpoints on resume.
+- The `context_meter` runtime event now fires on **every** dispatch (not just user-message dispatches), so the meter is accurate when background heartbeat / automation events drive the run.
+- New cross-tenant-safe API at `backend/runtime/router.py`: `GET /api/runtime/context-meter/{session_id}` returns the latest meter for the authenticated user. `RuntimeRun.owner_uid` is resolved against the cookie payload (`auth._verify_session` against `aegis_session`) and any session whose owner doesn't match returns 404 (not 403, to avoid existence leaks).
+
+### What's Working
+- `tests/test_runtime_context_window.py` (3) + `tests/test_runtime_router.py` (3) lock the bucket shape, the threshold/compaction transition, the auth requirement, and the cross-tenant 404. Phase 7 regression suite (`test_runtime_persistence.py`, `test_runtime_supervisor_smoke.py`, `test_runtime_rehydration_retry.py`) stays green.
+- `bun run build` clean.
+
+### What's NOT Working Yet
+- Frontend doesn't yet consume `/api/runtime/context-meter/{session_id}` or the `context_meter` / `compaction_checkpoint` runtime events — that's Phase 9.
+
+### Next Steps
+1. Phase 9: wire the frontend usage dropdown + toast surface to the truthful runtime meter.
+
+### Decisions Made
+- `COMPACT_THRESHOLD_PCT` lives on the dispatch hook (not the model loop) so the same threshold applies regardless of which provider the loop selected.
+- Compaction rewrites the **prompt prefix** rather than mutating durable history — durable history stays intact for audit / replay.
+
+### Blockers
+- None.
+
+---
+
 ## Session 5.71 - April 21, 2026 (Design-system uplift pass: OpenClaw-inspired dark UI shell)
 
 **Agent:** GPT-5.3-Codex

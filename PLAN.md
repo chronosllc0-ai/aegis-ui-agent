@@ -498,7 +498,7 @@ fresh supervisor.
   matching terminal status without emitting a spurious
   `run_interrupted` frame.
 
-### Phase 8 — Truthful context meter + compaction checkpoints — **IN PROGRESS (PR #343)**
+### Phase 8 — Truthful context meter + compaction checkpoints — **DONE (merged as PR #343, commit `c9ae065`)**
 
 **What changes:**
 
@@ -542,6 +542,123 @@ runtime event and the very next dispatch uses the checkpoint as the
 prompt prefix. Frontend integration of the new `/api/runtime/context-meter/{session_id}`
 endpoint and the `context_meter` / `compaction_checkpoint` runtime
 events is a follow-up phase tracked separately.
+
+### Phase 9 — Frontend wiring for the truthful context meter — **DONE (merged as PR #344, commit `dbd519b`)**
+
+**What changes:**
+
+- **WebSocket runtime-event bridge** (`main.py` ~line 2461+): the
+  per-user runtime FanOut now pushes `context_meter`,
+  `compaction_checkpoint`, `run_started`, `run_completed`,
+  `tool_call_*`, `final_message`, and friends to every authenticated
+  websocket via `_attach_runtime_event_bridge`. Frames are wrapped in
+  `{kind: "runtime_event", event: {...}}` so the client can demux by
+  the inner `kind`. The bridge subscribes on WS open and unsubscribes
+  on disconnect; FanOut auto-evicts a callback that raises.
+- **`useContextMeter` hook + `UsageDropdown`**
+  (`frontend/src/hooks/useContextMeter.ts` +
+  `frontend/src/components/UsageDropdown.tsx`): replaces the previous
+  chat-only heuristic with the eight truthful buckets reported by
+  `backend/runtime/context_window.py`. Initial state seeds from
+  `GET /api/runtime/context-meter/{session_id}` on mount; live updates
+  arrive via the `context_meter` runtime event. The bar reflects the
+  same `projected_pct` the dispatch hook uses for compaction
+  decisions, so the user can never be surprised by a checkpoint.
+- **Compaction toast surface**: when a `compaction_checkpoint` event
+  arrives, the meter resets and a one-shot toast tells the user that
+  the session was just compacted, with the checkpoint summary
+  rendered inline.
+- **Background-state aware**: heartbeat + automation-driven dispatches
+  produce meter updates even with no user message in flight, so the
+  meter is accurate in the background-work case (hard requirement #13).
+
+**Tests**:
+
+- `tests/test_ws_runtime_bridge.py` (Phase 9 baseline): bridge attach
+  + detach, FanOut error eviction, only-the-owning-user receives the
+  frames, runtime fan-out → ws frame envelope.
+- `tests/test_runtime_router.py` (Phase 8 carry-over) stays green —
+  the auth + cross-tenant guards on the seeding endpoint are
+  unchanged.
+
+**Merge criteria:** open the chat panel, watch the usage dropdown
+move on every dispatch (including pure heartbeat/background runs),
+trigger a synthetic compaction by lowering `COMPACT_THRESHOLD_PCT`
+and confirm the meter resets + the toast renders. `bun run build`
+clean. PR #344 reviewed by chatgpt-codex-connector + kilo-code-bot,
+all P1/P2 findings addressed in the round-1 follow-up commit on the
+phase 9 branch before merge.
+
+### Phase 10 — Web chat from runtime event stream + assistant-reply persistence — **DONE (merged as PR #345, commit `2b9c91c`)**
+
+**What changes:**
+
+- **Single source of truth for chat rendering**: the chat panel no
+  longer relies on the legacy WS action ack path for assistant
+  bubbles. `useWebSocket.ts` consumes `runtime_event` frames directly
+  and renders `final_message` / `tool_call_started` /
+  `tool_call_completed` / `error` / `run_completed` events. The user
+  half is still persisted at `start_action` time (before dispatch),
+  so a refresh halfway through a run still shows the user message
+  while the assistant reply is being produced.
+- **Assistant-reply persistence**: the WS runtime bridge in `main.py`
+  (`_forward` final_message branch) writes the assistant reply to the
+  chat session via `_log_web_message` so a refresh / reconnect sees
+  the full transcript. The user half is already persisted by
+  `_log_web_message` at chat-event accept time.
+- **Multi-tab dedupe + correct session_id targeting**: authenticated
+  web sessions share a single per-user runtime FanOut
+  (`agent:main:web:{owner_uid}`). Every tab attaches its own bridge
+  and would otherwise persist the same `final_message` once per tab,
+  attributed to whichever tab's `ws_session_id` got there first. Two
+  layered fixes:
+  - **Origin propagation** — `agent_loop.dispatch` reads
+    `ws_session_id` from the inbound chat event payload and threads
+    it into the `run_started` and `final_message` event payloads.
+    The bridge persists with that originating `ws_session_id`
+    instead of its own, so writes always land in the chat session
+    that fired the message — even when another tab's bridge wins
+    the race.
+  - **Process-global LRU dedupe** — `_RUNTIME_PERSISTED_RUNS` is a
+    bounded `OrderedDict[str, None]` keyed on `run_id` (cap 4096,
+    `move_to_end` for LRU touch). The first bridge to handle a
+    given `final_message` wins persistence; siblings skip.
+    `_runtime_persistence_reset_for_tests` exposes a clean reset
+    used by the test fixture.
+- **Strict channel filter on the frontend**: `isChannelChatRelevant`
+  in `useWebSocket.ts` requires `channel === "web"` (no empty-string
+  fallback) to match the backend persistence guard. Meter +
+  checkpoint events are exempt because the meter is session-wide
+  regardless of origin channel.
+- **Defensive spinner clear**: `setIsWorking(false)` fires on
+  `final_message` as well as `run_completed` so a dropped terminal
+  event (websocket re-handshake mid-run, etc.) doesn't leave the
+  spinner hanging forever.
+- **`run_completed` status taxonomy**: `agent_loop.dispatch` emits
+  `status: "error"` after an unexpected `Runner.run` exception. The
+  frontend now folds `"error"` and `"failed"` into the `failed`
+  terminal state so the UI doesn't briefly flip `failed → completed`.
+
+**Tests**: `tests/test_ws_runtime_bridge.py` 10/10 — including new
+cases `test_final_message_persistence_dedupes_per_run_across_bridges`,
+`test_final_message_uses_origin_ws_session_id_when_bridge_differs`,
+and `test_final_message_falls_back_to_bridge_session_when_origin_missing`,
+plus an autouse `_reset_dedupe` fixture so `run_id` reuse across
+tests doesn't accidentally suppress writes.
+`tests/test_runtime_connectors.py` + `tests/test_runtime_context_window.py`
+19/19 — no regression in `agent_loop.emit` shape from the origin
+threading.
+
+**Merge criteria:** open two browser tabs of the same authenticated
+user, send a message from one, confirm both render the assistant
+reply live, refresh either tab, confirm the reply is in the
+transcript exactly once and attributed to the originating session.
+`bun run build` clean. PR #345 reviewed by chatgpt-codex-connector
++ kilo-code-bot; all 6 review findings (kilo CRITICAL channel
+mismatch, codex P1 status="error", codex P1 multi-tab dedupe + wrong
+session_id, kilo P2 stuck spinner, kilo S1 task_id attribution
+caveat documented, kilo S2 dict guard tightened) addressed in the
+round-1 follow-up commit `205ed0d` before merge.
 
 ---
 
