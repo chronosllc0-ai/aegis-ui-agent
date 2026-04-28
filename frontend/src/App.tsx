@@ -12,7 +12,7 @@ import { ProductTour, isTourComplete } from './components/ProductTour'
 import { SpendingAlert } from './components/SpendingAlert'
 import { UsageDropdown } from './components/UsageDropdown'
 import { UserMenu } from './components/UserMenu'
-import { TaskPlanView } from './components/TaskPlanView'
+import type { PendingPlanSummary } from './components/ChatPanel'
 import { Icons } from './components/icons'
 import { ChatPanel } from './components/ChatPanel'
 import { HeaderBar, NavItem, SidebarSection } from './components/ui/DesignSystem'
@@ -217,10 +217,7 @@ function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [, setPendingPlan] = useState<string | null>(() => {
-    return sessionStorage.getItem('aegis.pendingPlan')
-  })
-  const [activePlanId, setActivePlanId] = useState<string | null>(null)
+  const [pendingPlan, setPendingPlan] = useState<PendingPlanSummary | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showTour, setShowTour] = useState(false)
@@ -718,12 +715,81 @@ function App() {
       })
       const data = await resp.json().catch(() => ({}))
       if (resp.ok && data?.ok && data?.plan?.id) {
-        setActivePlanId(data.plan.id as string)
+        const plan = data.plan as {
+          id: string
+          title?: string
+          original_prompt?: string
+          steps?: Array<{ title?: string; parent_step_id?: string | null }>
+        }
+        // Single-pass: drop child steps + empty/whitespace-only titles.
+        const rootSteps = (plan.steps ?? []).flatMap((step) => {
+          if (step.parent_step_id) return []
+          const title = (step.title ?? '').trim()
+          return title ? [title] : []
+        })
+        setPendingPlan({
+          id: plan.id,
+          title: plan.title || 'Plan ready',
+          originalPrompt: plan.original_prompt || trimmed,
+          steps: rootSteps,
+        })
       }
     } catch {
       // silent - plan decompose errors are non-fatal
     }
   }
+
+  // Approve + execute the pending plan inline. Drives the agent loop by sending
+  // a normal chat message ("execute") with the plan id as metadata so the user
+  // bubble appears in the stream and the backend can pick up where the planner
+  // left off.
+  const handlePlanExecute = useCallback(
+    (planId: string) => {
+      const summary = pendingPlan
+      const stepsBlock = summary && summary.steps.length > 0
+        ? `\n\nPlan steps:\n${summary.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
+        : ''
+      const userText = 'execute'
+      // Visible user-bubble message + WS dispatch through the normal chat path.
+      dispatchPromptFromUI(userText, {
+        plan_id: planId,
+        plan_action: 'execute',
+        plan_steps_inline: stepsBlock || undefined,
+        task_label_source: 'plan_execute',
+        task_label: summary?.title ?? userText,
+      })
+      // Best-effort approve via existing planner API so the plan record reflects
+      // the decision; failures don't block the chat-driven execution path.
+      void fetch(apiUrl(`/api/plans/${encodeURIComponent(planId)}/approve`), {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => undefined)
+      // NOTE: do not clear pendingPlan here — the card's local `decided` state
+      // renders a terminal "Plan execution started" chip that should remain
+      // visible in the chat history. The card is keyed on planId so a fresh
+      // /api/plans/decompose call mounts a new card with reset local state.
+    },
+    [pendingPlan, dispatchPromptFromUI],
+  )
+
+  const handlePlanCancel = useCallback(
+    (planId: string) => {
+      const userText = 'cancel'
+      dispatchPromptFromUI(userText, {
+        plan_id: planId,
+        plan_action: 'cancel',
+        task_label_source: 'plan_cancel',
+        task_label: pendingPlan?.title ?? userText,
+      })
+      void fetch(apiUrl(`/api/plans/${encodeURIComponent(planId)}/cancel`), {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => undefined)
+      // See handlePlanExecute — leave pendingPlan set so the card's terminal
+      // "Plan cancelled" chip stays visible in the chat history.
+    },
+    [pendingPlan, dispatchPromptFromUI],
+  )
 
   const handleUserInputResponse = (answer: string, requestId: string) => {
     send({ action: 'user_input_response', request_id: requestId, response: answer })
@@ -791,8 +857,10 @@ function App() {
           onOpenDoc={openDoc}
           docsPortalHref={getStandaloneDocUrl()}
           onBuyCredits={(plan) => {
+            // Persist the chosen credits plan key so the post-auth redirect can
+            // resume the purchase flow. The previous in-memory mirror state was
+            // unused and conflicted with the planner pendingPlan state.
             sessionStorage.setItem('aegis.pendingPlan', plan)
-            setPendingPlan(plan)
             openAuth()
           }}
           onOpenUseCase={(id) => {
@@ -993,10 +1061,6 @@ function App() {
                   </div>
                 )}
               </div>
-            ) : activePlanId ? (
-              <div className='h-full overflow-y-auto p-2'>
-                <TaskPlanView planId={activePlanId} onClose={() => setActivePlanId(null)} />
-              </div>
             ) : (
               <ChatPanel
                 logs={enrichedLogs}
@@ -1041,6 +1105,9 @@ function App() {
                   setSelectedTaskId(sessionId)
                   setSidebarOpen(false)
                 }}
+                pendingPlan={pendingPlan}
+                onPlanExecute={handlePlanExecute}
+                onPlanCancel={handlePlanCancel}
               />
             )}
           </div>

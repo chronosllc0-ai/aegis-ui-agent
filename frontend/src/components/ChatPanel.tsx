@@ -81,10 +81,23 @@ export interface ChatPanelProps {
   sessions?: SessionSwitcherItem[]
   selectedSessionId?: string | null
   onSessionSwitch?: (sessionId: string) => void
+  /** Pending plan summary card to render inline in the chat stream. */
+  pendingPlan?: PendingPlanSummary | null
+  /** Click handler for the plan card "Execute" button. */
+  onPlanExecute?: (planId: string) => void
+  /** Click handler for the plan card "Cancel" button. */
+  onPlanCancel?: (planId: string) => void
+}
+
+export type PendingPlanSummary = {
+  id: string
+  title: string
+  originalPrompt: string
+  steps: string[]
 }
 
 // ─── Message shape ─────────────────────────────────────────────────────────────
-type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router'
+type ChatRole = 'user' | 'assistant' | 'tool' | 'reasoning' | 'approval' | 'subagent' | 'generating' | 'user_input' | 'task_summary' | 'plan_confirm' | 'live_plan' | 'mode_router' | 'plan_summary'
 
 interface ChatMessage {
   id: string
@@ -106,6 +119,7 @@ interface ChatMessage {
   requestId?: string
   stepId?: string
   planSteps?: string[]
+  planSummary?: PendingPlanSummary
   routeMode?: string
   routeReason?: string
   workerReference?: string
@@ -1199,6 +1213,86 @@ function PlanConfirmCard({ plan, requestId, onConfirm, onReject }: {
   )
 }
 
+// ─── PlanSummaryCard — inline planner result with bullet steps + Execute/Cancel
+// Renders as an agent-side bubble so it lives inside the chat stream rather than
+// taking over the whole panel. The Execute / Cancel buttons inject a matching
+// user message into the chat (so the agent loop visibly continues with that
+// command) and call the parent handler to wire it through to the backend.
+function PlanSummaryCard({
+  summary,
+  onExecute,
+  onCancel,
+  disabled,
+}: {
+  summary: PendingPlanSummary
+  onExecute: (planId: string) => void
+  onCancel: (planId: string) => void
+  disabled?: boolean
+}) {
+  const [decided, setDecided] = useState<'executed' | 'cancelled' | null>(null)
+
+  if (decided === 'executed') {
+    return (
+      <div className='my-1.5 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300'>
+        <IcoCheck className='h-3.5 w-3.5 flex-shrink-0' />
+        <span>Plan execution started</span>
+      </div>
+    )
+  }
+  if (decided === 'cancelled') {
+    return (
+      <div className='my-1.5 flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-xs text-zinc-500'>
+        <IcoX className='h-3.5 w-3.5 flex-shrink-0' />
+        <span>Plan cancelled</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className='my-2 rounded-2xl border border-[#2a2a2a] bg-[#191919] overflow-hidden'>
+      <div className='flex items-center gap-2 border-b border-[#222] px-4 py-3'>
+        <IcoPlan className='h-4 w-4 flex-shrink-0 text-zinc-400' />
+        <p className='flex-1 text-xs font-semibold text-zinc-200'>{summary.title || 'Plan'}</p>
+        <span className='text-[10px] text-zinc-600'>Approve to execute</span>
+      </div>
+
+      <div className='px-4 py-3 space-y-2'>
+        {summary.steps.length === 0 && (
+          <p className='text-xs text-zinc-500 italic'>No steps were produced — try rephrasing the request.</p>
+        )}
+        {summary.steps.map((step, i) => (
+          <div key={i} className='flex items-start gap-2'>
+            <span className='mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border border-[#333] text-[9px] font-bold text-zinc-500'>
+              {i + 1}
+            </span>
+            <span className='text-xs leading-relaxed text-zinc-300'>{step}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className='flex items-center justify-end gap-2 border-t border-[#222] px-4 py-3'>
+        <button
+          type='button'
+          disabled={!!disabled}
+          onClick={() => { setDecided('cancelled'); onCancel(summary.id) }}
+          className='px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50'
+        >
+          Cancel
+        </button>
+        <button
+          type='button'
+          disabled={!!disabled || summary.steps.length === 0}
+          onClick={() => { setDecided('executed'); onExecute(summary.id) }}
+          className='flex items-center gap-1.5 rounded-xl bg-zinc-100 px-4 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-white transition-colors disabled:opacity-50'
+        >
+          Execute
+          <span className='text-[10px] opacity-50'>&#9166;</span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── LivePlanCard — animated step checklist for announce_plan ────────────────
 function LivePlanCard({ steps, completedTools }: { steps: string[]; completedTools: Set<string> }) {
   if (!steps.length) return null
@@ -1548,6 +1642,9 @@ export function ChatPanel({
   sessions = [],
   selectedSessionId,
   onSessionSwitch,
+  pendingPlan = null,
+  onPlanExecute,
+  onPlanCancel,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AttachedFile[]>([])
@@ -2080,6 +2177,16 @@ export function ChatPanel({
             </Fragment>
           )
         })}
+
+        {pendingPlan && onPlanExecute && onPlanCancel && (
+          <PlanSummaryCard
+            key={pendingPlan.id}
+            summary={pendingPlan}
+            onExecute={onPlanExecute}
+            onCancel={onPlanCancel}
+            disabled={connectionStatus !== 'connected'}
+          />
+        )}
 
         {(isActivityVisible || isWorking) && lastUserMessageIndex === -1 && (
           <div className='my-1'>
