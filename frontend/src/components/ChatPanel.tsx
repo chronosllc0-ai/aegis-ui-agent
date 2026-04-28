@@ -138,13 +138,25 @@ interface AttachedFile {
 
 type ComposerSubmissionMode = 'normal' | 'plan'
 
-export function resolveComposerSubmission(input: string, planIntent: boolean): { mode: ComposerSubmissionMode; text: string } {
+// The default chat composer no longer routes through the planner.
+// Plain text always dispatches as a direct chat turn so the agent
+// can respond without any pre-flight gate. The legacy ``/plan``
+// prefix and the ``planIntent`` toggle are intentionally ignored
+// here — both are kept in the type signature so the call sites
+// don't need to change while the planner is being re-architected
+// as an opt-in skill rather than a default code path.
+export function resolveComposerSubmission(
+  input: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _planIntent: boolean,
+): { mode: ComposerSubmissionMode; text: string } {
   const trimmed = input.trim()
   if (!trimmed) return { mode: 'normal', text: '' }
+  // Strip the ``/plan`` prefix if present so the user-typed text
+  // still reaches the agent verbatim. Mode stays ``normal``.
   if (trimmed.startsWith('/plan')) {
-    return { mode: 'plan', text: trimmed.slice('/plan'.length).trim() }
+    return { mode: 'normal', text: trimmed.slice('/plan'.length).trim() }
   }
-  if (planIntent) return { mode: 'plan', text: trimmed }
   return { mode: 'normal', text: trimmed }
 }
 

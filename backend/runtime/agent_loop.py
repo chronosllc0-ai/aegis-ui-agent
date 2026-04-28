@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
 from agents import Agent, Runner
 from agents.extensions.models.litellm_model import LitellmModel
@@ -88,6 +88,20 @@ class DispatchConfig:
     connector_loader: ConnectorLoader | None = None
     context_window_tokens: int | None = None
     compact_threshold_pct: int | None = None
+    # Optional callable that persists an assistant ``final_message``
+    # to the chat-session log keyed on ``(owner_uid, ws_session_id)``.
+    # Invoked by ``dispatch`` after ``Runner.run`` succeeds, so the
+    # heartbeat (and any other no-websocket trigger) still drops the
+    # assistant reply into the right chat thread when no fan-out
+    # subscriber is attached. Returning ``True`` indicates the write
+    # was performed; the WS bridge uses the same dedupe LRU to avoid
+    # double-writing when both paths are alive.
+    #
+    # Signature: ``(run_id, owner_uid, ws_session_id, text, metadata)
+    # -> Awaitable[bool]``.
+    chat_message_persister: (
+        Callable[[str, str, str, str, dict[str, Any]], Awaitable[bool]] | None
+    ) = None
 
 
 def _extract_text(event: AgentEvent) -> str:
@@ -440,6 +454,51 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             if isinstance(origin_ws_session_id, str) and origin_ws_session_id:
                 final_payload["ws_session_id"] = origin_ws_session_id
             await emit("final_message", final_payload)
+            # Always-on persistence hook. Runs after the fan-out
+            # publish above, so when a websocket bridge is attached
+            # it has already had its turn to call _log_web_message
+            # and mark this run_id in the dedupe LRU. The persister
+            # checks the same LRU and skips if already done — but
+            # for the no-websocket case (heartbeat, scheduled
+            # automation, agent restart with queued events) this is
+            # the only thing that lands the assistant reply in the
+            # chat-session row.
+            persister = cfg.chat_message_persister
+            if (
+                persister is not None
+                and isinstance(origin_ws_session_id, str)
+                and origin_ws_session_id
+                and final_text.strip()
+                and session.owner_uid
+            ):
+                try:
+                    metadata: dict[str, Any] = {
+                        "source": "runtime",
+                        "action": "final_message",
+                        "run_id": run_id,
+                        "runtime_session_id": session.session_id,
+                        "origin_ws_session_id": origin_ws_session_id,
+                    }
+                    extra_source = (
+                        event.payload.get("source")
+                        if isinstance(event.payload, dict)
+                        else None
+                    )
+                    if isinstance(extra_source, str) and extra_source:
+                        metadata["trigger_source"] = extra_source
+                    await persister(
+                        run_id,
+                        session.owner_uid,
+                        origin_ws_session_id,
+                        final_text,
+                        metadata,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "chat_message_persister failed run=%s session=%s",
+                        run_id,
+                        session.session_id,
+                    )
         except Exception as exc:  # noqa: BLE001
             # Critical: do NOT re-raise. The supervisor worker serves
             # every channel session for this user — propagating the

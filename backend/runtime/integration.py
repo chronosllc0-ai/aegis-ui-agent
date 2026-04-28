@@ -129,11 +129,19 @@ def runtime_supervisor_enabled() -> bool:
     return _env_flag("RUNTIME_SUPERVISOR_ENABLED", default=True)
 
 
-async def ensure_runtime_started() -> None:
+async def ensure_runtime_started(
+    *,
+    chat_message_persister=None,
+) -> None:
     """Create the supervisor registry and install the dispatch hook.
 
     Safe to call on every startup; the registry is only created once.
     When the feature flag is off this is a no-op.
+
+    ``chat_message_persister`` is an optional callable forwarded into
+    :class:`DispatchConfig` so the agent loop can land assistant
+    replies in the chat-session row even when no websocket bridge is
+    attached (heartbeat / queued automation paths).
     """
     global _registry, _fanout_registry
     if not runtime_supervisor_enabled():
@@ -176,6 +184,7 @@ async def ensure_runtime_started() -> None:
             # event before DB init just records no run row; once the DB
             # is up every subsequent run persists normally.
             session_factory=_session_ctx,
+            chat_message_persister=chat_message_persister,
         ),
     )
     # Phase 7: enable inbox durability on every supervisor the registry
