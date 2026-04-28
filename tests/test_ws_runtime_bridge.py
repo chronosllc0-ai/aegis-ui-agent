@@ -531,3 +531,119 @@ def test_final_message_skipped_for_non_web_channel(
 
     asyncio.run(scenario())
     assert captured == []
+
+
+# ── Hotfix 2026-04-28: bridge must stop pushing into a closed socket ──
+
+class _ClosedFakeWebSocket(_FakeWebSocket):
+    """``_FakeWebSocket`` whose ``client_state`` is ``DISCONNECTED``.
+
+    Mirrors the post-disconnect state Starlette / FastAPI leaves a
+    ``WebSocket`` in: the consumer side has observed the close frame
+    but the bridge subscriber may still receive frames from the
+    per-user runtime FanOut for milliseconds afterwards. Without the
+    hotfix, every push into this socket triggers
+    ``RuntimeError: Unexpected ASGI message 'websocket.send', after
+    sending 'websocket.close'`` which the old ``_safe_ws_send`` logged
+    via ``logger.exception`` (full traceback) and then continued — at
+    rates of ~10 frames/sec from heartbeat dispatches that overwhelmed
+    Railway's 500 logs/sec replica cap and got the container killed.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        from starlette.websockets import WebSocketState
+        self.client_state = WebSocketState.DISCONNECTED
+        self.application_state = WebSocketState.DISCONNECTED
+
+
+def test_bridge_evicts_subscriber_when_socket_already_closed(
+    _isolate_runtime,
+) -> None:
+    """The runtime fan-out subscriber raises on a disconnected socket so
+    ``FanOut`` auto-evicts it. A subsequent publish to the same fan-out
+    must not deliver to the dead subscriber.
+    """
+    import main
+
+    fake_registry = _isolate_runtime
+
+    async def scenario() -> None:
+        ws = _ClosedFakeWebSocket()
+        attached = await main._attach_runtime_event_bridge(
+            ws, ws_session_id="ws-dead", owner_uid="user-A"
+        )
+        # ``_attach_runtime_event_bridge`` itself calls
+        # ``_safe_ws_send`` to announce the runtime_session — that
+        # short-circuits silently because client_state is DISCONNECTED,
+        # so the announcement frame is dropped (no traceback logged).
+        # The subscription is still attached, however; publishing a
+        # frame should raise out of the callback and FanOut should
+        # remove the subscriber.
+        assert attached is not None
+        runtime_session_id, subscriber_name = attached
+        fanout = await fake_registry.get(runtime_session_id)
+        # First publish triggers the eviction.
+        await fanout.publish(
+            RuntimeEvent(
+                kind="context_meter",
+                session_id=runtime_session_id,
+                owner_uid="user-A",
+                channel="web",
+                run_id=None,
+                seq=1,
+                payload={"projected_pct": 12.5},
+            )
+        )
+        # Second publish must be a no-op — subscriber should be gone.
+        # We assert by checking ``FanOut.__len__`` (number of live
+        # subscribers) and the private ``_subscribers`` list — the
+        # eviction guarantee is that ``subscriber_name`` is no longer
+        # present after a callback raises.
+        remaining = [s.name for s in fanout._subscribers]  # type: ignore[attr-defined]
+        assert subscriber_name not in remaining, (
+            f"subscriber {subscriber_name!r} should have been evicted "
+            f"after the closed-socket push raised; still present in "
+            f"{remaining!r}"
+        )
+        # Belt-and-braces: a second publish must not raise either.
+        await fanout.publish(
+            RuntimeEvent(
+                kind="context_meter",
+                session_id=runtime_session_id,
+                owner_uid="user-A",
+                channel="web",
+                run_id=None,
+                seq=2,
+                payload={"projected_pct": 13.0},
+            )
+        )
+
+    asyncio.run(scenario())
+
+
+def test_safe_ws_send_short_circuits_on_disconnected_socket() -> None:
+    """``_safe_ws_send`` returns ``False`` without calling ``send_json``
+    when the websocket has already moved to ``DISCONNECTED``.
+    """
+    import main
+
+    class _ExplodingWebSocket(_ClosedFakeWebSocket):
+        async def send_json(self, payload):  # type: ignore[override]
+            raise AssertionError(
+                "send_json must not be invoked on a DISCONNECTED socket; "
+                "the fast-path in _safe_ws_send is the whole point of the "
+                "2026-04-28 hotfix"
+            )
+
+    async def scenario() -> None:
+        ws = _ExplodingWebSocket()
+        sent = await main._safe_ws_send(
+            ws,
+            {"type": "runtime_event", "data": {}},
+            ws_session_id="ws-dead",
+            phase="runtime_event_forward",
+        )
+        assert sent is False
+
+    asyncio.run(scenario())

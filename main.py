@@ -22,6 +22,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState as _WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -2133,12 +2134,38 @@ async def _safe_ws_send(
     ws_session_id: str | None = None,
     phase: str = "send",
 ) -> bool:
-    """Send a websocket payload and emit structured diagnostics on failures."""
+    """Send a websocket payload and emit structured diagnostics on failures.
+
+    Hotfix (2026-04-28): short-circuit when the socket is no longer in
+    ``CONNECTED`` state so we never trigger Starlette's
+    ``Unexpected ASGI message 'websocket.send', after sending
+    'websocket.close'`` exception path. Without this, a runtime
+    fan-out subscriber attached to a per-user runtime keeps pushing
+    frames into a tab that has already disconnected, every push raises,
+    every raise calls ``logger.exception`` (full traceback), and within
+    seconds the log rate hits Railway's 500 logs/sec cap and the
+    replica is killed.
+    """
+    # Fast-path: socket already closed → silent no-op. This is hot-path
+    # because the runtime FanOut delivers many frames per second.
+    client_state = getattr(websocket, "client_state", None)
+    application_state = getattr(websocket, "application_state", None)
+    if (
+        client_state is _WebSocketState.DISCONNECTED
+        or application_state is _WebSocketState.DISCONNECTED
+    ):
+        return False
     try:
         await websocket.send_json(payload)
         return True
     except Exception as exc:  # noqa: BLE001
-        logger.exception(
+        # Demote to a single-line warning (no traceback). The traceback
+        # was the source of the 500 logs/sec spam: a closed-socket
+        # send raises a multi-frame RuntimeError every time the runtime
+        # bridge ticks. We still emit a structured runtime event so
+        # observability tooling can count these without flooding the
+        # log stream.
+        logger.warning(
             "ws_send_failed request_id=%s task_id=%s ws_session_id=%s phase=%s outcome=error error_code=E_SOCKET_SEND_FAILED error=%s",
             request_id or "",
             task_id or "",
@@ -2149,7 +2176,7 @@ async def _safe_ws_send(
         _record_runtime_event(
             category="ws_ping_pong",
             subsystem="websocket",
-            level="error",
+            level="warning",
             message="websocket send failed",
             session_id=ws_session_id,
             request_id=request_id,
@@ -2559,7 +2586,16 @@ async def _attach_runtime_event_bridge(
         kind = getattr(event, "kind", None)
         channel = getattr(event, "channel", "web")
         payload = getattr(event, "payload", {}) or {}
-        await _safe_ws_send(
+        # Hotfix (2026-04-28): if the websocket has already disconnected,
+        # stop the bridge by raising — FanOut auto-evicts a subscriber
+        # whose callback raises. Without this, every frame keeps trying
+        # to push into a dead socket and the warning rate spirals into
+        # Railway's log-rate cap (which then kills the replica). See
+        # the post-mortem in the hotfix branch description.
+        client_state = getattr(websocket, "client_state", None)
+        if client_state is _WebSocketState.DISCONNECTED:
+            raise RuntimeError("ws_runtime_bridge_socket_closed")
+        sent_ok = await _safe_ws_send(
             websocket,
             {
                 "type": "runtime_event",
@@ -2576,6 +2612,11 @@ async def _attach_runtime_event_bridge(
             ws_session_id=ws_session_id,
             phase="runtime_event_forward",
         )
+        if not sent_ok:
+            # Send failed → socket is effectively dead. Raise to let
+            # FanOut evict this subscriber so we don't keep retrying
+            # for every subsequent frame.
+            raise RuntimeError("ws_runtime_bridge_send_failed")
         # Phase 10: persist the assistant final reply to the chat
         # log so a refresh / reconnect sees the full transcript. The
         # user half is already persisted at ``start_action`` time.
@@ -2742,6 +2783,38 @@ async def websocket_navigate(websocket: WebSocket) -> None:
         while True:
             try:
                 data = await websocket.receive_json()
+            except WebSocketDisconnect:
+                # Re-raise to the outer ``except WebSocketDisconnect`` so
+                # the finally block runs the normal cleanup path. Without
+                # this re-raise, the loop would ``continue`` and call
+                # ``receive_json`` again, which raises ``RuntimeError:
+                # Cannot call "receive" once a disconnect message has
+                # been received.`` indefinitely.
+                raise
+            except RuntimeError as exc:
+                # Starlette raises ``RuntimeError`` if the consumer
+                # tries to receive after a disconnect message has
+                # already been observed. Treat that exactly the same as
+                # a clean disconnect — convert to ``WebSocketDisconnect``
+                # so the outer handler wraps up cleanly.
+                if "disconnect" in str(exc).lower() or "websocket" in str(exc).lower():
+                    raise WebSocketDisconnect(code=1006) from exc
+                # Real runtime error (not disconnect-shaped): treat
+                # as malformed payload (best-effort) and continue.
+                await _safe_ws_send(
+                    websocket,
+                    {
+                        "type": "error",
+                        "data": {
+                            "message": "Invalid websocket payload. Please retry with valid JSON.",
+                            "code": "E_BAD_PAYLOAD",
+                        },
+                    },
+                    ws_session_id=session_id,
+                    phase="receive_json_invalid_payload",
+                )
+                logger.warning("Invalid websocket payload for session %s: %s", session_id, exc)
+                continue
             except Exception as exc:  # noqa: BLE001
                 await _safe_ws_send(
                     websocket,
