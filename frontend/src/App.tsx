@@ -721,10 +721,12 @@ function App() {
           original_prompt?: string
           steps?: Array<{ title?: string; parent_step_id?: string | null }>
         }
-        const rootSteps = (plan.steps ?? [])
-          .filter((step) => !step.parent_step_id)
-          .map((step) => (step.title ?? '').trim())
-          .filter(Boolean)
+        // Single-pass: drop child steps + empty/whitespace-only titles.
+        const rootSteps = (plan.steps ?? []).flatMap((step) => {
+          if (step.parent_step_id) return []
+          const title = (step.title ?? '').trim()
+          return title ? [title] : []
+        })
         setPendingPlan({
           id: plan.id,
           title: plan.title || 'Plan ready',
