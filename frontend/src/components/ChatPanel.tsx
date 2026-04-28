@@ -2180,6 +2180,7 @@ export function ChatPanel({
 
         {pendingPlan && onPlanExecute && onPlanCancel && (
           <PlanSummaryCard
+            key={pendingPlan.id}
             summary={pendingPlan}
             onExecute={onPlanExecute}
             onCancel={onPlanCancel}

@@ -217,9 +217,6 @@ function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [, setPendingPlan] = useState<string | null>(() => {
-    return sessionStorage.getItem('aegis.pendingPlan')
-  })
   const [pendingPlan, setPendingPlan] = useState<PendingPlanSummary | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -765,7 +762,10 @@ function App() {
         method: 'POST',
         credentials: 'include',
       }).catch(() => undefined)
-      setPendingPlan((prev) => (prev?.id === planId ? null : prev))
+      // NOTE: do not clear pendingPlan here — the card's local `decided` state
+      // renders a terminal "Plan execution started" chip that should remain
+      // visible in the chat history. The card is keyed on planId so a fresh
+      // /api/plans/decompose call mounts a new card with reset local state.
     },
     [pendingPlan, dispatchPromptFromUI],
   )
@@ -783,7 +783,8 @@ function App() {
         method: 'POST',
         credentials: 'include',
       }).catch(() => undefined)
-      setPendingPlan((prev) => (prev?.id === planId ? null : prev))
+      // See handlePlanExecute — leave pendingPlan set so the card's terminal
+      // "Plan cancelled" chip stays visible in the chat history.
     },
     [pendingPlan, dispatchPromptFromUI],
   )
@@ -854,8 +855,10 @@ function App() {
           onOpenDoc={openDoc}
           docsPortalHref={getStandaloneDocUrl()}
           onBuyCredits={(plan) => {
+            // Persist the chosen credits plan key so the post-auth redirect can
+            // resume the purchase flow. The previous in-memory mirror state was
+            // unused and conflicted with the planner pendingPlan state.
             sessionStorage.setItem('aegis.pendingPlan', plan)
-            setPendingPlan(plan)
             openAuth()
           }}
           onOpenUseCase={(id) => {
