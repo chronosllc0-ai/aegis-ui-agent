@@ -241,7 +241,7 @@ export const DOCS_PAGES: DocsPage[] = [
   {
     slug: 'websocket-reference',
     title: 'API reference: WebSocket session contract',
-    summary: 'The action and event contract for /ws/navigate.',
+    summary: 'The action and event contract for /ws/agent.',
     section: 'reference',
     audience: 'Developers',
     updatedAt: '2026-03-19',

@@ -1981,7 +1981,7 @@
 2. If using a Railway-generated backend domain instead of `api.mohex.org`, set `COOKIE_SAMESITE=none` and keep `COOKIE_SECURE=true`.
 3. In Netlify, set:
    - `VITE_API_URL=https://api.mohex.org`
-   - `VITE_WS_URL=wss://api.mohex.org/ws/navigate`
+   - `VITE_WS_URL=wss://api.mohex.org/ws/agent`
    - `VITE_DOCS_SITE_URL=https://docs.mohex.org`
 4. Configure OAuth providers with callback URLs based on `PUBLIC_BASE_URL`:
    - `/api/auth/google/callback`
@@ -3013,7 +3013,7 @@
 - Added Gemini 3 preview models to the model selector.
 
 ### What's Working
-- Mic button toggles audio capture and streams audio chunks to `/ws/navigate`.
+- Mic button toggles audio capture and streams audio chunks to `/ws/agent`.
 - Sidebar bottom actions stay visible; main view no longer crowds the input area on small screens.
 - Telegram integration config + test round-trip to backend endpoints.
 - Model selector shows new Gemini preview models.
@@ -3817,7 +3817,7 @@
 
 ### Next steps
 - Triage and fix the `config` + runtime skills resolution path so server-authoritative resolved IDs are propagated consistently in runtime settings.
-- Add integration-level test for frontend `useWebSocket.send` + backend `/ws/navigate` handshake to ensure malformed payloads always produce protocol errors instead of disconnects.
+- Add integration-level test for frontend `useWebSocket.send` + backend `/ws/agent` handshake to ensure malformed payloads always produce protocol errors instead of disconnects.
 
 ### Blockers / decisions needed
 - Decide whether empty `interrupt` should require an instruction or default to "stop current task" semantics when no text is supplied.

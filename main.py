@@ -458,7 +458,7 @@ _SYSTEM_CHAT_ACTION_DENYLIST = {
 def _is_browser_chat_pollution(step: dict[str, Any]) -> bool:
     """Return True when a step is execution-noise that should not be persisted to chat."""
     step_type = str(step.get("type") or "").strip().lower()
-    if step_type in {"workflow_step", "browser_action", "human_browser_action"}:
+    if step_type == "workflow_step":
         return True
     content = str(step.get("content") or "").strip()
     if not content:
@@ -2721,11 +2721,12 @@ async def _detach_runtime_event_bridge(
 
 
 @app.websocket("/ws/agent")
-@app.websocket("/ws/navigate")
 async def websocket_navigate(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time agent sessions.
+    """WebSocket endpoint for the chat-only agent runtime.
 
-    Accepts both /ws/agent (new) and /ws/navigate (legacy alias).
+    The single canonical path is ``/ws/agent``. The legacy ``/ws/navigate``
+    alias was removed in the chat-only cleanup PR; the function name is
+    kept only for symbol stability.
     """
     await websocket.accept()
     session_id = await live_manager.create_session()
@@ -3227,27 +3228,6 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                     task_id=runtime.current_task_id,
                     ws_session_id=session_id,
                     phase="handoff_continue_removed",
-                )
-            elif action == "human_browser_action":
-                # Phase 6: chat-only runtime. Manual browser steering from
-                # the frontend was removed; the always-on runtime owns the
-                # browser lifecycle via MCP. Reject politely so legacy
-                # clients get a clear signal.
-                await _safe_ws_send(
-                    websocket,
-                    {
-                        "type": "task_error",
-                        "data": {
-                            "task_id": runtime.current_task_id,
-                            "code": "E_UNSUPPORTED_ACTION",
-                            "message": "human_browser_action is no longer supported (chat-only runtime)",
-                            "retryable": False,
-                        },
-                    },
-                    request_id=runtime.current_request_id,
-                    task_id=runtime.current_task_id,
-                    ws_session_id=session_id,
-                    phase="human_browser_action_removed",
                 )
             elif action == "ping":
                 _record_runtime_event(

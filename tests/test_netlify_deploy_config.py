@@ -8,8 +8,8 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 NETLIFY_CONFIG = ROOT / "netlify.toml"
 FRONTEND_GITIGNORE = ROOT / "frontend/.gitignore"
-EXPECTED_API_URL = "https://web-production-5b3f.up.railway.app"
-EXPECTED_WS_URL = "wss://web-production-5b3f.up.railway.app/ws/navigate"
+EXPECTED_API_URL = "https://web-production-7f848.up.railway.app"
+EXPECTED_WS_URL = "wss://web-production-7f848.up.railway.app/ws/agent"
 
 
 def _build_environment(path: Path) -> dict[str, str]:
