@@ -1,10 +1,11 @@
-"""OpenAI Agents SDK wrappers for the legacy native tool catalog.
+"""OpenAI Agents SDK wrappers for the native tool catalog.
 
-Every non-terminal, non-browser tool in ``universal_navigator.py``'s
-``TOOL_DEFINITIONS`` manifest is re-exposed here as a
-``@function_tool``. Tool names, parameter names, and result shapes
-match the legacy contract so downstream consumers (prompts, training
-data, docs, tests) keep working.
+Every non-terminal, non-browser tool from the original
+``TOOL_DEFINITIONS`` manifest is exposed here as a ``@function_tool``.
+Tool names, parameter names, and result shapes match the original
+contract so downstream consumers (prompts, training data, docs, tests)
+keep working. The legacy ``universal_navigator.py`` source has been
+removed; this module is the canonical native-tool home.
 
 Out of scope for Phase 2:
 
@@ -69,7 +70,8 @@ from backend.user_memory import (
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# Shared helpers (mirror the ones in universal_navigator.py).
+# Shared helpers (originally extracted from universal_navigator.py;
+# that module has been removed and this is now the canonical home).
 # ----------------------------------------------------------------------
 
 RESULT_CHAR_LIMIT = 12_000
@@ -1405,7 +1407,7 @@ def get_enabled_native_tools() -> list:
     Currently the only knob is ``RUNTIME_EXEC_SHELL_ENABLED``; when set
     to ``false`` the ``exec_shell`` tool is omitted from the agent's
     toolbox for the rest of the process lifetime. Everything else is
-    always on to keep parity with the legacy orchestrator.
+    always on to keep parity with the original tool surface area.
     """
     tools = list(NATIVE_TOOLS)
     if not _exec_shell_enabled():

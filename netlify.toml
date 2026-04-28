@@ -19,20 +19,20 @@
 #
 # Recommended production values:
 #   VITE_API_URL      = https://api.mohex.org
-#   VITE_WS_URL       = wss://api.mohex.org/ws/navigate
+#   VITE_WS_URL       = wss://api.mohex.org/ws/agent
 #   VITE_DOCS_SITE_URL = https://docs.mohex.org
 #
 # If you keep the backend on the Railway default domain instead:
 #   VITE_API_URL      = https://your-backend.up.railway.app
-#   VITE_WS_URL       = wss://your-backend.up.railway.app/ws/navigate
+#   VITE_WS_URL       = wss://your-backend.up.railway.app/ws/agent
 #
 # These are baked into the build at deploy time via Vite's env handling.
 
 [build.environment]
   NODE_VERSION = "22"
   VITE_APP_VERSION = "1.2.0"
-  VITE_API_URL = "https://web-production-5b3f.up.railway.app"
-  VITE_WS_URL = "wss://web-production-5b3f.up.railway.app/ws/navigate"
+  VITE_API_URL = "https://web-production-7f848.up.railway.app"
+  VITE_WS_URL = "wss://web-production-7f848.up.railway.app/ws/agent"
 
 # ── Security headers ─────────────────────────────────────────────────
 
