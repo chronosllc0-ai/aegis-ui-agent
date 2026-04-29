@@ -272,12 +272,19 @@ async def startup_event() -> None:
     start_scheduler()
     await background_worker.start()
     _pinger.start()
-    if sessions_v2_enabled():
-        _heartbeat_session_scheduler.start()
+    # The session-v2 flag used to gate the heartbeat scheduler entirely,
+    # which left the scheduler "registered but never_run" whenever the
+    # flag flipped off in any environment. Heartbeat is core
+    # always-on behaviour and routes through the runtime supervisor
+    # directly (see ``_heartbeat_session_dispatch``); it doesn't need
+    # the v2 session store to function. Always start it.
+    _heartbeat_session_scheduler.start()
 
     # Phase 2: always-on runtime supervisor (flag-gated).
     try:
-        await _runtime_ensure_started()
+        await _runtime_ensure_started(
+            chat_message_persister=_runtime_chat_message_persister,
+        )
     except Exception:
         logger.exception("Phase 2 supervisor failed to start; staying on legacy path")
 
@@ -288,8 +295,7 @@ async def shutdown_event() -> None:
     global db_init_task
 
     _pinger.stop()
-    if sessions_v2_enabled():
-        _heartbeat_session_scheduler.stop()
+    _heartbeat_session_scheduler.stop()
 
     if db_init_task is not None and not db_init_task.done():
         db_init_task.cancel()
@@ -713,8 +719,95 @@ async def _heartbeat_dispatch(session_id: str, instruction: str) -> None:
     _start_navigation_task(runtime.websocket, runtime, session_id, instruction)
 
 
+async def _heartbeat_session_dispatch(
+    user_id: str, session_id: str, instruction: str
+) -> None:
+    """Route a heartbeat tick into the always-on supervisor for ``user_id``.
+
+    Replaces the old ``_heartbeat_dispatch``-as-session-dispatcher path,
+    which depended on ``runtime.websocket`` being open and routed via
+    the legacy ``_start_navigation_task`` orchestrator. Now:
+
+      1. The scheduler itself has already written the user-bubble to
+         the heartbeat ``chat_sessions`` row (see ``run_once``).
+      2. We hand the prompt to the user's :class:`SessionSupervisor`
+         as a normal ``CHAT_MESSAGE`` event with ``ws_session_id`` set
+         to ``HEARTBEAT_SESSION_ID``. The agent loop then runs whether
+         or not a websocket is attached.
+      3. When a websocket *is* attached, the existing fan-out bridge
+         streams ``run_started``/``final_message`` to the tab and
+         persists the assistant reply via ``_log_web_message``. When
+         no websocket is attached, the dispatch hook still emits
+         events into the (subscriber-less) fan-out and finishes; the
+         assistant reply landing in the heartbeat session row is
+         covered by the dedicated persistence hook installed in
+         :func:`_install_runtime_chat_message_persister` (follow-up).
+    """
+    _record_runtime_event(
+        category="heartbeat",
+        subsystem="heartbeat",
+        level="info",
+        message="heartbeat trigger received",
+        session_id=session_id,
+        details={"instruction": instruction, "user_id": user_id},
+    )
+    if not user_id:
+        logger.warning("Heartbeat dispatch skipped: empty user_id session=%s", session_id)
+        return
+    if not _runtime_supervisor_enabled():
+        logger.warning(
+            "Heartbeat dispatch skipped: runtime supervisor disabled session=%s user=%s",
+            session_id,
+            user_id,
+        )
+        return
+    registry = _runtime_get_registry()
+    if registry is None:
+        logger.warning(
+            "Heartbeat dispatch skipped: runtime registry not initialised session=%s user=%s",
+            session_id,
+            user_id,
+        )
+        return
+    try:
+        supervisor = await registry.get(user_id)
+        # Codex P1 (PR #350 review): use a dedicated ``heartbeat``
+        # channel so the supervisor's fan-out bridge does not surface
+        # heartbeat run_started / final_message frames in any tab's
+        # live chat stream. The frontend ``useWebSocket`` runtime_event
+        # handler filters on ``channel === 'web'``, so non-web events
+        # are dropped on the client. The dedicated persister hook
+        # (``_runtime_chat_message_persister``) still writes the
+        # assistant reply to the heartbeat session row regardless of
+        # channel, and the WS bridge's own persister is gated on
+        # ``channel == 'web'`` so we don't double-write either.
+        await supervisor.enqueue(
+            _RuntimeAgentEvent(
+                owner_uid=user_id,
+                channel="heartbeat",
+                kind=_RuntimeEventKind.CHAT_MESSAGE,
+                payload={
+                    "text": instruction,
+                    "ws_session_id": session_id,
+                    "source": "heartbeat",
+                },
+            )
+        )
+        logger.info(
+            "Heartbeat dispatch enqueued user=%s session=%s",
+            user_id,
+            session_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Heartbeat dispatch enqueue failed user=%s session=%s",
+            user_id,
+            session_id,
+        )
+
+
 _pinger = HeartbeatPinger(dispatch=_heartbeat_dispatch, interval_seconds=60)
-_heartbeat_session_scheduler = HeartbeatSessionScheduler(dispatch=_heartbeat_dispatch)
+_heartbeat_session_scheduler = HeartbeatSessionScheduler(dispatch=_heartbeat_session_dispatch)
 background_worker.set_event_sink(_dispatch_background_task_event)
 
 # Stream subscribers: user_uid -> {platform, integration_id, chat_id, last_sent_at}
@@ -2283,6 +2376,92 @@ async def _log_web_message(
         logger.warning("Failed to persist web message to DB for session %s: %s", session_id, exc)
 
 
+async def _runtime_chat_message_persister(
+    run_id: str,
+    owner_uid: str,
+    ws_session_id: str,
+    text: str,
+    metadata: dict[str, Any],
+) -> bool:
+    """Persist an agent ``final_message`` for a given (owner, session).
+
+    Mirrors the heart of :func:`_log_web_message` but:
+
+      * Doesn't require an in-memory :class:`SessionRuntime` — the
+        always-on supervisor's heartbeat / queue replay paths fire
+        without a websocket attached.
+      * Dedupes against ``_RUNTIME_PERSISTED_RUNS`` so the websocket
+        bridge's existing write (when a tab is open) doesn't double-
+        write the same run.
+
+    Returns ``True`` when this call performed the write, ``False`` when
+    the write was skipped because of dedupe / unknown user / empty
+    text / DB error.
+    """
+    if not owner_uid:
+        return False
+    if not ws_session_id:
+        return False
+    if not text or not text.strip():
+        return False
+    if _runtime_persistence_already_done(run_id):
+        return False
+    try:
+        from backend.session_store import (
+            append_session_message,
+            get_or_create_session,
+        )
+        from backend.database import get_session as _get_session
+    except Exception:  # noqa: BLE001
+        logger.exception("runtime_chat_message_persister: import failed")
+        return False
+    try:
+        async for db in _get_session():
+            wrote_session = False
+            if sessions_v2_enabled():
+                session_row = await get_or_create_session(
+                    db,
+                    user_id=owner_uid,
+                    platform="web",
+                    session_id=ws_session_id,
+                )
+                await append_session_message(
+                    db,
+                    session_ref_id=session_row.id,
+                    role="assistant",
+                    content=text,
+                    metadata=metadata,
+                )
+                wrote_session = True
+            if legacy_conversation_mode_enabled() or sessions_dual_write_enabled():
+                conv = await get_or_create_conversation(
+                    db,
+                    user_id=owner_uid,
+                    platform="web",
+                    platform_chat_id=ws_session_id,
+                    title=None,
+                )
+                await append_message(
+                    db,
+                    conv.id,
+                    "assistant",
+                    text,
+                    metadata=metadata,
+                )
+                wrote_session = True
+            await db.commit()
+            return wrote_session
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "runtime_chat_message_persister: write failed run=%s owner=%s session=%s",
+            run_id,
+            owner_uid,
+            ws_session_id,
+        )
+        return False
+    return False
+
+
 async def _runtime_supervisor_dispatch_chat(
     websocket: WebSocket,
     runtime: SessionRuntime,
@@ -2721,12 +2900,14 @@ async def _detach_runtime_event_bridge(
 
 
 @app.websocket("/ws/agent")
+@app.websocket("/ws/navigate")
 async def websocket_navigate(websocket: WebSocket) -> None:
     """WebSocket endpoint for the chat-only agent runtime.
 
-    The single canonical path is ``/ws/agent``. The legacy ``/ws/navigate``
-    alias was removed in the chat-only cleanup PR; the function name is
-    kept only for symbol stability.
+    The canonical path is ``/ws/agent``. The legacy ``/ws/navigate``
+    alias is restored so older Netlify env overrides (and any clients
+    that cached the old URL) keep working — both decorators bind the
+    same handler so behaviour is identical.
     """
     await websocket.accept()
     session_id = await live_manager.create_session()

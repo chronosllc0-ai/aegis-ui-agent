@@ -31,7 +31,16 @@ class HeartbeatRuntimeState:
     last_result: str = "never_run"
 
 
-HeartbeatDispatcher = Callable[[str, str], Awaitable[None]]
+# Dispatch hook signature: ``(user_id, session_id, prompt)``. The
+# scheduler iterates per-user, so user_id is always known and is the
+# only correct way to route the prompt to the right always-on
+# supervisor. Earlier versions of this signature dropped ``user_id``
+# and the dispatch hook tried to reverse it via the in-memory
+# ``_session_runtimes`` keyed by ws_session_id — that lookup never
+# matched the shared ``agent:main:heartbeat`` session_id, which is
+# why heartbeat dispatch silently became a no-op. Adding user_id
+# here is what unblocks the always-on routing path.
+HeartbeatDispatcher = Callable[[str, str, str], Awaitable[None]]
 
 
 def build_heartbeat_prompt(*, now: datetime, tz_name: str = "America/New_York") -> str:
@@ -111,7 +120,7 @@ class HeartbeatSessionScheduler:
             self._state.last_run_at_utc = started_at.isoformat()
             try:
                 async for db in get_session():
-                    dispatch_queue: list[tuple[str, str]] = []
+                    dispatch_queue: list[tuple[str, str, str]] = []
                     users = (
                         await db.execute(
                             sa_select(SessionModel.user_id)
@@ -140,10 +149,10 @@ class HeartbeatSessionScheduler:
                             content=prompt,
                             metadata={"source": "heartbeat_scheduler", "session": HEARTBEAT_SESSION_ID},
                         )
-                        dispatch_queue.append((HEARTBEAT_SESSION_ID, prompt))
+                        dispatch_queue.append((user_id, HEARTBEAT_SESSION_ID, prompt))
                     await db.commit()
-                    for dispatch_session_id, dispatch_prompt in dispatch_queue:
-                        await self._dispatch(dispatch_session_id, dispatch_prompt)
+                    for dispatch_user_id, dispatch_session_id, dispatch_prompt in dispatch_queue:
+                        await self._dispatch(dispatch_user_id, dispatch_session_id, dispatch_prompt)
                     self._state.last_result = "ok"
             finally:
                 self._state.running = False
