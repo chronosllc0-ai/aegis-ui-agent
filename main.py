@@ -3014,7 +3014,15 @@ async def websocket_navigate(websocket: WebSocket) -> None:
                 continue
             action = data.get("action")
             # Normalize action aliases → canonical internal names
-            if action in {"navigate", "task", "chat", "message"}:
+            #
+            # ``execute`` was introduced by PR #331 (kilo) when it
+            # replaced ``navigate`` in the frontend, but the backend
+            # alias set was never updated, so every chat submit since
+            # then has been silently rejected with
+            # ``Unknown action: execute``. Add it to the alias set so
+            # the chat-send path resolves to ``navigate_start`` like
+            # any other generic message action.
+            if action in {"navigate", "task", "chat", "message", "execute"}:
                 action = "navigate_start"
             if action == "stop":
                 action = "stop_task"
