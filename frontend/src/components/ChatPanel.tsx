@@ -1870,7 +1870,13 @@ export function ChatPanel({
     if (!trimmed && attachments.length === 0) return
     if (isWorking && steeringMode === 'auto') return
     const parsed = resolveComposerSubmission(trimmed, forcePlan)
-    const outgoingText = parsed.mode === 'plan' ? parsed.text : trimmed
+    // Codex P2 (PR #350 review): always use ``parsed.text`` — when
+    // the composer strips a prefix like ``/plan`` we must forward the
+    // cleaned text, not the original ``trimmed`` input. Falling back
+    // to ``trimmed`` when ``parsed.text`` is empty preserves the
+    // attachment-only send path (parsed text trims to empty but
+    // ``trimmed`` may still be empty too — both safe).
+    const outgoingText = parsed.text || trimmed
     const withContext = activeConnector ? `[${activeConnector.name}] ${outgoingText}` : outgoingText
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const localMsg: ChatMessage = {

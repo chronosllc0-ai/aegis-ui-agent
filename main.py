@@ -771,10 +771,20 @@ async def _heartbeat_session_dispatch(
         return
     try:
         supervisor = await registry.get(user_id)
+        # Codex P1 (PR #350 review): use a dedicated ``heartbeat``
+        # channel so the supervisor's fan-out bridge does not surface
+        # heartbeat run_started / final_message frames in any tab's
+        # live chat stream. The frontend ``useWebSocket`` runtime_event
+        # handler filters on ``channel === 'web'``, so non-web events
+        # are dropped on the client. The dedicated persister hook
+        # (``_runtime_chat_message_persister``) still writes the
+        # assistant reply to the heartbeat session row regardless of
+        # channel, and the WS bridge's own persister is gated on
+        # ``channel == 'web'`` so we don't double-write either.
         await supervisor.enqueue(
             _RuntimeAgentEvent(
                 owner_uid=user_id,
-                channel="web",
+                channel="heartbeat",
                 kind=_RuntimeEventKind.CHAT_MESSAGE,
                 payload={
                     "text": instruction,
@@ -2890,12 +2900,14 @@ async def _detach_runtime_event_bridge(
 
 
 @app.websocket("/ws/agent")
+@app.websocket("/ws/navigate")
 async def websocket_navigate(websocket: WebSocket) -> None:
     """WebSocket endpoint for the chat-only agent runtime.
 
-    The single canonical path is ``/ws/agent``. The legacy ``/ws/navigate``
-    alias was removed in the chat-only cleanup PR; the function name is
-    kept only for symbol stability.
+    The canonical path is ``/ws/agent``. The legacy ``/ws/navigate``
+    alias is restored so older Netlify env overrides (and any clients
+    that cached the old URL) keep working — both decorators bind the
+    same handler so behaviour is identical.
     """
     await websocket.accept()
     session_id = await live_manager.create_session()
