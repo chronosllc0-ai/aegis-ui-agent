@@ -82,12 +82,22 @@ def resolve_runtime_model_setting(
     settings: Mapping[str, Any] | None,
     fallback: Model | str | None = None,
 ) -> Model | str | None:
-    """Resolve the per-dispatch model, preserving static fallback only if unset."""
+    """Resolve the per-dispatch model, preserving static fallback only if unset.
+
+    Runtime settings usually come from the browser as strings, but callers
+    may also pass an already-constructed Agents SDK Model. Preserve that
+    object instead of stringifying it into an invalid LiteLLM model ID.
+    """
     runtime_settings = settings or {}
-    selected = normalize_runtime_model(
-        str(runtime_settings.get("provider") or ""),
-        str(runtime_settings.get("model") or ""),
-    )
+    model_value = runtime_settings.get("model")
+    if isinstance(model_value, Model):
+        return model_value
+    if not isinstance(model_value, str):
+        return fallback
+
+    provider_value = runtime_settings.get("provider")
+    provider = provider_value if isinstance(provider_value, str) else str(provider_value or "")
+    selected = normalize_runtime_model(provider, model_value)
     return selected or fallback
 
 
@@ -96,6 +106,9 @@ def _runtime_model_label(model: Model | str | None) -> str | None:
         return model
     if model is None:
         return None
+    model_name = getattr(model, "model", None)
+    if isinstance(model_name, str) and model_name.strip():
+        return model_name
     return model.__class__.__name__
 
 
