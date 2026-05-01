@@ -141,6 +141,7 @@ function App() {
   const { show: showChangelog, dismiss: dismissChangelog, version: appVersion } = useChangelog()
   const toastCtx = useToast()
   const { addNotification } = useNotifications()
+  const agentErrorToastDedupeRef = useRef<{ key: string; at: number } | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(MAIN_SESSION_ID)
   // Server-side conversation persistence - replaces localStorage for history + messages
   const [authUser, setAuthUser] = useState<{ uid?: string; name: string; email: string; avatar_url?: string | null; role?: string; impersonating?: boolean } | null>(null)
@@ -300,13 +301,26 @@ function App() {
     else if (isAuthError) title = 'API key invalid or expired'
     else if (isProviderError) title = 'Provider not configured'
 
+    const message = last.message || 'The agent encountered an unexpected error.'
+
     // Always surface agent errors as a notification so they are impossible to miss
     addNotification({
       type: 'error',
       title,
-      message: last.message || 'The agent encountered an unexpected error.',
+      message,
       source: 'credit',
     })
+
+    // Also show an immediate toast. The notification tray is persistent,
+    // but runtime/provider failures need a foreground signal; throttle
+    // identical errors because reconnect/retry loops can emit repeats.
+    const toastKey = `${title}:${message}`
+    const now = Date.now()
+    const previousToast = agentErrorToastDedupeRef.current
+    if (!previousToast || previousToast.key !== toastKey || now - previousToast.at > 10_000) {
+      toastCtx.error(title, message)
+      agentErrorToastDedupeRef.current = { key: toastKey, at: now }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs])
 

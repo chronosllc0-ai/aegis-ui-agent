@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from agents import Agent, Runner
 from agents.extensions.models.litellm_model import LitellmModel
@@ -43,6 +43,73 @@ DEFAULT_INSTRUCTIONS = (
     "tool calls minimal, preserve user intent across turns, and explain "
     "outcomes in natural language when returning to the user."
 )
+
+LITELLM_PROVIDER_PREFIX_BY_SETTINGS_PROVIDER = {
+    # The Chronos catalogue is backed by OpenRouter-style model IDs.
+    # LiteLLM needs the routing provider prepended, e.g.
+    # ``openrouter/nvidia/nemotron-...``.
+    "chronos": "openrouter",
+    "openrouter": "openrouter",
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "google": "gemini",
+    "xai": "xai",
+    "fireworks": "fireworks_ai",
+}
+
+
+def normalize_runtime_model(provider: str | None, model_id: str | None) -> str | None:
+    """Convert frontend provider/model settings into a LiteLLM model string.
+
+    The browser stores provider IDs from ``frontend/src/lib/models.ts``.
+    The always-on runtime uses ``LitellmModel``, which expects provider
+    routing prefixes such as ``fireworks_ai/`` or ``openrouter/``.
+    """
+    model = (model_id or "").strip()
+    if not model:
+        return None
+
+    settings_provider = (provider or "").strip().lower()
+    litellm_prefix = LITELLM_PROVIDER_PREFIX_BY_SETTINGS_PROVIDER.get(settings_provider)
+    if not litellm_prefix:
+        return model
+    if model.startswith(f"{litellm_prefix}/"):
+        return model
+    return f"{litellm_prefix}/{model}"
+
+
+def resolve_runtime_model_setting(
+    settings: Mapping[str, Any] | None,
+    fallback: Model | str | None = None,
+) -> Model | str | None:
+    """Resolve the per-dispatch model, preserving static fallback only if unset.
+
+    Runtime settings usually come from the browser as strings, but callers
+    may also pass an already-constructed Agents SDK Model. Preserve that
+    object instead of stringifying it into an invalid LiteLLM model ID.
+    """
+    runtime_settings = settings or {}
+    model_value = runtime_settings.get("model")
+    if isinstance(model_value, Model):
+        return model_value
+    if not isinstance(model_value, str):
+        return fallback
+
+    provider_value = runtime_settings.get("provider")
+    provider = provider_value if isinstance(provider_value, str) else str(provider_value or "")
+    selected = normalize_runtime_model(provider, model_value)
+    return selected or fallback
+
+
+def _runtime_model_label(model: Model | str | None) -> str | None:
+    if isinstance(model, str):
+        return model
+    if model is None:
+        return None
+    model_name = getattr(model, "model", None)
+    if isinstance(model_name, str) and model_name.strip():
+        return model_name
+    return model.__class__.__name__
 
 
 def _resolve_model(setting: str | None) -> Model:
@@ -219,7 +286,8 @@ def _default_build_agent(
         _extend_unique(mcp_tools, "MCP")
     if connector_tools:
         _extend_unique(connector_tools, "connector")
-    return build_agent(session=session, tools=tools, instructions=config.instructions, model=config.model)
+    runtime_model = resolve_runtime_model_setting(ctx.settings, config.model)
+    return build_agent(session=session, tools=tools, instructions=config.instructions, model=runtime_model)
 
 
 async def _ensure_mcp_provider(
@@ -299,6 +367,9 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             )
             await _maybe_record(cfg.session_factory, run_id=run_id, seq=seq, kind=kind, payload=payload)
 
+        runtime_settings = dict(event.payload.get("settings") or {})
+        selected_model = resolve_runtime_model_setting(runtime_settings, cfg.model)
+
         if cfg.session_factory is not None:
             try:
                 async with cfg.session_factory() as sess:
@@ -308,7 +379,7 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
                         owner_uid=session.owner_uid,
                         channel=session.channel,
                         session_id=session.session_id,
-                        model=str(cfg.model) if cfg.model else None,
+                        model=_runtime_model_label(selected_model),
                     )
                     await mark_inbox_dispatched(sess, event_id=event.event_id, run_id=run_id)
             except Exception:  # noqa: BLE001
@@ -337,7 +408,7 @@ def build_dispatch_hook(config: DispatchConfig | None = None) -> DispatchHook:
             session_id=session.session_id,
             owner_uid=session.owner_uid,
             channel=session.channel,
-            settings=dict(event.payload.get("settings") or {}),
+            settings=runtime_settings,
             memory_mode=str(event.payload.get("memory_mode") or "files"),
             is_main_session=True,
         )
@@ -544,4 +615,6 @@ __all__ = [
     "build_agent",
     "build_dispatch_hook",
     "install_supervisor_dispatch",
+    "normalize_runtime_model",
+    "resolve_runtime_model_setting",
 ]
