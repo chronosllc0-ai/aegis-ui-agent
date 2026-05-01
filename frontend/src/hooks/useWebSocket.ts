@@ -272,10 +272,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const pendingStartRef = useRef<{ requestId: string; timer: number | null; instruction: string } | null>(null)
   const pendingBackendActivityTimeoutRef = useRef<number | null>(null)
   const lastBackendActivityAtRef = useRef(0)
-  const pendingQueuedStateTimeoutRef = useRef<number | null>(null)
   const terminalTaskStateRef = useRef<Record<string, string>>({})
   const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
-  const queuedTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_QUEUED_TIMEOUT_MS ?? 20000)
   const backendActivityTimeoutMs = Number(import.meta.env.VITE_BACKEND_ACTIVITY_TIMEOUT_MS ?? 3000)
 
   const appendLog = useCallback(
@@ -335,10 +333,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }, 25000)
     }
     ws.onclose = () => {
-      if (pendingQueuedStateTimeoutRef.current !== null) {
-        window.clearTimeout(pendingQueuedStateTimeoutRef.current)
-        pendingQueuedStateTimeoutRef.current = null
-      }
       const pendingStart = pendingStartRef.current
       if (pendingStart && pendingStart.timer !== null) {
         window.clearTimeout(pendingStart.timer)
@@ -606,10 +600,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           appendLog({ message: `Start rejected: ${String(payload.data?.reason ?? 'unknown')}`, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
           return
         }
-        if (pendingQueuedStateTimeoutRef.current !== null) {
-          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
-          pendingQueuedStateTimeoutRef.current = null
-        }
         setExecutionState('running')
         return
       }
@@ -619,19 +609,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         if (state === 'running' || state === 'tool_call' || state === 'queued' || state === 'waiting_input') {
           setExecutionState(state === 'queued' ? 'starting' : 'running')
           setIsWorking(true)
-          if (state === 'queued') {
-            if (pendingQueuedStateTimeoutRef.current !== null) {
-              window.clearTimeout(pendingQueuedStateTimeoutRef.current)
-            }
-            pendingQueuedStateTimeoutRef.current = window.setTimeout(() => {
-              setExecutionState('failed')
-              setIsWorking(false)
-              appendLog({ message: 'Task stayed queued too long (E_START_TIMEOUT). Retry from chat.', taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
-            }, queuedTimeoutMs)
-          } else if (pendingQueuedStateTimeoutRef.current !== null) {
-            window.clearTimeout(pendingQueuedStateTimeoutRef.current)
-            pendingQueuedStateTimeoutRef.current = null
-          }
         } else if (state === 'succeeded') {
           terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('completed')
@@ -648,10 +625,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'task_result') {
-        if (pendingQueuedStateTimeoutRef.current !== null) {
-          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
-          pendingQueuedStateTimeoutRef.current = null
-        }
         const payloadTaskId = String(payload.data?.task_id ?? '').trim() || taskId
         const terminalState = terminalTaskStateRef.current[payloadTaskId]
         if (terminalState === 'failed') setExecutionState('failed')
@@ -672,10 +645,6 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'task_error') {
-        if (pendingQueuedStateTimeoutRef.current !== null) {
-          window.clearTimeout(pendingQueuedStateTimeoutRef.current)
-          pendingQueuedStateTimeoutRef.current = null
-        }
         setExecutionState('failed')
         setIsWorking(false)
         setTaskActivity(createIdleActivityState())
@@ -1262,7 +1231,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       return false
     },
-    [ackTimeoutMs, appendLog, backendActivityTimeoutMs, queuedTimeoutMs],
+    [ackTimeoutMs, appendLog, backendActivityTimeoutMs],
   )
 
   const sendAudioChunk = useCallback((audio: string) => {
