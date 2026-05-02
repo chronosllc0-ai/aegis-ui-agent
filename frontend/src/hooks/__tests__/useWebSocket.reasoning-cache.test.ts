@@ -82,6 +82,32 @@ describe('useWebSocket reasoning cache persistence', () => {
     expect(completed[0].status).toBe('completed')
   })
 
+  it('does not reconnect just because option callback identities change', () => {
+    const { rerender } = renderHook(
+      ({ version: _version }: { version: number }) => useWebSocket({
+        onUsageMessage: vi.fn(),
+        onRuntimeSession: vi.fn(),
+        onRuntimeContextMeter: vi.fn(),
+        onRuntimeCompactionCheckpoint: vi.fn(),
+      }),
+      { initialProps: { version: 1 } },
+    )
+
+    act(() => {
+      vi.runOnlyPendingTimers()
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    rerender({ version: 2 })
+
+    act(() => {
+      vi.advanceTimersByTime(0)
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
   it('does not fail after a task_state queued event because chat no longer has a queued watchdog', () => {
     vi.stubEnv('VITE_NAVIGATE_ACK_TIMEOUT_MS', '5000')
     vi.stubEnv('VITE_BACKEND_ACTIVITY_TIMEOUT_MS', '3000')

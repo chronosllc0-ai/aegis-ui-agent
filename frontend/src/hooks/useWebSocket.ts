@@ -243,6 +243,22 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const onRuntimeSession = options?.onRuntimeSession
   const onRuntimeContextMeter = options?.onRuntimeContextMeter
   const onRuntimeCompactionCheckpoint = options?.onRuntimeCompactionCheckpoint
+  const optionHandlersRef = useRef({
+    activeThreadId,
+    onUsageMessage,
+    onRuntimeSession,
+    onRuntimeContextMeter,
+    onRuntimeCompactionCheckpoint,
+  })
+  useEffect(() => {
+    optionHandlersRef.current = {
+      activeThreadId,
+      onUsageMessage,
+      onRuntimeSession,
+      onRuntimeContextMeter,
+      onRuntimeCompactionCheckpoint,
+    }
+  }, [activeThreadId, onUsageMessage, onRuntimeSession, onRuntimeContextMeter, onRuntimeCompactionCheckpoint])
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [executionState, setExecutionState] = useState<ExecutionState>('idle')
   const [isWorking, setIsWorking] = useState(false)
@@ -412,8 +428,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         const sessionId = typeof data?.session_id === 'string' ? data.session_id : ''
         const ownerUid = typeof data?.owner_uid === 'string' ? data.owner_uid : ''
         const channel = typeof data?.channel === 'string' ? data.channel : 'web'
-        if (sessionId && onRuntimeSession) {
-          onRuntimeSession({ session_id: sessionId, owner_uid: ownerUid, channel })
+        const runtimeSessionHandler = optionHandlersRef.current.onRuntimeSession
+        if (sessionId && runtimeSessionHandler) {
+          runtimeSessionHandler({ session_id: sessionId, owner_uid: ownerUid, channel })
         }
         return
       }
@@ -466,7 +483,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         // match.
         const isChannelChatRelevant =
           channel === 'web' || kind === 'context_meter' || kind === 'compaction_checkpoint'
-        if (kind === 'context_meter' && onRuntimeContextMeter) {
+        const runtimeContextMeterHandler = optionHandlersRef.current.onRuntimeContextMeter
+        if (kind === 'context_meter' && runtimeContextMeterHandler) {
           // Validate at the WS boundary so the consumer never sees a
           // partially-populated meter — missing numeric fields would
           // otherwise turn into NaN downstream (percentage bars going
@@ -474,16 +492,17 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           // optional ``owner_uid`` / ``session_id`` are passed through
           // untouched.
           if (isRuntimeContextMeter(inner)) {
-            onRuntimeContextMeter(inner)
+            runtimeContextMeterHandler(inner)
           } else if (typeof console !== 'undefined') {
             // eslint-disable-next-line no-console
             console.warn('[runtime] dropped malformed context_meter payload', inner)
           }
           return
         }
-        if (kind === 'compaction_checkpoint' && onRuntimeCompactionCheckpoint) {
+        const runtimeCompactionCheckpointHandler = optionHandlersRef.current.onRuntimeCompactionCheckpoint
+        if (kind === 'compaction_checkpoint' && runtimeCompactionCheckpointHandler) {
           if (isRuntimeCompactionCheckpoint(inner)) {
-            onRuntimeCompactionCheckpoint(inner)
+            runtimeCompactionCheckpointHandler(inner)
           } else if (typeof console !== 'undefined') {
             // eslint-disable-next-line no-console
             console.warn('[runtime] dropped malformed compaction_checkpoint payload', inner)
@@ -870,7 +889,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'mode_event') {
         const scopedFrontendTaskId = String(payload.data?.frontend_task_id ?? '').trim()
-        if (scopedFrontendTaskId && activeThreadId && scopedFrontendTaskId !== activeThreadId) {
+        const currentActiveThreadId = optionHandlersRef.current.activeThreadId
+        if (scopedFrontendTaskId && currentActiveThreadId && scopedFrontendTaskId !== currentActiveThreadId) {
           return
         }
         const parsed = parseModeRuntimeEvent(payload.data)
@@ -942,7 +962,8 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       if (payload.type === 'mode_transition') {
         const scopedFrontendTaskId = String(payload.data?.frontend_task_id ?? '').trim()
-        if (scopedFrontendTaskId && activeThreadId && scopedFrontendTaskId !== activeThreadId) {
+        const currentActiveThreadId = optionHandlersRef.current.activeThreadId
+        if (scopedFrontendTaskId && currentActiveThreadId && scopedFrontendTaskId !== currentActiveThreadId) {
           return
         }
         const toMode = String(payload.data?.to_mode ?? '').trim()
@@ -978,11 +999,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'usage' || payload.type === 'usage_tick') {
-        onUsageMessage?.(payload as unknown as Record<string, unknown>)
+        optionHandlersRef.current.onUsageMessage?.(payload as unknown as Record<string, unknown>)
         return
       }
       if (payload.type === 'context_update') {
-        onUsageMessage?.(payload as unknown as Record<string, unknown>)
+        optionHandlersRef.current.onUsageMessage?.(payload as unknown as Record<string, unknown>)
         return
       }
       if (payload.type === 'reasoning_start') {
@@ -1158,7 +1179,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
     }
-  }, [appendLog, clearPostQueueProgressTimeout, onUsageMessage, onRuntimeCompactionCheckpoint, onRuntimeContextMeter, onRuntimeSession, postQueueProgressTimeoutMs])
+  }, [appendLog, clearPostQueueProgressTimeout, postQueueProgressTimeoutMs])
 
   useEffect(() => {
     connectRef.current = connect
