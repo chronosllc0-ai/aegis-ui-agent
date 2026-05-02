@@ -39,6 +39,7 @@ class MockWebSocket {
 describe('useWebSocket reasoning cache persistence', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.unstubAllEnvs()
     localStorage.clear()
     MockWebSocket.instances = []
     vi.stubGlobal('WebSocket', MockWebSocket)
@@ -110,6 +111,71 @@ describe('useWebSocket reasoning cache persistence', () => {
     expect(result.current.executionState).toBe('starting')
     expect(result.current.isWorking).toBe(true)
     expect(result.current.logs.some((entry) => entry.message.includes('Task stayed queued too long'))).toBe(false)
+  })
+
+  it('fails a queued task only when no runtime progress arrives before the post-queue timeout', () => {
+    vi.stubEnv('VITE_NAVIGATE_ACK_TIMEOUT_MS', '5000')
+    vi.stubEnv('VITE_BACKEND_ACTIVITY_TIMEOUT_MS', '3000')
+    vi.stubEnv('VITE_NAVIGATE_POST_QUEUE_PROGRESS_TIMEOUT_MS', '100')
+
+    const { result } = renderHook(() => useWebSocket())
+
+    act(() => {
+      vi.runOnlyPendingTimers()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeTruthy()
+
+    act(() => {
+      result.current.send({ action: 'navigate', instruction: 'Say hi' })
+    })
+
+    const outbound = JSON.parse(ws.sent.at(-1) ?? '{}') as { request_id?: string }
+    expect(outbound.request_id).toBeTruthy()
+
+    act(() => {
+      ws.emit({ type: 'navigate_ack', data: { request_id: outbound.request_id, task_id: 'server-task', accepted: true } })
+      ws.emit({ type: 'task_state', data: { task_id: 'server-task', state: 'queued' } })
+      vi.advanceTimersByTime(101)
+    })
+
+    expect(result.current.executionState).toBe('failed')
+    expect(result.current.isWorking).toBe(false)
+    expect(result.current.logs.some((entry) => entry.message.includes('No runtime progress reported after queueing'))).toBe(true)
+  })
+
+  it('clears the post-queue timeout when runtime progress arrives', () => {
+    vi.stubEnv('VITE_NAVIGATE_ACK_TIMEOUT_MS', '5000')
+    vi.stubEnv('VITE_BACKEND_ACTIVITY_TIMEOUT_MS', '3000')
+    vi.stubEnv('VITE_NAVIGATE_POST_QUEUE_PROGRESS_TIMEOUT_MS', '100')
+
+    const { result } = renderHook(() => useWebSocket())
+
+    act(() => {
+      vi.runOnlyPendingTimers()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeTruthy()
+
+    act(() => {
+      result.current.send({ action: 'navigate', instruction: 'Say hi' })
+    })
+
+    const outbound = JSON.parse(ws.sent.at(-1) ?? '{}') as { request_id?: string }
+    expect(outbound.request_id).toBeTruthy()
+
+    act(() => {
+      ws.emit({ type: 'navigate_ack', data: { request_id: outbound.request_id, task_id: 'server-task', accepted: true } })
+      ws.emit({ type: 'task_state', data: { task_id: 'server-task', state: 'queued' } })
+      ws.emit({ type: 'runtime_event', channel: 'web', data: { kind: 'run_started', channel: 'web', payload: {} } })
+      vi.advanceTimersByTime(101)
+    })
+
+    expect(result.current.executionState).toBe('running')
+    expect(result.current.isWorking).toBe(true)
+    expect(result.current.logs.some((entry) => entry.message.includes('No runtime progress reported after queueing'))).toBe(false)
   })
 
   it('keeps early reasoning deltas when reasoning_start arrives late', () => {

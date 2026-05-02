@@ -271,10 +271,19 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const connectRef = useRef<() => void>(() => undefined)
   const pendingStartRef = useRef<{ requestId: string; timer: number | null; instruction: string } | null>(null)
   const pendingBackendActivityTimeoutRef = useRef<number | null>(null)
+  const pendingPostQueueProgressTimeoutRef = useRef<number | null>(null)
   const lastBackendActivityAtRef = useRef(0)
   const terminalTaskStateRef = useRef<Record<string, string>>({})
   const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
   const backendActivityTimeoutMs = Number(import.meta.env.VITE_BACKEND_ACTIVITY_TIMEOUT_MS ?? 3000)
+  const postQueueProgressTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_POST_QUEUE_PROGRESS_TIMEOUT_MS ?? 60000)
+
+  const clearPostQueueProgressTimeout = useCallback(() => {
+    if (pendingPostQueueProgressTimeoutRef.current !== null) {
+      window.clearTimeout(pendingPostQueueProgressTimeoutRef.current)
+      pendingPostQueueProgressTimeoutRef.current = null
+    }
+  }, [])
 
   const appendLog = useCallback(
     (entry: Omit<LogEntry, 'id' | 'timestamp' | 'elapsedSeconds' | 'stepKind'> & { elapsedSeconds?: number; stepKind?: LogEntry['stepKind'] }) => {
@@ -346,6 +355,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         window.clearTimeout(pendingBackendActivityTimeoutRef.current)
         pendingBackendActivityTimeoutRef.current = null
       }
+      clearPostQueueProgressTimeout()
       setConnectionStatus('disconnected')
       setIsWorking(false)
       if (shouldReconnectRef.current) {
@@ -364,6 +374,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         window.clearTimeout(pendingBackendActivityTimeoutRef.current)
         pendingBackendActivityTimeoutRef.current = null
       }
+      clearPostQueueProgressTimeout()
       setConnectionStatus('disconnected')
     }
     ws.onmessage = (event: MessageEvent<string>) => {
@@ -492,6 +503,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         // ref. (kilo S1 from the PR #345 review.)
         const liveTaskId = activeTaskIdRef.current
         lastBackendActivityAtRef.current = performance.now()
+        if (kind === 'run_started' || kind === 'final_message' || kind === 'tool_call' || kind === 'tool_result' || kind === 'run_completed' || kind === 'error') {
+          clearPostQueueProgressTimeout()
+        }
         if (kind === 'run_started') {
           setIsWorking(true)
           setExecutionState('running')
@@ -595,6 +609,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           pendingStartRef.current = null
         }
         if (!accepted) {
+          clearPostQueueProgressTimeout()
           setExecutionState('failed')
           setIsWorking(false)
           appendLog({ message: `Start rejected: ${String(payload.data?.reason ?? 'unknown')}`, taskId: activeTaskIdRef.current, type: 'error', status: 'failed' })
@@ -606,18 +621,39 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       if (payload.type === 'task_state') {
         const payloadTaskId = String(payload.data?.task_id ?? '').trim() || activeTaskIdRef.current
         const state = String(payload.data?.state ?? '')
-        if (state === 'running' || state === 'tool_call' || state === 'queued' || state === 'waiting_input') {
-          setExecutionState(state === 'queued' ? 'starting' : 'running')
+        if (state === 'queued') {
+          clearPostQueueProgressTimeout()
+          const frontendTaskId = activeTaskIdRef.current
+          pendingPostQueueProgressTimeoutRef.current = window.setTimeout(() => {
+            pendingPostQueueProgressTimeoutRef.current = null
+            if (activeTaskIdRef.current !== frontendTaskId || terminalTaskStateRef.current[payloadTaskId]) return
+            setExecutionState('failed')
+            setIsWorking(false)
+            appendLog({
+              message: 'No runtime progress reported after queueing (E_START_TIMEOUT). Retry from chat.',
+              taskId: frontendTaskId,
+              type: 'error',
+              status: 'failed',
+            })
+          }, postQueueProgressTimeoutMs)
+          setExecutionState('starting')
+          setIsWorking(true)
+        } else if (state === 'running' || state === 'tool_call' || state === 'waiting_input') {
+          clearPostQueueProgressTimeout()
+          setExecutionState('running')
           setIsWorking(true)
         } else if (state === 'succeeded') {
+          clearPostQueueProgressTimeout()
           terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('completed')
           setIsWorking(false)
         } else if (state === 'failed') {
+          clearPostQueueProgressTimeout()
           terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('failed')
           setIsWorking(false)
         } else if (state === 'cancelled') {
+          clearPostQueueProgressTimeout()
           terminalTaskStateRef.current[payloadTaskId] = state
           setExecutionState('cancelled')
           setIsWorking(false)
@@ -625,6 +661,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'task_result') {
+        clearPostQueueProgressTimeout()
         const payloadTaskId = String(payload.data?.task_id ?? '').trim() || taskId
         const terminalState = terminalTaskStateRef.current[payloadTaskId]
         if (terminalState === 'failed') setExecutionState('failed')
@@ -645,6 +682,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'task_error') {
+        clearPostQueueProgressTimeout()
         setExecutionState('failed')
         setIsWorking(false)
         setTaskActivity(createIdleActivityState())
@@ -656,6 +694,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'step') {
+        clearPostQueueProgressTimeout()
         const stepType = String(payload.data?.type ?? '').toLowerCase()
         const nonExecutionStepTypes = new Set(['queue', 'steer', 'config'])
         if (!nonExecutionStepTypes.has(stepType)) {
@@ -779,6 +818,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'interrupt') {
+        clearPostQueueProgressTimeout()
         setIsWorking(false)
         appendLog({
           message: String(payload.data?.message ?? 'Task interrupted'),
@@ -789,6 +829,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'tool-call') {
+        clearPostQueueProgressTimeout()
         setIsWorking(true)
         appendLog({
           message: String(payload.data?.content ?? payload.data?.tool ?? 'Tool call'),
@@ -799,6 +840,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'result') {
+        clearPostQueueProgressTimeout()
         setIsWorking(false)
         setExecutionState('completed')
         const persisted = readPersistedThinking(taskId)
@@ -1110,16 +1152,17 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         return
       }
       if (payload.type === 'error') {
+        clearPostQueueProgressTimeout()
         setIsWorking(false)
         appendLog({ message: String(payload.data?.message ?? 'Unknown error'), taskId, type: 'error', status: 'failed' })
         return
       }
     }
-  }, [appendLog, onUsageMessage])
+  }, [appendLog, clearPostQueueProgressTimeout, onUsageMessage, onRuntimeCompactionCheckpoint, onRuntimeContextMeter, onRuntimeSession, postQueueProgressTimeoutMs])
 
   useEffect(() => {
     connectRef.current = connect
-  }, [connect])
+  }, [clearPostQueueProgressTimeout, connect])
 
   useEffect(() => {
     shouldReconnectRef.current = true
@@ -1139,12 +1182,13 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         window.clearTimeout(pendingBackendActivityTimeoutRef.current)
         pendingBackendActivityTimeoutRef.current = null
       }
+      clearPostQueueProgressTimeout()
       if (wsRef.current) {
         wsRef.current.onclose = null
         wsRef.current.close()
       }
     }
-  }, [connect])
+  }, [clearPostQueueProgressTimeout, connect])
 
   const send = useCallback(
     (message: Record<string, unknown>) => {
@@ -1174,6 +1218,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           if (/^https?:\/\//i.test(maybeUrl)) setCurrentUrl(maybeUrl)
           // Embed frontend task ID in metadata so backend can scope sub-agents to this task
           const existingMeta = (message.metadata as Record<string, unknown> | undefined) ?? {}
+          clearPostQueueProgressTimeout()
           const pendingStart = pendingStartRef.current
           if (pendingStart && pendingStart.timer !== null) {
             window.clearTimeout(pendingStart.timer)
@@ -1231,7 +1276,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       }
       return false
     },
-    [ackTimeoutMs, appendLog, backendActivityTimeoutMs],
+    [ackTimeoutMs, appendLog, backendActivityTimeoutMs, clearPostQueueProgressTimeout],
   )
 
   const sendAudioChunk = useCallback((audio: string) => {
@@ -1257,9 +1302,10 @@ export function useWebSocket(options?: UseWebSocketOptions) {
       window.clearTimeout(pendingBackendActivityTimeoutRef.current)
       pendingBackendActivityTimeoutRef.current = null
     }
+    clearPostQueueProgressTimeout()
     reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
-  }, [])
+  }, [clearPostQueueProgressTimeout])
 
   const spawnSubAgent = useCallback((instruction: string, model: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
