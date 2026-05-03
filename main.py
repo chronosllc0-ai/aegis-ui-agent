@@ -52,6 +52,7 @@ from backend.research.router import research_router
 from backend.reasoning import (
     CANONICAL_REASONING_LEVELS,
     apply_reasoning_level,
+    apply_reasoning_level_for_model,
     normalize_reasoning_level,
     reasoning_level_label,
     runtime_reasoning_level,
@@ -1352,7 +1353,12 @@ def _merge_runtime_settings(current: dict[str, Any], incoming: dict[str, Any]) -
     model = str(merged.get("model", "")).strip()
     if not model:
         merged["model"] = settings.DEFAULT_MODEL or "nvidia/nemotron-3-super-120b-a12b:free"
-    apply_reasoning_level(merged, runtime_reasoning_level(merged))
+    apply_reasoning_level_for_model(
+        merged,
+        provider=merged.get("provider"),
+        model=merged.get("model"),
+        level=runtime_reasoning_level(merged),
+    )
     return merged
 
 

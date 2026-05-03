@@ -171,6 +171,29 @@ describe('useWebSocket reasoning cache persistence', () => {
     expect(result.current.logs.some((entry) => entry.message.includes('No runtime progress reported after queueing'))).toBe(true)
   })
 
+  it('surfaces blank runtime finals and does not let run_completed overwrite failure', () => {
+    const { result } = renderHook(() => useWebSocket())
+
+    act(() => {
+      vi.runOnlyPendingTimers()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeTruthy()
+
+    act(() => {
+      result.current.send({ action: 'navigate', instruction: 'Say hi' })
+      ws.emit({ type: 'runtime_event', data: { kind: 'run_started', channel: 'web', payload: {} } })
+      ws.emit({ type: 'runtime_event', data: { kind: 'final_message', channel: 'web', payload: { text: '' } } })
+      ws.emit({ type: 'runtime_event', data: { kind: 'run_completed', channel: 'web', payload: { status: 'completed' } } })
+    })
+
+    expect(result.current.executionState).toBe('failed')
+    expect(result.current.isWorking).toBe(false)
+    expect(result.current.logs.some((entry) => entry.rawStepType === 'final_message_empty')).toBe(true)
+    expect(result.current.logs.some((entry) => entry.message.includes('completed without a visible response'))).toBe(true)
+  })
+
   it('clears the post-queue timeout when runtime progress arrives', () => {
     vi.stubEnv('VITE_NAVIGATE_ACK_TIMEOUT_MS', '5000')
     vi.stubEnv('VITE_BACKEND_ACTIVITY_TIMEOUT_MS', '3000')
