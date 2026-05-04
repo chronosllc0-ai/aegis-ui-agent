@@ -117,7 +117,7 @@ function clampSettingsReasoning(settings: AppSettings): AppSettings {
   const clamped = settings.enableReasoning
     ? clampReasoningEffort(settings.provider, settings.model, normalized)
     : 'none'
-  const enableReasoning = clamped !== 'none' && supportsConfigurableReasoning(settings.provider, settings.model)
+  const enableReasoning = clamped !== 'none'
   return {
     ...settings,
     enableReasoning,

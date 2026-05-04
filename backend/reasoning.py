@@ -61,6 +61,12 @@ def reasoning_level_label(level: object) -> str:
 _OPENAI_GPT5_LEVELS: tuple[ReasoningLevel, ...] = ("none", "minimal", "low", "medium", "high")
 _STANDARD_EFFORT_LEVELS: tuple[ReasoningLevel, ...] = ("none", "low", "medium", "high")
 _OFF_ONLY_LEVELS: tuple[ReasoningLevel, ...] = ("none",)
+_DIRECT_ANTHROPIC_REASONING_PREFIXES = (
+    "claude-opus-4",
+    "claude-sonnet-4",
+    "claude-haiku-4",
+)
+_OPENROUTER_QWEN_REASONING_MODELS = frozenset({"qwen/qwen3-max-thinking"})
 
 
 def supported_reasoning_levels(provider: object, model: object) -> tuple[ReasoningLevel, ...]:
@@ -99,7 +105,7 @@ def supported_reasoning_levels(provider: object, model: object) -> tuple[Reasoni
         return _OFF_ONLY_LEVELS
 
     if provider_id == "anthropic":
-        if model_id.startswith("claude-") and ("4" in model_id or "haiku-4" in model_id):
+        if model_id.startswith(_DIRECT_ANTHROPIC_REASONING_PREFIXES):
             return _STANDARD_EFFORT_LEVELS
         return _OFF_ONLY_LEVELS
 
@@ -113,7 +119,7 @@ def supported_reasoning_levels(provider: object, model: object) -> tuple[Reasoni
             return _STANDARD_EFFORT_LEVELS
         if model_id.startswith("x-ai/grok-3-mini"):
             return _STANDARD_EFFORT_LEVELS
-        if "qwen3" in model_id and "thinking" in model_id:
+        if model_id.split(":", 1)[0] in _OPENROUTER_QWEN_REASONING_MODELS:
             return _STANDARD_EFFORT_LEVELS
         return _OFF_ONLY_LEVELS
 

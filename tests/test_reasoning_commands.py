@@ -108,7 +108,10 @@ def test_provider_model_reasoning_effort_clamp() -> None:
     assert clamp_reasoning_level_for_model("openai", "gpt-5", "minimal") == "minimal"
     assert clamp_reasoning_level_for_model("chronos", "nvidia/nemotron-3-super-120b-a12b:free", "high") == "none"
     assert clamp_reasoning_level_for_model("openrouter", "qwen/qwen3-max-thinking", "xhigh") == "high"
+    assert clamp_reasoning_level_for_model("openrouter", "qwen/qwen3-next-80b-a3b-instruct:free", "high") == "none"
     assert clamp_reasoning_level_for_model("anthropic", "claude-opus-4-6", "high") == "high"
+    assert clamp_reasoning_level_for_model("anthropic", "claude-sonnet-4-20250514", "high") == "high"
+    assert clamp_reasoning_level_for_model("anthropic", "claude-3.5-sonnet-20241022", "high") == "none"
     assert clamp_reasoning_level_for_model("openrouter", "anthropic/claude-opus-4.6", "high") == "none"
 
     settings = {"enable_reasoning": True, "reasoning_effort": "xhigh"}
