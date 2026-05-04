@@ -290,6 +290,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   const pendingPostQueueProgressTimeoutRef = useRef<number | null>(null)
   const lastBackendActivityAtRef = useRef(0)
   const terminalTaskStateRef = useRef<Record<string, string>>({})
+  const blankFinalMessageRef = useRef(false)
   const ackTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_ACK_TIMEOUT_MS ?? 5000)
   const backendActivityTimeoutMs = Number(import.meta.env.VITE_BACKEND_ACTIVITY_TIMEOUT_MS ?? 3000)
   const postQueueProgressTimeoutMs = Number(import.meta.env.VITE_NAVIGATE_POST_QUEUE_PROGRESS_TIMEOUT_MS ?? 60000)
@@ -526,6 +527,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           clearPostQueueProgressTimeout()
         }
         if (kind === 'run_started') {
+          blankFinalMessageRef.current = false
           setIsWorking(true)
           setExecutionState('running')
           return
@@ -533,12 +535,23 @@ export function useWebSocket(options?: UseWebSocketOptions) {
         if (kind === 'final_message') {
           const text = typeof inner.text === 'string' ? inner.text : ''
           if (text.trim().length > 0) {
+            blankFinalMessageRef.current = false
             appendLog({
               message: text,
               taskId: liveTaskId,
               type: 'result',
               status: 'completed',
               rawStepType: 'final_message',
+            })
+          } else {
+            blankFinalMessageRef.current = true
+            setExecutionState('failed')
+            appendLog({
+              message: '⚠️ Agent completed without a visible response. Try again or switch models if this repeats.',
+              taskId: liveTaskId,
+              type: 'error',
+              status: 'failed',
+              rawStepType: 'final_message_empty',
             })
           }
           // Defensive: clear the working flag here too. ``run_completed``
@@ -596,9 +609,14 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           const status = typeof inner.status === 'string' ? inner.status : 'completed'
           setIsWorking(false)
           if (status === 'failed' || status === 'error') {
+            blankFinalMessageRef.current = false
             setExecutionState('failed')
           } else if (status === 'cancelled') {
+            blankFinalMessageRef.current = false
             setExecutionState('cancelled')
+          } else if (blankFinalMessageRef.current) {
+            blankFinalMessageRef.current = false
+            setExecutionState('failed')
           } else {
             setExecutionState('completed')
           }
@@ -1223,6 +1241,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
           const nextTaskId = crypto.randomUUID()
           const requestId = crypto.randomUUID()
           activeTaskIdRef.current = nextTaskId
+          blankFinalMessageRef.current = false
           setExecutionState('starting')
           setIsWorking(true)
           setTaskActivity((prev) => ({ ...prev, phase: 'thinking', detail: String(message.instruction ?? 'New task'), updatedAt: new Date().toISOString(), lastEventAt: Date.now() }))
@@ -1326,6 +1345,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     clearPostQueueProgressTimeout()
     reasoningNormalizersRef.current = {}
     activeTaskIdRef.current = 'idle'
+    blankFinalMessageRef.current = false
   }, [clearPostQueueProgressTimeout])
 
   const spawnSubAgent = useCallback((instruction: string, model: string) => {

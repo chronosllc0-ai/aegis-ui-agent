@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import type { AppSettings } from '../../hooks/useSettings'
-import { THINKING_EFFORT_LABELS, THINKING_EFFORT_LEVELS } from '../../hooks/useSettings'
-import { PROVIDERS, providerById, providerForModel, modelInfo } from '../../lib/models'
+import type { AppSettings, ReasoningEffort } from '../../hooks/useSettings'
+import { THINKING_EFFORT_LABELS } from '../../hooks/useSettings'
+import { clampReasoningEffort, modelInfoForProvider, PROVIDERS, providerById, providerForModel, supportedReasoningEffortsForModel } from '../../lib/models'
 import { ToolsTab } from './ToolsTab'
 import { WorkspaceFilesTab } from './WorkspaceFilesTab'
 
@@ -13,11 +13,13 @@ type AgentTabProps = {
 export function AgentTab({ settings, onPatch }: AgentTabProps) {
   const [activeSubtab, setActiveSubtab] = useState<'general' | 'workspace'>('general')
   const currentProvider = providerById(settings.provider) ?? providerForModel(settings.model) ?? PROVIDERS[0]
-  const currentModel = modelInfo(settings.model)
+  const currentModel = modelInfoForProvider(currentProvider.id, settings.model)
+  const availableReasoningEfforts = supportedReasoningEffortsForModel(currentProvider.id, settings.model)
   const supportsReasoning = Boolean(currentModel?.reasoning)
-  const selectedReasoningEffort = !settings.enableReasoning
-    ? 'none'
-    : (settings.reasoningEffort === 'none' ? 'medium' : settings.reasoningEffort)
+  const canConfigureReasoning = availableReasoningEfforts.some((effort) => effort !== 'none')
+  const selectedReasoningEffort = settings.enableReasoning
+    ? clampReasoningEffort(currentProvider.id, settings.model, settings.reasoningEffort)
+    : 'none'
 
   return (
     <div className='space-y-6'>
@@ -138,7 +140,7 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
           <div className='rounded-xl border border-[#2a2a2a] bg-[#121212] p-3'>
             <div>
               <p className='text-xs font-semibold text-zinc-200'>Thinking effort</p>
-              <p className='text-[11px] text-zinc-500'>Choose the same six-level reasoning scale used in the composer.</p>
+              <p className='text-[11px] text-zinc-500'>Only provider/model-supported effort levels are shown. Some native-thinking models do not expose a configurable effort knob.</p>
             </div>
             <label htmlFor='agent-thinking-effort' className='sr-only'>
               Thinking effort
@@ -147,12 +149,13 @@ export function AgentTab({ settings, onPatch }: AgentTabProps) {
               id='agent-thinking-effort'
               value={selectedReasoningEffort}
               onChange={(event) => {
-                const effort = event.target.value as (typeof THINKING_EFFORT_LEVELS)[number]
+                const effort = event.target.value as ReasoningEffort
                 onPatch({ reasoningEffort: effort, enableReasoning: effort !== 'none' })
               }}
-              className='mt-3 w-full rounded border border-[#2a2a2a] bg-[#111] px-3 py-2 text-xs text-zinc-100'
+              disabled={!canConfigureReasoning}
+              className='mt-3 w-full rounded border border-[#2a2a2a] bg-[#111] px-3 py-2 text-xs text-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-600'
             >
-              {THINKING_EFFORT_LEVELS.map((effort) => (
+              {availableReasoningEfforts.map((effort) => (
                 <option key={effort} value={effort} className='bg-[#111] text-zinc-100'>
                   {THINKING_EFFORT_LABELS[effort]}
                 </option>

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_INTEGRATIONS, mergeIntegrationCatalog, type IntegrationConfig } from '../lib/mcp'
+import { clampReasoningEffort, supportsConfigurableReasoning, type ReasoningEffortLevel } from '../lib/models'
 import type { SteeringMode } from './useWebSocket'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
 
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ReasoningEffort = ReasoningEffortLevel
 
 export const THINKING_EFFORT_LEVELS: readonly ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 export const THINKING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
@@ -111,9 +112,22 @@ const DEFAULT_SETTINGS: AppSettings = {
 // Providers that require a user-supplied BYOK key to work
 const BYOK_PROVIDERS = new Set(['openai', 'anthropic', 'google', 'xai', 'openrouter'])
 
+function clampSettingsReasoning(settings: AppSettings): AppSettings {
+  const normalized = normalizeReasoningEffort(settings.reasoningEffort)
+  const clamped = settings.enableReasoning
+    ? clampReasoningEffort(settings.provider, settings.model, normalized)
+    : 'none'
+  const enableReasoning = clamped !== 'none'
+  return {
+    ...settings,
+    enableReasoning,
+    reasoningEffort: enableReasoning ? clamped : 'none',
+  }
+}
+
 function loadInitialSettings(): AppSettings {
   const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) return DEFAULT_SETTINGS
+  if (!raw) return clampSettingsReasoning(DEFAULT_SETTINGS)
   try {
     const parsed = JSON.parse(raw) as Partial<AppSettings>
     const merged = { ...DEFAULT_SETTINGS, ...parsed }
@@ -128,15 +142,15 @@ function loadInitialSettings(): AppSettings {
       }
     }
 
-    return {
+    return clampSettingsReasoning({
       ...merged,
       reasoningEffort: normalizeReasoningEffort(merged.reasoningEffort),
       enabledSkillIds: Array.isArray(merged.enabledSkillIds) ? merged.enabledSkillIds.filter((id): id is string => typeof id === 'string') : [],
       integrations: mergeIntegrationCatalog(Array.isArray(merged.integrations) ? merged.integrations : undefined),
-    }
+    })
   } catch {
     localStorage.removeItem(STORAGE_KEY)
-    return DEFAULT_SETTINGS
+    return clampSettingsReasoning(DEFAULT_SETTINGS)
   }
 }
 
@@ -161,7 +175,7 @@ export function useSettings() {
   }, [settings.theme])
 
   const patchSettings = useCallback((partial: Partial<AppSettings>) => {
-    setSettings((prev) => ({ ...prev, ...partial }))
+    setSettings((prev) => clampSettingsReasoning({ ...prev, ...partial }))
   }, [])
 
   const syncToFirestore = useCallback(async () => {
@@ -184,8 +198,10 @@ export function useSettings() {
       tool_permissions: settings.toolPermissions,
       disabled_tools: settings.disabledTools,
       enabled_skill_ids: settings.enabledSkillIds,
-      enable_reasoning: settings.enableReasoning,
-      reasoning_effort: settings.reasoningEffort,
+      enable_reasoning: settings.enableReasoning && supportsConfigurableReasoning(settings.provider, settings.model),
+      reasoning_effort: settings.enableReasoning
+        ? clampReasoningEffort(settings.provider, settings.model, settings.reasoningEffort)
+        : 'none',
       steering_mode: settings.steeringMode,
     }),
     [settings],

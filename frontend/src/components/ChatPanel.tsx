@@ -15,7 +15,8 @@ import { SteeringControl } from './SteeringControl'
 import { FiChevronDown, FiMic, FiPlus, FiSend, FiServer, FiCpu } from 'react-icons/fi'
 import { FaBrain } from 'react-icons/fa6'
 import type { SteeringMode } from '../hooks/useWebSocket'
-import { THINKING_EFFORT_LABELS, THINKING_EFFORT_LEVELS, type ReasoningEffort } from '../hooks/useSettings'
+import { THINKING_EFFORT_LABELS, type ReasoningEffort } from '../hooks/useSettings'
+import { clampReasoningEffort, supportedReasoningEffortsForModel } from '../lib/models'
 
 // ─── SVG primitives ───────────────────────────────────────────────────────────
 type SvgProps = { className?: string }
@@ -1482,6 +1483,9 @@ function InputBarCursor({
   const [isInputFocused, setIsInputFocused] = useState(false)
   const isExpanded = !isWorking || isInputFocused || canSend
   const showAutoStopOnly = isWorking && steeringMode === 'auto'
+  const availableReasoningEfforts = supportedReasoningEffortsForModel(provider, model)
+  const selectedReasoningEffort = clampReasoningEffort(provider, model, reasoningEffort) as ReasoningEffort
+  const canConfigureReasoning = availableReasoningEfforts.some((effort) => effort !== 'none')
 
   return (
     <div className='space-y-0'>
@@ -1571,20 +1575,22 @@ function InputBarCursor({
           </label>
 
           <label className='group relative inline-flex h-7 w-11 items-center justify-between rounded-md px-1.5 py-1 hover:bg-[#222] sm:h-auto sm:w-auto sm:min-w-0 sm:justify-start sm:gap-1 sm:px-1'>
-            <FaBrain className='h-3.5 w-3.5 text-zinc-500' />
+            <FaBrain className={`h-3.5 w-3.5 ${canConfigureReasoning ? 'text-zinc-500' : 'text-zinc-700'}`} />
             <select
-              value={reasoningEffort}
+              value={selectedReasoningEffort}
               onChange={(event) => onReasoningEffortChange(event.target.value as ReasoningEffort)}
-              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none sm:static sm:max-w-[90px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100'
+              disabled={!canConfigureReasoning}
+              className='absolute inset-0 cursor-pointer appearance-none bg-transparent opacity-0 outline-none disabled:cursor-not-allowed sm:static sm:max-w-[90px] sm:pr-3 sm:text-xs sm:text-zinc-200 sm:opacity-100 sm:disabled:text-zinc-600'
               aria-label='Thinking effort'
+              title={canConfigureReasoning ? 'Thinking effort' : 'This model has no configurable thinking effort'}
             >
-              {THINKING_EFFORT_LEVELS.map((effort) => (
+              {availableReasoningEfforts.map((effort) => (
                 <option key={effort} value={effort} className='bg-[#0f0f0f] text-zinc-100'>
                   {THINKING_EFFORT_LABELS[effort]}
                 </option>
               ))}
             </select>
-            <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />
+            {canConfigureReasoning && <FiChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-zinc-500 sm:right-0.5' />}
           </label>
 
           <div className='flex-1' />

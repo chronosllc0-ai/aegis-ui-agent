@@ -14,7 +14,14 @@ from fastapi.testclient import TestClient
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from backend.reasoning import apply_reasoning_level, normalize_reasoning_level, runtime_reasoning_level
+from backend.reasoning import (
+    apply_reasoning_level,
+    apply_reasoning_level_for_model,
+    clamp_reasoning_level_for_model,
+    normalize_reasoning_level,
+    runtime_reasoning_level,
+    supported_reasoning_levels,
+)
 from integrations.discord import DiscordIntegration
 from integrations.slack_connector import SlackIntegration
 from integrations.telegram import TelegramIntegration
@@ -89,6 +96,67 @@ def test_reasoning_normalization_and_aliases() -> None:
     apply_reasoning_level(settings, "minimal")
     assert settings["reasoning_enabled"] is True
     assert settings["reasoning_effort"] == "minimal"
+
+
+def test_provider_model_reasoning_effort_clamp() -> None:
+    assert supported_reasoning_levels("fireworks", "accounts/fireworks/models/kimi-k2p5") == ("none",)
+    assert clamp_reasoning_level_for_model("fireworks", "accounts/fireworks/models/kimi-k2p5", "medium") == "none"
+
+    assert supported_reasoning_levels("google", "gemini-2.5-pro") == ("none", "low", "medium", "high")
+    assert clamp_reasoning_level_for_model("google", "gemini-2.5-pro", "xhigh") == "high"
+    assert clamp_reasoning_level_for_model("xai", "grok-3-mini", "minimal") == "low"
+    assert clamp_reasoning_level_for_model("openai", "gpt-5", "minimal") == "minimal"
+    assert clamp_reasoning_level_for_model("chronos", "nvidia/nemotron-3-super-120b-a12b:free", "high") == "none"
+    assert clamp_reasoning_level_for_model("openrouter", "qwen/qwen3-max-thinking", "xhigh") == "high"
+    assert clamp_reasoning_level_for_model("openrouter", "qwen/qwen3-next-80b-a3b-instruct:free", "high") == "none"
+    assert clamp_reasoning_level_for_model("anthropic", "claude-opus-4-6", "high") == "high"
+    assert clamp_reasoning_level_for_model("anthropic", "claude-sonnet-4-20250514", "high") == "high"
+    assert clamp_reasoning_level_for_model("anthropic", "claude-3.5-sonnet-20241022", "high") == "none"
+    assert clamp_reasoning_level_for_model("openrouter", "anthropic/claude-opus-4.6", "high") == "none"
+
+    settings = {"enable_reasoning": True, "reasoning_effort": "xhigh"}
+    applied = apply_reasoning_level_for_model(
+        settings,
+        provider="fireworks",
+        model="accounts/fireworks/models/kimi-k2p5",
+        level=settings["reasoning_effort"],
+    )
+    assert applied == "none"
+    assert settings["enable_reasoning"] is False
+    assert settings["reasoning_enabled"] is False
+    assert settings["reasoning_effort"] == "none"
+
+
+def test_web_runtime_settings_clamp_provider_model_effort() -> None:
+    main_mod = import_module("main")
+
+    fireworks = main_mod._merge_runtime_settings(
+        {},
+        {
+            "provider": "fireworks",
+            "model": "accounts/fireworks/models/kimi-k2p5",
+            "enable_reasoning": True,
+            "reasoning_enabled": True,
+            "reasoning_effort": "medium",
+        },
+    )
+    assert fireworks["reasoning_effort"] == "none"
+    assert fireworks["enable_reasoning"] is False
+    assert fireworks["reasoning_enabled"] is False
+
+    gemini = main_mod._merge_runtime_settings(
+        {},
+        {
+            "provider": "google",
+            "model": "gemini-2.5-pro",
+            "enable_reasoning": True,
+            "reasoning_enabled": True,
+            "reasoning_effort": "xhigh",
+        },
+    )
+    assert gemini["reasoning_effort"] == "high"
+    assert gemini["enable_reasoning"] is True
+    assert gemini["reasoning_enabled"] is True
 
 
 def test_reasoning_slash_command_and_legacy_reason_alias() -> None:
